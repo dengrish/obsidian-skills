@@ -24,18 +24,14 @@ finalize. Keep old images until those checks pass; never use bare `cp`/`mv`,
 omit either owner guard, or bypass prepare/finalize.
 
 Prepare's inventory checks the note in both directions: an old-slug image
-embed with no exact attachment is a blocking result, including legacy loose
-`_figN` spellings. Either restore the file from the raw's staged image
-([body source](duplicates-and-reprocessing.md#reprocessing-an-existing-note))
-or stop the changed-slug operation and first publish a separate approved
-same-slug rewrite that replaces the broken embed with
-`<!-- missing attachment: Oldslug_fig_N.ext -->`; retain a report entry, then
-restart the rename from a fresh snapshot. Do not edit the owner note under
-a plan already in flight. The missing reference is never silently omitted from
-an otherwise successful rename. Other-slug and non-image embeds are outside
-this plan. A body can contain both old embeds and new remote images; download
-only the remote images, starting after the highest occupied number, even if
-they appear earlier in document order.
+embed with no exact attachment, including legacy loose `_figN` spellings,
+blocks the rename. Resolve each one before the new note is published, under the
+[body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
+The missing reference is never silently omitted from an otherwise successful
+rename. Other-slug and non-image embeds are outside this plan. A body can
+contain both old embeds and new remote images; download only the remote
+images, starting after the highest occupied number, even if they appear
+earlier in document order.
 
 ## Download and publish
 
@@ -60,21 +56,10 @@ that call's URLs in the file, in source order. Resolve a protocol-relative
 (`//cdn.example/image.png`), root-relative (`/images/a.png`) or relative
 (`images/a.png`) source against the verified capture page URL before passing
 it; the helper refuses a URL with no scheme rather than guessing.
-The result's `url` and `final_url` fields are report-safe locators: they omit
-HTTP credentials, queries and fragments, and replace a `data:` payload with an
-omission marker. Use those fields in reports and failure placeholders. Do not
-copy the raw image URL there; the unchanged raw capture retains it for retry.
 
-The helper permits HTTP(S) and data URIs. For each HTTP(S) hop it resolves once,
-rejects the whole answer set if any address is non-public, and connects the
-socket only to a vetted address. The logical hostname remains in the Host header
-and in TLS SNI/certificate validation. Redirect targets repeat that process
-before another request; HTTPS cannot downgrade to HTTP. It detects image format
-from bytes and stages complete files outside the image directory before
-publication. New files use exclusive creation; explicit replacements are
-atomic. A failure to provide safe publication leaves existing files alone.
-These are reasons to use the helper, not instructions to reimplement it with
-`curl` and `mv`.
+The helper permits HTTP(S) and data URIs and enforces public-address pinning,
+scheme and redirect checks, byte-sniffed formats and exclusive publication;
+never reimplement them with `curl` or `mv`.
 
 `stage` writes only to the selected scratch directory outside the vault. After
 the reviewed note is safely public, place each returned file with:
@@ -87,14 +72,9 @@ python3 '<skill>/scripts/fetch_images.py' place \
 
 The owner note must already contain the exact filename-only embed. `place`
 moves the scratch file only after byte sniffing and occupied-slot checks.
-`download` is reserved for an already published owner note and likewise
-requires `--owner-note`; it must not be used to populate a new draft.
 
-The network policy is direct-only: ambient HTTP(S) proxy settings are not used.
-A forward proxy could resolve the hostname again after the local check and undo
-address pinning. Run the helper where direct egress is available. There is no
-unguarded proxy fallback; `--allow-private-hosts` changes which resolved target
-addresses are permitted, not the proxy policy.
+Run the helper where direct egress is available; ambient proxies are ignored
+and there is no proxy fallback.
 
 | Option | Default | Use |
 |---|---|---|
@@ -105,30 +85,19 @@ addresses are permitted, not the proxy policy.
 
 Keep downloads sequential. Do not resize a large figure merely to reduce size;
 if it exceeds the chosen cap, use the failure path below. Data URIs share that
-cap, deadline and counter; percent/base64 decoding is streamed so encoded input
-cannot allocate an unbounded decoded copy before the cap is checked. Scheme
-restrictions and redirect checks are not optional flags.
+cap, deadline and counter. Scheme restrictions and redirect checks are not
+optional flags.
 
-Use the returned filename and extension. Recognized raster signatures override
-URL suffixes and claimed MIME types. SVG requires an SVG root, not an HTML/XML
-page that happens to contain an SVG, and must be inert and self-contained. The
-helper refuses XML DTDs and stylesheets, scripts, `foreignObject`, event
-handlers, external `href`/base attributes, and external CSS resources before
-publication; fragment-only references inside the same SVG remain valid. JSON,
-HTML, other file types and unrecognized bytes fail even when served as
-`image/png`; never guess a `.png` extension for them. A format needing
-conversion must be converted at a scratch path and checked before guarded
-`place` publication.
+Use the returned filename and extension. The helper refuses non-image bytes
+(even when served as `image/png`) and active or external SVG content; never
+rename a refused file to `.png`. A format needing conversion must be converted at a
+scratch path and checked before guarded `place` publication.
 
-An occupied `<slug>_fig_<N>.*` slot is refused across extensions. Only an explicit,
-owned replacement may use `--overwrite`, and only for the same filename. Pass
-`--owner-note '<vault>/Articles/<slug>.md'`; the helper accepts the replacement
-only when that unchanged note's first current `sources:` item is a web URL and
-its rendered body contains the exact filename-only embed. Embed-shaped strings
-in frontmatter, comments, escaped text, or code do not establish ownership. If
-the format changed, keep the old file, allocate a new number and update the
-draft; do not leave extension twins at one number. Renames enforce the same
-rule. Migrate a legacy scalar `source:` to current `sources:` before a
+An occupied `<slug>_fig_<N>.*` slot is refused across extensions; existing
+attachments are never replaced, and a format change takes a new number, so no
+number carries extension twins. Renames enforce the same rule. Embed-shaped
+strings in frontmatter, comments, escaped text or code do not establish
+ownership. Migrate a legacy scalar `source:` to current `sources:` before a
 destructive attachment operation.
 
 ## Captions and embeds
@@ -171,7 +140,10 @@ login wall where identified.
 For a failed download, unsupported source, unavailable helper or failed safe
 publication, leave `<!-- image download failed: [redacted source locator] -->`
 at the original location and report the reason. Substitute the helper's `url`
-field for the bracketed label. Retain any caption as an ordinary paragraph
-because there is no image to caption. There is **no manual download/publication
-fallback**. Do not bypass ownership, host, size or occupied-slot checks to make
-an image appear successful.
+field for the bracketed label. When the helper produced no `url` field (it
+could not run, or failed before reporting one), keep the literal bracketed
+label and never copy the raw URL; the retained raw capture is the retry record.
+Retain any caption as an ordinary paragraph because there is no image to
+caption. There is **no manual download/publication fallback**. Do not bypass
+ownership, host, size or occupied-slot checks to make an image appear
+successful.

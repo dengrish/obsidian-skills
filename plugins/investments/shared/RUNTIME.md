@@ -13,10 +13,9 @@ shared guide the workflow names; a workflow summary is not a competing
 definition. Read [input safety](INPUT_SAFETY.md)
 before handling external values or content. Do not append skill-provenance
 footers to Markdown notes; [build identity](PROVENANCE.md) stays in the
-plugin's bundled `provenance.json`. At closeout, follow the
-[shared suggestion-log rules](SUGGESTIONS.md) whenever the run writes or
-initializes a log; the active workflow says when. A request to review or
-improve the plugin itself follows the
+plugin's bundled `provenance.json`. At closeout, apply the
+[closeout gate](#close-out) before writing or initializing any suggestion log.
+A request to review or improve the plugin itself follows the
 [plugin-review rules](SUGGESTIONS.md#reviewing-the-plugin-itself).
 
 Before creating, replacing, moving, or removing a vault artifact, follow the
@@ -41,11 +40,10 @@ replacement is a capability, not permission to revise a historical record.
   support standalone PDF input/output paths may run without a vault; keep those
   paths and do not select or create a vault solely for suggestion logs. Never
   create a vault at a remembered home path.
-- Independent plugins can use the same selected vault. Keep each workflow's
-  normal output folders there; installing another plugin does not create a
-  separate vault, move existing artifacts, or change their ownership. Folder
-  overrides apply only where the selected workflow supports them. Follow its
-  layout rules for navigation notes, source files and dated records.
+- Both plugins may use the same selected vault, each keeping its workflows'
+  normal output folders. Folder overrides apply only where the selected
+  workflow supports them. Follow its layout rules for navigation notes, source
+  files and dated records.
 - Shared helper discovery uses the installed plugin's own `shared/scripts/`.
   `OBSIDIAN_VAULT_SHARED` remains the supported explicit override, with no
   fallback from an invalid override. It is a durable helper-discovery setting,
@@ -142,9 +140,8 @@ the source or image was verified.
 A sibling skill name in the active workflow means read its `SKILL.md` from
 the same plugin and follow it, including setup, scope, and validation. It does
 not require delegation, an agent framework, or a host-specific skill invocation
-tool. The independently installable plugins do not require one another.
-A separately installed PDF or browser skill is optional; use it only when
-available and relevant.
+tool. A separately installed PDF or browser skill is optional; use it only
+when available and relevant.
 
 ## Only when a workflow needs it
 
@@ -170,3 +167,20 @@ missing packages only into the chosen virtual environment. Never purge
 unrelated caches or scratch files to make room. If setup or network access is
 unavailable, use that workflow's documented fallback and name what could not
 be checked or converted.
+
+## Close out
+
+Read the [shared suggestion-log rules](SUGGESTIONS.md) at closeout only when an
+apply-capable run has one of these:
+
+- an evidenced workflow defect in its own skill or in a producer whose output
+  the run consumed;
+- a note-content item the active workflow routes to a content log;
+- an existing open or fixed item, in a log its workflow names, that this run
+  fixed, verified or saw recur (search that log for the run's outputs);
+- a missing canonical log for this plugin's skills.
+
+When the run only adds or updates open items, the rules'
+[first section](SUGGESTIONS.md#add-or-update-one-item) is enough; otherwise
+read them in full. A run with none of these, and every preview, report-only or
+no-apply run, writes no log.

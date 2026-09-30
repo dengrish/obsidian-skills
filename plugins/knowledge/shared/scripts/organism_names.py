@@ -20,7 +20,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from entry_structure import split_sentences
+from entry_structure import first_letter_ci_equal, split_sentences
 
 __all__ = [
     "bound_common_names",
@@ -85,12 +85,6 @@ def _plain_markup(text):
     value = re.sub(r"\[\[[^\]|]+\|([^\]]+)\]\]", r"\1", text or "")
     value = re.sub(r"\[\[([^\]]+)\]\]", r"\1", value)
     return " ".join(value.replace("*", "").replace("_", "").split())
-
-
-def _first_letter_ci_equal(a, b):
-    if a is None or b is None or len(a) != len(b):
-        return False
-    return not a or (a[0].lower() == b[0].lower() and a[1:] == b[1:])
 
 
 def scientific_abbreviation_matches(name, taxon):
@@ -191,7 +185,7 @@ def bound_common_names(title, description, opening):
 def _title_bound_abbreviation(title, taxon, opening):
     for match in _BOLD_PAREN_RE.finditer(first_sentence(opening)):
         visible = _plain_markup(match.group("bold"))
-        if not _first_letter_ci_equal(visible, title):
+        if not first_letter_ci_equal(visible, title):
             continue
         candidate = _plain_markup(match.group("paren"))
         if scientific_abbreviation_matches(candidate, taxon):

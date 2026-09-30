@@ -32,7 +32,7 @@ Usage as a module (after the CONVENTIONS.md §5 bootstrap):
     import plurals
     plurals.singularize("hypotheses")               -> 'hypothesis'
     plurals.singular_key("confusion-matrices")      -> 'confusion-matrix'
-    plurals.singular_keys("bases")                  -> {'bases', 'base', 'basis'}
+    plurals.singular_keys("bases")                  -> {'bas', 'base', 'bases', 'basis'}
     plurals.wordorder_key_singular("testing-hypotheses")  -> 'hypothesis-testing'
     plurals.real_permutation("weight-tying", "tying-weights")   -> True
     plurals.stem_key("masked-language-modeling")    -> 'languag-mask-model'

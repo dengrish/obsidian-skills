@@ -26,6 +26,11 @@ Ranges a definition needs (``p \\ge 1`` for an Lp norm, ``0 \\le \\lambda \\le
 1``, ``r \\in [0,1]``) are outside its patterns, and every result remains an
 agent-review candidate rather than an edit.
 
+A third floor lists existing displays that set two relations with different
+left-hand sides side by side, such as ``a = ..., \\qquad b = ...``; an index
+range such as ``i = 1, \\ldots, m`` qualifies a relation and is not a second
+one.
+
 Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
 
@@ -35,6 +40,7 @@ import re
 __all__ = [
     "find_boilerplate_candidates",
     "find_missing_display_equation_candidates",
+    "find_multi_relation_display_candidates",
     "find_noncanonical_display_equation_candidates",
 ]
 
@@ -313,6 +319,152 @@ def find_noncanonical_display_equation_candidates(
             "line": line,
         })
     return candidates
+
+
+# Displays that already lay relations out in rows are outside this check.
+_ROW_ENVIRONMENT_RE = re.compile(
+    r"\\begin\s*\{\s*(?:aligned|align|alignat|flalign|gathered|gather|"
+    r"split|multline|eqnarray)\*?\s*\}")
+_LATEX_TOKEN_RE = re.compile(r"\\(?:[A-Za-z]+|.)", re.DOTALL)
+_ENVIRONMENT_NAME_RE = re.compile(r"\s*\{[^{}]*\}")
+_DEFINING_RELATION_COMMANDS = frozenset(
+    (r"\coloneqq", r"\triangleq", r"\equiv", r"\defeq"))
+_RANGE_DOTS_COMMANDS = frozenset((r"\ldots", r"\dots", r"\cdots"))
+# A segment that qualifies the relation beside it rather than stating a
+# second one: "\forall i", "\text{for } i = 1", "\text{subject to}".
+_QUALIFIER_LEAD_RE = re.compile(
+    r"\s*(?:\\forall(?![A-Za-z])|\\(?:text|textrm|mathrm)\s*\{\s*"
+    r"(?:for|if|when|where|with|given|subject\s+to|such\s+that|s\.\s*t\.)"
+    r"(?![A-Za-z]))")
+# A logical connective between relations states one derivation or
+# equivalence, not a second quantity: "f(x) = 0 \quad \Rightarrow \quad x = 1",
+# "a = 2 \qquad \therefore \qquad b = 4", "\text{hence}".
+_CONNECTIVE = (
+    r"(?:\\(?:Rightarrow|Longrightarrow|Leftarrow|Longleftarrow|implies|"
+    r"impliedby|iff|Leftrightarrow|Longleftrightarrow|therefore|because)"
+    r"(?![A-Za-z])|\\(?:text|textrm|mathrm)\s*\{\s*"
+    r"(?:hence|thus|so|therefore)(?![A-Za-z])[^{}]*\})")
+_CONNECTIVE_LEAD_RE = re.compile(r"\s*" + _CONNECTIVE)
+_CONNECTIVE_TAIL_RE = re.compile(_CONNECTIVE + r"[\s,;]*$")
+_LHS_NOISE_RE = re.compile(r"\\[,;:! ]|~|\s")
+
+
+def _display_relation_segments(content):
+    """Split display math at top-level ``\\quad``/``\\qquad``/``,\\;`` gaps.
+
+    Braces (literal ``\\{`` too), parentheses, brackets and
+    ``\\begin``...``\\end`` environments nest.  Returns
+    ``(text, lhs, range_qualifier)`` per segment: ``lhs`` is the text before
+    the segment's first top-level ``=`` (or defining relation command), else
+    ``None``; ``range_qualifier`` marks a top-level ``, \\ldots`` index range.
+    """
+    segments = []
+    start, depth, environments = 0, 0, 0
+    lhs_end, range_qualifier = None, False
+
+    def close(end):
+        text = content[start:end]
+        lhs = text[:lhs_end - start] if lhs_end is not None else None
+        segments.append((text, lhs, range_qualifier))
+
+    index = 0
+    while index < len(content):
+        char = content[index]
+        top = depth == 0 and environments == 0
+        token = (_LATEX_TOKEN_RE.match(content, index) if char == "\\"
+                 else None)
+        if token:
+            command = token.group(0)
+            index = token.end()
+            if command in (r"\begin", r"\end"):
+                name = _ENVIRONMENT_NAME_RE.match(content, index)
+                environments = max(0, environments + (
+                    1 if command == r"\begin" else -1))
+                index = name.end() if name else index
+            elif command in (r"\{", r"\lbrace"):
+                depth += 1
+            elif command in (r"\}", r"\rbrace"):
+                depth = max(0, depth - 1)
+            elif top and (command in (r"\quad", r"\qquad") or (
+                    command == r"\;"
+                    and content[start:token.start()].rstrip().endswith(","))):
+                close(token.start())
+                start, lhs_end, range_qualifier = index, None, False
+            elif top and command in _DEFINING_RELATION_COMMANDS:
+                lhs_end = token.start() if lhs_end is None else lhs_end
+            elif top and command in _RANGE_DOTS_COMMANDS:
+                range_qualifier = range_qualifier or content[
+                    start:token.start()].rstrip().endswith(",")
+            continue
+        if char in "{([":
+            depth += 1
+        elif char in "})]":
+            depth = max(0, depth - 1)
+        elif (char == "=" and top and lhs_end is None
+              and content[index - 1:index] not in ("<", ">", "!", "=")
+              and content[index + 1:index + 2] != "="):
+            lhs_end = index
+        index += 1
+    close(len(content))
+    return segments
+
+
+def find_multi_relation_display_candidates(masked_prose,
+                                           excluded_line_spans=()):
+    """Return displays that set two different relations side by side.
+
+    ``a = \\ldots, \\qquad b = \\ldots`` in one display hides the second
+    quantity beside the first; each defining relation belongs in its own
+    display beside the prose that introduces it.  The display is split only
+    at top-level ``\\quad``, ``\\qquad`` or ``,\\;`` gaps, outside every
+    group and environment, so a ``cases`` or matrix body never splits it.
+    A candidate needs two relation segments with different left-hand sides.
+    Qualifiers are exempt: an index range (``i = 1, \\ldots, m``), a segment
+    led by ``\\forall`` or a ``\\text{for|if|where|with|...}`` word, and the
+    segment after a standalone qualifier such as ``\\text{subject to}``.
+    A logical connective such as ``\\Rightarrow``, ``\\iff``,
+    ``\\therefore`` or ``\\text{hence}`` (and the relation it leads to) is
+    exempt too: a chain it joins states one derivation, not two quantities.
+    Displays already laid out in rows (``aligned``, ``gathered``...) are
+    skipped.  Every result is an agent-review candidate: a coordinated pair
+    such as polar coordinates may rightly share a line.
+    """
+    prose = masked_prose or ""
+    excluded = {
+        line
+        for start, end in (excluded_line_spans or ())
+        for line in range(start, end + 1)
+    }
+    matches = list(_DISPLAY_BLOCK_RE.finditer(prose))
+    matches.extend(_ONE_LINE_DISPLAY_RE.finditer(prose))
+    candidates, seen = [], set()
+    for match in matches:
+        line = _line_number(prose, match.start(1))
+        content = match.group(1)
+        if (line in seen or line - 1 in excluded
+                or _ROW_ENVIRONMENT_RE.search(content)):
+            continue
+        sides, qualify_next = [], False
+        for text, lhs, range_qualifier in _display_relation_segments(content):
+            led = bool(_QUALIFIER_LEAD_RE.match(text)
+                       or _CONNECTIVE_LEAD_RE.match(text))
+            qualified = qualify_next or range_qualifier or led
+            # A standalone qualifier or connective states no side itself and
+            # exempts the next segment; so does a connective ending this one
+            # ("a = 1 \Rightarrow \quad b = 2").
+            qualify_next = ((lhs is None and led)
+                            or bool(_CONNECTIVE_TAIL_RE.search(text)))
+            side = _LHS_NOISE_RE.sub("", lhs or "").strip(",;")
+            if side and not qualified and side not in sides:
+                sides.append(side)
+        if len(sides) >= 2:
+            seen.add(line)
+            candidates.append({
+                "kind": "multi-relation-display",
+                "phrase": " ".join(content.split()),
+                "line": line,
+            })
+    return sorted(candidates, key=lambda candidate: candidate["line"])
 
 
 def _lhs_has_symbol(lhs, symbols):
@@ -1608,6 +1760,65 @@ def run_self_test(verbose=False):
     total += len(format_cases)
     for name, prose, expected, spans in format_cases:
         got = len(find_noncanonical_display_equation_candidates(prose, spans))
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    # Two relations in one display: (name, prose, candidate lines, spans).
+    split_cases = [
+        ("two defining relations beside \\qquad are reported",
+         "Prose.\n\n$$\n\\text{MSE} = \\frac{1}{m} \\sum_{i} (\\hat{y} - y_i)^2,"
+         " \\qquad \\hat{y} = \\frac{1}{m} \\sum_{i} y_i\n$$", [4], ()),
+        ("a relation beside a cases definition is still reported",
+         "$$\ng(\\theta) = \\nabla f + 2\\alpha \\begin{pmatrix} 0 \\\\ s "
+         "\\end{pmatrix}, \\qquad s = \\begin{cases} -1 & x < 0 \\\\ "
+         "+1 & x > 0 \\end{cases}\n$$", [2], ()),
+        ("a one-line display and a ,\\; gap are read too",
+         "$$a = 1,\\; b = 2$$", [1], ()),
+        ("an index range qualifies rather than adds a relation",
+         "$$\nw^{(i)} = \\frac{1}{m}, \\qquad i = 1, \\ldots, m\n$$", [], ()),
+        ("an elided vector is not an index range",
+         "$$\nx = (x_1, \\ldots, x_n), \\quad y = (y_1, \\ldots, y_n)\n$$",
+         [2], ()),
+        ("forall, for and subject-to qualifiers are exempt",
+         "$$\nf(x) = 0, \\quad \\forall x = 1\n$$\n\n"
+         "$$\ny_i = w x_i, \\qquad \\text{for } i = 1\n$$\n\n"
+         "$$\n\\max f(w) = 1 \\quad \\text{subject to} \\quad g(w) = 0\n$$",
+         [], ()),
+        ("a standalone connective between gaps joins one derivation",
+         "$$\nf(x) = 0 \\quad \\Rightarrow \\quad x = 1\n$$\n\n"
+         "$$\na = b \\quad \\iff \\quad b = a + 0\n$$\n\n"
+         "$$\na = 2 \\qquad \\therefore \\qquad b = 4\n$$\n\n"
+         "$$\n\\nabla L = 0 \\quad \\Longrightarrow \\quad w = 2\n$$",
+         [], ()),
+        ("a connective leading or ending a segment is exempt too",
+         "$$\nf(x) = 0, \\quad \\implies x = 1\n$$\n\n"
+         "$$\na = 1 \\Rightarrow \\quad b = 2\n$$\n\n"
+         "$$\na = 1, \\quad \\text{hence } b = 2\n$$\n\n"
+         "$$\na = 1 \\quad \\text{ thus} \\quad b = 2\n$$", [], ()),
+        ("a connective does not exempt an unrelated later relation",
+         "$$\nx = 1, \\quad y = 2\n$$\n\n"
+         "$$\na = 1 \\quad \\text{and} \\quad b = 2\n$$\n\n"
+         "$$\na = 1 \\quad \\Rightarrowtail \\quad b = 2\n$$",
+         [2, 6, 10], ()),
+        ("gaps inside a group, environment or text never split",
+         "$$\nf = \\begin{cases} a = 1, \\quad b = 2 & x \\end{cases}\n$$\n\n"
+         "$$\nS = \\{a = 1, \\quad b = 2\\}\n$$\n\n"
+         "$$\na = 1 \\text{ and \\quad } b = 2\n$$", [], ()),
+        ("row layouts, repeated sides and inequalities stay quiet",
+         "$$\n\\begin{aligned} a &= 1, \\quad c = 2 \\end{aligned}\n$$\n\n"
+         "$$\na = 1, \\quad a = 2\n$$\n\n$$\na \\le 1, \\quad b = 2\n$$",
+         [], ()),
+        ("a display in a parsed table is outside body prose",
+         "Name | Value\n--- | ---\nX | $$a = 1, \\quad b = 2$$", [],
+         ((0, 2),)),
+    ]
+    total += len(split_cases)
+    for name, prose, expected, spans in split_cases:
+        got = [candidate["line"] for candidate in
+               find_multi_relation_display_candidates(prose, spans)]
         ok = got == expected
         if verbose or not ok:
             print(("PASS" if ok else "FAIL") + ": " + name)

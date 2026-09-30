@@ -3,7 +3,7 @@
 Read this when the [organizer book test](../SKILL.md#5-test-for-a-book-and-split-only-when-justified)
 identifies a book, or when the user explicitly requests chapter PDFs. Finish
 any required guarded rename first; the selected book must have a stable
-canonical name. Use `scripts/organize.py split` or its `split_book` API.
+canonical name. Use `scripts/organize.py split`.
 
 ## 1. Choose the chapter folder and check for an existing split
 
@@ -46,7 +46,7 @@ within them.
 A chapter ends at the next chapter's start. The last ends at the first
 excluded back-matter section, or the end of the book if there is none.
 
-**The chapter API uses zero-based physical PDF indices.** `start_idx` is the
+**The chapter list uses zero-based physical PDF indices.** `start_idx` is the
 first included page and `end_idx` is the page **after** the last included page.
 These are not printed folio numbers or the one-based page numbers used by the
 figure-cropping tools. For example, physical pages 43–78 use `start_idx=42`
@@ -58,7 +58,7 @@ the contents. If running headers repeat the title, extend it with the line
 the opening page prints after the title; include the chapter label only where
 that page prints it with the title, and never use a bare label (`Chapter 2`).
 
-`split_book` moves a start whose page lacks the heading to the nearest page
+The helper moves a start whose page lacks the heading to the nearest page
 within ±2 that carries it, never a contents page (any page listing two or more
 planned headings); a tie, a larger offset, or an unmatched heading is
 refused. It also takes in a standalone title page just before the start. The
@@ -139,24 +139,10 @@ it, are expected and need no re-plan. Pages left to no chapter must be
 deliberate exclusions, such as back matter or an excluded section. Only then
 repeat the same command with `--apply`.
 
-Outside a vault, omit `--vault` and put `--out` beside the book. For an API
-caller, import the shipped helper and build its name map **at each split**;
-call it without `apply` to plan, then with `apply=True` after review:
-
-```python
-import sys
-sys.path.insert(0, "<skill>/scripts")
-from organize import split_book, vault_names
-
-notes = split_book(pdf_path, chapters, out_dir, vault_names(vault),
-                   apply=True, vault=vault)
-```
-
-Use `--vault`, or `vault_names(vault)` with `vault=vault`, whenever a vault
-is in scope. Rebuild that map after every earlier rename or split; a snapshot
-from the start of a batch cannot protect against names created later in the
-same batch. Without a vault, pass an empty map and report that only
-destination checks ran.
+Outside a vault, omit `--vault` and put `--out` beside the book; report that
+only destination checks ran. With a vault in scope always pass `--vault`: each
+plan and apply checks vault-wide names afresh, including names an earlier
+rename or split in the same batch created.
 
 The helper resolves **all chapters before writing any**, on every call. Every
 heading must map to a verified start, all ranges must be in bounds and
@@ -167,12 +153,13 @@ chapter stem must not already name any `Articles/` note or `_fig*` image, even
 one left by an earlier split of this book, because the helper cannot tell who
 derived it. Resolve that blocker as for a
 [rename](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan):
-if the files came from this same chapter, ask the user to clear them from that
-name before splitting and restore them afterward; otherwise choose another
-chapter name.
-Occupied symlinks and case-equivalent names also block. `SplitRefused` lists
-unresolved problems; do not bypass one by extracting just the chapters that
-passed.
+ask the user to clear figure-extract crops or a reading note of this same chapter off that name
+before splitting and restore them afterward, to rename a clipping-clean note
+and its images to a free slug through clipping-clean, or to move another
+tool's images permanently to their own note's stem; otherwise choose another
+chapter name. Occupied symlinks and case-equivalent names also block.
+A refused split lists every unresolved problem and exits nonzero; do not
+bypass one by extracting just the chapters that passed.
 
 During writing, the helper stages chapter files and rolls back files created
 by this operation on failure. It does not replace the original book or remove
@@ -197,7 +184,7 @@ checking. This skill does not extract or delete figures.
 - **No detectable chapters or uncertain page mapping:** report what could
   not be established. Do not create an empty folder or invent boundaries.
   Ask for manual ranges only after completing any independent work.
-- **Scanned or garbled text:** `split_book` verifies headings against the
+- **Scanned or garbled text:** the split verifies headings against the
   book's own text layer, so it cannot split a book without a usable one.
   Renders or OCR of a scratch copy may inform proposed, unverified ranges in
   the report; never split the copy, and never OCR or replace the original.

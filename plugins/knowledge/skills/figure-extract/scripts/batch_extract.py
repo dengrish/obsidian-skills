@@ -51,7 +51,8 @@ Behavior:
     collector's durable state records those names. They are listed as
     skipped and do not change the exit status. Name one directly with
     --src and --allow-unorganized to extract it under its current name.
-  - A PDF whose manifest records `_fig_ED<N>` crops is always processed with
+  - A PDF whose manifest records `_fig_ED<N>` crops, or whose `--out` holds
+    an unrecorded legacy `<stem>_fig_ED<N>.png`, is always processed with
     `--ed-prefix ED`, so a default run cannot refold it into `_fig_S<N>`.
   - Output is flat: the pdf_stem in each filename disambiguates across
     subfolders. When --out is a vault's canonical Sources/Images folder, every
@@ -93,6 +94,10 @@ Usage:
     # later runs stop asking about it and a broad --overwrite keeps it:
     python3 batch_extract.py --src ... --out ... \\
         --mark-reviewed Prince_UDL_2026_02_SupLearn:10-5
+
+    # Take that mark back, e.g. so --overwrite may replace the crop:
+    python3 batch_extract.py --src ... --out ... --overwrite \\
+        --unmark-reviewed Prince_UDL_2026_02_SupLearn:10-5
 
     # The adversarial fixtures this module is held to.
     python3 batch_extract.py --test
@@ -201,8 +206,8 @@ from figure_state import (MANIFEST_FILE, MANIFEST_HEADER, REVIEW_FILE,
                           write_review, figure_identity, manifest_key,
                           check_manifest_writable, parse_reviewed, read_sidecar,
                           read_manifest_snapshot, file_digest)  # noqa: E402
-from vault_artifacts import (inventory_pdfs, output_vault_root,
-                             source_stem_groups,
+from vault_artifacts import (inventory_pdfs, inventory_source_figures,
+                             output_vault_root, source_stem_groups,
                              verify_selected_pdf)  # noqa: E402
 
 #: The review ledger (`REVIEW_FILE`) and ownership manifest (`MANIFEST_FILE`)
@@ -465,24 +470,7 @@ def mark_reviewed(path, entries, dry_run=False, allowed_stems=None):
     error only on the real run is the same surprise the other way round.
     """
     allowed_stems = None if allowed_stems is None else set(allowed_stems)
-    recorded = []
-    for e in entries:
-        stem, sep, fig = e.rpartition(":")
-        if not sep or not stem.strip() or not fig.strip():
-            sys.exit(
-                f"--mark-reviewed {e!r}: expected STEM:FIG, e.g. "
-                f"--mark-reviewed Prince_UDL_2026_02_SupLearn:10-5"
-            )
-        stem = stem.strip()
-        fig = fig.strip()
-        if allowed_stems is not None and stem not in allowed_stems:
-            sys.exit(
-                f"--mark-reviewed {e!r}: {stem!r} is not the exact on-disk "
-                "stem of one eligible, uniquely identified PDF in this run. "
-                "Copy the stem and options from the flagged report; no review "
-                "record was written"
-            )
-        recorded.append((stem, fig))
+    recorded = _review_entries("--mark-reviewed", entries, allowed_stems)
     rows = "".join(f"{stem}\t{fig}\n" for stem, fig in recorded)
     parse_reviewed(rows)
     previous, expected = read_sidecar(path)
@@ -497,6 +485,63 @@ def mark_reviewed(path, entries, dry_run=False, allowed_stems=None):
     body += rows
     write_review(path, body, expected=expected)
     return recorded
+
+
+def _review_entries(flag, entries, allowed_stems):
+    """Validate `STEM:FIG` arguments of a review-ledger flag; [(stem, fig)]."""
+    parsed = []
+    for e in entries:
+        stem, sep, fig = e.rpartition(":")
+        if not sep or not stem.strip() or not fig.strip():
+            sys.exit(
+                f"{flag} {e!r}: expected STEM:FIG, e.g. "
+                f"{flag} Prince_UDL_2026_02_SupLearn:10-5"
+            )
+        stem = stem.strip()
+        fig = fig.strip()
+        if allowed_stems is not None and stem not in allowed_stems:
+            sys.exit(
+                f"{flag} {e!r}: {stem!r} is not the exact on-disk "
+                "stem of one eligible, uniquely identified PDF in this run. "
+                "Copy the stem and options from the flagged report; no review "
+                "record was written"
+            )
+        parsed.append((stem, fig))
+    return parsed
+
+
+def unmark_reviewed(path, entries, dry_run=False, allowed_stems=None):
+    """Remove the ledger rows for `STEM:FIG` entries.
+
+    Returns (removed rows, entries no row matched). The counterpart of
+    `mark_reviewed`, and the supported way to take a mark back: a hand edit
+    of the hidden TAB-separated ledger that leaves one malformed line blocks
+    every later run into that folder. A row matches on its exact stem and
+    on its label under filename normalization (`10.5` and `10-5` are one
+    mark); every other line, comments included, is kept byte for byte, and
+    the rewrite is published against the version read. An entry with no row
+    removes nothing and is reported, not refused, so a printed command can
+    name a mark that may not exist. `dry_run` validates and writes nothing.
+    """
+    allowed_stems = None if allowed_stems is None else set(allowed_stems)
+    requested = _review_entries("--unmark-reviewed", entries, allowed_stems)
+    targets = {(stem, normalize_fig_num(fig)) for stem, fig in requested}
+    previous, expected = read_sidecar(path)
+    parse_reviewed(previous)
+    kept, removed = [], []
+    for line in previous.splitlines(keepends=True):
+        rows = parse_reviewed(line)
+        if rows and all((stem, normalize_fig_num(fig)) in targets
+                        for stem, fig in rows):
+            removed.extend(sorted(rows))
+            continue
+        kept.append(line)
+    matched = {(stem, normalize_fig_num(fig)) for stem, fig in removed}
+    absent = [(stem, fig) for stem, fig in requested
+              if (stem, normalize_fig_num(fig)) not in matched]
+    if removed and not dry_run:
+        write_review(path, "".join(kept), expected=expected)
+    return removed, absent
 
 
 def load_manifest(path):
@@ -837,9 +882,18 @@ def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest,
 
 
 def _caption_excerpt(doc, page_idx, rect, limit=40):
-    """The start of a caption's text, so two same-label captions can be told apart."""
+    """The start of a caption's text, so two same-label captions can be told apart.
+
+    `rect` is in the page's displayed space, as `detect_figures` yields it;
+    `get_text(clip=...)` reads unrotated content space, so a `/Rotate`d page
+    maps it back first or the excerpt comes out empty.
+    """
     try:
-        text = " ".join(doc[page_idx].get_text("text", clip=rect).split())
+        page = doc[page_idx]
+        clip = fitz.Rect(rect)
+        if page.rotation:
+            clip = clip * page.derotation_matrix
+        text = " ".join(page.get_text("text", clip=clip).split())
     except Exception:
         return ""
     return text if len(text) <= limit else text[:limit - 1] + "…"
@@ -881,6 +935,32 @@ def _records_extended_data(manifest, stem):
     return False
 
 
+def unrecorded_extended_data(out_dir, pdfs, manifest):
+    """{PDF: its unrecorded `<stem>_fig_ED<N>.png` names in `out_dir`}.
+
+    A legacy `--ed-prefix ED` crop without an ownership record fixes that
+    PDF's namespace as firmly as a recorded one: under the default prefix
+    the same Extended Data caption would be written again as `_fig_S<N>`,
+    a second copy of one figure. The run switches such a PDF to `ED`, so
+    its summary reports the occupied slot with an `--adopt-legacy` command.
+    """
+    try:
+        names = sorted(os.listdir(out_dir)) if os.path.isdir(out_dir) else []
+    except OSError:
+        names = []
+    recorded = {figure_identity(key) for key in manifest}
+    by_stem = {}
+    for name in names:
+        identity = figure_identity(name)
+        stem, sep, label = identity.rpartition("_fig_")
+        if (sep and stem and label.endswith(".png")
+                and _ED_LABEL_RE.fullmatch(label[:-len(".png")])
+                and identity not in recorded):
+            by_stem.setdefault(stem, []).append(name)
+    return {source: by_stem[figure_identity(source.stem)] for source in pdfs
+            if figure_identity(source.stem) in by_stem}
+
+
 def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 reviewed=(), seen_hashes=None, *, manifest,
                 chapter_pdfs=(), chapter_caption_cache=None,
@@ -916,8 +996,9 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         written:    list  — their filenames, a replacement marked "(replaced)"
         skipped:    int   — figures whose output already existed BEFORE this run
         collisions: list  — (kept label, kept page, dropped label, dropped
-                            page, dropped caption excerpt) where two captions
-                            in this same PDF normalized to the same filename.
+                            page, dropped caption excerpt, output label) where
+                            two captions in this same PDF normalized to the
+                            same filename.
                             The first caption "won" (was written); the later
                             one was dropped. Common when a paper uses both
                             `Figure S1` AND `Supplementary Figure 1` style,
@@ -1079,6 +1160,19 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
     # {output path: digest} for every output this PDF's run noted, so a
     # replaced file's place in `seen_hashes` can pass to a surviving twin.
     noted = {}
+    # A dry run publishes nothing, so one inventory of this PDF's figure
+    # namespace answers every caption's slot check; a whole-vault preview
+    # re-walked a 2,000-file image folder once per figure. A writing run
+    # still inventories afresh before each crop.
+    dry_inventory = []
+
+    def slot_conflict_for(fig_suffix, out_path):
+        if not dry_run or not os.path.lexists(out_dir):
+            return _figure_slot_conflict(out_dir, stem, fig_suffix, out_path)
+        if not dry_inventory:
+            dry_inventory.append(inventory_source_figures(out_dir, stem))
+        return _figure_slot_conflict(out_dir, stem, fig_suffix, out_path,
+                                     inventory=dry_inventory[0])
 
     try:
         for page_idx, fig_num, raw_label, bbox, _cap_rect, reason in detect_figures(doc):
@@ -1094,7 +1188,8 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             if out_path in written_this_run:
                 kept_label, kept_page = written_this_run[out_path]
                 collision = (kept_label, kept_page, raw_label, page_idx + 1,
-                             _caption_excerpt(doc, page_idx, _cap_rect))
+                             _caption_excerpt(doc, page_idx, _cap_rect),
+                             fig_suffix)
                 if (((stem, fig_num) in reviewed
                         or (stem, fig_suffix) in reviewed)
                         and not _ed_supplementary_pair(kept_label, raw_label)):
@@ -1126,8 +1221,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     if reason.startswith(CAPTION_IN_CROP_TAG):
                         result["caption_in"].append((fig_num, reason))
 
-            slot_conflict = _figure_slot_conflict(
-                out_dir, stem, fig_suffix, out_path)
+            slot_conflict = slot_conflict_for(fig_suffix, out_path)
             if slot_conflict is not None:
                 occupied_path, why = slot_conflict
                 result["occupied"].append((fig_num, occupied_path, why))
@@ -1170,7 +1264,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                         or (stem, fig_suffix) in reviewed):
                     # A review mark commonly follows an explicit-coordinate
                     # repair. A broad automatic --overwrite must not undo that
-                    # checked crop; remove the ledger row first to opt back in.
+                    # checked crop; --unmark-reviewed opts it back in.
                     written_this_run[out_path] = (raw_label, page_idx + 1)
                     result["skipped"] += 1
                     _note_output(result, seen_hashes, out_path, fig_num, stem,
@@ -1609,22 +1703,38 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
 
     if total_occupied:
         print("Output names held by a file with no matching ownership record:")
+        # An exact `<stem>_fig_<label>.png` with no record is one line per PDF:
+        # a folder extracted before ownership records existed has one per
+        # figure, and a line each (path and explanation repeated) made the
+        # summary hundreds of kilobytes. The adoption command below names
+        # every such slot again; any other occupant keeps its own line.
         legacy = defaultdict(list)
+        legacy_dir = {}
         for pdf_path, r in per_pdf.items():
             for fig_num, path, why in r.get("occupied", ()):
-                print(f"  {pdf_path.name}  Fig {fig_num}  → {path}  ({why})")
                 label = normalize_fig_num(fig_num)
                 if (why.startswith("no ownership record")
                         and os.path.basename(str(path))
                         == f"{pdf_path.stem}_fig_{label}.png"):
                     legacy[pdf_path].append(label)
+                    legacy_dir.setdefault(pdf_path, os.path.dirname(str(path)))
+                    continue
+                print(f"  {pdf_path.name}  Fig {fig_num}  → {path}  ({why})")
+        for pdf_path, labels in legacy.items():
+            print(f"  {pdf_path.name}: {len(labels)} unrecorded slot(s) at "
+                  f"{os.path.join(legacy_dir[pdf_path], pdf_path.stem)}"
+                  f"_fig_<label>.png: " + ", ".join(labels))
+        if legacy:
+            print("  (Each of those has no ownership record: a legacy crop from an earlier")
+            print("  extractor run, or another skill's <slug>_fig_<N> file.)")
         print("  These figures were NOT extracted and NOT skipped: Sources/Images/ is shared,")
         print("  and clipping-clean writes <slug>_fig_<N> there too, so a clipping whose")
         print("  slug equals this PDF's stem can own the name. If it belongs to the")
         print("  clipping, route its note-and-image rename through clipping-clean; if the")
-        print("  PDF identity must change, route it through pdf-organize. If a crop this")
-        print("  extractor recorded has changed bytes, inspect it and reconcile that exact")
-        print("  ownership record first.")
+        print("  PDF identity must change, route it through pdf-organize. A crop this")
+        print("  extractor recorded whose bytes have changed is left alone: report it, and")
+        print("  repair it only with the user's authorization (the skill's review reference,")
+        print("  ownership section).")
         print("  --overwrite replaces verified own output only; it never claims a foreign file.")
         if legacy:
             print("  An unrecorded exact PNG may instead be this extractor's own crop from")
@@ -1640,19 +1750,22 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     if total_collisions or total_reviewed_collisions:
         print("Caption collisions (later caption dropped — two supplementary styles in one")
         print("PDF, or a continuation caption, are the usual causes):")
-        ed_pairs = []
+        # {PDF: [S labels whose kept crop is Extended Data]} in report order.
+        ed_pairs = {}
         ordinary = False
         for pdf_path, r in per_pdf.items():
-            for kept, kept_page, dropped, dropped_page, excerpt in r["collisions"]:
+            for (kept, kept_page, dropped, dropped_page, excerpt,
+                 label) in r["collisions"]:
                 print(f"  {pdf_path.name}  kept '{kept}' (p. {kept_page}), dropped "
                       f"'{dropped}' (p. {dropped_page}"
                       + (f": {excerpt!r}" if excerpt else "") + ")")
                 if ed_prefix == "S" and _ed_supplementary_pair(kept, dropped):
-                    if pdf_path not in ed_pairs:
-                        ed_pairs.append(pdf_path)
+                    labels = ed_pairs.setdefault(pdf_path, [])
+                    if _EXTENDED_DATA_RE.match(kept) and label not in labels:
+                        labels.append(label)
                 else:
                     ordinary = True
-            for kept, kept_page, dropped, dropped_page, _excerpt in r.get(
+            for kept, kept_page, dropped, dropped_page, *_rest in r.get(
                     "reviewed_collisions", ()):
                 print(f"  {pdf_path.name}  collision reviewed: kept '{kept}' "
                       f"(p. {kept_page}), dropped '{dropped}' (p. {dropped_page})")
@@ -1662,13 +1775,17 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             print("  --mark-reviewed for that label; the dropped caption is not extracted.")
         if ed_pairs:
             print("  Extended Data and Supplementary figures share _fig_S<N> under the default")
-            print("  prefix. For each collision above that kept an Extended Data caption, remove")
-            print("  that S label's review row, if any; then rerun each PDF alone (it replaces")
-            print("  only unmarked _fig_S<N> crops) and view every PNG it writes:")
+            print("  prefix. For each collision above that kept an Extended Data caption, the")
+            print("  rerun below drops that S label's review mark, if any; it reruns each PDF")
+            print("  alone, replaces only unmarked _fig_S<N> crops, and every PNG it writes")
+            print("  needs viewing:")
             switch = ["--overwrite-supplementary"] + (["--dry-run"] if dry_run else [])
-            for pdf_path in ed_pairs:
+            for pdf_path, labels in ed_pairs.items():
+                unmark = []
+                for label in labels:
+                    unmark += ["--unmark-reviewed", f"{pdf_path.stem}:{label}"]
                 print("    " + _batch_command(
-                    pdf_path, out_dir, switch,
+                    pdf_path, out_dir, switch + unmark,
                     **dict(context, ed_prefix="ED")))
         print()
 
@@ -1749,9 +1866,9 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         if namespaces:
             print("  An S<N>/ED<N> pair usually means _fig_S<N> still holds the Extended Data")
             print("  crop from an earlier default-prefix run. If that S label has its own")
-            print("  Supplementary caption, remove that S label's review row, if any, and rerun")
-            print("  that PDF alone with --ed-prefix ED --overwrite-supplementary; otherwise")
-            print("  report the S file as a stale mislabelled crop. View every PNG a rerun writes.")
+            print("  Supplementary caption, rerun that PDF alone with --ed-prefix ED")
+            print("  --overwrite-supplementary --unmark-reviewed '<stem>:S<N>'; otherwise report")
+            print("  the S file as a stale mislabelled crop. View every PNG a rerun writes.")
         else:
             print("  The detector could not separate these figures — side-by-side panels with")
             print("  a caption each is the usual cause. Set explicit crops (see the skill's")
@@ -2103,6 +2220,41 @@ def run_self_test():
            not os.path.exists(dry_ledger))
         ok("mark_reviewed --dry-run created no directory",
            not os.path.isdir(os.path.join(tmp, "dry")))
+
+        # `unmark_reviewed` is the supported way back: exact rows go, a
+        # dotted or hyphenated spelling of the label is one mark, and every
+        # other line -- header, comment, hand-typed row -- stays byte for byte.
+        unmark_ledger = os.path.join(tmp, "unmark", REVIEW_FILE)
+        os.makedirs(os.path.dirname(unmark_ledger))
+        unmark_body = (REVIEW_HEADER + "Doe_Figs_2025\t1\n"
+                       + "Doe_Figs_2025\t10.5\n# keep this note\n"
+                       + "Doe_Figs_2025:2 # hand-typed\nOther_Paper_2025\tS1\n")
+        with open(unmark_ledger, "w", encoding="utf-8", newline="") as fh:
+            fh.write(unmark_body)
+        check("unmark_reviewed --dry-run reports and writes nothing",
+              (unmark_reviewed(unmark_ledger, ["Doe_Figs_2025:10-5"],
+                               dry_run=True),
+               open(unmark_ledger, encoding="utf-8").read()),
+              (([("Doe_Figs_2025", "10.5")], []), unmark_body))
+        check("unmark_reviewed removes exact rows and reports a missing mark",
+              unmark_reviewed(unmark_ledger, ["Doe_Figs_2025:10-5",
+                                              "Doe_Figs_2025:2",
+                                              "Doe_Figs_2025:9"]),
+              ([("Doe_Figs_2025", "10.5"), ("Doe_Figs_2025", "2")],
+               [("Doe_Figs_2025", "9")]))
+        check("...keeping every other line byte for byte",
+              open(unmark_ledger, encoding="utf-8").read(),
+              REVIEW_HEADER + "Doe_Figs_2025\t1\n# keep this note\n"
+              + "Other_Paper_2025\tS1\n")
+        refused = False
+        try:
+            unmark_reviewed(unmark_ledger, ["Other_Paper_2025:S1"],
+                            allowed_stems={"Doe_Figs_2025"})
+        except SystemExit:
+            refused = True
+        check("unmark_reviewed refuses a stem outside the run",
+              (refused, ("Other_Paper_2025", "S1") in load_reviewed(
+                  unmark_ledger)), (True, True))
 
         # --- split books ---------------------------------------------------
         def paths(*names):
@@ -2489,6 +2641,48 @@ def run_self_test():
         ok("...with an excerpt of the dropped caption",
            merged_collision["collisions"][0][4].startswith(
                "Extended Data Figure 1"))
+        # The caption rect arrives in displayed space; on a /Rotate page the
+        # excerpt clip has to be mapped back to content space, or it is empty.
+        rotated_collision_pdf = os.path.join(
+            tmp, "Doe_RotatedCollision_2025.pdf")
+        rdoc = fitz.open()
+        for number in (1, 2):
+            rpage = rdoc.new_page(width=612, height=792)
+            rpage.draw_rect(fitz.Rect(100, 200, 500, 400), fill=(0.2, 0.4, 0.8))
+            rpage.insert_text((100, 430), "Figure 1. Caption number %d text."
+                              % number, fontsize=9)
+            rpage.set_rotation(90)
+        rdoc.save(rotated_collision_pdf)
+        rdoc.close()
+        rotated_collision = process_pdf(
+            Path(rotated_collision_pdf), out, dpi=72, dry_run=True,
+            manifest=geometry_manifests[os.fspath(out)])
+        check("a rotated page's collision excerpt names the dropped caption",
+              [item[3:5] for item in rotated_collision["collisions"]],
+              [(2, "Figure 1. Caption number 2 text.")])
+        # A dry run writes nothing, so it inventories a PDF's figure namespace
+        # once rather than once per caption.
+        inventory_pdf = _st_fig_pdf(
+            os.path.join(tmp, "Doe_Inventory_2025.pdf"),
+            captions=("Figure 1. One.", "Figure 2. Two.", "Figure 3. Three."))
+        inventory_out = os.path.join(tmp, "inventory-out")
+        os.makedirs(inventory_out)
+        inventory_calls = []
+        real_inventory = inventory_source_figures
+
+        def counting_inventory(*args, **kwargs):
+            inventory_calls.append(args)
+            return real_inventory(*args, **kwargs)
+
+        import extract_figures as extract_module
+        with mock.patch.dict(
+                globals(), {"inventory_source_figures": counting_inventory}), \
+                mock.patch.object(extract_module, "inventory_source_figures",
+                                  counting_inventory):
+            inventoried = process_pdf(Path(inventory_pdf), inventory_out,
+                                      dpi=72, dry_run=True, manifest={})
+        check("a dry run inventories the figure namespace once per PDF",
+              (inventoried["extracted"], len(inventory_calls)), (3, 1))
         # A review mark acknowledges an inspected collision, but never an
         # Extended Data/Supplementary pair: --ed-prefix ED is its repair.
         merged_reviewed = process_pdf(
@@ -3367,6 +3561,28 @@ def run_self_test():
         ok("...and says they were neither extracted nor skipped",
            "NOT extracted and NOT skipped" in text)
         ok("...naming the other producer", "clipping-clean" in text)
+        # A folder extracted before ownership records existed has an
+        # unrecorded exact PNG in every slot: one line per PDF, the reason
+        # once, and the adoption command -- not a line per slot.
+        legacy_pdf_path = Path(os.path.join(tmp, "Doe_Many_2025.pdf"))
+        legacy_why = _foreign_occupant({}, os.path.join(out, "absent.png"))[0]
+        many = dict(foreign)
+        many["occupied"] = [
+            (label, os.path.join(out, "Doe_Many_2025_fig_%s.png" % label),
+             legacy_why) for label in ("1", "2", "3")] + [
+            ("4", os.path.join(out, "Doe_Many_2025_fig_4.jpg"),
+             "the portable figure slot is occupied by a JPG")]
+        text = summary({legacy_pdf_path: many})
+        ok("unrecorded exact slots are summarized once per PDF",
+           "Doe_Many_2025.pdf: 3 unrecorded slot(s) at "
+           + os.path.join(out, "Doe_Many_2025") + "_fig_<label>.png: 1, 2, 3"
+           in text and text.count("no ownership record") == 1
+           and "Fig 1  →" not in text)
+        ok("...other occupants keep their own line and the adoption command "
+           "names the exact slots",
+           "Doe_Many_2025.pdf  Fig 4  → " in text
+           and "--adopt-legacy Doe_Many_2025:3" in text
+           and "Doe_Many_2025:4" not in text)
         text = summary({a: r, tiny_pdf: tiny, Path(partial_pdf): part,
                         Path(junk): bad_open})
         ok("the summary keeps the unreadable file out of the OCR bucket",
@@ -3757,6 +3973,10 @@ def run_self_test():
         ok("the ED switch hint names only the collided S label's review row",
            "For each collision above that kept an Extended Data caption" in so
            and "Remove any review rows" not in so)
+        ok("...and the printed rerun drops exactly that S label's mark",
+           len(keep_hints) == 1
+           and "--unmark-reviewed Doe_Keeps_2025:S1" in keep_hints[0]
+           and "Doe_Keeps_2025:S2" not in keep_hints[0])
         keep_s2 = keep_out / "Doe_Keeps_2025_fig_S2.png"
         keep_s2_auto = keep_s2.read_bytes() if keep_s2.exists() else b""
         keep_repair = subprocess.run(
@@ -3841,6 +4061,81 @@ def run_self_test():
                "Using --ed-prefix ED for 1 PDF(s)" in so), (0, True, True))
         configure_marker_prefix("Extended Data", "S")
 
+        # An unrecorded legacy _fig_ED<N> crop (a vault without a manifest)
+        # fixes its PDF's namespace too: a default folder sweep must not
+        # write the same Extended Data figure again as _fig_S<N>.
+        led_dir = Path(tmp) / "ed-unrecorded-scan"
+        led_dir.mkdir()
+        for name in ("Doe_Led_2025_fig_ED1.png", "doe_led_2025_fig_EDA2.png",
+                     "Doe_Led_2025_fig_S1.png", "Doe_Led_2025_fig_ED3.jpg",
+                     "Doe_Led_2025_fig_ED4.png", "Roe_Led_2025_fig_ED1.png",
+                     "Doe_Led_2025_2_fig_ED1.png"):
+            (led_dir / name).write_bytes(b"x")
+        check("unrecorded ED crops are found per PDF, case-insensitively, "
+              "without recorded, S, non-PNG or other-stem files",
+              unrecorded_extended_data(
+                  led_dir, [Path("Doe_Led_2025.pdf"), Path("Zed_Led_2025.pdf")],
+                  {"Doe_Led_2025_fig_ED4.png": "0" * 64}),
+              {Path("Doe_Led_2025.pdf"): ["Doe_Led_2025_fig_ED1.png",
+                                          "doe_led_2025_fig_EDA2.png"]})
+        check("...and a missing output folder holds none",
+              unrecorded_extended_data(Path(tmp) / "no-such-out",
+                                       [Path("Doe_Led_2025.pdf")], {}), {})
+        leg_src = Path(tmp) / "ed-unrecorded"
+        leg_src.mkdir()
+        leg_pdf = leg_src / "Doe_Legacy_2025.pdf"
+        ldoc = fitz.open()
+        for cap, fill in (("Figure 1. Main.", (0.5, 0.5, 0)),
+                          ("Extended Data Figure 1. First.", (1, 0, 0))):
+            lpage = ldoc.new_page(width=612, height=792)
+            lpage.draw_rect(fitz.Rect(100, 200, 500, 400), fill=fill)
+            lpage.insert_text((100, 430), cap, fontsize=9)
+        ldoc.save(str(leg_pdf))
+        leg_out = Path(tmp) / "ed-unrecorded-out"
+        leg_out.mkdir()
+        legacy_ed1 = leg_out / "Doe_Legacy_2025_fig_ED1.png"
+        ldoc[1].get_pixmap(clip=fitz.Rect(100, 200, 500, 400),
+                           dpi=72).save(str(legacy_ed1))
+        ldoc.close()
+        odoc = fitz.open()
+        opage = odoc.new_page(width=612, height=792)
+        opage.draw_rect(fitz.Rect(100, 200, 500, 400), fill=(0, 0, 0.5))
+        opage.insert_text((100, 430), "Extended Data Figure 1. Other.",
+                          fontsize=9)
+        odoc.save(str(leg_src / "Roe_Plain_2024.pdf"))
+        odoc.close()
+        legacy_bytes = legacy_ed1.read_bytes()
+        code, so, se = run(["--src", str(leg_src), "--out", str(leg_out),
+                            "--dpi", "72"])
+        leg_adopt = [line.strip() for line in so.splitlines()
+                     if line.strip().startswith(shlex.quote(sys.executable) + " ")
+                     and "--adopt-legacy Doe_Legacy_2025:ED1" in line]
+        check("a default sweep over an unrecorded legacy ED crop keeps ED "
+              "for that PDF instead of writing a second copy as S1",
+              (code, (leg_out / "Doe_Legacy_2025_fig_S1.png").exists(),
+               legacy_ed1.read_bytes() == legacy_bytes,
+               "Using --ed-prefix ED for 1 PDF(s)" in so,
+               "Doe_Legacy_2025.pdf: unrecorded Doe_Legacy_2025_fig_ED1.png"
+               in so, len(leg_adopt)),
+              (1, False, True, True, True, 1))
+        check("...while another PDF's Extended Data still folds into S",
+              sorted(p.name for p in leg_out.glob("Roe_Plain_2024_fig_*")),
+              ["Roe_Plain_2024_fig_S1.png"])
+        if leg_adopt:
+            code, so, se = run(shlex.split(leg_adopt[0])[2:])
+            check("...its printed adoption records the legacy ED1 without "
+                  "another reminder",
+                  (code, "Doe_Legacy_2025.pdf: unrecorded" in so,
+                   legacy_ed1.read_bytes() == legacy_bytes), (0, False, True))
+            code, so, se = run(["--src", str(leg_src), "--out", str(leg_out),
+                                "--dpi", "72"])
+            check("...after which a default sweep keeps ED from the manifest",
+                  (code, (leg_out / "Doe_Legacy_2025_fig_S1.png").exists(),
+                   "Using --ed-prefix ED for 1 PDF(s)" in so,
+                   "Doe_Legacy_2025.pdf: unrecorded" in so),
+                  (0, False, True, False))
+        configure_marker_prefix("Extended Data", "S")
+
         # Every label the caption detector can produce must be one the
         # explicit-crop and --adopt-legacy tools accept, under both prefixes;
         # otherwise a bad automatic crop under that name cannot be repaired.
@@ -3917,6 +4212,22 @@ def run_self_test():
         check("...in the ledger inside --out",
               ("Doe_Figs_2025", "1") in load_reviewed(
                   os.path.join(run_out, REVIEW_FILE)), True)
+        # The mark protects that crop from --overwrite until it is removed;
+        # --unmark-reviewed removes it in the same run that replaces the crop.
+        code, so, se = run(["--src", str(a), "--out", run_out, "--dpi", "72",
+                            "--overwrite"])
+        ok("a review mark keeps --overwrite off the checked crop",
+           code == 0 and "Doe_Figs_2025_fig_1.png (replaced)" not in so)
+        code, so, se = run(["--src", str(a), "--out", run_out, "--dpi", "72",
+                            "--overwrite", "--unmark-reviewed",
+                            "Doe_Figs_2025:1"])
+        check("--unmark-reviewed removes the mark before --overwrite replaces "
+              "the crop",
+              (code, "Removed review mark: Doe_Figs_2025 Fig 1" in so,
+               "Doe_Figs_2025_fig_1.png (replaced)" in so,
+               ("Doe_Figs_2025", "1") in load_reviewed(
+                   os.path.join(run_out, REVIEW_FILE))),
+              (0, True, True, False))
 
         # Execute the command the summary actually advertises. Losing ED or
         # a custom ledger used to create an extra S1 PNG and leave the original
@@ -4459,7 +4770,8 @@ def main(argv=None):
             "keep Extended Data figures in a distinct namespace (e.g., "
             "Nature papers that have both 'Supplementary Figure 1' AND "
             "'Extended Data Figure 1' as different figures). A PDF whose "
-            "manifest records _fig_ED crops always uses 'ED'."
+            "manifest records _fig_ED crops, or whose --out holds an "
+            "unrecorded <stem>_fig_ED<N>.png, always uses 'ED'."
         ),
     )
     p.add_argument(
@@ -4503,6 +4815,14 @@ def main(argv=None):
             "Record that an existing crop has been checked (repeatable), e.g. "
             "--mark-reviewed Prince_UDL_2026_02_SupLearn:10-5. Appends to the "
             "review file and continues with the run."
+        ),
+    )
+    p.add_argument(
+        "--unmark-reviewed", action="append", default=[], metavar="STEM:FIG",
+        help=(
+            "Remove that figure's review mark (repeatable) before the run, so "
+            "its warnings return and --overwrite may replace its crop. Other "
+            "rows are kept; a figure with no mark is reported, not refused."
         ),
     )
     p.add_argument("--test", action="store_true", help="run the self-test")
@@ -4554,6 +4874,8 @@ def main(argv=None):
         pending = []
         if args.mark_reviewed:
             pending.append("--mark-reviewed")
+        if args.unmark_reviewed:
+            pending.append("--unmark-reviewed")
         if args.adopt_legacy:
             pending.append("--adopt-legacy")
         if pending:
@@ -4641,9 +4963,12 @@ def main(argv=None):
               file=sys.stderr)
         return 1
     # A PDF extracted with --ed-prefix ED keeps that namespace: a default run
-    # would write its Extended Data figures as _fig_S<N> again.
+    # would write its Extended Data figures as _fig_S<N> again. An unrecorded
+    # legacy _fig_ED<N> crop counts too; adoption below cannot switch it.
+    ed_unrecorded = unrecorded_extended_data(out_dir, pdfs, manifest)
     ed_namespace = {source for source in pdfs
-                    if _records_extended_data(manifest, source.stem)}
+                    if _records_extended_data(manifest, source.stem)
+                    or source in ed_unrecorded}
     adoptable_stems = reviewable_stems(
         pdfs,
         include_split_books=args.include_split_books,
@@ -4665,7 +4990,8 @@ def main(argv=None):
     marked = []
     try:
         reviewed = load_reviewed(review_file)
-        if args.mark_reviewed:
+        allowed_review_stems = None
+        if args.mark_reviewed or args.unmark_reviewed:
             allowed_review_stems = reviewable_stems(
                 pdfs,
                 include_split_books=args.include_split_books,
@@ -4674,6 +5000,18 @@ def main(argv=None):
                 source.stem for source in pdfs
                 if figure_identity(source.stem) in refused_keys
             }
+        if args.unmark_reviewed:
+            unmarked, unmatched = unmark_reviewed(
+                review_file, args.unmark_reviewed, dry_run=args.dry_run,
+                allowed_stems=allowed_review_stems)
+            verb = "Would remove" if args.dry_run else "Removed"
+            for stem, fig in unmarked:
+                print(f"{verb} review mark: {stem} Fig {fig}  → {review_file}")
+            for stem, fig in unmatched:
+                print(f"No review mark to remove: {stem} Fig {fig}")
+            print()
+            reviewed -= set(unmarked)
+        if args.mark_reviewed:
             marked = mark_reviewed(review_file, args.mark_reviewed,
                                    dry_run=args.dry_run,
                                    allowed_stems=allowed_review_stems)
@@ -4796,8 +5134,19 @@ def main(argv=None):
                             "run pdf-organize, or pass --allow-unorganized "
                             "for a deliberate one-off"))
     if args.ed_prefix == "S" and any(p in ed_namespace for p in pdfs):
-        print("Using --ed-prefix ED for %d PDF(s) whose manifest records "
-              "_fig_ED<N> crops." % sum(p in ed_namespace for p in pdfs))
+        print("Using --ed-prefix ED for %d PDF(s) whose manifest records, or "
+              "whose output folder holds, _fig_ED<N> crops."
+              % sum(p in ed_namespace for p in pdfs))
+        # Names this run's --adopt-legacy just recorded need no reminder.
+        recorded_now = {figure_identity(key) for key in manifest}
+        for p in pdfs:
+            pending = [name for name in ed_unrecorded.get(p, ())
+                       if figure_identity(name) not in recorded_now]
+            if pending:
+                print("  %s: unrecorded %s. Compare each with its page; the "
+                      "occupied-name report prints an --adopt-legacy "
+                      "command for each one a caption claims."
+                      % (p.name, ", ".join(pending)))
         print()
     # The book-skip is reported even when the refusal above emptied the run.
     # It used to sit after an early `return`, so a vault holding legacy
@@ -4973,7 +5322,7 @@ def main(argv=None):
     # always 0 — a run that refused every PDF, could not open half of them, or
     # detected figures it then failed to write reported success, and anything
     # reading `$?` (a shell `&&`, a wrapper, the model) took the report's word
-    # for it without reading the report. Three outcomes are failures:
+    # for it without reading the report. These outcomes are failures:
     # refusals, files that could not be opened at all, figures detected but not
     # written (including a later caption dropped in a filename collision), and
     # crops whose ownership could not be persisted. A suspicious bbox is NOT

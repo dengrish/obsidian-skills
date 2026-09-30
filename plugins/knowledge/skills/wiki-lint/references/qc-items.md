@@ -31,43 +31,42 @@ ownership.
 | Ordinary `itemN` | Apply only the determinate, source-independent correction allowed by item N below. Report semantic or ownership uncertainty. |
 | `item0` | Report the unreadable path and error; there is no parsed entry to repair. Its unknown aliases suppress dependent link actions until readability is restored and the vault is rescanned; direct-filename checks remain usable. |
 | `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. |
-| `item2/read-type` | Normalize a recognizable answer to the equivalent bare boolean. |
+| `item2/read-type` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
 | `item2/type-enum` | Write the exact enum spelling only when the body makes the intended type unambiguous; otherwise preserve and report. |
-| `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Preserve and report; supplying a boolean would invent user-owned state. |
-| `item2/parents-null` | Write `parents: []`; this changes only the spelling of an already empty value. |
+| `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Report only: [item 2](#2-field-order-and-quoting). |
+| `item2/parents-null` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
 | `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. A parent that resolves to a MOC is report-only here and never respelled; Task 3 replaces it (`moc-parent`). Re-derive invalid relationships only in Task 3's authorized closure. |
 | `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
 | `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Legacy metadata is read-only compatibility data; do not add or refresh it or infer a historical creator. |
-| `item3`, `item3/report-only` | Report date problems; wiki-lint writes neither date. |
-| `item4/source-identity` | Establish provenance under item 4 before removing anything; preserve independent or uncertain citations. |
+| `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
+| `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source; otherwise report. |
 | `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |
 | `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the request explicitly names the consolidation or redistribution operation, or the affected entries and intended outcome. Normalized similarity alone never authorizes deletion. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
-| `item10/unparsed` | Preserve the link; the target file's `item0` or `item1` governs repair. |
+| `item10/unparsed` | Report only: [item 10](#10-wikilinks); the target file's `item0` or `item1` governs repair. |
 | `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
 | `item10/dangling`, `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
-| `item10/table` | Replace only the table-cell link markup with its visible plain-text label. |
-| `item10/redundant-pipe` | In Task 1, collapse exact `[[slug|slug]]` body-prose links to `[[slug]]`. Never apply this to the Related footer. |
+| `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
 | `item12/equation-format` | Preserve the existing equation and put its opening and closing `$$` delimiters on separate lines. Do not add a duplicate display. |
+| `item12/equation-split-candidate` | When the relations define different quantities, split the display into two, each beside the prose that introduces its quantity, under the [equation guide](../../wiki-build/references/equations.md#2-form--defining-equations-are-display-math). Keep the math unchanged, and keep a coordinated pair on one line. |
 | `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math, or replace it with its verbal core, only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
-| `item12/panel-composite` | Preserve both embeds and report the duplicated exhibit until source-backed review chooses either the default composite or the subject-specific panel. |
-| `item12/remote-image`, `item12/missing-image` | Report and preserve the embed and caption; repair requires work outside this entry. |
+| `item12/panel-composite`, `item12/remote-image`, `item12/missing-image` | Report only: [item 12](#12-equations-images-and-tables). |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
-| `item18/partial-label` | Reword a label that keeps only the target title's modifiers so it names the target, preserving the claim; report a label that names a different entity. See [item 18](#18-alias-form-collisions-and-display-labels). |
-| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). |
+| `item18/partial-label` | Task 1 repair, or report a label naming another entity: [item 18](#18-alias-form-collisions-and-display-labels). |
+| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Content after a card's line 3 that is not a recognized attachment is report-only. |
 | `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars) and shorten it only when the card's bar allows; the candidate alone is never an order. |
 | `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars): when the card's bar allows, drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
-| `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry). |
+| `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](refactors.md#retitle-an-entry). |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
-| `hierarchy_diagnostic.parent_state_findings`, `moc_file_states`, `moc_inventory_findings`, `legacy_moc_states`, `moc_consistency_findings` | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure. Non-outline formatting needs no separate span approval; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. |
-| Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only under an explicit request, through the [alias-removal protocol](../../../shared/CONVENTIONS.md#4b-aliases-use-the-same-slug-rule). |
+| `hierarchy_diagnostic` (every field) | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. Actions are in [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion). |
+| Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only under an explicit request, through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
 
 ## Source-independent item guide
 
@@ -251,8 +250,9 @@ works and apply it once? If not, log a
 is missing (a core facet, a model's prediction step or objective, a display's
 verbal reading) and its route: a deepen request from the entry's cited
 sources or accurate background. A gap that only an unbuilt source would fill
-is expected until that source is built and is not proposed. Routine lint
-never fills it.
+(any source the entry does not cite, even one another entry cites) is expected
+until a wiki-build request naming that whole source fills it in, and is not
+proposed. Routine lint never fills it.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -317,7 +317,8 @@ ambiguous targets.
 Self-links, duplicate resolving links, and dangling targets use Task 2's
 [link protocol](link-hygiene.md). Preserve genuine local section/block
 navigation. The scanner masks listings and parsed tables and excludes embeds;
-consult its [coverage contract](scanner.md#deterministic-scanner-and-autonomous-semantic-pass)
+consult its [item keys](scanner.md#item-keys-in-problems) and
+[false-positive notes](scanner.md#before-you-call-a-finding-a-false-positive)
 before disputing a finding or treating literal sample syntax as a link.
 
 ### 11. Related footer
@@ -457,16 +458,11 @@ owner plus complete inbound rewrite.
 ### 18. Alias form, collisions, and display labels
 
 Apply builder [item 18](../../wiki-build/SKILL.md#quality-checklist) and the
-[display-label rule](../../wiki-build/references/writing.md#display-label-casing)
-and [§6's carve-outs](../../../shared/CONVENTIONS.md#6-wikilink-forms).
-Normalize determinate alias form and duplicates; report cross-entry ownership
-conflicts. Never auto-retarget a display whose exact surface belongs to another
-entry. Preserve the four deliberate display-label carve-outs: a
-context-resolved cross-domain bare term (a bare word of the title, or a
-cross-domain synonym the target introduces in italics), a natural plural or
-verb inflection, a derived adjective or agent-noun form of the title's head
-word, and an explicitly bound Organism common name. Do not create an ambiguous
-alias merely to silence a display-label finding. When an `item18` label is a
+[display-label rule](../../wiki-build/references/writing.md#display-label-casing),
+including its four carve-outs, which lint preserves. Normalize determinate
+alias form and duplicates; report cross-entry ownership conflicts. Never
+auto-retarget a display whose exact surface belongs to another entry. Do not
+create an ambiguous alias merely to silence a display-label finding. When an `item18` label is a
 cross-domain synonym its target does not introduce, reword the label to a
 claimed form or report the missing introduction under the notes log. A
 recurring finding on a cross-domain word outside the corpus is a

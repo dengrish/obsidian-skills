@@ -13,46 +13,30 @@ unchanged until [safe replacement](duplicates-and-reprocessing.md#publish-an-app
 
 ## Run the mechanical sweep
 
-Run the following, then inspect every match in context. These commands do not
-parse Markdown: ignore YAML and literal fenced/inline code when judging body
-matches. Never edit source code to satisfy a prose detector.
+Run the sweep on the complete scratch draft, then inspect every match in
+context:
 
 ```bash
-f='<path to the completed scratch .md>'
-echo "[1  H1 in body — expect NONE]";                          grep -nE '^# ' "$f"
-echo "[2  Summary callouts — expect exactly 1]";               grep -cE '^> \[!Summary\]' "$f"
-echo "[3  leftover raw image refs ![](…) — NONE]";             grep -nE '!\[[^]]*\]\(' "$f"
-echo "[4  stray HTML — NONE outside code, kept tables, pipe-cell <br>, reported sup/sub]"; grep -noE '<(br|span|div|sup|sub|font|small|hr)[ />]' "$f"
-echo "[5  clipping-chrome candidates — inspect in context]";   grep -niE 'subscribe|read more|continue reading|sign in|share this|^comments|loading comments|write a comment' "$f"
-echo "[6  backlink/nav-header candidates — inspect in context]"; grep -niE '^[[:space:]>#*]*(backlinks?|what links here|mentioned in|citations of this page)([^A-Za-z0-9]|$)' "$f"
-echo "[7  malformed emphasis: odd *-run count — see body ckl]";awk 'gsub(/\*+/,"&")%2==1 {print FNR": "$0}' "$f"
-echo "[8  stacked list markers: source-check candidates]";        grep -nE '^(>[[:space:]]?)*[[:space:]]*([-*]|[0-9]+\.)([[:space:]]+([-*]|[0-9]+\.))+[[:space:]]' "$f"
-echo "[9  currency \$-then-digit: each must be \\\$ or math]";  grep -nE '\$[0-9]' "$f"
-echo "[10 unescaped \$ parity: must be EVEN after escaping]";   grep -oE '(^|[^\\])\$' "$f" | wc -l
-echo "[11 dropped-\$ candidates: source-compare, NOISY]";       grep -nE '/[ =]|/1[KMB]([^A-Za-z0-9]|$)|/(GPU|hour|min|token)|per (hour|GPU|min)|[0-9]+/[0-9]|\([^)]*in (1[89]|20)[0-9]{2}\)' "$f"
-echo "[12 nested-list deep indent: candidate, NOISY]";         grep -nE $'^(>[ \t]?)*\t\t' "$f"
-echo "[12b sibling indent split: candidate, NOISY — run body-cleaning sibling-consistency script on \$f]"
-echo "[13 footnote refs vs defs: the two lists must be identical]"
-  printf '  refs: '; sed 's/^\[\^[0-9]*\]://' "$f" | grep -oE '\[\^[0-9]+\]' | tr -d '[]^' | sort -n | uniq | tr '\n' ' '; echo
-  printf '  defs: '; grep -oE '^\[\^[0-9]+\]:' "$f" | tr -d '[]^:' | sort -n | uniq | tr '\n' ' '; echo
-echo "[14 leftover HTML <table> — NONE unless complex]";       grep -nE '<table' "$f"
-echo "[15 decorative HR BELOW the ___ separator — NONE]";      awk 'flag && /^([-*_]{3,}|<hr>)[[:space:]]*$/ {print FNR": "$0} /^___[[:space:]]*$/ {flag=1}' "$f"
+python3 '<skill>/scripts/body_checks.py' sweep '<path to the completed scratch .md>'
 ```
 
-If a runner rejects sliced output as invalid UTF-8, a permitted
-`2>&1 | iconv -f utf-8 -t utf-8 -c` output filter can make the diagnostic readable.
-It does not repair the note itself.
+It prints numbered items 1–15 (with 12b), each with its expectation. It skips
+the leading YAML block and fenced code, and reports an unclosed fence, whose
+lines it scans as prose. It does not parse inline code: ignore literal inline
+code when judging a match. Never edit source code to satisfy a prose detector.
 
 Read the results as follows:
 
 - Required in rendered prose: no H1, exactly one actual Summary callout, no
-  remote-image reference left without a failure placeholder, and no confirmed
-  clipping damage. A code example is not a second callout.
-- Odd asterisk runs, stacked markers and deep indentation are **candidates**.
-  List bullets, escapes, multiline emphasis and genuine nested lists can match.
-  Use the [body-cleaning rules](body-cleaning.md#repair-structure-and-markup)
-  and sibling-consistency scan before repairing. A parent with children stays
-  nested; peer dialogue turns should align.
+  remote-image reference (Markdown, or HTML such as `<img>`, `<picture>` or
+  `<figure>`) left without a failure placeholder, and no confirmed clipping
+  damage.
+- Odd asterisk runs, stacked markers, deep indentation and sibling splits
+  (items 7, 8, 12 and 12b) are **candidates**. List bullets, escapes, multiline
+  emphasis and genuine nested lists can match. Use the
+  [body-cleaning rules](body-cleaning.md#repair-structure-and-markup) and
+  [nested-list repair](nested-lists.md) before repairing. A parent with
+  children stays nested; peer dialogue turns should align.
 - Currency-rate and inflation matches require comparison with the source.
   Fractions/dates are expected false positives. After literal currency dollars
   are escaped, check math-delimiter pairing; an even count alone is not proof.
@@ -68,23 +52,10 @@ Read the results as follows:
 Compare the ordered heading outline and coarse counts of lists, quotes, links,
 images, tables and code blocks. Use the fetched source when available; when its
 fetch failed, compare against the original capture and report the live-source
-limit. A representative note-side outline/count scan is:
+limit. The note-side outline and counts come from:
 
-```python
-import re, sys
-body = open(sys.argv[1], encoding="utf-8").read()
-body = re.sub(r'^---\n.*?\n---\n', '', body, count=1, flags=re.S)   # drop YAML
-heads  = [(len(m.group(1)), m.group(2).strip())
-          for m in re.finditer(r'^(#{1,6})\s+(.*)$', body, re.M)]
-counts = dict(
-    list_lines = len(re.findall(r'^\s*(?:>\s?)*\s*(?:[-*]|\d+\.)\s', body, re.M)),
-    quote_lines= len(re.findall(r'^\s*>', body, re.M)),
-    links      = len(re.findall(r'\[[^\]]+\]\([^)]+\)', body)),
-    image_embeds = len(re.findall(r'!\[\[?', body)),
-    code_fences  = body.count('```'),
-)
-print("HEADINGS:", *(f"{'#'*l} {t}" for l,t in heads), sep="\n  ")
-print("COUNTS:", counts)
+```bash
+python3 '<skill>/scripts/body_checks.py' outline '<path to the completed scratch .md>'
 ```
 
 Counts are tripwires, not assertions. Exclude the note's generated callout and
@@ -127,8 +98,7 @@ suggested detector; do not edit an installed plugin during clipping processing.
   the shared enum rather than invented synonyms (`tags: []` when none fits).
 - [ ] A new note uses bare `read: false`. A rewrite preserves the review state,
   including absent/unknown values, and reports those states rather than forcing
-  a boolean. If a required schema check rejects that state, the draft stays
-  unpublished. The capture URL and existing clipping date are unchanged.
+  a boolean. The capture URL and existing clipping date are unchanged.
 - [ ] The Summary starts immediately after YAML, appears once, and has the
   prescribed blank-line/`___` boundary before the body. No stale old callout
   remains inside the article.
@@ -169,9 +139,11 @@ suggested detector; do not edit an installed plugin during clipping processing.
 
 ## Check attachments and audit results
 
-- [ ] Each draft embed resolves to a real file or through the reviewed rename
-  mapping to an existing file. Planned names match the final note stem/casing.
-  Do not rename live images just to make the draft pass this check.
+- [ ] Each draft embed names a staged scratch file (a new or recovered image),
+  an existing attachment (unchanged slug), or, for a changed slug, an existing
+  old-slug attachment with only the slug replaced. Planned names match the
+  final note stem/casing. Nothing is placed or renamed before publication; do
+  not rename live images just to make the draft pass this check.
 - [ ] Completed images were opened for readability; their returned extensions
   match the format. No newly created extension twins or unexplained missing
   attachments remain. Any SVG is inert and self-contained and passed the

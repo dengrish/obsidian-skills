@@ -44,7 +44,7 @@ Use `--allow-unorganized` only for a deliberate one-off exception and explain
 that downstream source identity will depend on the current name. The shared
 rule is [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 
-Folder sweeps skip [feed-owned attachments](../../shared/CONVENTIONS.md#1-vault-folder-layout)
+Folder sweeps skip [feed-owned attachments](../../shared/CONVENTIONS.md#1c-feed-owned-attachments)
 and list them without failing the run. If the user names one, keep its name,
 use the `--allow-unorganized` exception, and report it. Never rename a
 collector-owned file or treat its photo attachments as extractor-owned
@@ -63,7 +63,7 @@ their approval for `pdf-organize` to file, then extract from the filed path.
 A refused PDF writes and adopts nothing, even with `--overwrite`; other PDFs
 continue and the run exits nonzero. When another vault file shares a PDF
 basename, report both paths and give the user the
-[shared-basename remedy](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
+[shared-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames).
 
 **In a recursive run containing both a book and its chapters, extract the
 chapters and skip the whole book.** The skip is scoped to this run, not a
@@ -96,11 +96,16 @@ source PDF revised at the same path (a verified skip proves ownership, not
 freshness), follow
 [ownership, adoption and review records](references/review-and-repair.md#ownership-legacy-adoption-and-review-records).
 
-Extract a PDF alone with `--ed-prefix ED` when `<stem>_fig_ED*` files exist,
-or when no `<stem>_fig*` crop exists yet and its captions number Extended Data
-figures alongside its main figures; the default folds Extended Data into `S`
-(`SI` stays distinct). After a default run, switch only a PDF whose summary
-prints an `--ed-prefix ED` rerun, following [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
+The default folds Extended Data into `S` (`SI` stays distinct). Every run,
+folder sweeps included, keeps `--ed-prefix ED` for a PDF whose manifest
+records `_fig_ED<N>` crops or whose `Sources/Images/` already holds an
+unrecorded `<stem>_fig_ED<N>.png`. Compare each unrecorded one with its page
+and record the confirmed ones with the `--adopt-legacy` command the summary
+prints. Pass `--ed-prefix ED` yourself only for a single PDF with no
+`<stem>_fig*` crop yet and captions (the `raw` column of `auto_fig_bbox.py`)
+that number Extended Data figures separately. In a folder sweep keep the
+default, and switch only a PDF whose summary prints an `--ed-prefix ED`
+rerun, following [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
 Use `--keep-frame` to keep a publisher's surrounding frame, which is otherwise
 cropped away.
 
@@ -143,7 +148,8 @@ crop with the reference's [explicit repair procedure](references/review-and-repa
 for coordinate units, naming exceptions, scratch copies, review marks and
 cleanup. Record `--mark-reviewed '<stem>:<fig>'` for every explicitly repaired
 crop, flagged or not, only after viewing it: the mark verifies nothing,
-silences its warnings and protects the crop from a later batch `--overwrite`.
+silences its warnings and protects the crop from a later batch `--overwrite`
+until `--unmark-reviewed` removes it.
 Preserve every recovery path named by a failed write.
 
 ### 4. Report completed and unresolved work
@@ -156,6 +162,6 @@ marks recorded. After a nonzero run, report the PDFs that succeeded without
 calling the whole request complete. Preserve originals, legacy panels, and all
 unrelated images.
 
-At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
-and apply them to `Reviews/figure-extract-suggestions.md` and to the logs of
-producers whose outputs this run consumed.
+At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
+`Reviews/figure-extract-suggestions.md` and to the logs of producers whose
+outputs this run consumed.

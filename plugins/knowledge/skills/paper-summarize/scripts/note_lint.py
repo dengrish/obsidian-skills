@@ -401,8 +401,6 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
     if known != [k for k in SCHEMA if k in known]:
         note.fail(2, "front-matter keys out of schema order; expected %s, got %s"
                      % (" ".join(k for k in SCHEMA if k in known), " ".join(known)))
-    if known and known[-1] != "read" and "read" in known:
-        note.fail(2, "`read` must be the last key in the schema")
 
     def scalar(key):
         return kv[key][0] if key in kv else None
@@ -538,9 +536,8 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
             bare = parse_scalar(desc)[0]
         except ValueError:
             bare = None     # the malformed scalar was reported above
-        if bare == "":
-            note.fail(2, "`description` is empty")
-        elif isinstance(bare, str) and len(bare) > MAX_DESCRIPTION:
+        # An empty value was reported with the title check above.
+        if isinstance(bare, str) and len(bare) > MAX_DESCRIPTION:
             note.fail(2, "`description` is %d characters, over the %d limit"
                          % (len(bare), MAX_DESCRIPTION))
 
@@ -1678,7 +1675,7 @@ def _cases():
          "not in the CONVENTIONS.md 2b schema"),
         ("read not last", _mutate("description: Doe", "read: false\ndescription: Doe")
          .replace("tags:\n  - \"#medicine\"\nread: false\n---", "tags:\n  - \"#medicine\"\n---"),
-         "last key"),
+         "__ONLY__out of schema order"),
         ("description too long",
          _mutate("description: Doe cut recurrence from 45% to 8% in a 219-patient trial.",
                  "description: " + "x" * 111), "over the 110 limit"),
@@ -2261,6 +2258,59 @@ def _cases():
                  "1. " + " ".join(["The"] * MAX_STEP_WORDS) + ".\n"
                  "2. The team did another.\n3. The team did a third."),
          CLEAN),
+
+        # --- checks no case exercised: each could be deleted with the suite
+        # --- still green (mutation audit of 2026-09-30).
+        ("a front-matter line before any key",
+         _mutate('---\ntitle: "A Title', '---\n  stray: value\ntitle: "A Title'),
+         "__ONLY__front-matter line before any key"),
+        ("a duplicate front-matter key",
+         _mutate("format: Paper\n", "format: Paper\nformat: Paper\n"),
+         "duplicate front-matter key(s): format"),
+        ("sources written as a scalar",
+         _mutate("sources:\n", 'sources: "[[Doe_X_2025.pdf]]"\n'),
+         "__ONLY__found a scalar value"),
+        ("a URL as sources item 1",
+         _mutate('  - "[[Doe_X_2025.pdf]]"\n', '  - "https://doi.org/10.1000/example"\n'),
+         "__ONLY__`sources` item 1 must be the PDF wikilink"),
+        ("three sources items",
+         _mutate('  - "https://arxiv.org/abs/2501.02045"\n',
+                 '  - "https://arxiv.org/abs/2501.02045"\n'
+                 '  - "https://doi.org/10.1000/example"\n'),
+         "__ONLY__two is the maximum"),
+        ("an empty description is reported once",
+         _mutate("description: Doe cut recurrence from 45% to 8% in a 219-patient trial.",
+                 'description: ""'), "__ONLY__`description` is empty"),
+        ("an author entry without its list marker",
+         _mutate("  - Priya N. Doe", "  Priya N. Doe"),
+         "__ONLY__`author` entry is not a block-list item"),
+        ("an unquoted ` #` cuts an author short",
+         _mutate("  - Priya N. Doe", "  - Priya N. Doe # lead author"),
+         "__ONLY__quote `author` entry"),
+        ("front matter with no body", GOOD.split("> [!Summary]")[0],
+         "note has no body"),
+        ("a callout of the wrong type",
+         _mutate("> [!Summary]", "> [!Note]"), "__ONLY__expected `> [!Summary]` here"),
+        ("an empty callout bullet",
+         _mutate("> - Two.", "> - "), "__ONLY__empty callout bullet"),
+        ("a blank line inside the callout",
+         _mutate("> - Two.\n", ">\n> - Two.\n"), "__ONLY__blank line inside the callout"),
+        ("a two-word heading is not a sentence",
+         _mutate(I_H, "## Recurrence-free survivorship"),
+         "__ONLY__word(s); a short sentence needs at least 3"),
+        ("a `#` heading in the body",
+         _mutate(M_H + "\n\nProse.", M_H + "\n\n# Top heading\n\nProse."),
+         "__ONLY__no `#` heading in the note"),
+        ("no blank line under a heading",
+         _mutate(M_H + "\n\nProse.", M_H + "\nProse."),
+         "__ONLY__no blank line under the Methods heading"),
+        ("a prose section written as bullets",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\n- One point.\n- Another point."),
+         "__ONLY__the Interpretation section is prose, not a bullet list"),
+        ("a table as the last block of the file",
+         _mutate("- **Code.** github.example/x\n",
+                 "- **Code.** github.example/x\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"),
+         "the table is the last block"),
     ]
 
 
@@ -2400,6 +2450,23 @@ def _selftest():
                     print("FAIL  a source-keyed symlink outside Images passed "
                           "the figure inventory: %r" % linked_findings)
                 os.unlink(linked_image)
+        # Invalid frontmatter names no source stem, so the embeds fall back
+        # to a no-follow check of the image folder itself.
+        sourceless = GOOD.replace('  - "[[Doe_X_2025.pdf]]"\n',
+                                  '  - "https://doi.org/10.1000/example"\n', 1)
+        fallback = [message for _line, message in lint(
+            sourceless.replace("Doe_X_2025_fig_2.png", "Doe_X_2025_fig_8.png"),
+            images=scratch, mode="empirical")]
+        present = [message for _line, message in lint(
+            sourceless, images=scratch, mode="empirical")]
+        if (any("not a direct regular file in the image folder" in message
+                for message in fallback)
+                and not any("image folder" in message for message in present)):
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  a sourceless note's embed skipped the image-folder "
+                  "fallback: missing %r, present %r" % (fallback, present))
         invalid_note = (long_note.replace("read: false", 'read: "false"')
                         .replace("#page=5|5", "#page=0|0")
                         .replace("Doe_X_2025_fig_2.png", "Doe_X_2025_fig_9.png"))

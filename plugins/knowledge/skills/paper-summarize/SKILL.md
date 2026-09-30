@@ -13,8 +13,10 @@ description: >
 # Paper Summarize
 
 One selected PDF produces one reading note in `Articles/`, named exactly after
-its PDF stem. Write for a scientist from another field: explain the document's
-main contribution, what supports it and what limits it. The PDF stays untouched.
+its PDF stem; an authorized rewrite keeps an owned note's on-disk spelling when
+it differs only by case or Unicode normalization. Write for a scientist from
+another field: explain the document's main contribution, what supports it and
+what limits it. The PDF stays untouched.
 
 Read [runtime setup](../../shared/RUNTIME.md) once per task and resolve `<vault>`,
 `<skill>`, `<plugin>` and, when a step needs it, `<scratch>`. After setting up
@@ -53,8 +55,10 @@ no-apply run creates no vault folder: it scans an empty `<scratch>` in place of
 an absent `Articles/` or `Sources/Images/` and reports the result as partial,
 not ready to publish.
 
-The read-only inventory is wider than the **processing scope** above: scan the
-whole `Sources/PDFs/` tree when present so books and chapters stay visible:
+Scan a named PDF alone, as `--src '<pdf path>' --json` with the notes/images
+paths below and any naming exception; naming selects a chapter or split book
+directly. For a folder request, scan the whole `Sources/PDFs/` tree when
+present, never a subfolder, so books and chapters are recognized:
 
 ```bash
 python3 '<skill>/scripts/paper_scan.py' \
@@ -62,12 +66,17 @@ python3 '<skill>/scripts/paper_scan.py' \
     --notes '<vault>/Articles' --images '<vault>/Sources/Images'
 ```
 
-For selected PDFs deliberately kept outside that tree, repeat the command with
-`--src '<selected PDF or folder>'`, the same notes/images paths and any naming
+For selected folders deliberately kept outside that tree, repeat the command
+with `--src '<selected folder>'`, the same notes/images paths and any naming
 exception; when the tree is absent for that reason, scan only those inputs. An
 unexpectedly absent tree after filing is an incomplete handoff, not an empty
-inventory. Combine rows by PDF path and process only selected files, in path
-order; inventorying another file never authorizes summarizing it.
+inventory. Combine rows by PDF path and process only the selected files, at the
+paths tracked for them after any filing, in path order; inventorying another
+file never authorizes summarizing it.
+
+A named PDF's scan, or a single-file `--json` rescan of each PDF a sweep will
+process, gives that PDF's **step-1 row**: the snapshot, figure preparation and
+step 6 use its `note` path and `figures[].file`.
 
 With canonical `Sources/Images/` output, each scan also proves the selected
 PDF's basename is unique across the whole vault, including `Inbox/`.
@@ -83,11 +92,11 @@ metadata, or a portable-equivalent (NFC, case-folded) duplicate basename as a
 | `new` | Continue. |
 | `done` | Skip unless the request already authorizes replacing existing summaries; for a named file without that authorization, ask whether to overwrite or skip. |
 | `legacy` | Leave the older embed note untouched; report that its occupied path must be resolved. |
-| `collision` | Write nothing; report the existing origin, `source_conflicts`, `note_conflicts` or `source_gate_error`. Resolve `source_conflicts` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. Portable-equivalent article names need ownership cleanup. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
+| `collision` | Write nothing; report the existing origin, `source_conflicts`, `note_conflicts` or `source_gate_error`. Resolve `source_conflicts` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. Portable-equivalent article names need ownership cleanup. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
 | `unorganized` | Stop for that PDF and route naming to `pdf-organize`. After it files the PDF, re-run the inventory and continue from the new path; the old path is no longer the source identity. |
-| `feed` | A [feed-owned attachment](../../shared/CONVENTIONS.md#1-vault-folder-layout): skip it, and never route it to `pdf-organize`. Only when the user names one, rescan that file alone with `--allow-unorganized`, keep its collector path and feed receipts unchanged, and report the exception. |
-| `book` | Skip a whole split book and name the chapter folder. Include a named split book with `--include-split-books`, then ignore every other row. |
-| `chapter` | Skip during an ordinary folder sweep. Include a named chapter with `--include-chapters`, then ignore every other row; the flag also selects chapters for a requested sweep. |
+| `feed` | A [feed-owned attachment](../../shared/CONVENTIONS.md#1c-feed-owned-attachments): skip it, and never route it to `pdf-organize`. Only when the user names one, rescan that file alone with `--allow-unorganized`, keep its collector path and feed receipts unchanged, and report the exception. |
+| `book` | Skip a whole split book in a folder sweep and name the chapter folder; `--include-split-books` selects split books only for a sweep that asks for them. |
+| `chapter` | Skip during an ordinary folder sweep; `--include-chapters` selects chapters for a sweep that asks for them. |
 
 A row with `figure_inventory_error` is blocked whatever its status: resolve the
 named unsafe image occupant and rescan before reading its figure count. The
@@ -98,14 +107,16 @@ zero figure counts. If the scan helper cannot run, stop and report it.
 
 Record each destination before relying on it: every selected `new` row, and
 every `done` row once its rewrite is authorized and before its existing note is
-read. Step 6 publishes against this record.
+read. The destination is the step-1 row's `note` path made vault-relative
+(`Articles/<pdf stem>.md` for a `new` row, the on-disk spelling for a `done`
+row). Step 6 publishes against this record.
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
-    -o '<scratch>/summary-snapshots.json' 'Articles/<pdf stem>.md'
+    -o '<scratch>/summary-snapshots.json' '<destination>'
 ```
 
-A `new` row must record `absent`; otherwise rescan it.
+A `new` row must record `absent` and a `done` row `file`; otherwise rescan it.
 
 ### Prepare the figure inventory
 
@@ -134,25 +145,32 @@ python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
 
 Carry intake's deliberate `--allow-unorganized` exception and any non-default
 option an earlier extraction report names (such as `--keep-frame` or `--dpi`)
-into this and every repair command; none waives source uniqueness or image
-ownership checks. A preview, plan-only or no-apply run adds `--dry-run`, which
-writes nothing; report the missing figures as a gap and repair no crop.
+into this command, and into figure-extract's repair commands as that procedure
+lists them; none waives source uniqueness or image ownership checks. A
+preview, plan-only or no-apply run adds `--dry-run`, which writes nothing;
+report the missing figures as a gap and repair no crop.
 
 Read its diagnostics and respect its naming/ownership refusals. If it prints an
-`--ed-prefix ED` rerun, run it and repeat `--cites` with that option. Then
-complete figure-extract's
+`--ed-prefix ED` rerun and no `<stem>_fig_S*` crop existed before this step, so
+every S crop it would replace is one this run wrote, run it and repeat
+`--cites` with that option. Otherwise do not run it: leave the existing crops,
+keep the default prefix, select from them or carry the claim in prose, and
+report the switch for the Extended Data procedure above. Then complete
+figure-extract's
 [visual review](../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)
 of the crops this run wrote, repairing a bad one through its explicit-crop
 workflow; do not invent a separate crop or rename procedure. Crops it reports
-only as occupied are no gap: select from them and do not adopt them here. This
-is the only step that invokes `figure-extract`; otherwise the image folder is
-read-only, and
+only as occupied are no gap: select from them and do not adopt them here.
+Never overwrite, adopt or repair a pre-existing crop: skip a wrong one, carry
+its claim in prose and report it for figure-extract. This is the only step that
+invokes `figure-extract`; otherwise the image folder is read-only, and
 [missing exhibits](references/figures.md#when-the-figure-you-need-is-not-there)
 governs a needed figure that is still absent or badly cropped.
 
-Whether or not extraction ran, rescan that PDF alone with `--json` (same
-`--notes`/`--images` and any naming exception) for its figure list only. Embed
-only a file named in its `figures[].file`, never a filename rebuilt from a label.
+If this step wrote, renamed or repaired any crop, repeat the step-1
+single-file `--json` scan and use its figure list; otherwise use the step-1
+row's. Embed only a file named in its `figures[].file`, never a filename
+rebuilt from a label.
 
 ## 2. Read the PDF and record the claims
 
@@ -199,15 +217,7 @@ Save the complete draft at a unique `<scratch>` path; never put an unfinished
 note in `Articles/`. Use the [worked example](references/worked-example.md)
 when the assembled form is unclear.
 
-## 4. Verify the draft against the source
-
-Read [the verification checklist](references/review-checklist.md), which owns
-the finder command, match handling, source-page checks and verification report.
-Check independently against the PDF, not by rereading the draft, and correct or
-cut unsupported claims. A clean token search never replaces direct page
-verification.
-
-## 5. Lint the complete draft
+## 4. Lint the complete draft
 
 ```bash
 python3 '<skill>/scripts/note_lint.py' '<draft note>' \
@@ -228,14 +238,27 @@ If `note_lint.py` cannot run, or a required format or verification reference is
 missing, fix the permitted runtime or leave the draft unpublished and report
 the blocker; a checklist-only review is not a clean lint result.
 
+## 5. Verify the linted draft against the source
+
+Read [the verification checklist](references/review-checklist.md), which owns
+the finder command, match handling, source-page checks and verification report.
+Check independently against the PDF, not by rereading the draft, and correct or
+cut unsupported claims. A clean token search never replaces direct page
+verification. If verification changes the draft, rerun lint and recheck any
+text a lint fix rewords.
+
 ## 6. Publish the verified, linted note
 
-The destination is `Articles/<pdf stem>.md`. Re-inventory `Articles/` just
-before publishing; an equivalent spelling (NFC, case-folded) that arrived after
-intake occupies the destination. Write `<scratch>/<pdf stem>.manifest.json` as
-`[{"path": "Articles/<pdf stem>.md", "draft": "<absolute draft path>"}]` and
-publish with `publish_files.py`, which creates the note exclusively or replaces
-it only against its step-1 record (`--dry-run` plans without writing):
+The destination is the one recorded in step 1. Just before publishing, repeat
+the step-1 single-file scan and publish only while the row is still `new`, or
+`done` for an authorized rewrite, with the same `note` path; otherwise act on
+its new status. `publish_files.py` sees only the recorded spelling, so on a
+case- or normalization-sensitive filesystem only this scan catches a
+portable-equivalent note that arrived after intake. Write
+`<scratch>/<pdf stem>.manifest.json` as
+`[{"path": "<destination>", "draft": "<absolute draft path>"}]` and publish
+with `publish_files.py`, which creates the note exclusively or replaces it only
+against its step-1 record (`--dry-run` plans without writing):
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
@@ -263,6 +286,6 @@ dates, low-confidence calls, approved rewrites and explicit scan overrides.
 Do not report inapplicable availability labels or out-of-scope governance fields
 as missing disclosures.
 
-At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
-and apply them to `Reviews/paper-summarize-suggestions.md` and to the logs of
-producers whose outputs this run consumed.
+At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
+`Reviews/paper-summarize-suggestions.md` and to the logs of producers whose
+outputs this run consumed.

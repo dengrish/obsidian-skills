@@ -23,7 +23,9 @@ diff in one call:
   5. Links: body and Related wikilinks of each staged entry. ``dangling``
      lists a target that matches no entry of the combined tree by filename
      stem or alias, nor, when bare, a file stem in the vault's ``MOCs``
-     folder (case/NFC-insensitive). ``noncanonical`` lists a target that
+     folder (case/NFC-insensitive); a path-qualified target must spell an
+     entry's Wiki-relative path, whole or its end, unless no entry has its
+     basename and an alias claims it. ``noncanonical`` lists a target that
      resolves but not by its exact filename: ``case`` (one owner spelled
      differently), ``alias`` (no file has the name, bare or ending a path,
      and one entry claims it) or ``ambiguous`` (a name or path several
@@ -371,8 +373,8 @@ def mirror_wiki(wiki, tree, prefix):
 # review
 # --------------------------------------------------------------------------
 
-def _lint(tree):
-    report = lint_path(tree)
+def _lint(tree, cache):
+    report = lint_path(tree, cache=cache)
     if report["problems"]:
         raise ReviewError("lint could not read the review tree completely: %s"
                           % "; ".join(report["problems"]))
@@ -431,21 +433,39 @@ def _link_regions(text):
             ("related", sections["related_line"] or ""))
 
 
-def dangling_links(text, known, mocs=()):
+def dangling_links(text, known, mocs=(), paths=None, wiki_parts=("Wiki",)):
     """``(section, target)`` for each unresolved body or Related wikilink.
 
     ``known`` holds entry stems and aliases; ``mocs`` holds MOC stems, which
-    resolve only a bare target.
+    resolve only a bare target. ``paths`` holds the entries' folded
+    Wiki-relative paths without ``.md``: when given, a path-qualified target
+    (other than ``./`` or ``../``) resolves only to an entry whose path it
+    spells whole or ends, less a leading Wiki qualifier, or, when no entry
+    has its basename, to an alias of that name.
     """
+    stems = (None if paths is None
+             else {path.rsplit("/", 1)[-1] for path in paths})
     found = []
     for section, region in _link_regions(text):
         for target, _label in extract_wikilinks(region):
             stem = _link_stem(target)
-            bare = "/" not in target.replace("\\", "/").strip().strip("/")
-            if (stem is None or stem in known or (bare and stem in mocs)
-                    or (section, target) in found):
+            written = target.replace("\\", "/").strip().strip("/")
+            bare = "/" not in written
+            if stem is None or (section, target) in found:
                 continue
-            found.append((section, target))
+            if bare or stems is None or written.startswith(("./", "../")):
+                resolved = stem in known or (bare and stem in mocs)
+            else:
+                rest = _root_split(written.split("/"), wiki_parts)[1]
+                if rest[-1].lower().endswith(".md"):
+                    rest[-1] = rest[-1][:-3]
+                lookup = fold_name("/".join(rest))
+                resolved = (lookup in paths
+                            or any(path.endswith("/" + lookup)
+                                   for path in paths)
+                            or (stem not in stems and stem in known))
+            if not resolved:
+                found.append((section, target))
     return found
 
 
@@ -582,7 +602,7 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                     if kind is None:
                         continue              # dangling
                 else:
-                    continue                  # dangling, or lint's to resolve
+                    continue                  # dangling_links reports it
             replacement = None
             if kind != "ambiguous":
                 if fold_name(owner) == own:
@@ -650,9 +670,11 @@ def review(wiki, manifest, out, vault=None):
                      "are incomplete for entries that may live in unmirrored "
                      "folder(s): %s" % ", ".join(folders))
 
+    # Files the overlay leaves unchanged keep their baseline single-file lint.
+    cache = {}
     baseline = collections.Counter(
         _match_key(rel, finding)
-        for rel, finding in _findings(_lint(tree), tree))
+        for rel, finding in _findings(_lint(tree, cache), tree))
 
     staged_paths = {}
     for rel, inner, data in staged:
@@ -671,7 +693,7 @@ def review(wiki, manifest, out, vault=None):
             raise ReviewError("cannot overlay %s: %s" % (rel, exc))
         staged_paths[fold_name(inner)] = rel
 
-    combined = _lint(tree)
+    combined = _lint(tree, cache)
     on_staged, introduced, baseline_count = [], [], 0
     for rel, finding in _findings(combined, tree):
         key = _match_key(rel, finding)
@@ -692,11 +714,13 @@ def review(wiki, manifest, out, vault=None):
             introduced.append(record)
 
     known, stems, alias_owners, titles, unread = set(), {}, {}, {}, []
+    entry_paths = set()
     for entry in combined["entries"]:
         known.add(fold_name(os.path.splitext(os.path.basename(entry["file"]))[0]))
         known.update(fold_name(alias) for alias in entry.get("aliases") or [])
         rel = os.path.relpath(entry["file"], tree).replace(os.sep, "/")
         path = os.path.splitext(rel)[0]
+        entry_paths.add(fold_name(path))
         stems.setdefault(fold_name(path.rsplit("/", 1)[-1]), set()).add(path)
         for alias in entry.get("aliases") or []:
             alias_owners.setdefault(fold_name(alias), set()).add(path)
@@ -720,7 +744,8 @@ def review(wiki, manifest, out, vault=None):
     mocs, dangling, noncanonical = _moc_stems(vault), [], []
     for rel, inner, data in staged:
         text = data.decode("utf-8-sig", errors="replace")
-        for section, target in dangling_links(text, known, mocs):
+        for section, target in dangling_links(text, known, mocs, entry_paths,
+                                              wiki_parts):
             record = {"file": rel, "section": section, "target": target}
             occupant = unmirrored_stems.get(_link_stem(target))
             # A file outranks an alias; otherwise every unmirrored leaf and
@@ -1091,6 +1116,24 @@ def run_self_test():
               [link for link in path_links if link[0] == "related"],
               [("related", "ppv", "alias", "[[precision|Precision]]", None),
                ("related", "Recall", "case", "[[recall|Recall]]", None)])
+
+        wrong, wrong_links = links_review(
+            "wrong-path", {"precision.md": measure("Precision"),
+                           "recall.md": measure("Recall", ["tpr"]),
+                           "metrics/accuracy.md": measure("Accuracy")},
+            " It uses [[metrics/precision|precision]], "
+            "[[Wiki/nowhere/precision|p]], [[Wiki/precision|precision]], "
+            "[[Wiki/metrics/accuracy|accuracy]], [[metrics/accuracy.md|"
+            "accuracy]], [[Wiki/accuracy|accuracy]] and [[nowhere/tpr|TPR]].")
+        check("a path whose folder holds no such entry is dangling even when "
+              "its basename is an entry; whole, trailing and root-qualified "
+              "paths resolve, and a path to an alias follows the alias rule",
+              ([(r["section"], r["target"], r.get("unmirrored"))
+                for r in wrong["dangling"]], wrong_links, wrong["clean"]),
+              ([("body", "metrics/precision", None),
+                ("body", "Wiki/nowhere/precision", None)],
+               [("body", "nowhere/tpr", "alias", "[[recall|TPR]]", None)],
+               False))
 
         # An online page's URL is a valid source item (CONVENTIONS section 7),
         # and a frontmatter URL is never a link, even when its last path

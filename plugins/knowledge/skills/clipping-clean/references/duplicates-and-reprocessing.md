@@ -30,9 +30,18 @@ restores missing attachments of a matching owned note from its raw (as under
 changed-slug handoff by [its procedure](#finish-a-pending-changed-slug-handoff).
 Every other match stays a `duplicate` skip.
 
-Record the original bytes, file identity, permissions and metadata before
-preparing the replacement: `expected = atomic_move.regular_file_snapshot(<note>)`,
-kept unchanged through publication and cleanup. Exclude this one note from its
+Before reading the note for the rewrite, record its bytes, identity and mode
+in the run's snapshot file; it must record `file`:
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+    -o '<scratch>/clipping-snapshots.json' 'Articles/<old_slug>.md'
+```
+
+Once a changed slug is settled, record `'Articles/<new_slug>.md'` in the same
+file; it must record `absent`. A case/Unicode respelling of the same note needs
+no second record. This JSON record is the expected version through publication
+and cleanup; never re-record it at commit time. Exclude this one note from its
 own dedup scan.
 
 **Body source.** For a named `Articles/` note, remove only its leading Summary
@@ -51,6 +60,15 @@ caption, and never delete an attachment. A missing attachment that cannot be
 restored becomes a reported `<!-- missing attachment: … -->` placeholder;
 [image handling](images.md#existing-embeds-on-a-reprocess) covers a changed slug.
 
+For a changed slug, resolve every old-slug embed in the old note that lacks its
+exact attachment before step 4 of the
+[replacement](#publish-an-approved-replacement). Either restore it with
+`fetch_images.py place` (old slug, `--owner-note` the old note), or first
+publish an approved same-slug rewrite of the old note that replaces that embed
+with the `<!-- missing attachment: … -->` placeholder, then record the old note
+afresh with `snapshot --replace` and re-read it. Prepare refuses a missing old
+attachment, and by step 5 the new note is already public.
+
 Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
 to decide which fields regenerate and which preserve user state. In particular,
 an unknown or absent review state is not permission to supply `false`; report
@@ -58,8 +76,9 @@ that state and any metadata conflicts as required there.
 
 Retain existing figure numbers. An unchanged slug leaves existing attachments
 alone; new images continue after the highest occupied number. A changed slug
-needs a reviewed dry-run rename plan, not early changes to files the original
-note uses.
+maps each existing attachment by replacing only the slug; `rename --phase
+prepare --dry-run` reviews that plan after the new note is public (step 5).
+Nothing changes files the original note uses before then.
 
 ## Settle a slug before writing images
 
@@ -99,28 +118,41 @@ never moved, deleted or rewritten, including after a successful reprocess.
    that draft. For a changed slug, replace only the slug in each planned image
    name; preserve its figure tail and extension. Do not copy, move or rename a
    live attachment before both owner notes are public.
-2. Preflight both paths under the selected `Articles/`. The original must still
-   be this clipping's regular, non-symlink file, with the identity and contents
-   read at the start. Check destination occupancy with `os.path.lexists`, not
-   `exists` or shell `-e`. Refuse any other occupant. A case/Unicode spelling of
-   the same note is allowed only when `os.path.samefile` confirms it and the
-   directory has **one** entry with that normalized name. Two distinct hard-link
-   entries are not a spelling alias.
-3. Stage the finished bytes in a unique hidden temporary directory beside the
-   resolved real `Articles/` directory, outside the note folder and on its filesystem. Preserve the original note's
-   permissions. Recheck the destination before publication.
-4. Publish the complete staged note through the shared
-   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api);
-   `publish_files.py` offers no conditional removal (step 9) and cannot give a
-   new name the original note's permissions. At a free destination (a changed
-   slug), call
+2. Preflight both paths under the selected `Articles/` with
+   `publish_files.py verify --vault '<vault>' --snapshots '<scratch>/clipping-snapshots.json'`.
+   It rechecks every record in the run's file, so judge only this
+   replacement's own entries. The original must report `unchanged`: still this
+   clipping's regular, non-symlink file with the recorded identity and bytes.
+   A distinct new destination must report `unchanged`, that is, still absent.
+   Records of notes already published earlier in this run are expected to
+   report `changed`, `appeared` or `removed`; a nonzero exit caused only by
+   those entries does not refuse this preflight. An `error` result, or any
+   other status on this replacement's own entries, does. Refuse any other
+   occupant. A case/Unicode spelling of the same note is allowed only when
+   `os.path.samefile` confirms it and the directory has **one** entry with that
+   normalized name. Two distinct hard-link entries are not a spelling alias.
+3. For a driver publication (step 4), stage the finished bytes with the
+   recorded `mode` in a unique hidden temporary directory beside the resolved
+   real `Articles/` directory, outside the note folder and on its filesystem.
+   `publish_files.py` stages its own copy.
+4. Publish the complete note. A same-name rewrite runs `publish_files.py
+   publish` against the record with the manifest
+   `[{"path": "Articles/<slug>.md", "draft": "<absolute draft path>"}]`, as in
+   [publication](../SKILL.md#6-publish-safely); it replaces only the recorded
+   version and keeps its mode. The other two publications use a private driver
+   under the shared
+   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api):
+   `publish_files.py` offers no conditional removal (step 9), cannot give a
+   new name the original note's permissions, and refuses a case alias. The
+   driver rebuilds the expected token from the old note's JSON record `r` as
+   `atomic_move.RegularFileSnapshot(identity=tuple(r["identity"]), digest=r["digest"], mode=r["mode"], size=r["size"])`,
+   never from a fresh snapshot. At a free destination (a changed slug), it calls
    `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`.
-   For a same-name or same-file-spelling rewrite, call
+   For a same-file spelling change, it calls
    `atomic_move.replace_expected(staged, target, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`
-   with the token recorded above and a fresh `stage_dir`. Never take a fresh
-   snapshot at commit time, and never recheck and then call `os.replace`. If
-   publication fails, no attachment has moved and the unchanged old note still
-   resolves.
+   with that token and a fresh `stage_dir`. Never recheck and then call
+   `os.replace`. If publication fails, no attachment has moved and the
+   unchanged old note still resolves.
 5. Read back the published note. For a same-path rewrite, place every newly
    staged remote or recovered image through the guarded
    [image publication procedure](images.md#download-and-publish), then verify
@@ -206,10 +238,12 @@ never moved, deleted or rewritten, including after a successful reprocess.
    external dependencies around every retirement. A newly introduced link causes
    rollback. If any check fails, it retains both sets and reports the blocker or
    recovery path.
-9. After finalize succeeds, conditionally remove the distinct old note with
+9. After finalize succeeds, conditionally remove the distinct old note in the
+   private driver with
    `atomic_move.remove_expected(old_note, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`,
-   passing the token recorded before the rewrite (or when finishing a pending
-   handoff) and a fresh `stage_dir`; clean that `stage_dir` only after success.
+   passing the token rebuilt from the old note's record (made before the
+   rewrite, or when finishing a pending handoff) and a fresh `stage_dir`; clean
+   that `stage_dir` only after success.
    Do not use a check followed by `unlink`, remove it for the same-file
    spelling case, or remove it if it changed. A cleanup refusal
    keeps the path; never delete first and report broken references afterward.
@@ -225,8 +259,9 @@ claim a failed rename completed.
 When the user asks to finish or resume a pending handoff left by step 6
 (naming either note of the same-URL pair), confirm that both notes share the
 web origin, the old note embeds the old-slug images and the new note embeds
-their mapped names. Record `expected = atomic_move.regular_file_snapshot(<old note>)`
-from the old note you read for this check; step 9 passes that token. Rerun
+their mapped names. Record the old note with `publish_files.py snapshot
+--replace` in this run's snapshot file before reading it for this check; step 9
+rebuilds its token from that record. Rerun
 `rename --phase prepare --dry-run` with the original paths and slugs, review
 it, then run the identical live command. Copies prepared earlier are verified
 as `already-prepared`, and it returns the current mapping and dependency

@@ -1,9 +1,9 @@
 # Shared suggestion logs
 
-Read this before writing any suggestion log: at closeout when the run has an
-item to add, update, move or verify, or a missing canonical log to initialize.
-A run with none of these writes no log. A report-only, preview, or no-apply
-run writes no logs or setup files. All logs live in `<vault>/Reviews/`:
+Read this before writing any suggestion log, when the
+[closeout gate](RUNTIME.md#close-out) sends a run here; a run it does not send
+here writes no log. A report-only, preview, or no-apply run writes no logs or
+setup files. All logs live in `<vault>/Reviews/`:
 **open issues first, then a short record of fixed ones** that stays until the
 user removes it. They are shared issue records, not fully generated notes:
 preserve existing items and unrelated content rather than rebuilding a log
@@ -33,8 +33,9 @@ per occurrence of the same underlying problem. An all-skipped run may close
 out from evidence already obtained; closeout does not authorize new audits or
 expand the run's scope.
 
-Read the existing log first. Reuse one stable ID per problem within each log;
-match the underlying issue before allocating a new ID. Update an existing
+Snapshot the log with the first command below, then read it. Reuse one stable
+ID per problem within each log; match the underlying issue before allocating
+a new ID. Update an existing
 item's evidence and reporting skills when new observations warrant it;
 increment recurrence at most once per logical run, even across rescans,
 retries, or delegated checks. Use one run timestamp in `YYYY-MM-DD HH:MM`
@@ -83,8 +84,7 @@ unchanged snapshot:
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
-    -o '<scratch>/log-snapshots.json' --replace \
-    'Reviews/<current-skill>-suggestions.md'
+    -o '<scratch>/log-snapshots.json' 'Reviews/<current-skill>-suggestions.md'
 python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
     --snapshots '<scratch>/log-snapshots.json' \
     --manifest '<scratch>/log-manifest.json'
@@ -97,11 +97,11 @@ or leaf symlinks, non-regular occupants, and case/Unicode-equivalent ownership
 collisions. Create a missing `Reviews/` directory only after checking its name
 has no other owner, by adding `--create-dir Reviews` to `publish`. If its path
 or a log cannot be used safely, preserve the occupant and report the blocked
-log update; complete other independent authorized work. When `publish` reports
-that a log changed since its snapshot, preserve that change: rerun the
-snapshot, re-read and redo the update before retrying; never overwrite newer
-content or blindly append. Scope is limited to recognized logs, not arbitrary
-files under `Reviews/`.
+log update; complete other independent authorized work. When `snapshot` or
+`publish` reports that a log changed since its snapshot, preserve that change:
+rerun the snapshot with `--replace`, re-read and redo the update before
+retrying; never overwrite newer content or blindly append. Scope is limited
+to recognized logs, not arbitrary files under `Reviews/`.
 
 Report what was added, updated, moved, or verified and the check used.
 
@@ -109,9 +109,7 @@ Report what was added, updated, moved, or verified and the check used.
 
 Use `Reviews/<current-skill>-suggestions.md`, taking the exact skill name from
 its loaded `SKILL.md` and matching folder under the current plugin's `skills/`.
-Do not prefix the filename with a plugin namespace. Independently installed
-plugins use these same per-skill paths in the same selected vault; existing
-logs keep their identities when a plugin is renamed or split.
+Do not prefix the filename with a plugin namespace.
 
 Content corrections follow the active workflow's ownership and history rules.
 A workflow handling Wiki entries uses `Reviews/wiki-notes-suggestions.md` for
@@ -169,9 +167,8 @@ the existing items under `## Open`, one heading level lower, and adds an empty
 On an apply-capable run in an established vault, initialize any missing
 canonical skill logs for the skills shipped in the current plugin's `skills/`
 directory. Derive the roster from that installed package rather than a fixed
-list. Neither plugin requires the other or initializes its logs. Preserve any
-existing logs from either plugin; create the Wiki note-content log only when
-needed by a Wiki workflow.
+list. Preserve any existing logs from either plugin; create the Wiki
+note-content log only when needed by a Wiki workflow.
 This initialization does not authorize adding issues to unrelated producer logs.
 
 Existing logs may be migrated to these canonical paths when migration is

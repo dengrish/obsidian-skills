@@ -3,7 +3,7 @@
 - [The input](#the-input)
 - [The output note](#the-output-note)
 - [Why these choices matter](#why-these-choices-matter)
-- [Illustrative verification and lint](#illustrative-verification-and-lint)
+- [Illustrative lint and verification](#illustrative-lint-and-verification)
 
 Read when the assembled output is unclear. The paper is fictional; it is not an
 external source or a completed live-vault run. [Note format](note-format.md),
@@ -76,7 +76,7 @@ The trial was randomised, double-blind and placebo-controlled, at 14 hospitals i
 4. The trial masked patients, treating clinicians and outcome assessors.
 5. A committee blind to allocation adjudicated recurrence within 8 weeks (diarrhoea plus a positive stool toxin assay).
 
-## Recurrence fell from 45% to 8% within eight weeks
+## Capsules cut 8-week recurrence to 8% against 45% on placebo after repeat relapses
 
 **The primary outcome.** Recurrence within 8 weeks occurred in 8.2% of the transplant arm (9 of 110) against 45.0% on placebo (49 of 109). That is an absolute reduction of 36.8 percentage points (95% CI 25.9 to 47.7). The risk ratio was 0.18 (95% CI 0.09 to 0.36).<sup>[[Doe_GutMicrobiome_2025.pdf#page=5|5]]</sup> In adults with at least two prior recurrences who have finished vancomycin, encapsulated transplant reduces recurrence against placebo.
 
@@ -130,10 +130,21 @@ The authors conclude that encapsulated transplant should be offered after a seco
   status are outside this note's scope.
 - Availability names restricted data access and missing code separately.
 
-## Illustrative verification and lint
+## Illustrative lint and verification
 
-On a real PDF, collect all numbers, names and scope tokens, then use the finder
-and read their pages. A few example needles are:
+For a real note, save the completed draft to a unique scratch `.md` and lint it:
+
+```bash
+python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
+    --mode empirical --images '<vault>/Sources/Images'
+```
+
+Lint cannot verify the science or the page citations, and every selected real
+image still needs visual inspection. Do not create placeholder images to make
+this fictional example pass the command above.
+
+Then, on the real PDF, collect all numbers, names and scope tokens, use the
+finder and read their pages. A few example needles are:
 
 ```bash
 python3 '<skill>/scripts/paper_text.py' '<vault>/Sources/PDFs/Doe_GutMicrobiome_2025.pdf' \
@@ -148,17 +159,6 @@ source's wording, then correcting the claim to week 8 and checking that page;
 would require opening the page to distinguish a line break from an accidental
 join. These are illustrative decisions, not invented tool results from an
 included PDF.
-
-For a real note, save the completed draft to a unique scratch `.md`, then run:
-
-```bash
-python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
-    --mode empirical --images '<vault>/Sources/Images'
-```
-
-Lint cannot verify the science or the page citations, and every selected real
-image still needs visual inspection. Do not create placeholder images to make
-this fictional example pass the command above.
 
 A real run reports source-check counts/corrections and lint separately, then
 publishes only after both gates pass. It does not copy this example's facts or

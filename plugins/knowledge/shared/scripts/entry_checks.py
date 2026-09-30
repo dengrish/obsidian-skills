@@ -3,12 +3,13 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 17's single-word alias hint, and item 19's card set, primary card and
-Spaced Repetition markers in the body and on card lines)
+item 7's description subject, item 17's single-word alias hint, and item 19's
+card set, primary answer on card line 3, primary card and Spaced Repetition
+markers in the body and on card lines)
 and the discipline-root test from this one copy, so an entry that passes the
 builder gate does not fail the next scan on the same mechanical rule. Each
-check returns dictionaries with a ``check`` name, a ``message`` and evidence;
-callers choose the finding key and severity.
+check returns dictionaries with a ``check`` name, a ``message`` and evidence,
+or a fault message; callers choose the finding key and severity.
 ``prose`` is an entry's comment-masked explanatory body (up to the Related
 footer or the Flashcards section), without the blank lines after the
 frontmatter. Stdlib only (plus sibling shared helpers), Python 3.10+.
@@ -29,6 +30,9 @@ from code_typography import FILE_EXTENSIONS  # noqa: E402
 from entry_structure import (  # noqa: E402
     SOURCE_REFERENCE_FORMS,
     _BOLD_OUTER_RE,
+    acronym_initial_forms,
+    description_subject_forms,
+    first_letter_ci_equal,
     mask_body_comments,
     math_title_plain_text,
     normalized_answer_surface,
@@ -36,34 +40,49 @@ from entry_structure import (  # noqa: E402
     strip_code,
     strip_fenced,
     strip_indented,
+    title_display_form,
 )
 from markdown_tables import markdown_block_start, mask_line_spans  # noqa: E402
-from organism_names import bound_common_names, first_sentence  # noqa: E402
+from organism_names import (  # noqa: E402
+    bound_common_names,
+    first_sentence,
+    organism_title_classification,
+    scientific_abbreviation_matches,
+)
 from plurals import pluralize, singular_forms  # noqa: E402
-from slugify import base_term, has_parenthetical  # noqa: E402
+from portable_names import portable_identity  # noqa: E402
+from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
 
 
 __all__ = [
     "BARE_WORD_ALIAS_HINT",
     "BOLD_OUTER_RE",
+    "BOLD_PAREN_RE",
     "COMMON_NOUNS",
     "LEGACY_EXTRA_PREFIX",
+    "PAREN_LEADIN_RE",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
     "SR_INLINE_SEPARATORS",
     "SOURCE_REFERENCE_FORMS",
+    "acronym_counterpart",
     "api_surface_findings",
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
     "bold_parts",
     "cross_domain_synonym_label",
     "cross_domain_word",
+    "description_has_entity_subject",
+    "description_subject_findings",
     "display_label_links",
     "emphasis_span_findings",
+    "flashcard_line3_fault",
+    "flashcard_primary_answer",
     "flashcard_set_faults",
     "is_discipline_root",
     "label_drops_head",
     "label_shares_surface",
+    "line3_parts",
     "merge_scar_findings",
     "organism_common_name_bound",
     "organism_common_name_surfaces",
@@ -242,6 +261,61 @@ def api_surface_findings(entry_type, title, prose, body):
                        "artifact-wide design/interface API, never a usage "
                        f'catalog): {", ".join(identifiers[:6])}'})
     return findings
+
+
+# ---------------------------------------------------------------------------
+# item 7: the description's subject
+# ---------------------------------------------------------------------------
+
+_LEADING_ARTICLE_RE = re.compile(r"^(?:a|an|the)\s+", re.IGNORECASE)
+_SUBJECT_BOUNDARY_RE = re.compile(r"^(?:$|[\s,(:;\u2013\u2014])")
+
+
+def description_has_entity_subject(description, title):
+    """Conservative mechanical floor for the entity-as-subject rule.
+
+    The description must begin with one of ``description_subject_forms``
+    (the title, a disambiguated title's base term, a mathematical title's
+    plain form), compared case-insensitively on the first letter only and
+    ending at a subject boundary. A disambiguated title in full is not a
+    running-prose subject. A leading article is optional only when it is not
+    already part of the canonical name: "The Iliad" stays valid without
+    accepting "The The Iliad". A blank description or title passes, because
+    presence and title validity have their own findings.
+    """
+    if not description or not title:
+        return True
+    forms = description_subject_forms(title)
+    starts = [description.strip()]
+    article = _LEADING_ARTICLE_RE.match(starts[0])
+    if article and not any(_LEADING_ARTICLE_RE.match(form) for form in forms):
+        starts.append(starts[0][article.end():])
+    for text in starts:
+        if has_parenthetical(title):
+            full = text[:len(title)]
+            if (first_letter_ci_equal(full, title)
+                    and _SUBJECT_BOUNDARY_RE.match(text[len(title):])):
+                continue
+        for form in forms:
+            if (first_letter_ci_equal(text[:len(form)], form)
+                    and _SUBJECT_BOUNDARY_RE.match(text[len(form):])):
+                return True
+    return False
+
+
+def description_subject_findings(description, title):
+    """Item 7: the description-subject finding for one entry, or ``[]``."""
+    if description_has_entity_subject(description, title):
+        return []
+    forms = description_subject_forms(title)
+    return [{
+        "check": "description-subject",
+        "message": ("description subject must begin with the canonical title "
+                    "or base term (an optional leading article is allowed); "
+                    "expected one of: %s"
+                    % ", ".join('"%s"' % form for form in forms)),
+        "evidence": {"description": description, "expected_subjects": forms},
+    }]
 
 
 # ---------------------------------------------------------------------------
@@ -680,9 +754,9 @@ def label_drops_head(display, title, aliases=(), target_prose=""):
 def cross_domain_synonym_label(display, surfaces, target_prose=""):
     """Whether a label is a cross-domain synonym that its target introduces.
 
-    CONVENTIONS §6's first carve-out keeps a bare cross-domain word as a
-    context-resolved label, never an alias. A bare word of the title
-    (``[[information-entropy|entropy]]``) already passes
+    wiki-build writing.md's first display-label carve-out keeps a bare
+    cross-domain word as a context-resolved label, never an alias. A bare
+    word of the title (``[[information-entropy|entropy]]``) already passes
     :func:`label_shares_surface`; this covers the other form, a one-word
     synonym from :data:`COMMON_NOUNS` that the target's own ``target_prose``
     sets in italics: ``[[label-machine-learning|targets]]`` where Label
@@ -845,6 +919,217 @@ def primary_line3_faults(card_count, rows, term, counterpart):
     return [], ('no card carries the primary answer "%s"; preserve every '
                 "existing card and attachment and add or identify the primary "
                 "card (extra cards keep their own answers)" % answer)
+
+
+#: The opener's direct parenthetical after the bold title, past any leading
+#: date parenthetical: ``**Principal component analysis** (PCA)``,
+#: ``**ILSVRC** (2010–2017) (ImageNet Large Scale ...)``. Only the literal noun
+#: ``algorithm`` may intervene; a general word window would attach unrelated
+#: later parentheticals to the title. introduced_aliases.py reads the same
+#: slot as item-17 alias evidence.
+BOLD_PAREN_RE = re.compile(
+    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
+    r"\*\*(?!\*)(?:\s+algorithm)?\s*"
+    r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)"
+    r"[^()\n]{0,59}\)\s*)?"
+    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
+    re.IGNORECASE)
+
+#: A lexical marker LEADING a parenthetical name -- ``(singular,
+#: *archaeon*)``, ``(formerly Facebook)``. Annotation, not part of the name:
+#: left in place, the candidate came out polluted ("singular, *archaeon*").
+PAREN_LEADIN_RE = re.compile(
+    r"^(?:(?:short\s+for|originally\s+called|also\s+called|"
+    r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
+    r"formerly|n[ée]e|or|a\.k\.a\.?)[\s,:]+", re.IGNORECASE)
+
+_SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
+
+#: A direct italic scientific abbreviation can be the title's own established
+#: counterpart: ``***Saccharomyces cerevisiae*** (*S. cerevisiae*)``. This is
+#: deliberately narrower than "any italic parenthetical", so an annotated
+#: synonym does not become a card counterpart merely because it is also listed
+#: in aliases.
+_SCI_ABBREV_RE = re.compile(
+    r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
+
+_LINE3_RE = re.compile(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?")
+
+
+def acronym_counterpart(term, candidate):
+    """Whether the pair has an acronym/full-form relationship.
+
+    The check is deliberately structural. It rejects arbitrary alternate
+    names such as Mark Twain/Samuel Clemens while admitting canonical shapes
+    such as PCA, CART, Lasso, MLOps, OOB and t-SNE.
+    """
+    term_words = re.findall(r"[A-Za-z0-9]+", term or "")
+    cand_words = re.findall(r"[A-Za-z0-9]+", candidate or "")
+    if not term_words or not cand_words:
+        return False
+
+    def compact_forms(value, words):
+        forms = set()
+        first = re.sub(r"[^A-Za-z0-9]", "", words[0])
+        if len(first) >= 2:
+            forms.add(first.casefold())
+        uppers = "".join(ch for ch in value if ch.isupper())
+        if len(uppers) >= 2:
+            forms.add(uppers.casefold())
+        whole = re.sub(r"[^A-Za-z0-9]", "", value)
+        if len(words) == 1 and len(whole) >= 2:
+            forms.add(whole.casefold())
+        return forms
+
+    def related(short, long):
+        if len(short) < 2 or len(long) < len(short):
+            return False
+        if short == long or long.startswith(short):
+            return True
+        it = iter(long)
+        return all(ch in it for ch in short)
+
+    def acronym_tokens(value):
+        """Compact tokens that visibly behave as abbreviations.
+
+        Initials alone miss established forms whose letters come from a
+        compound or morpheme (ATP, DNA, RNA, MLOps) and a short token carried
+        beside a shared tail (OOB evaluation). Requiring at least two written
+        capitals keeps ordinary title-cased names and pseudonyms out.
+        """
+        out = set()
+        for token in re.findall(r"[A-Za-z0-9]+", value or ""):
+            compact = re.sub(r"[^A-Za-z0-9]", "", token)
+            if (2 <= len(compact) <= 10
+                    and sum(1 for ch in token if ch.isupper()) >= 2):
+                out.add(compact.casefold())
+        return out
+
+    def lexical_compact(value):
+        return re.sub(r"[^A-Za-z0-9]", "", value or "").casefold()
+
+    term_compact = compact_forms(term, term_words)
+    cand_compact = compact_forms(candidate, cand_words)
+    initial_match = (
+        any(related(short, initials)
+            for short in cand_compact
+            for initials in acronym_initial_forms(term))
+        or any(related(short, initials)
+               for short in term_compact
+               for initials in acronym_initial_forms(candidate))
+    )
+    if initial_match:
+        return True
+    term_text, candidate_text = lexical_compact(term), lexical_compact(candidate)
+    return (
+        any(related(short, candidate_text) for short in acronym_tokens(term))
+        or any(related(short, term_text) for short in acronym_tokens(candidate))
+    )
+
+
+def _clean_paren_name(raw):
+    """The name inside an opener parenthetical, lead-in and markup stripped."""
+    value = " ".join((raw or "").split())
+    value = PAREN_LEADIN_RE.sub("", value)
+    return value.replace("*", "").replace("_", "").strip()
+
+
+def _card_counterpart(raw, term, organism_parts):
+    """The cleaned parenthetical when it is a direct counterpart, else None.
+
+    Three classes qualify: a ``short for`` expansion, an acronym/full-form
+    pair, and, for a title proven scientific (``organism_parts``), its direct
+    italic one-letter-genus abbreviation. An annotated parenthetical such as
+    ``(singular, *archaeon*)`` or ``(originally called *X*)`` is item-17
+    alias evidence, not the title's direct binding, so it never belongs on
+    card line 3.
+    """
+    value = " ".join((raw or "").split())
+    cleaned = _clean_paren_name(value)
+    short_for = bool(_SHORT_FOR_PAREN_RE.match(value))
+    scientific_abbreviation = bool(
+        organism_parts
+        and scientific_abbreviation_matches(cleaned, organism_parts[0])
+        and re.fullmatch(r"\*[^*\n]+\*", value.strip())
+        and _SCI_ABBREV_RE.fullmatch(cleaned))
+    if short_for or scientific_abbreviation or acronym_counterpart(term, cleaned):
+        return cleaned
+    return None
+
+
+def flashcard_primary_answer(title, aliases, opener, entry_type=""):
+    """Item 19: the entry's own primary answer, ``(term, counterpart)``.
+
+    The term has one exact plain-text spelling: ``title`` verbatim, its base
+    term for a disambiguation parenthetical, or its mathematical plain form
+    for a symbol title. An opener parenthetical directly after the bold title
+    becomes the required counterpart only when it is a direct counterpart
+    (see ``_card_counterpart``) and its slug is in ``aliases``: that separates
+    an opener-established binding from a date or explanatory aside without
+    inferring counterpart semantics from an alias list that can also hold
+    synonyms. An Organism's scientific abbreviation counts only when
+    ``organism_title_classification`` proves the title scientific.
+    ``aliases`` are the entry's list aliases (a malformed scalar field binds
+    nothing); ``opener`` is its opening paragraph, hard wraps allowed.
+    """
+    title = title or ""
+    term = base_term(title) if has_parenthetical(title) else title
+    term = title_display_form(term)
+    aliases = [alias for alias in aliases or () if alias]
+    alias_keys = {portable_identity(alias) for alias in aliases}
+    opening = " ".join(line.strip() for line in (opener or "").splitlines())
+    organism_parts = None
+    if entry_type == "Organism":
+        status, parts = organism_title_classification(term, aliases, opening)
+        organism_parts = parts if status == "scientific" else None
+    for match in BOLD_PAREN_RE.finditer(opening):
+        visible, _style, _italic = bold_parts(match)
+        # Identity is compared in plain form, so a Greek title bolded as
+        # LaTeX or spelled out still binds its counterpart.
+        if not first_letter_ci_equal(math_title_plain_text(visible),
+                                     math_title_plain_text(term)):
+            continue
+        candidate = _card_counterpart(match.group("paren"), term,
+                                      organism_parts)
+        if candidate is None:
+            continue
+        try:
+            candidate_key = portable_identity(slug_stem(candidate))
+        except SlugError:
+            continue
+        if candidate_key in alias_keys:
+            return term, candidate
+    return term, None
+
+
+def line3_parts(line3):
+    """Split card line 3 into its term and optional final parenthetical."""
+    line3 = (line3 or "").strip()
+    match = _LINE3_RE.fullmatch(line3)
+    return ((match.group("term"), match.group("paren")) if match
+            else (line3, None))
+
+
+def flashcard_line3_fault(line3, title, aliases, opener, entry_type=""):
+    """Item 19: why card line 3 breaks the primary-answer contract, or None.
+
+    Line 3 is exactly the primary term plus, when the opener establishes
+    one, `` (counterpart)``; any other parenthetical is refused. Arguments
+    after ``line3`` are ``flashcard_primary_answer``'s.
+    """
+    expected_term, required = flashcard_primary_answer(
+        title, aliases, opener, entry_type)
+    term, counterpart = line3_parts(line3)
+    if expected_term and term != expected_term:
+        return ('the term must be exactly "%s" (same canonical casing)'
+                % expected_term)
+    if counterpart is not None and required is None:
+        return ('the parenthetical "%s" is not an opener-established, '
+                "alias-bound counterpart of the title" % counterpart)
+    if required is not None and counterpart != required:
+        return ("the established counterpart must appear exactly as (%s)"
+                % required)
+    return None
 
 
 #: The Spaced Repetition plugin's default single-line card separators in the
@@ -1614,6 +1899,154 @@ def run_self_test(verbose=False):
               ("", ["#"]),
               (None, ["#statistics"]))],
           [True, True] + [False] * 10)
+
+    # item 7: the description subject (one copy for both tools)
+    check("only the first letter's case is folded for a title subject",
+          [description_has_entity_subject(text, "arXiv") for text in (
+              "ArXiv stores preprints.", "arXiv stores preprints.",
+              "Arxiv stores preprints.", "ARXIV stores preprints.")],
+          [True, True, False, False])
+    check("a disambiguated title's base term, after an optional article",
+          [description_has_entity_subject(text, "Feature (machine learning)")
+           for text in ("A feature supplies a model input.",
+                        "Feature supplies a model input.",
+                        "Feature (machine learning) supplies a model input.",
+                        "A Feature (machine learning) supplies an input.")],
+          [True, True, False, False])
+    check("a placeholder, a longer noun phrase or a prefix is not the subject",
+          [description_has_entity_subject(text, "Fairness") for text in (
+              "This method compares groups.",
+              "Machine learning fairness compares group outcomes.",
+              "Fairness-aware learning compares group outcomes.",
+              "Fairness, in machine learning, compares outcomes.",
+              "Fairness: a property of classifiers.",
+              "Fairness — a property of classifiers.")],
+          [False, False, False, True, True, True])
+    check("an article in the canonical name is not optional twice",
+          [description_has_entity_subject(text, "The Iliad") for text in (
+              "The Iliad is an epic poem.", "The The Iliad is an epic poem.",
+              "Iliad is an epic poem.")],
+          [True, False, False])
+    check("a mathematical title's plain form is a description subject",
+          [description_has_entity_subject(text, "$k$-fold") for text in (
+              "k-fold splits a dataset.", "kfold splits a dataset.")],
+          [True, False])
+    check("a blank description or title is left to its own finding",
+          [description_has_entity_subject(d, t) for d, t in (
+              ("", "Fairness"), (None, "Fairness"), ("Anything.", ""))],
+          [True, True, True])
+    check("one item-7 subject message names every accepted subject",
+          [(f["check"], f["message"], f["evidence"]["expected_subjects"])
+           for f in description_subject_findings(
+               "This method compares groups.", "Feature (machine learning)")],
+          [("description-subject",
+            "description subject must begin with the canonical title or base "
+            "term (an optional leading article is allowed); expected one of: "
+            '"Feature"', ["Feature"])])
+    check("a valid subject has no item-7 subject finding",
+          description_subject_findings("A feature supplies an input.",
+                                       "Feature (machine learning)"), [])
+
+    # item 19: the primary answer on card line 3 (one copy for both tools)
+    check("acronym/full-form pairs, including compound and shared-tail forms",
+          [acronym_counterpart(short, long) for short, long in (
+              ("ATP", "adenosine triphosphate"),
+              ("DNA", "deoxyribonucleic acid"),
+              ("MLOps", "ML operations"),
+              ("OOB evaluation", "out-of-bag evaluation"),
+              ("Principal component analysis", "PCA"),
+              ("t-distributed stochastic neighbor embedding", "t-SNE"))],
+          [True] * 6)
+    check("pseudonyms and unrelated names are not acronym counterparts",
+          [acronym_counterpart(a, b) for a, b in (
+              ("Mark Twain", "Samuel Clemens"), ("Saccharomyces cerevisiae",
+                                                 "S. cerevisiae"),
+              ("", "PCA"), ("PCA", ""))],
+          [False, False, False, False])
+    pca = ("Principal component analysis", ["pca"],
+           "**Principal component analysis** (PCA) projects data.")
+    check("an opener acronym whose slug is an alias is the counterpart",
+          flashcard_primary_answer(*pca), ("Principal component analysis", "PCA"))
+    check("without the alias the opener acronym binds nothing",
+          flashcard_primary_answer(pca[0], ["principal-components"], pca[2]),
+          ("Principal component analysis", None))
+    check("the term is the base term or plain form; no opener, no counterpart",
+          [flashcard_primary_answer(title, [], "")
+           for title in ("Feature (machine learning)", "$k$-fold", "", None)],
+          [("Feature", None), ("k-fold", None), ("", None), ("", None)])
+    check("a hard-wrapped opener, a date before the acronym and the "
+          "`algorithm` noun keep the binding",
+          [flashcard_primary_answer(title, aliases, opener)[1]
+           for title, aliases, opener in (
+               ("Principal component analysis", ["pca"],
+                "**Principal component\nanalysis** (PCA) projects data."),
+               ("ILSVRC",
+                ["imagenet-large-scale-visual-recognition-challenge"],
+                "**ILSVRC** (2010–2017) (ImageNet Large Scale Visual "
+                "Recognition Challenge) ranked models."),
+               ("k-nearest neighbors", ["knn"],
+                "The **k-nearest neighbors** algorithm (KNN) predicts."))],
+          ["PCA", "ImageNet Large Scale Visual Recognition Challenge", "KNN"])
+    check("short-for binds; a.k.a. is stripped; an annotated synonym or a "
+          "later bold term does not bind",
+          [flashcard_primary_answer(title, aliases, opener)[1]
+           for title, aliases, opener in (
+               ("AdaBoost", ["adaptive-boosting"],
+                "**AdaBoost** (short for *adaptive boosting*) reweights."),
+               ("PCA", ["principal-component-analysis"],
+                "**PCA** (a.k.a. *principal component analysis*) projects."),
+               ("Boosting", ["hypothesis-boosting"],
+                "**Boosting** (originally called *hypothesis boosting*) "
+                "combines weak learners."),
+               ("Bacteria", ["bacterium"],
+                "**Bacteria** (singular, *bacterium*) is a domain."),
+               ("Counterpart scope", ["pca"],
+                "**Counterpart scope** uses **Principal component analysis** "
+                "(PCA)."))],
+          ["adaptive boosting", "principal component analysis",
+           None, None, None])
+    yeast = ("Saccharomyces cerevisiae", ["s-cerevisiae"],
+             "***Saccharomyces cerevisiae*** (*S. cerevisiae*) is a yeast.")
+    check("a scientific Organism title binds its italic genus abbreviation",
+          flashcard_primary_answer(*yeast, "Organism"),
+          ("Saccharomyces cerevisiae", "S. cerevisiae"))
+    check("the abbreviation binds only an Organism, in italics, with its alias",
+          [flashcard_primary_answer(*args)[1] for args in (
+              yeast + ("Concept",),
+              (yeast[0], yeast[1], yeast[2].replace("(*S. cerevisiae*)",
+                                                    "(S. cerevisiae)"),
+               "Organism"),
+              (yeast[0], [], yeast[2], "Organism"))],
+          [None, None, None])
+    check("the Organism counterpart rule is the scientific classification, "
+          "not a Latin-looking title",
+          [_card_counterpart("*S. cerevisiae*", "Saccharomyces cerevisiae",
+                             parts)
+           for parts in (None, ("Saccharomyces cerevisiae", ""))],
+          [None, "S. cerevisiae"])
+    check("line 3 splits one final spaced parenthetical",
+          [line3_parts(line) for line in (
+              " PCA (principal component analysis) ", "ROC curve",
+              "ROC curve(RC)", "A (b) (c)", "", None)],
+          [("PCA", "principal component analysis"), ("ROC curve", None),
+           ("ROC curve(RC)", None), ("A (b)", "c"), ("", None), ("", None)])
+    check("line-3 contract: one message per fault, None when met",
+          [flashcard_line3_fault(line, *pca) for line in (
+              "Principal component analysis (PCA)",
+              "principal component analysis (PCA)",
+              "Principal component analysis",
+              "Principal component analysis (pca)")] +
+          [flashcard_line3_fault(line, "ROC curve", ["auroc"],
+                                 "A **ROC curve** plots rates.")
+           for line in ("ROC curve", "ROC curve (RC)")],
+          [None,
+           'the term must be exactly "Principal component analysis" (same '
+           "canonical casing)",
+           "the established counterpart must appear exactly as (PCA)",
+           "the established counterpart must appear exactly as (PCA)",
+           None,
+           'the parenthetical "RC" is not an opener-established, alias-bound '
+           "counterpart of the title"])
 
     failed = [case for case in cases if not case[1]]
     for label, ok, got, want in cases:

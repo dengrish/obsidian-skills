@@ -105,9 +105,7 @@ Otherwise, put the publication logic in a private Python driver, pass paths as
 ordinary `sys.argv` values, and import `atomic_move` after putting the trusted
 plugin `shared/scripts/` directory first on `sys.path`, using the actual plugin
 path resolved under [runtime setup](RUNTIME.md#resolve-the-paths-before-acting).
-Shipped skill scripts carry their own helper-discovery bootstrap. The atomic
-write helper is supplied by the current plugin; installing or importing from
-another plugin is not required.
+Shipped skill scripts carry their own helper-discovery bootstrap.
 
 Use one snapshot function throughout the operation. The shared
 `regular_file_snapshot(path)` rejects leaf symlinks and non-regular files,

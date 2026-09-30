@@ -6,7 +6,7 @@ Scope: source figures, recreated tables and captions. Report a source with no fi
 
 **Inventory every source figure before selecting:** the source's figure references and every matching local file and Markdown image reference, never only the images you expect to use.
 
-Use step 4's inventory command, never a recursive shell glob: it matches every case, extension and separator variant of the `<resolved_source_stem>_fig` prefix and returns direct regular files in `candidates`. `Sources/Images/` is flat: symlinks, nonregular occupants, portable-equivalent names and nested matches are `blocked_matches` that make the inventory unsafe, staging residue is reported but never consumed, and an unreadable directory leaves absence unproved. Read the complete JSON and resolve or report its findings; an empty partial result never means "this source has no figures."
+Use [step 1](../SKILL.md#1-read-the-source)'s inventory command, never a recursive shell glob: it matches every case, extension and separator variant of the `<resolved_source_stem>_fig` prefix and returns direct regular files in `candidates`. `Sources/Images/` is flat: symlinks, nonregular occupants, portable-equivalent names and nested matches are `blocked_matches` that make the inventory unsafe, staging residue is reported but never consumed, and an unreadable directory leaves absence unproved. Read the complete JSON and resolve or report its findings; an empty partial result never means "this source has no figures."
 
 - **PDF source.** Figures come from `figure-extract`, named `[pdf_stem]_fig_<N>.png` by the source's figure number ([CONVENTIONS §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)). **A source figure with no extracted file stays in the inventory as unavailable**, never fabricated or denied: when the inventory is empty, first [prepare missing PDF figures](#missing-pdf-figures), and report an unavailable figure that would materially help.
 - **Markdown source.** Image references live in the note and resolve directly, even under an older filename prefix; a rendered one is never called unavailable or renamed. Downloads follow [§8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages). A failed download leaves `<!-- image download failed: … -->` in place: inventory it as an unavailable figure with that reason, and never copy the comment or its orphaned caption into an entry. An older note's remote `![alt](https://…)` image is inventoried from the text and reused in Markdown form, never rewritten as a wikilink, which would lose the URL.
@@ -15,7 +15,7 @@ Use step 4's inventory command, never a recursive shell glob: it matches every c
 
 ### Missing PDF figures
 
-When a PDF source shows or refers to figures but its complete, safe step-4
+When a PDF source shows or refers to figures but its complete, safe step-1
 inventory has no `candidates`, an apply run extracts that PDF alone, once,
 after the parser check passes and before selecting exhibits:
 

@@ -75,7 +75,7 @@ attachment work.
 | `new` | Continue. |
 | `duplicate` | Ordinary batch: skip and retain the raw. Named file: identify the existing note and obtain overwrite-or-skip authorization before changing it; honor authorization already given. Explicit reprocess intent supplies that decision only for a matching note this skill owns; a resume completes only notes the interrupted run left incomplete ([resume](references/duplicates-and-reprocessing.md#reprocessing-an-existing-note)). A `research_extracts` match is always skipped and reported with its path. |
 | `duplicate-of-earlier-input` | This is a pending capture, not a published owner. Skip only after the earlier capture publishes successfully. If it fails or is deferred, recheck the later capture against the current Articles index and process it when still new. |
-| `no-source` | Recover a usable HTTP(S) URL from the capture and recheck it with `--url`. Without one, skip/report in batch or ask for it on a named capture. A clearly local note or plugin demo is unsupported input: name it and leave it. Never treat either case as new. |
+| `no-source` | Recover a URL only from an origin the capture itself labels: a nonstandard frontmatter key such as `url:` or `link:`, or an explicit 'Source:'/'Originally published at' line naming this article. Never use a body hyperlink, an image or CDN URL, or a search result. Recheck a recovered origin with `--url`. Without one, skip and report it in a batch, or ask on a named capture. A clearly local note or plugin demo is unsupported input: name it and leave it. Never treat either case as new. |
 
 Report `unindexable` notes and existing URL `collisions`; do not repair, merge
 or delete them as part of the scan. A same-URL pair left by a pending
@@ -100,7 +100,8 @@ as unverified. Without usable title evidence, retain the raw, skip that input
 and report the missing title: there is no stable identity to publish. A missing
 publication year keeps the note explicitly undated (`published: null`, filename
 suffix `nd`) and is reported. Never substitute `created`, the site name, or
-memory. Keep fetched text for the later completeness audit.
+memory. Keep the fetched markup and text for body cleaning and the
+completeness audit.
 
 Choose 2–4 identifying words from the corrected title, then run:
 
@@ -112,8 +113,7 @@ For an evidence-backed undated page, pass `--undated` instead of `--year`.
 
 The note is `<slug>.md`; every image uses the same stem plus `_fig_<N>.<ext>`.
 The full title remains in YAML. [Filename rules](references/filename-slug.md)
-cover author/casing/date exceptions and the permitted manual fallback if the
-slug helper is unavailable.
+cover topic choice and how to review the helper's notes.
 
 **Settle the slug before downloading any image.** For every proposed stem,
 recheck the URL and the `Articles/` namespace, then PDF stems throughout
@@ -152,7 +152,9 @@ Read [body cleaning](references/body-cleaning.md) before changing the capture.
 Remove clipping chrome and repair markup while preserving the article's prose,
 links, emphasis, code and technical content. Do not paraphrase the body or
 truncate a long article. Equations follow that reference's source-fidelity
-rules; missing content is flagged, never reconstructed from a guess.
+rules; missing content is flagged, never reconstructed from a guess. Read
+[nested-list repair](references/nested-lists.md) only when a list shows
+stacked markers, orphaned deep indentation or a one-tab sibling split.
 
 When the body contains images, read [image handling](references/images.md).
 Fetch downloadable images in source order with `stage`, each call (audit
@@ -174,9 +176,11 @@ recovery record. Keep staged files outside the vault until the completed note
 is published, so an interrupted draft leaves no ownerless files in
 `Sources/Images/`.
 
-**There is no hand-written download or publication fallback.** If
-`fetch_images.py` cannot run, leave the documented placeholder and report the
-missing image; do not substitute `curl` plus `mv` or bypass its ownership checks.
+**There is no hand-written download or publication fallback:** never
+substitute `curl` plus `mv` for `fetch_images.py` or bypass its ownership
+checks. If the helper cannot run, leave the
+[failure placeholder](references/images.md#failures-and-readability) and report
+the missing image.
 
 On reprocessing, retain existing embeds and figure numbers; new downloads start
 after the highest occupied number. For a changed slug, replace only the old slug
@@ -239,9 +243,11 @@ from the report.
 
 Run [the review checklist](references/review-checklist.md) on the complete
 scratch draft. Fix confirmed mechanical damage in the draft; flag uncertain
-editorial choices. Check planned image names against the reviewed rename
-mapping without changing live attachments early. A missing review reference
-blocks finalization; do not reconstruct its rules from memory.
+editorial choices. For a changed slug, check that each existing-attachment
+embed in the draft is its old name with only the slug replaced (same tail and
+extension); the helper's dry-run mapping is reviewed after publication, in the
+replacement procedure's step 5. A missing review reference blocks
+finalization; do not reconstruct its rules from memory.
 
 ## 6. Publish safely
 
@@ -312,6 +318,6 @@ skips to a count and filenames. Report:
 The polished clipping may later be a source for `wiki-build`; this run writes
 no wiki entries.
 
-At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
-and apply them to `Reviews/clipping-clean-suggestions.md` and to the logs of
-producers whose outputs this run consumed.
+At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
+`Reviews/clipping-clean-suggestions.md` and to the logs of producers whose
+outputs this run consumed.

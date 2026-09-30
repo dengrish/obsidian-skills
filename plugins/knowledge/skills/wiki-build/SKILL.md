@@ -36,7 +36,7 @@ Read each guide when its trigger fires, and not before.
 | [references/review.md](references/review.md) | step 7, before the audits |
 | [references/merge.md](references/merge.md) | step 3 returns `merge` for any candidate, or the request names an existing entry to update; an `adjudicate` result alone needs only its [collision decisions](references/merge.md#collision-decisions) |
 | [references/equations.md](references/equations.md) | before writing or keeping a formula: the source states or describes a calculation for an accepted entity, or a merged body or card has math |
-| [references/media.md](references/media.md) | the step-4 figure inventory has `candidates` or findings, the source refers to figures (even unavailable ones), or it has a table worth recreating |
+| [references/media.md](references/media.md) | the step-1 figure inventory has `candidates` or findings, the source refers to figures (even unavailable ones), or it has a table worth recreating |
 | [references/special-titles.md](references/special-titles.md) | a title is a common-word phrase, or has a qualifier, LaTeX, a mathematical symbol or a chemical formula; `bare-common-noun`; candidates differing only in word order, number or form |
 | [references/source-cases.md](references/source-cases.md#resolve-a-markdown-source) | the source is a `.md` file |
 | [source cases: Inbox and extracts](references/source-cases.md#inbox-captures-feed-attachments-and-research-extracts) | the source sits in `Inbox/`, `naming.py feed` reports `feed-owned`, or it is a wiki-add research extract |
@@ -46,7 +46,7 @@ Read each guide when its trigger fires, and not before.
 | [references/api-surface.md](references/api-surface.md) | a candidate is `Software`, or a draft would name a library's API or usage steps |
 | [references/calibration.md](references/calibration.md) | the tag is still undecided after [tags](references/writing.md#tags), or the source is about history, law, politics, finance or business |
 | CONVENTIONS [§2a](../../shared/CONVENTIONS.md#2a-wiki-entry--wikimd), [§2c](../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox), [§6](../../shared/CONVENTIONS.md#6-wikilink-forms), [§7](../../shared/CONVENTIONS.md#7-source-references) | a merged entry carries a key the complete example lacks, or its keys in another order (§2a); an existing `read:` is not boolean (§2c); a link needs path qualification (§6); a citation needs several page anchors or cites a Markdown file, or a merged entry cites an online page's URL (§7) |
-| [SUGGESTIONS](../../shared/SUGGESTIONS.md) | at closeout, only when the run writes a log ([closeout](#closeout)) |
+| [SUGGESTIONS](../../shared/SUGGESTIONS.md) | at closeout, only when the [closeout gate](#closeout) sends the run there |
 
 Publication runs `publish_files.py`, which implements the shared safe-write
 protocol; this workflow does not read SAFE_WRITES.md.
@@ -72,6 +72,8 @@ per source and step 7 once ([several sources](references/source-cases.md#several
 ### 1. Read the source
 
 Resolve [source intake](references/source-intake.md) before extracting. A folder or inbox run skips a source with a confirmed prior match unless the request states rerun or resume intent ([skip, rerun and resume](references/source-cases.md#skip-rerun-and-resume)); a source the user names is [filled in](references/source-intake.md#check-prior-coverage). For a source that proceeds, read all of it, track each entity's introducing physical PDF page, and report the primary/secondary classification. A [named-entity request](#named-entity-requests) on a long source may instead map its headings and read only the passages that teach or mention each named entity or an alias.
+
+Inventory a proceeding source's images with `python3 '<plugin>/shared/scripts/vault_artifacts.py' figures --images '<images-folder>' --stem '<resolved_source_stem>'`, the stem of the source actually read (the PDF after a summary substitution); creates and merges both select from it. Before selecting exhibits, an apply run extracts a PDF that refers to figures but has no `candidates` under [missing PDF figures](references/media.md#missing-pdf-figures).
 
 ### 2. Extract entities
 
@@ -124,9 +126,7 @@ Use the `slug` that step 3's `find_collisions.py` report returned for that exact
 
 Draft the complete bytes for `<wiki-folder>/<slug>.md` privately in [the entry shape](#the-entry) and add it to the manifest. New entries have bare `read: false`, `parents: []`, and no `importance:` key; only the user sets review state to true.
 
-**Count every drafted or revised description before review**, including one a merge or audit writes: `lint_entry.py` on the private draft reports `description_chars` (at most 110, without YAML quotes). Never estimate by eye; shorten under the [description rule](references/writing.md#description) and recount.
-
-Inventory source images with `python3 '<plugin>/shared/scripts/vault_artifacts.py' figures --images '<images-folder>' --stem '<resolved_source_stem>'`, the stem of the source actually read (the PDF after a summary substitution). An apply run extracts a PDF that refers to figures but has no `candidates` under [missing PDF figures](references/media.md#missing-pdf-figures).
+**Count every drafted or revised description before review**, including one a merge or audit writes: `lint_entry.py` on the private draft reports `description_chars` (at most 110, without YAML quotes; a `5-slug` finding is expected there when the draft file is not named by its slug). Never estimate by eye; shorten under the [description rule](references/writing.md#description) and recount.
 
 ### 5. Merge into existing entries
 
@@ -140,7 +140,7 @@ Finish with a frequency-inverted check: from the most- to the least-mentioned ac
 
 ### 7. Review and report
 
-1. **Lint.** Lint every staged entry with `python3 '<skill>/scripts/lint_entry.py' '<file>'`, then build and lint the private **combined review tree**:
+1. **Lint.** Build and lint the private **combined review tree**, which lints every staged draft at its publication path:
 
    ```bash
    python3 '<skill>/scripts/review_tree.py' --vault '<vault>' \
@@ -149,12 +149,12 @@ Finish with a frequency-inverted check: from the most- to the least-mentioned ac
    ```
 
    Reuse one `--out` on reruns; each call rebuilds it. It never follows a symlink, `unmirrored` paths stay occupied, and its lint flags a new alias another entry owns (`18-alias-collision`). Resolve privately every `on_staged` and `introduced` finding, every `dangling` link and every `noncanonical` link (apply its `replacement`; retarget an `ambiguous` one to the entry the prose means, or report an inherited one the prose leaves open) until `clean` is true or only what step 7.2 reports and adjudicated review-only candidates remain. Exit 2 blocks dependent drafts like any unusable helper result; a prose-only review is not a clean lint.
-2. **Report, never repair or block on,** what this run may not change: an unmodified copy's link or Related label that now names a new entry, a merged entry's inherited state the [merge rules](references/merge.md#merge-logic) preserve (including its `report_only: true` findings, such as those on a legacy extra card), and a missing `Person`/`Event` date no [rare-types route](references/rare-types.md#dates-in-the-opener-person-and-event) supplies. Baseline findings on unmodified copies stay wiki-lint's, unreported.
+2. **Report, never repair or block on,** what this run may not change: an unmodified copy's link or Related label that now names a new entry, a merged entry's inherited state the [merge rules](references/merge.md#merge-logic) preserve (including its `report_only: true` findings, such as those on a legacy extra card), and a merged entry's missing `Person`/`Event` date no [rare-types route](references/rare-types.md#dates-in-the-opener-person-and-event) supplies (a new candidate without one is deferred). Baseline findings on unmodified copies stay wiki-lint's, unreported.
 3. **Check against the source.** For every new or changed claim, re-read the active-source passage and compare conditions, population or version, time frame, causal direction (including the opener's), units and numbers, and uncertainty; correct or narrow misstatements, including priority and superlative wording, under [principle 3](references/writing.md#prose-principles) (5(h) background needs no citation). Then apply the [editorial reread](references/writing.md#editorial-reread) and re-check atomic scope and protected content. These edits are autonomous; a prose/script disagreement follows the governing rule.
 4. **Review-only candidates need no edit to silence them:** a supported, recorded decision to keep prose (hard voting without an equation) resolves one even if `summary.clean` stays false. Never add notation or rewrite clear prose to force a zero-finding report; errors, incomplete checks, unresolved candidates and new findings in the published bytes are never waived.
 5. **Renaming or deleting a pre-existing entry, or removing a semantic-invalid alias, is never a review fix.** Report it with evidence and route an authorizing request to wiki-lint's [refactor mode](../wiki-lint/SKILL.md#explicit-source-backed-refactor-mode). Renaming an entry created this run must keep every reference written this run resolving; duplicate spellings within one alias list stay format fixes.
 6. **Audits.** Run the three [audits](references/review.md#the-three-audits) in order.
-7. **Revalidate.** In one shell, re-run step 3's `mktemp`, `vault_index.py` and `find_collisions.py` commands against the real Wiki (an empty scratch folder while Wiki is absent), then verify every original snapshot:
+7. **Revalidate.** Rewrite `<scratch>/candidates.json` with the final title of every candidate this run staged, from all its sources and audit recoveries. In one shell, re-run step 3's `mktemp`, `vault_index.py` and `find_collisions.py` commands against the real Wiki (an empty scratch folder while Wiki is absent), then verify every original snapshot:
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' verify --vault '<vault>' \
@@ -162,7 +162,7 @@ Finish with a frequency-inverted check: from the most- to the least-mentioned ac
    ```
 
    A new occupant, alias owner, changed file, or newly unreadable path invalidates the affected draft: preserve it, re-snapshot each changed path with `snapshot --replace` before re-reading it, rebuild the draft and combined view, and review again. A preview/no-apply run stops here and reports the reviewed proposal; it never creates `Wiki/` or a publication stage inside the vault.
-8. **Publish.** An ordinary build or update request authorizes this without a second review. Re-lint any draft changed since its last lint and leave no-op entries untouched. Publish with `publish_files.py`, which creates new slugs exclusively and replaces files only against their original snapshots (`--dry-run` plans without writing):
+8. **Publish.** An ordinary build or update request authorizes this without a second review. Rerun `review_tree.py` if any draft changed since its last run, and leave no-op entries untouched. Publish with `publish_files.py`, which creates new slugs exclusively and replaces files only against their original snapshots (`--dry-run` plans without writing):
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
@@ -170,19 +170,12 @@ Finish with a frequency-inverted check: from the most- to the least-mentioned ac
    ```
 
    Add `--create-dir Wiki` only when Wiki is absent. The helper reads each publication back and stops at the first failure: report a partial failure path by path, fix its cause and rerun.
-9. **Confirm.** Refresh the public index and lint the whole Wiki (`lint_entry.py '<vault>/Wiki'`). Claim completion only when the published bytes equal the reviewed bytes and the only remaining findings are what step 7.2 reports, adjudicated review-only candidates, findings on or under the last review tree's `unmirrored` paths, and at most its `baseline_count` baseline findings on other entries.
+9. **Confirm.** Lint the whole Wiki (`python3 '<skill>/scripts/lint_entry.py' --findings-only '<vault>/Wiki'`, which lists only entries with findings). Claim completion only when the published bytes equal the reviewed bytes and the only remaining findings are what step 7.2 reports, adjudicated review-only candidates, findings on or under the last review tree's `unmirrored` paths, and at most its `baseline_count` baseline findings on other entries.
 10. **Report** under the [run report](references/review.md#run-report); never describe proposals as applied.
 
 ### Closeout
 
-Write a suggestion log only when this run has something to record:
-
-- an evidenced workflow defect (`Reviews/wiki-build-suggestions.md`, or the log of a producer whose output this run consumed);
-- an unresolved note-content proposal, including a missing entity the run report records (`Reviews/wiki-notes-suggestions.md`);
-- an open notes item naming an entry this run changed (search that log for the run's slugs);
-- on an apply-capable run, a missing canonical log for this plugin's skills.
-
-If so, first read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md), or only their [first section](../../shared/SUGGESTIONS.md#add-or-update-one-item) when the run just adds or updates open items. Otherwise, or in a preview or no-apply run, write no log.
+Apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Reviews/wiki-build-suggestions.md`, the logs of producers whose outputs this run consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`. That log receives an unresolved note-content proposal, including a missing entry that this run's published prose mentions in plain text (as the [run report](references/review.md#run-report) records it); search it for open items naming an entry this run changed.
 
 ## The entry
 

@@ -399,6 +399,57 @@ def to_page_space(page, rect):
     return fitz.Rect(rect)
 
 
+#: The page `detect_figures` is working on and its memo of extraction results,
+#: or (None, None). One figure's detection reads the same page's text dict and
+#: drawings from several helpers; re-extracting them each time was most of a
+#: batch run's cost (211 `get_text("dict")` calls for 30 figures in one Géron
+#: chapter). Only `_PageMemo` sets this, around code that yields nothing, so
+#: no memo outlives its page or leaks into a caller while the generator waits.
+_ACTIVE_MEMO = [None, None]
+
+
+class _PageMemo(object):
+    """`with _PageMemo(page, memo):` serves `page`'s text dict and drawings
+    from `memo` inside the block, and restores the previous memo after it."""
+
+    def __init__(self, page, memo):
+        self.page, self.memo, self.previous = page, memo, None
+
+    def __enter__(self):
+        self.previous = list(_ACTIVE_MEMO)
+        _ACTIVE_MEMO[:] = [self.page, self.memo]
+        return self
+
+    def __exit__(self, *exc_info):
+        _ACTIVE_MEMO[:] = self.previous
+        return False
+
+
+def _memoized(page, key, extract):
+    """`extract()` for `page`, once per detection pass over that page.
+
+    The result is shared by every caller in the pass and must not be mutated.
+    A page outside a `_PageMemo` block (a self-test, a single helper call) is
+    extracted afresh, exactly as before.
+    """
+    active, memo = _ACTIVE_MEMO
+    if active is not page:
+        return extract()
+    if key not in memo:
+        memo[key] = extract()
+    return memo[key]
+
+
+def _text_dict(page):
+    """`page.get_text("dict")`, memoized for the current detection pass."""
+    return _memoized(page, "dict", lambda: page.get_text("dict"))
+
+
+def _drawings(page):
+    """`page.get_drawings()`, memoized for the current detection pass."""
+    return _memoized(page, "drawings", page.get_drawings)
+
+
 def header_y(page):
     """Top-margin bound for this page, in unrotated content space."""
     return min(HEADER_Y_MAX, content_rect(page).height * HEADER_Y_FRACTION)
@@ -450,7 +501,7 @@ def collect_content_rects(page):
     body_x_max = pr.width * 0.95
     cover_w = pr.width * PAGE_COVER_SHARE
     cover_h = pr.height * PAGE_COVER_SHARE
-    for d in page.get_drawings():
+    for d in _drawings(page):
         r = d.get("rect")
         if r is None:
             continue
@@ -492,7 +543,7 @@ def collect_frame_lines(page):
     pr = content_rect(page)
     body_x_min = pr.width * 0.05
     body_x_max = pr.width * 0.95
-    for d in page.get_drawings():
+    for d in _drawings(page):
         r = d.get("rect")
         if r is None:
             continue
@@ -576,7 +627,7 @@ def collect_text_blocks(page):
     """
     out = []
     top_margin, bottom_margin = header_y(page), footer_y(page)
-    for b in page.get_text("dict")["blocks"]:
+    for b in _text_dict(page)["blocks"]:
         if b.get("type", 0) != 0:
             continue
         lines = []
@@ -740,7 +791,7 @@ def find_caption_blocks(page):
             own_rect = cap_rect or rect
             if style_blocks is None:
                 try:
-                    style_blocks = page.get_text("dict")["blocks"]
+                    style_blocks = _text_dict(page)["blocks"]
                 except Exception:
                     style_blocks = []
             candidates.append({
@@ -1411,13 +1462,18 @@ def _next_side_text_y(page, region, captions, left, right, inner_text):
     return boundary
 
 
-def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None):
+def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None,
+                    furniture_y=None):
     """Compute figure bbox for the figure that goes with `caption_rect`.
 
     `diag`, when a dict is passed in, is filled with what the sanity check
     needs to judge the result: `region` is the figure's drawing cluster
     between the previous caption and this one, i.e. what the crop *should*
     have covered.
+
+    `furniture_y` is the bottom of this page's running head
+    (`running_head_floor`); the figure search starts below it when the
+    caption does.
     """
     other_caps = [r for _, r in all_captions if r is not caption_rect]
     placement = caption_placement(page, caption_rect, other_caps)
@@ -1425,11 +1481,13 @@ def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None
     if diag is not None:
         diag["placement"] = placement
     inner_text = []          # text blocks that are part of the figure itself
-    # One `get_drawings()` pass for the whole figure: it is the expensive
-    # call on this path, and a drawing-heavy page has thousands of paths.
+    # Inside `detect_figures` the page's drawings and text dict are read once
+    # per page (`_PageMemo`), so this and `caption_placement` share one pass.
     content = collect_content_rects(page)
     pr = content_rect(page)
     page_top, page_bottom = header_y(page), footer_y(page)
+    if furniture_y is not None and furniture_y < caption_rect.y0:
+        page_top = max(page_top, furniture_y)
 
     if side in ("right", "left"):
         # Caption beside the figure. Use the full page band for Y bounds — the
@@ -1751,17 +1809,17 @@ def degenerate(bbox):
     return bbox.width <= 0 or bbox.height <= 0
 
 
-#: Body-prose characters inside a crop, at the document's own modal font size.
+#: Body-prose characters inside a crop, at the page's modal font size.
 #: Over 150 means the crop has swallowed a paragraph.  Measured on the paper
 #: that motivated this check: 419 chars for the figure that reached into prose,
 #: 47 for the worst clean one.
 MAX_PROSE_CHARS = 150
 
 
-def prose_chars_in(page, bbox, body_size=None):
+def prose_chars_in(page, bbox):
     """Characters of body-size text inside `bbox`.  0 when it cannot tell."""
     try:
-        d = page.get_text("dict")
+        d = _text_dict(page)
     except Exception:
         return 0
     sizes = {}
@@ -1777,7 +1835,7 @@ def prose_chars_in(page, bbox, body_size=None):
                 spans.append((sz, sp.get("bbox"), len(txt)))
     if not sizes:
         return 0
-    modal = body_size if body_size else max(sizes, key=sizes.get)
+    modal = max(sizes, key=sizes.get)
     n = 0
     for sz, sb, ln in spans:
         if abs(sz - modal) > 0.3 or not sb:
@@ -1834,6 +1892,39 @@ def header_bands(doc, min_share=0.4):
             out.extend((x0, lo, x1, hi, txt)
                        for x0, x1 in sorted(x_spans))
     return out
+
+
+#: Gap left below a running head before the figure search may start.
+RUNNING_HEAD_GAP = 4
+
+
+def running_head_floor(page, headers):
+    """The y below which this page's running head ends, or None.
+
+    `headers` is `header_bands(doc)`. A head printed at or just below the
+    nominal header strip is inside the figure search region, and so is the
+    rule publishers draw under it: a body-width line joins the figure's
+    drawing cluster, the head then reads as a compact label just above that
+    cluster, and the crop reaches up to the margin clamp. Measured on a
+    preprint where 5 of 7 crops carried the running head this way.
+    `suspicious()` still reports a head inside a crop; this keeps the search
+    from starting above it in the first place.
+    """
+    if not headers:
+        return None
+    band = header_y(page) * 3
+    floor = None
+    for blk in _text_dict(page).get("blocks", []):
+        for line in blk.get("lines", []):
+            bb = line.get("bbox")
+            if not bb or bb[1] > band:
+                continue
+            txt = " ".join("".join(
+                sp.get("text", "") for sp in line.get("spans", [])).split())
+            if any(txt == htxt and min(bb[2], hx1) - max(bb[0], hx0) > 1
+                   for hx0, _hy0, hx1, _hy1, htxt in headers):
+                floor = bb[3] if floor is None else max(floor, bb[3])
+    return None if floor is None else floor + RUNNING_HEAD_GAP
 
 
 #: Tag on the `suspicious()` reason for a crop that has caption text in it, so
@@ -2033,7 +2124,14 @@ REF_RE = re.compile(
 #: "Figs. 1–3" recorded only their endpoints. Every figure named only by the
 #: inside of a range was therefore absent from `caption_coverage`'s reference
 #: set, which is the one signal in this pipeline that a detection was PARTIAL.
+#:
+#: It continues only a PLURAL keyword (`PLURAL_REF_RE`). After a singular one
+#: the next number belongs to the sentence: "219.6 for the model in Figure 8-5,
+#: 600.4 for the model on the right" recorded a phantom `Fig 600.4` as cited,
+#: and the PDF read as PARTIAL.
 REF_MORE_RE = re.compile(r'\s*(,|&|and|to|[–—-])\s*(\d+(?:' + LABEL_SEP + r'\d+)*)')
+#: The end of a REF_RE match's text before its label, when the keyword is plural.
+PLURAL_REF_RE = re.compile(r'(?i:Figures|Figs)\.?\s*$')
 
 
 def _normalize_ref(marker, label):
@@ -2072,7 +2170,10 @@ def hyphen_range_members(label, hyphenated):
     chapter-figure form — so three things have to hold before it reads as a
     range, and all three fail on a real chapter label:
 
-      * both sides are plain integers (`4-2` qualifies, `A-1` and `1-2-3` do not);
+      * both sides are plain integers (`4-2` qualifies, `A-1` and `1-2-3` do not),
+        or dotted labels with one numeric parent (`12.10-12.11`, from a book
+        that prints `figures 12.10–12.11`, whose dash `normalize_label` has
+        already made a hyphen);
       * the span ascends and is narrow (`0 < B - A <= MAX_RANGE_SPAN`), which
         `4-2` fails outright;
       * NO caption in this document uses a hyphenated label. A book that
@@ -2082,12 +2183,17 @@ def hyphen_range_members(label, hyphenated):
     if hyphenated or not isinstance(label, str) or label.count("-") != 1:
         return []
     lo_s, hi_s = label.split("-")
-    if not (lo_s.isdigit() and hi_s.isdigit()):
+    lo_parent, _, lo_s = lo_s.rpartition(".")
+    hi_parent, _, hi_s = hi_s.rpartition(".")
+    if lo_parent != hi_parent or not (lo_s.isdigit() and hi_s.isdigit()):
+        return []
+    if lo_parent and not all(part.isdigit() for part in lo_parent.split(".")):
         return []
     lo, hi = int(lo_s), int(hi_s)
     if not 0 < hi - lo <= MAX_RANGE_SPAN:
         return []
-    return [str(v) for v in range(lo, hi + 1)]
+    prefix = lo_parent + "." if lo_parent else ""
+    return [prefix + str(v) for v in range(lo, hi + 1)]
 
 
 def find_figure_references(doc, page_idxs=None, caption_labels=None):
@@ -2147,6 +2253,8 @@ def find_figure_references(doc, page_idxs=None, caption_labels=None):
         for m in REF_RE.finditer(text):
             record(m.group(1), m.group(2))
             # "Figures 1 and 2" / "Figs. 1–3": keep consuming labels.
+            if not PLURAL_REF_RE.search(text, m.start(), m.start(2)):
+                continue
             pos, prev = m.end(), m.group(2)
             while True:
                 m2 = REF_MORE_RE.match(text, pos)
@@ -2156,7 +2264,7 @@ def find_figure_references(doc, page_idxs=None, caption_labels=None):
                 nxt = m2.group(2)
                 if sep in ("-", "–", "—", "to") and prev.isdigit() and nxt.isdigit():
                     lo, hi = int(prev), int(nxt)
-                    if 0 < hi - lo <= 20:            # a range: 1–3 means 1,2,3
+                    if 0 < hi - lo <= MAX_RANGE_SPAN:  # a range: 1–3 means 1,2,3
                         for v in range(lo + 1, hi + 1):
                             lab = _normalize_ref(m.group(1), str(v))
                             out[lab] = out.get(lab, 0) + 1
@@ -2228,25 +2336,33 @@ def detect_figures(doc, page_idxs=None):
     _headers = header_bands(doc)
     for i in page_idxs:
         page = doc[i]
-        caps = find_caption_blocks(page)
-        if not caps:
-            continue
-        # bbox_for_figure operates on (fig_num, rect) pairs for the
-        # "neighboring captions" disambiguation. Re-pack the captions in
-        # that shape (dropping raw_label, which it doesn't need).
-        caps_for_bbox = [(fig_num, rect) for fig_num, _, rect in caps]
-        text_blocks = collect_text_rects(page)
-        for fig_num, raw_label, cap_rect in caps:
-            diag = {}
-            bbox = bbox_for_figure(page, cap_rect, caps_for_bbox, text_blocks,
-                                   diag=diag)
-            if bbox is None:
+        # One text dict and one drawings list per page, shared by every
+        # helper below. The memo is active only around work that yields
+        # nothing, and is dropped with the page.
+        memo = {}
+        with _PageMemo(page, memo):
+            caps = find_caption_blocks(page)
+            if not caps:
                 continue
-            # `suspicious` compares the bbox against text spans, header bands
-            # and caption rects, all of which are unrotated — so it runs
-            # BEFORE the crossing, not after.
-            reason = suspicious(bbox, diag.get("region"), page, cap_rect,
-                                _headers, caps, diag.get("placement"))
+            # bbox_for_figure operates on (fig_num, rect) pairs for the
+            # "neighboring captions" disambiguation. Re-pack the captions in
+            # that shape (dropping raw_label, which it doesn't need).
+            caps_for_bbox = [(fig_num, rect) for fig_num, _, rect in caps]
+            text_blocks = collect_text_rects(page)
+            furniture = running_head_floor(page, _headers)
+        for fig_num, raw_label, cap_rect in caps:
+            with _PageMemo(page, memo):
+                diag = {}
+                bbox = bbox_for_figure(page, cap_rect, caps_for_bbox,
+                                       text_blocks, diag=diag,
+                                       furniture_y=furniture)
+                if bbox is None:
+                    continue
+                # `suspicious` compares the bbox against text spans, header
+                # bands and caption rects, all of which are unrotated — so it
+                # runs BEFORE the crossing, not after.
+                reason = suspicious(bbox, diag.get("region"), page, cap_rect,
+                                    _headers, caps, diag.get("placement"))
             yield (i, fig_num, raw_label, to_page_space(page, bbox),
                    to_page_space(page, cap_rect), reason)
 
@@ -2364,6 +2480,26 @@ def _st_header_doc(head=True, pages=4):
                              fontsize=8)
         page.insert_text((72, 120), "Body text on page %d." % (i + 1),
                          fontsize=10)
+    return doc
+
+
+def _st_running_head_doc(pages=4):
+    """A running head just below the header strip, ruled, above each figure.
+
+    The head's line (y~55-66) and the body-width rule under it (y=70) are
+    inside the figure search region; the rule sits within
+    `CONTENT_CLUSTER_GAP` of the chart, so without a floor it joins the
+    figure and the crop reaches up to the margin clamp, head and all.
+    """
+    doc = fitz.open()
+    for i in range(pages):
+        page = doc.new_page(width=612, height=792)
+        page.insert_text((72, 64), "A SYNTHETIC RUNNING HEAD FOR TESTS",
+                         fontsize=8)
+        page.draw_line(fitz.Point(40, 70), fitz.Point(572, 70))
+        page.draw_rect(fitz.Rect(100, 90, 500, 300), fill=(0.2, 0.4, 0.8))
+        page.insert_text((100, 330), "Figure %d. A figure under a running "
+                         "head." % (i + 1), fontsize=9)
     return doc
 
 
@@ -2845,6 +2981,52 @@ def run_self_test():
           suspicious(fitz.Rect(300, 25, 560, 420), None, None, None, bands), "")
     check("suspicious: the crop stops below the running head",
           suspicious(fitz.Rect(60, 60, 520, 420), None, None, None, bands), "")
+
+    # --- the running head bounds the search, not just the verdict ----------
+    # A head below the header strip, with its rule inside the figure's drawing
+    # cluster, took 5 of 7 crops of a real preprint up to the margin clamp.
+    rdoc = _st_running_head_doc()
+    rbands = header_bands(rdoc)
+    floor = running_head_floor(rdoc[0], rbands)
+    ok("running_head_floor sits just below the head (%r)" % floor,
+       floor is not None and 66 < floor < 72)
+    check("running_head_floor without running heads", running_head_floor(
+        rdoc[0], []), None)
+    calls = {"dict": 0, "drawings": 0}
+    original_get_text = fitz.Page.get_text
+    original_get_drawings = fitz.Page.get_drawings
+
+    def counting_get_text(self, *args, **kwargs):
+        if (args[:1] or (kwargs.get("option"),))[0] == "dict":
+            calls["dict"] += 1
+        return original_get_text(self, *args, **kwargs)
+
+    def counting_get_drawings(self, *args, **kwargs):
+        calls["drawings"] += 1
+        return original_get_drawings(self, *args, **kwargs)
+
+    fitz.Page.get_text = counting_get_text
+    fitz.Page.get_drawings = counting_get_drawings
+    try:
+        rgen = detect_figures(rdoc)
+        rrows = [next(rgen)]
+        suspended = list(_ACTIVE_MEMO)
+        rrows += list(rgen)
+    finally:
+        fitz.Page.get_text = original_get_text
+        fitz.Page.get_drawings = original_get_drawings
+    ok("each crop starts below the running head's rule (%s)"
+       % [round(row[3].y0) for row in rrows],
+       len(rrows) == 4 and all(row[3].y0 > 70 for row in rrows))
+    check("...so no crop is flagged for holding the running head",
+          [row[5] for row in rrows], [""] * 4)
+    # One text dict per page for the header scan and one per captioned page
+    # for detection; the drawings once per captioned page.
+    check("detection reads each page's text dict and drawings once",
+          calls, {"dict": 8, "drawings": 4})
+    check("the page memo is not left active while the generator waits",
+          suspended, [None, None])
+    rdoc.close()
 
     pdoc = _st_prose_doc()
     ppage = pdoc[0]
@@ -3951,6 +4133,35 @@ def run_self_test():
           hyphen_range_members("A-1", False), [])
     check("hyphen_range_members: a three-part label",
           hyphen_range_members("1-2-3", False), [])
+    # A dotted book cites ranges the way it numbers figures: "figures
+    # 12.10–12.11" was one phantom label no caption can have, while the two
+    # real figures went unrecorded and the chapter read as PARTIAL.
+    check("hyphen_range_members: a dotted range under one parent",
+          hyphen_range_members("12.10-12.11", False), ["12.10", "12.11"])
+    check("hyphen_range_members: dotted endpoints under different parents",
+          hyphen_range_members("1.2-3.4", False), [])
+    check("hyphen_range_members: a lettered dotted parent is a label",
+          hyphen_range_members("A.1-A.3", False), [])
+    for text, labels, want in (
+            ("see figures 12.10–12.11", ["12.10", "12.11"],
+             ["12.10", "12.11"]),
+            ("figures 1.9–1.10", [], ["1.10", "1.9"]),
+            ("GLOW (figures 16.12–16.13)", ["16.12", "16.13"],
+             ["16.12", "16.13"]),
+            ("explored in figures 17.4–17.5", ["17.4", "17.5"],
+             ["17.4", "17.5"])):
+        check("a dotted en-dash range cites its members: %s" % text,
+              sorted(find_figure_references(_TextDoc(text),
+                                            caption_labels=labels)), want)
+    # After a SINGULAR keyword the next number belongs to the sentence.
+    check("a number after a singular reference is not a figure",
+          sorted(find_figure_references(_TextDoc(
+              "219.6 for the model on the left in Figure 8-5, 600.4 for the "
+              "model on the right"), caption_labels=["8-5"])), ["8-5"])
+    check("...while a plural reference keeps its list",
+          sorted(find_figure_references(_TextDoc("Figures 8-5, 8-6 and 8-7"),
+                                        caption_labels=["8-5"])),
+          ["8-5", "8-6", "8-7"])
     check("_uses_hyphen_labels", _uses_hyphen_labels(["1", "S2", "4-2"]), True)
     check("_uses_hyphen_labels on plain labels",
           _uses_hyphen_labels(["1", "S2", "A.1"]), False)

@@ -7,9 +7,10 @@ easier to understand, under the builder's
 [prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles);
 background needs no citation. A request covering a class of defects or the whole Wiki
 applies to every matching entry in that scope, not just named examples. A generic lint request does not
-activate this mode. A source not already cited by the target is a new
-contribution and belongs to `wiki-build`; a retitle uses the
-[entry-retitle protocol](../../../shared/CONVENTIONS.md#retitling-an-existing-wiki-entry),
+activate this mode. A source the target does not cite waits for a wiki-build
+request naming it whole, as under *Deepening* below; a new source the user
+supplies is a new contribution and belongs to `wiki-build`. A retitle uses the
+[entry-retitle protocol](refactors.md#retitle-an-entry),
 and a split, merge, deletion, or cross-entry redistribution uses
 [source-backed refactors](refactors.md).
 
@@ -18,9 +19,14 @@ builder's creation-time teaching rules to it: the learner arc, core-facet check
 and examples of its
 [prose principles](../../wiki-build/references/writing.md#prose-principles),
 and its [equation rules](../../wiki-build/references/equations.md).
-Fill gaps from the entry's cited sources and 5(h) background. Keep every
-existing claim unless it is wrong, and every card and attachment byte-for-byte
-and in place.
+Fill gaps from the entry's cited sources and 5(h) background. When the missing
+teaching lives only in a chapter or document the entry does not cite, leave the
+entry thin and report that a wiki-build request naming that whole source fills
+it in, even when another entry already cites it: a citation does not show the
+source was built as a whole, and the fill-in leaves entries citing it
+untouched. Never route a named-entity build from it, which would mark the
+source covered so folder runs skip its other topics. Keep every existing claim unless
+it is wrong, and every card and attachment byte-for-byte and in place.
 
 ## Establish the evidence and scope
 
@@ -66,12 +72,14 @@ Preserve unrelated prose, existing source membership, `created:`,
 
 If the final entry changed, set `updated:` to today's local date. Reset
 `read: false` only when the correction adds or rewrites unread explanatory body
-content under the builder's body-change rule; a metadata-, link-, or
+content under the builder's
+[body-change rule](../../wiki-build/references/merge.md#the-read-reset); a metadata-, link-, or
 format-only correction preserves it. Missing or unknown review state is never
 invented.
 
-Lint the complete private draft with
-`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<draft>'`. Before
+Stage the complete private draft under the entry's own filename, since the
+lint derives slug and root checks from it, and lint it with
+`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`. Before
 publication, check every added or changed wikilink and alias against the Step 0
 inventory: each target must be an existing, unambiguous entry, and a changed
 alias must not collide with another entry's title or alias. Then review the
@@ -82,8 +90,8 @@ reported; they neither widen the authorization into general cleanup nor block a
 valid correction unless they prevent source ownership, safe publication, or a
 coherent reading of the changed claim. An unavailable helper, crash, malformed
 output, or unresolved source blocks publication; it is not a clean result.
-Publish through the shared safe-write protocol against the exact original
-snapshot, re-scan the entry, and verify the public bytes. Report the entry,
+Publish with `publish_files.py` ([publishing](../SKILL.md#publishing)) against
+the exact original snapshot, re-scan the entry, and verify the public bytes. Report the entry,
 cited source provenance and applicable PDF page (for a URL source, the address,
 the date read and the supporting section, or that the page was unreachable or
 changed), corrected claim, dependent

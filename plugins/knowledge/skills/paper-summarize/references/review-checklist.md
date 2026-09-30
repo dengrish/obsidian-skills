@@ -5,8 +5,8 @@
 - [Check provenance and exhibits](#check-provenance-and-exhibits)
 - [Report separate outcomes](#report-separate-outcomes)
 
-Read for every complete draft before [workflow step 5's lint](../SKILL.md#5-lint-the-complete-draft)
-and publication; do not repeat lint's machine checks by eye. Check against the
+Read for every complete draft after [workflow step 4's lint](../SKILL.md#4-lint-the-complete-draft)
+and before publication; do not repeat lint's machine checks by eye. Check against the
 source pages, not only against internally consistent prose. [Summary standards](summary-standards.md)
 own the claim rules; [note format](note-format.md) owns the mechanical shape.
 This checklist verifies their application without repeating their procedures.
@@ -29,12 +29,12 @@ By default, `--find` uses a normalized, case-insensitive substring search. A
 needle that starts or ends with a digit matches only a whole number there, so
 `8.2%` does not match `18.2%` and `219` does not match `2190`.
 `--exact` keeps the same normalization but makes matching case-sensitive. A `loose` result comes
-from the documented spacing/hyphen fallback and still requires opening the page.
+from one of the relaxed matches listed below and still requires opening the page.
 
 | Result | Required action |
 |---|---|
 | `FOUND` | Record the physical page and read it before citing. A match can be quoted prior work or a reference-list entry, not this document's claim or finding. |
-| `loose` | Open the page: removed spacing/hyphens can recover a broken word or accidentally join unrelated text, and a number followed by `.digits` or `,digits` can be a decimal or a citation mark. It is not a verified claim yet. |
+| `loose` | Open the page: removed spacing/hyphens can recover a broken word or accidentally join unrelated text, a number followed by `.digits` or `,digits` can be a decimal or a citation mark, and a number after a minus sign may be a sign the claim dropped. It is not a verified claim yet. |
 | `MISSING` | Retry once using the source's actual short tokens. A phrase assembled as “hazard ratio 0.62” will miss “hazard ratio of 0.62”; try `0.62`. If the finder names pages without text, or the claim came from a figure or table image, check it on that page image instead ([page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)). Correct or cut an unsupported claim, never make it vaguer. |
 
 Every number, named drug/gene/organism/model/instrument/cohort, sample size,
@@ -84,9 +84,6 @@ Walk the callout, headings, body and captions with their supporting pages open:
   scope, evidence base, premises or reasoning without inventing a method. Notice
   notes identify the issuer's stated grounds and exact action. The third section
   develops the main contribution instead of cataloguing secondary material.
-- [ ] Sentences follow the [brevity targets](note-format.md#prose-and-key-messages).
-  Split or shorten first without losing meaning or necessary qualifications;
-  any longer sentence retained for clarity has a reason in the run report.
 - [ ] Empirical benefits retain harms, failed secondary outcomes and negative
   results. Arguments retain material contrary evidence, exceptions and
   conditions the document discusses. Notices separate what changed from what
@@ -111,7 +108,8 @@ Walk the callout, headings, body and captions with their supporting pages open:
   undated PDF uses `published: null` with its canonical `_nd` stem, or the
   deliberately preserved noncanonical name recorded at intake.
 - [ ] The first `sources:` PDF exists with the selected unique stem, and the
-  final note uses that exact stem. Citations target this PDF and lie within its
+  final note uses that exact stem or, on an authorized rewrite, the existing
+  owned note's recorded spelling. Citations target this PDF and lie within its
   physical page count.
 - [ ] Creation date follows the paper-note rule. A rewrite preserves the user's
   review state and unrelated metadata; a strict-format conflict is reported with
@@ -129,9 +127,10 @@ Walk the callout, headings, body and captions with their supporting pages open:
   boilerplate.
 - [ ] Every embed is an inventoried file under this PDF's stem and has been
   opened to confirm identity and readability. A valid filename is not proof of
-  the image contents; a wrong crop returns to [intake's figure
-  preparation](../SKILL.md#prepare-the-figure-inventory). No duplicate
-  composite/panel illustrates the same claim.
+  the image contents; a wrong crop this run wrote returns to [intake's figure
+  preparation](../SKILL.md#prepare-the-figure-inventory), and a wrong
+  pre-existing crop is skipped and reported. No duplicate composite/panel
+  illustrates the same claim.
 - [ ] Tables retain printed digits, units and orientation. Every retained value
   was checked on its source page; captioned trims do not hide contrary rows.
 - [ ] Captions lead with the message, stand alone and state scope/comparator.

@@ -13,12 +13,14 @@ character and would erase meaning):
   0.  canonical NFD normalization (preserves microsign versus Greek mu)
   1.  microsign U+00B5 -> "u"            (distinct from Greek mu U+03BC)
   2.  Greek letters    -> "name-"        (alpha- beta- ... omega-)
-  3.  dashes           -> "-"            (en, em, figure, horbar, minus)
+  3.  dashes           -> "-"            (hyphen, non-breaking hyphen,
+                                          en, em, figure, horbar, minus)
   4.  arrows           -> "-"
   5.  super/subscript digits -> plain digits
   6.  superscript charges  U+207A -> "-plus", U+207B -> "-minus"
   7.  prime U+2032 and apostrophes -> dropped
   8.  middle dot U+00B7 -> "-"
+  8b. multiplication sign U+00D7 -> "-times-"
   9.  non-decomposing Latin: ss / o / ae / oe
   10. [FIX-A] ASCII charge notation      (see below)
   11. [FIX-B] "+" -> "-plus", "#" -> "-sharp", "*" -> "-star"
@@ -226,7 +228,7 @@ def preprocess(title: str) -> str:
     # 8. middle dot
     s = s.replace("·", "-")
 
-    # Multiplication is semantic title text, not punctuation to discard.
+    # 8b. Multiplication is semantic title text, not punctuation to discard.
     s = s.replace("×", "-times-")
 
     # 9. non-decomposing Latin

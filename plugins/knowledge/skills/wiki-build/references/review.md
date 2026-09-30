@@ -4,7 +4,7 @@ Scope: the step-7 audits and run report of a run that drafted or merged entries;
 
 ## The three audits
 
-Run them at the end of step 7 in this order: **missed-entity, overlap/ownership, then orphan-link**, since each can change what the next checks. **Whatever the audits create or change gets the Quality Checklist**, the [editorial reread](writing.md#editorial-reread), a re-lint of each affected file and a `review_tree.py` rerun, as in [step 7](../SKILL.md#7-review-and-report), before continuing.
+Run them as [step 7.6](../SKILL.md#7-review-and-report), in this order: **missed-entity, overlap/ownership, then orphan-link**, since each can change what the next checks. **Whatever the audits create or change gets the Quality Checklist**, step 7.3's source check, the [editorial reread](writing.md#editorial-reread) and a `review_tree.py` rerun, as in step 7, before continuing.
 
 ### Missed-entity audit (source coverage)
 
@@ -17,13 +17,13 @@ For each item that passes, check the wiki state:
 - **Processed for this source this run** (created, merged or source-no-op-merged), or already citing it in a [fill-in](source-intake.md#check-prior-coverage) run → noted; another source's result in the batch does not count.
 - **An entry exists but was not processed for this source** → an overlooked merge, since existing ownership does not prove this source was integrated: run step 3 and the merge and no-op gates.
 - **Rejected this run with a reason** (2a, 2b, 2c, thin mention) → noted.
-- **None of these** → an overlooked candidate: take it through step 3 and step 4 or 5, or list it under *Entities deferred* when coverage is too thin, and log every recovery (slug, action, what the source said).
+- **None of these** → an overlooked candidate: take it through step 3, step 4 or 5, and step 6 (its own links, plus the first eligible mention of it in this run's other entries under [link provenance](merge.md#integration-principle)), or list it under *Entities deferred* when coverage is too thin, and log every recovery (slug, action, what the source said).
 
 **The bar is identical to step 2, not looser:** the audit asks what step 2 missed, reading the source against the wiki state, and a passing mention or a secondary source's transient signal stays a correctly rejected non-candidate.
 
 ### Overlap/ownership audit (this run's entries and their relevant neighbors)
 
-Compare every entry this run created or merged, recoveries included, with the other current-run entries **and with relevant existing canonical neighbors**: those its body and Related links resolve to, and any existing note the source's candidate ledger names as the likely owner of a concept explained in current-run prose. Look for duplicated explanatory work: the same worked example, mechanism walkthrough or multi-sentence explanation of a neighboring entity in more than one note. Judge meaning and ownership, not word overlap: a concise reciprocal contrast can belong in both entries, and shared terminology alone is no finding. Nor is a model entry's own prediction step and objective, or a one-line restatement of a neighbor's formula.
+Compare every entry this run created or merged, recoveries included, with the other current-run entries **and with relevant existing canonical neighbors**: those its body and Related links resolve to, and any existing entry the missed-entity audit's wiki-state check found owning a concept that current-run prose explains. Look for duplicated explanatory work: the same worked example, mechanism walkthrough or multi-sentence explanation of a neighboring entity in more than one note. Judge meaning and ownership, not word overlap: a concise reciprocal contrast can belong in both entries, and shared terminology alone is no finding. Nor is a model entry's own prediction step and objective, or a one-line restatement of a neighbor's formula.
 
 Give the full treatment to the most specific canonical entry whose subject it explains; an umbrella or related note keeps the shortest relationship needed for orientation and a wikilink (`Law of large numbers` owns the biased-coin illustration; `Hard voting` keeps its consequence for ensemble errors and a link).
 
@@ -31,7 +31,7 @@ Fix duplicate treatment in prose the active source contributed this run, even wh
 
 ### Orphan-link audit (this run's entries)
 
-**Rebuild the private combined-view index first** by rerunning `review_tree.py`, so drafts the missed-entity audit added resolve; its `dangling` and `noncanonical` lists are the mechanical floor, and a `dangling` item that lists `unmirrored` paths keeps its link when the real vault has the target. Every body and Related-footer wikilink in **the entries this run created or merged**, audit additions included, must name exactly one entry by its filename; `sources:`, `parents:` and MOC navigation are outside the audit, and missing or unsafe MOC destinations are reported for wiki-lint. Apply each `noncanonical` link's `replacement` exactly as given, and never create a variant file. Retarget an `ambiguous` one to the entry the prose means, path-qualified when [§6](../../../shared/CONVENTIONS.md#6-wikilink-forms) requires, or report an inherited one the prose leaves open. Refresh both inventories from current snapshots and final drafts just before publication. For every target with no match:
+**Rebuild the private combined-view index first** by rerunning `review_tree.py`, so drafts the missed-entity audit added resolve; its `dangling` and `noncanonical` lists are the mechanical floor, and a `dangling` item that lists `unmirrored` paths keeps its link when the real vault has the target. Every body and Related-footer wikilink in **the entries this run created or merged**, audit additions included, must name exactly one entry by its filename; `sources:`, `parents:` and MOC navigation are outside the audit, and missing or unsafe MOC destinations are reported for wiki-lint. Apply each `noncanonical` link's `replacement` exactly as given, and never create a variant file. Retarget an `ambiguous` one to the entry the prose means, path-qualified when [§6](../../../shared/CONVENTIONS.md#6-wikilink-forms) requires, or report an inherited one the prose leaves open. For every target with no match:
 
 - **Default fix: unlink to bare text** and drop the matching Related-footer item. **Never create a placeholder file to make a link resolve.**
 - **If the prose genuinely teaches the target** under the [positive trigger](../SKILL.md#2-extract-entities), create its **entry** from the source's coverage and keep the link; with coverage too thin, unlink it and list it under *Entities deferred*.

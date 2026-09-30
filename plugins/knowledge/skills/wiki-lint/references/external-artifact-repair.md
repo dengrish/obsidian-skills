@@ -44,7 +44,8 @@ reference. This mode changes dependency spelling only: it does not change
 `created:`, `updated:`, `read:`, content claims, parents, or MOC structure.
 
 Stage every completed blocker outside scanned vault folders and publish each
-against its exact snapshot through the shared safe-write protocol. If a later
+against its exact snapshot with `publish_files.py`
+([publishing](../SKILL.md#publishing)). If a later
 edit wins, preserve it and rebuild that repair. Re-scan changed Wiki entries;
 an unavailable scanner, crash, malformed output, or a fixable finding absent
 from that baseline blocks completion. Report pre-existing findings unchanged.

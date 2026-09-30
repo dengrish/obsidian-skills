@@ -48,8 +48,13 @@ CLI:
       [--compact]      compact JSON
 
 Output: per candidate {candidate, slug, matches:[{probe, matched_slug,
-matched_via, alias?, entry_slug, implies}], verdict, naming?}, plus the top-level
-``candidate_collisions[]``, ``index_problems[]`` and ``summary``.
+matched_via, alias?, matched_candidate?, entry_slug?, entry_path?,
+entry_errors?, implies}], verdict, naming?, error?}, plus the top-level
+``candidate_collisions[]``, ``index_problems[]`` and ``summary``. An
+existing-entry match gives in ``entry_path`` the file a merge would target;
+a peer match names the other candidate in ``matched_candidate``. ``error``
+explains an ``adjudicate`` verdict: an unsluggable title, unsafe owner
+metadata, several existing owners, or index problems that can hide ownership.
 ``naming: ["bare-common-noun"]`` marks a slug from special-titles.md's
 cross-domain corpus; it never changes the verdict (SKILL.md says how to act on
 it). Every index problem is reported, but only one that can hide slug, title

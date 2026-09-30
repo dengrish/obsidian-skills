@@ -38,19 +38,11 @@ Take the figures that **are** the main contribution:
 
 Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schematics, maps of where the samples came from, and any figure whose content is a table. **Unless the method is itself the contribution** — for a paper whose result is a technique, the schematic *is* the finding, and it goes in the third section under the claim about what the technique does. Even a method schematic belongs in that contribution section; `note_lint.py` calls this positional slot `Results` and checks its placement.
 
-**The tiebreak, when several look equally central**, is how often the body text refers to each one:
-
-```bash
-python3 '<skill>/scripts/paper_text.py' '<pdf path>' --cites
-```
-
-It counts every mention on every page, expanding compact plural lists and
-ranges; the figure's own caption is included, so each figure starts one ahead —
-read the counts as a ranking, not a measurement. **Pass the same `--ed-prefix`
-as [figure preparation](../SKILL.md#prepare-the-figure-inventory)**:
-`Extended Data Figure 1` is filed as `S1` by default and as `ED1` under
-`--ed-prefix ED` (`CONVENTIONS.md` §8b), and a mismatch scores it under a label
-no file on disk carries, so it reads as never cited.
+**The tiebreak, when several look equally central**, is how often the body text
+refers to each one: use the `--cites` counts from
+[figure preparation](../SKILL.md#prepare-the-figure-inventory), which already
+used the crops' `--ed-prefix`. Each count includes the figure's own caption, so
+read the counts as a ranking, not a measurement.
 
 Use the counts only to break a tie between substantively relevant figures, not to replace reading them.
 
@@ -110,11 +102,12 @@ The extractor writes whole figures. Existing vaults can also contain legacy pane
 
 ## When the figure you need is not there
 
-If a needed figure is missing or its crop is wrong, return to
+If a needed figure is missing, or a crop this run extracted is wrong, return to
 [intake's figure preparation](../SKILL.md#prepare-the-figure-inventory) for
-that PDF. Do not make a new extraction path inside drafting. If repair fails,
-report the extractor's actual diagnostics: a missing caption or output, a scan
-limitation or a failed extraction.
+that PDF. Skip a wrong pre-existing crop and report it; never overwrite, adopt
+or repair it here. Do not make a new extraction path inside drafting. If repair
+fails, report the extractor's actual diagnostics: a missing caption or output,
+a scan limitation or a failed extraction.
 
 A table is not an extracted figure: rebuild it below when it carries the result.
 For another unavailable exhibit, carry only the claim supported by the source

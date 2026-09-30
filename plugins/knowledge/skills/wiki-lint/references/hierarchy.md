@@ -56,6 +56,9 @@ document it already cites, and wiki-build cites a source it genuinely builds
 the root from.
 New roots use today's date for `created:` and `updated:` and set
 `read: false`; the maintenance date freeze covers existing notes only.
+Stage a new root under its own filename and lint it with
+`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`;
+resolve every finding before publication.
 Preserve existing roots' substantive content, review state, and card history
 under the normal correction rules. An ambiguous root owner blocks that
 group's publication; never fall back to an MOC parent.
@@ -146,7 +149,7 @@ are the only Related links Task 3 adds, and it removes none.
 
 The **whole recognized discipline or misc MOC belongs to Task 3**. Within an authorized
 closure, regenerate its complete content from the derived placement plan and
-publish it through the shared safe-write protocol. Comments (including a
+publish it with `publish_files.py` ([publishing](../SKILL.md#publishing)). Comments (including a
 legacy provenance footer), frontmatter, headings, and prose are obsolete
 generated formatting and are removed during regeneration under that
 whole-file ownership. This does not
@@ -173,26 +176,30 @@ keeps the qualifier that distinguishes it from other kinds of filter. Misc
 keeps the complete title. The link target always retains the entry path and
 slug.
 
-**Preflight paths before writing.** `MOCs/` must be a real directory under the
-selected vault; create it only when absent. Reject a non-directory occupant,
-directory or leaf symlink, unreadable path, case/NFC-equivalent folder or file
-collision, and duplicate canonical/legacy MOC ownership. Inventory existing
-canonical paths, recognized legacy vault-root MOCs
-(`<vault>/<discipline>-moc.md`), and previous-layout MOCs before initializing
-a missing file. Preserve an unexpected vault-root MOC and report its ownership
-conflict; never silently create a second MOC or move that note during routine
-lint. It shares the canonical basename, so bare links to that name stay
-ambiguous.
-Preserve the entire connected closure when ownership or readability is unsafe.
+**Preflight from the latest scan.** Its MOC inventory already checks `MOCs/`
+ownership from a guarded snapshot; act on its records under
+[read diagnostics](#read-diagnostics-and-verify-completion) rather than
+re-inspecting the folder. An unsafe or unreadable state blocks its connected
+closure, which stays untouched. Pass `--create-dir MOCs` to `publish` when
+every `moc_file_states` record is `missing` and `moc_inventory_findings` holds
+no directory finding (`unsafe-directory`, `ambiguous-directory` or
+`noncanonical-directory`), which is how an absent `MOCs/` looks (an empty
+folder looks the same, and a `legacy-location` record can accompany either):
+`publish` refuses a missing folder without the flag and ignores it when the
+folder exists. A recognized legacy vault-root
+MOC (`<vault>/<discipline>-moc.md`, a `legacy-location` record) stays in
+place: report its ownership conflict, and never silently create a second MOC
+or move that note during routine lint. It shares the canonical basename, so
+bare links to that name stay ambiguous.
 
 Before introducing a new MOC basename, inspect links to any Wiki entry sharing
 it. Qualify only references whose prior entry owner is proven, within the
 authorized reference scope, so creation does not redirect them to navigation.
 Preserve already ambiguous targets and report any required out-of-scope repair.
 
-Read and snapshot the existing MOC's complete bytes, identity, and permissions
-when deriving the replacement. Compare complete output bytes and skip a no-op.
-Create a missing file exclusively; conditionally replace an existing file only
+Record each MOC path with `publish_files.py snapshot` before reading it to
+derive the replacement. Compare complete output bytes and skip a no-op.
+`publish` creates a missing file exclusively and replaces an existing file only
 against that original snapshot. Whole-note ownership never authorizes replacing
 a later editor save. Publish and verify the MOC and corresponding parents in
 the same task. If a path changes or a write is interrupted, report the actual
@@ -222,6 +229,10 @@ second MOC, within an authorized closure for that discipline:
 1. When the old file is readable and uniquely owned and the canonical path is
    free, move it there with `move_noreplace` under the shared
    [safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally).
+   Record both paths with `publish_files.py snapshot` before reading the old
+   file. The driver takes its expected identity from the old file's record,
+   and the canonical path is re-recorded after the move, as
+   [publishing](../SKILL.md#publishing) describes.
 2. Rewrite links that resolved to the old file, `[[MOCs/<discipline-slug>…]]`,
    to the new name, preserving anchors and labels. A bare
    `[[<discipline-slug>]]` could have meant either file; preserve and report it.
@@ -277,7 +288,7 @@ unresolved/invalid parent, self-parent, or cycle. Every active included MOC is
 readable (or empty misc with zero members), contains only the complete generated
 outline and has no consistency
 finding. Each included entry's parents exactly
-match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. No included parent remains in `unlinked_children`. Re-scan to verify these conditions. After a
+match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. No included parent remains in `unlinked_children`, and the final scan's `problems` holds no fixable finding on a file Task 3 wrote that the pre-Task-3 scan lacked. Re-scan to verify these conditions. After a
 full-vault pass they hold for all active disciplines, misc, and requested entries;
 inactive discipline MOCs, legacy MOCs, and skipped closures remain explicitly
 reported and preserved, not described as repaired.

@@ -1,6 +1,6 @@
 # Filename and image slug rules
 
-**Read this when** the author or the title doesn't slug cleanly — more than one author, a surname-first or suffixed name, no human author at all, acronyms or brand casing in the title, a missing `published` year — or when `scripts/slug.py` isn't available and you're building the slug by hand.
+**Read this when** the author or the title doesn't slug cleanly — more than one author, a surname-first or suffixed name, no human author at all, acronyms or brand casing in the title, a missing `published` year.
 
 Use `--topic` as the documented path: choose 2–4 identifying content words; the
 helper handles the mechanics. Automatic `--title` output is a suggestion to check: it uses
@@ -20,14 +20,12 @@ stem after the helper reports its shortening or symbol notes.
 
 ## Author segment
 
-Use the surname of the first author. Resolve it in two stages so commas do not confuse the name with a list:
-
-1. **Pick the first author.** Authors normally arrive as a YAML list (one entry per supported human byline), so the first author is simply the first list entry. If instead the authors are mashed into a *single string* — multiple names joined by `and`, `&`, `;`, or a comma-separated list like `Buck, Carlsmith, and Greenblatt` or `Smith J, Jones K` — take only the portion before the first such separator as the first author, and ignore the rest.
-2. **Take that first author's surname** — the last whitespace-separated token of their name, kept in original case (it's a proper noun). A Vancouver-style byline puts capital initials after the surname (`Smith J`, `Smith JK`): skip them. A short all-capitals token that could be either (`Jun LEE`, `Kelvin NG`) is kept and reported.
-
-The comma-flip for surname-first names applies **only within a single author's name**, and only when the comma genuinely marks surname-first order: a name written `Smith, John` / `van der Berg, Jürgen` flips to natural order (`John Smith`) so the last token is the real surname. Two guards so the flip doesn't misfire:
-- **Don't flip a multi-author string.** If the comma is separating *different people* (the string has more than one comma, contains `and`/`&`/`;`, or starts with a Vancouver-style name such as `Smith J,`), it's an author list, not a surname-first name — resolve the first author per stage 1 instead.
-- **Don't flip a trailing suffix.** A post-comma token that's a generational or credential suffix (`Jr.`, `Sr.`, `II`, `III`, `IV`, `PhD`, `MD`, `MSc`, etc.) isn't a given name — `Martin Luther King, Jr.` is not surname-first. Drop the suffix and take the surname from the remaining name (`King`).
+Pass each retained author in byline order (repeat `--author`), or none. The
+helper takes the first author's surname, flips a surname-first name, drops
+suffixes and Vancouver initials, and drops the author segment for an editorial
+or anonymous byline. Review every note it prints (for example a
+possible-initials token such as `Jun LEE`), and rerun with a corrected
+`--author` when its reading is wrong. For example:
 
 - "Ruxandra Teslo" → `Teslo`
 - "Jürgen van der Berg" → `Berg` (last token wins)

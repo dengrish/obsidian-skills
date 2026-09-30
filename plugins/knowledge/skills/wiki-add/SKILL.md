@@ -121,8 +121,8 @@ the root form from accurate background with `sources: []`.
 
 Follow [research and durable sources](references/research.md), which
 searches the vault's sources before the web, routes unbuilt ones to
-wiki-build and cites a web page by its URL. The sources' neighboring concepts
-never become extra entries.
+wiki-build, files a PDF it acquires before citing it, and cites a web page by
+its URL. The sources' neighboring concepts never become extra entries.
 
 Apply the builder's [substance, durability and atomicity gates](../wiki-build/SKILL.md#2-extract-entities)
 to the requested topic. Insufficient evidence, unresolved ambiguity or a topic
@@ -170,24 +170,25 @@ publishing.
 
 ## 5. Publish and verify
 
-Validate every new note's final bytes. Immediately before publication, refresh
-the real Wiki inventory and candidate probes, and re-adjudicate a new occupant
-or alias owner without changing it: a newly arrived same-entity entry can
-become an existing-topic outcome; otherwise rebuild the affected draft or
-leave it pending.
+In builder step 7.7, write `<scratch>/candidates.json` with this item's final
+title and every alias form the draft carries or step 2 probed, in place of the
+builder's title-only list, and reuse that list for the post-publication
+collision probes. A newly arrived same-entity owner makes the item an
+existing-topic outcome (leave the draft unpublished); any other new occupant
+or alias owner means rebuilding the draft or leaving the item pending, without
+changing the occupant.
 
-Publish and verify newly filed PDFs and selected attachments first,
-through the [shared safe-write API](../../shared/SAFE_WRITES.md#call-the-shared-python-api)
-with exclusive creation and private staging on the target filesystem outside
-scanned output folders, never an overwrite-capable copy or rename as a
-fallback. Then publish the Wiki entry with the builder's
+A PDF this run acquired, and any figures figure-extract wrote for it, were
+already filed under [New PDFs](references/research.md#new-pdfs). Publish the
+Wiki entry with the builder's
 [publish command](../wiki-build/SKILL.md#7-review-and-report), adding
-`--create-dir Wiki` only when Wiki is absent. Create only the missing output
-folders these writes need.
+`--create-dir Wiki` only when Wiki is absent.
 
-Re-read the public entry, verify its bytes equal the reviewed draft, rerun its
-lint and the current collision checks, and confirm its vault sources and new
-links resolve and each URL item is exactly the address read in this run. Only that verified public state permits completion. On a failed write
+`publish_files.py` has read the entry back as its reviewed draft; rerun its
+lint and the collision probes, and confirm its vault sources and new links
+resolve and each URL item is the address chosen under
+[Cite a webpage](references/research.md#cite-a-webpage). Only that verified
+public state permits completion. On a failed write
 preserve any recovery paths under the shared protocol and report partial
 publication; do not delete newer files or mark a failed draft complete.
 
@@ -225,15 +226,8 @@ Close every report with one standing line: *New entries keep `parents: []`
 and stay out of the MOCs until `wiki-lint` places them and links them from
 existing entries — run it to connect and file them.*
 
-At closeout, write a suggestion log only when this run has something to
-record:
-
-- an evidenced workflow defect (`Reviews/wiki-add-suggestions.md`, or the log
-  of a producer whose output this run consumed);
-- a §4 note-content proposal (`Reviews/wiki-notes-suggestions.md`);
-- an open notes item naming an entry this run created (search that log for
-  the run's slugs);
-- on an apply-capable run, a missing canonical log for this plugin's skills.
-
-In any of these cases, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
-first and follow them. Otherwise write no log.
+At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
+`Reviews/wiki-add-suggestions.md`, the logs of producers whose outputs this run
+consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`, which
+receives §4 note-content proposals; search it for open items naming an entry
+this run created.

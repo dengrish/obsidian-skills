@@ -74,7 +74,6 @@ import shutil
 import stat
 import sys
 import tempfile
-import unicodedata
 import warnings
 
 _OBSIDIAN_SHARED_MODULES = ('atomic_move', 'figure_state', 'naming',
@@ -226,7 +225,8 @@ def normalize_fig_num(fig_num):
     The captured label can use `.` (Prince UDL, most math/CS books), `-`
     (Géron, many O'Reilly titles), or a mix. We standardize on `-` so the
     on-disk name is predictable regardless of caption style — `Figure 1.2`,
-    `Figure 1-2`, and `Figure 1 - 2` all become `_fig_1-2.png`.
+    `Figure 1-2`, and `Figure 1–2` all become `_fig_1-2.png`. A spaced
+    `Figure 1 - 2` is read as Figure 1 with a title.
     """
     return fig_num.replace(".", "-").replace("–", "-")
 
@@ -510,8 +510,12 @@ def _stable_output_digest(path):
     return _stable_output_snapshot(path)[1]
 
 
-def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
+def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path, inventory=None):
     """Return an occupied semantic figure slot, or ``None`` when it is free.
+
+    ``inventory`` is an ``inventory_source_figures(out_dir, stem)`` result to
+    reuse. Only a caller that writes nothing between checks (a dry run) may
+    pass one; a writing run inventories afresh for every slot.
 
     The published PDF crop is always PNG, but the shared image folder also
     contains clipping output such as JPG and WebP. Consumers identify a figure
@@ -528,7 +532,8 @@ def _figure_slot_conflict(out_dir, stem, fig_suffix, out_path):
     """
     if not os.path.lexists(out_dir):
         return None
-    inventory = inventory_source_figures(out_dir, stem)
+    if inventory is None:
+        inventory = inventory_source_figures(out_dir, stem)
     if not inventory.complete:
         detail = "; ".join(
             "%s: %s" % (item.path, item.message)
@@ -1790,6 +1795,15 @@ def run_self_test():
         ok("a legacy separator-less name holds its figure slot",
            _figure_slot_conflict(compact_dir, "Doe_Figs_2025", "3", os.path.join(
                compact_dir, "Doe_Figs_2025_fig_3.png")) is not None)
+        # A dry run may hand in one inventory for all of a PDF's slots; the
+        # answer is the one a fresh inventory gives, slot by slot.
+        compact_inventory = inventory_source_figures(compact_dir, "Doe_Figs_2025")
+        check("a reused inventory answers each slot like a fresh one",
+              [_figure_slot_conflict(
+                  compact_dir, "Doe_Figs_2025", suffix, os.path.join(
+                      compact_dir, "Doe_Figs_2025_fig_%s.png" % suffix),
+                  inventory=compact_inventory) is not None
+               for suffix in ("3", "4")], [True, False])
 
         # Skip-existing is the default, and it is what keeps a hand-set crop
         # from being undone by the next batch run.
@@ -2436,7 +2450,7 @@ def main(argv=None):
     parsed_crops = [(spec,) + parse_crop(spec) for spec in args.crop]
     targets = {}
     for spec, _page_idx, suffix, _rect in parsed_crops:
-        key = unicodedata.normalize("NFC", suffix).casefold()
+        key = figure_identity(suffix)
         if key in targets:
             sys.exit(f"--crop {spec!r} resolves to the same output label as "
                      f"{targets[key]!r}; each target may appear only once")
@@ -2559,8 +2573,10 @@ def main(argv=None):
         key = manifest_key(manifest, os.path.basename(target))
         if manifest.get(key) != digest:
             die(f"Refusing explicit crop of {target}: ownership is unknown or its bytes changed. "
-                "Inspect the occupant and reconcile its ownership record first; "
-                "--overwrite does not claim another file.")
+                "Inspect the occupant: adopt a confirmed legacy crop with the batch's "
+                "--adopt-legacy, and repair a changed recorded crop only with the "
+                "user's authorization (the skill's review reference, ownership "
+                "section); --overwrite does not claim another file.")
         preflight_digests[target] = digest
 
     os.makedirs(out_dir, exist_ok=True)

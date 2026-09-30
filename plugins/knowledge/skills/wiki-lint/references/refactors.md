@@ -1,13 +1,14 @@
 # Source-backed refactors of existing entries
 
 Read this only when the current request explicitly authorizes a split, merge,
-deletion, consolidation or redistribution of existing wiki content. An ordinary lint run
+deletion, consolidation, redistribution or retitle of existing wiki content, or
+an alias removal. An ordinary lint run
 reports these candidates and stops; a long note, duplicate wording, or scanner
 similarity never activates this mode by itself. Authorization already present
 in the request is sufficient. This protocol requires no separate human review.
-A pure retitle or semantic-invalid alias removal keeps its own
-[protocol](../SKILL.md#explicit-source-backed-refactor-mode); never disguise
-either as a split or merge to avoid its authorization and
+A pure retitle or semantic-invalid alias removal keeps its own protocol below
+([retitle](#retitle-an-entry), [alias removal](#remove-a-semantic-invalid-alias));
+never disguise either as a split or merge to avoid its authorization and
 complete-reference-rewrite gate.
 
 A correction confined to one existing entry and supported only by sources it
@@ -61,11 +62,13 @@ affected entry and supported by its durable source.
   orientation, without duplicating the full explanation across the results.
   A newly created split note gets today's `created:` and `updated:` dates and
   `read: false`. A retained original keeps `created:` and follows the builder's
-  body-change rule for `updated:` and `read:`.
+  [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
+  `updated:` and `read:`.
 - A merge chooses one collision-free surviving identity from the evidence and
   requested scope. Preserve that entry's `created:` and user-owned appearance
   fields, integrate nonduplicate claims, union only valid source contributions
-  and same-entity aliases, and apply the builder's body-change rule for
+  and same-entity aliases, and apply the builder's
+  [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
   `updated:` and `read:`. Report conflicting user-owned metadata from an entry
   that may be removed rather than silently selecting a value.
 - A consolidation keeps the full treatment of an explanation duplicated across
@@ -84,14 +87,20 @@ affected entry and supported by its durable source.
 
 ## Publish in dependency order
 
-Stage the complete result outside scanned vault folders, on the target
-filesystem (resolving a symlinked output directory before choosing its private
-stage parent), and use the shared safe-write protocol throughout. A refactor spans several files but is not one
-filesystem transaction, so order prevents a disappearing target:
+Stage complete drafts under `<scratch>` and publish creates and replacements
+with `publish_files.py` ([publishing](../SKILL.md#publishing)). Step 4's
+conditional removal uses `remove_expected` in a private driver under the
+[shared safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally),
+with the token rebuilt from the old entry's original snapshot record as
+[publishing](../SKILL.md#publishing) describes. A refactor spans several files
+but is not one filesystem transaction, so order prevents a disappearing
+target:
 
 1. Publish every new entry exclusively and conditionally replace retained
    entries from the exact snapshots used to plan them.
-2. Rewrite each inspected inbound link.
+2. Rewrite each inspected inbound link. An otherwise unchanged entry whose
+   only change is a rewritten link or `parents:` value keeps its dates and
+   `read:`.
 3. Re-scan and independently refresh the complete live-reference inventory.
    Verify that every changed link or transclusion resolves with its retained
    anchor, every moved source-specific claim keeps its source, and no obsolete destination
@@ -107,9 +116,60 @@ filesystem transaction, so order prevents a disappearing target:
    old entry. Missing or unverified source support is a reason to retain the
    content, never evidence that it is disposable. If a later edit or an
    unresolved inbound reference appears, retain the file and report the mixed
-   state; never force cleanup to make the refactor look done.
+   state; never force cleanup to make the refactor look done. A rollback
+   restores only files whose published bytes are still unchanged.
 
 Finish with Tasks 1–3 on the affected closure and re-scan until all fixable
 findings introduced by the refactor are gone. Report source evidence, created,
 retained, and removed paths, every inbound rewrite, review-state decisions,
 unresolved content, and the final scan counts.
+
+## Retitle an entry
+
+A title or slug correction is a whole-entry rename, not an alias-list edit; a
+request that explicitly authorizes it activates this protocol.
+
+1. Derive the destination with `slugify.py`, then run every create-time
+   collision probe against filenames, aliases and the other planned names
+   with wiki-build's `vault_index.py` and `find_collisions.py`
+   ([its step 3](../../wiki-build/SKILL.md#3-resolve-against-existing-entries)).
+   Record the source entry and the free destination with `publish_files.py
+   snapshot` before reading the entry's complete bytes and all user-owned
+   metadata; the source record keeps its identity, digest and permissions.
+   Refuse an occupied or ambiguous portable-equivalent destination; never
+   pick one owner by directory order.
+2. Rebuild the entry coherently under the new canonical title. Preserve its
+   `created:`, sources, review state, scheduling metadata, appearance/publish
+   properties and substantive content. A retitle alone advances `updated:`
+   and never resets `read:`. Keep the old slug as an alias only when it is
+   still a valid same-entity name; a proven wrong or misleading name is not
+   retained merely to make old links resolve.
+3. Inventory the references to the old filename and its aliases under
+   [step 3 above](#establish-evidence-and-complete-scope). Rewrite only
+   references that resolve to this exact owner, preserving display labels,
+   headings, block anchors and surrounding bytes; a Related-footer label
+   becomes the target's canonical title. Source evidence and external URLs
+   are never rewritten because their text matches.
+4. Publish [in dependency order](#publish-in-dependency-order): the
+   destination entry exclusively, then every snapshotted inbound and hierarchy
+   file conditionally, re-reading every result. Before removing the exact old
+   entry version with `remove_expected` against step 1's source record,
+   re-scan: every changed link must resolve uniquely to the new entry, the
+   old slug must have no unresolved inbound surface, and the new entry must
+   pass the current entry rules. Then rebuild the connected Task 3 closure
+   from the resulting tree and re-scan.
+
+## Remove a semantic-invalid alias
+
+An explicitly authorized removal first identifies the canonical owner. It then
+inventories and rewrites, under
+[step 3 above](#establish-evidence-and-complete-scope), every real reference
+that resolves through the alias and every link to this entry whose alias label
+names a different entity, publishing
+[in dependency order](#publish-in-dependency-order). A blocked dependency
+retains the alias until it can be repaired. Delete the alias only after
+verifying that no ambiguous owner, inbound alias-target link or such
+mislabelled link remains. The removal advances the owner's `updated:` and
+keeps its `read:`; an otherwise unchanged entry whose only change is a
+rewritten link keeps its dates and `read:` under the
+[shared date rule](../../../shared/CONVENTIONS.md#2a-wiki-entry--wikimd).

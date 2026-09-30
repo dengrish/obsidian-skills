@@ -1,14 +1,14 @@
 # Repairing a PDF's derived names and references
 
 Read this before applying an organizer plan that moves derived files, rewrites
-notes, or changes figure sidecars; also use it for API calls and failed
-verification. The [organizer workflow](../SKILL.md#workflow) owns source
-selection, naming, and authorization. This reference explains what its repair
-must preserve, not a separate way to rename files.
+notes, or changes figure sidecars, and when verification fails. The
+[organizer workflow](../SKILL.md#workflow) owns source selection, naming, and
+authorization. This reference explains what its repair must preserve, not a
+separate way to rename files.
 
 ## Establish the owned family
 
-`keyed_files` collects the candidate family: the PDF, its same-stem
+The helper's candidate family is the PDF, its same-stem
 `Sources/Images/<stem>_fig*` images, an `Articles/` note whose origin
 identifies this PDF, and any split-book folder with its chapters. Each
 chapter has its own family. The rename plan moves only proven members and
@@ -67,92 +67,41 @@ Read the relevant section when a plan involves that kind of derived file.
 ## Review the plan before writing
 
 The CLI's `check` lists citing paths and names. `rename` without `--apply`
-shows moves, note rewrites, sidecar updates, unreadable notes, and blockers.
-Apply only under the
+prints the moves and the sections below. Apply only under the
 [organizer workflow's authorization rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan).
 
-`rename_all` returns `(moves, edits, blockers)` and writes nothing while
-`blockers` is nonempty. Resolve every blocker: occupied destinations anywhere
-in the vault, target-stem figures or `Articles/` notes outside the family,
-for the PDF or any renamed chapter (see
-[SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)),
-collisions that differ only in case or Unicode normalization, overlong
-derived names, extension mismatches, unsafe paths, permissions, and
-malformed or conflicting sidecars. Do not force a partial family through.
+- **BLOCKED — nothing was written.** Resolve every blocker: occupied
+  destinations anywhere in the vault, target-stem figures or `Articles/` notes
+  outside the family, for the PDF or any renamed chapter (see
+  [SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)),
+  collisions that differ only in case or Unicode normalization, overlong
+  derived names, extension mismatches, unsafe paths, permissions, and
+  malformed or conflicting sidecars. Do not force a partial family through.
+- **Not read, and cite nothing this rename changes** lists notes that could
+  not be read as UTF-8. They remain untouched and must be reported as unread,
+  not verified clean. An unreadable note that cites this rename is a blocker.
+- **Figure sidecar updates** covers only the default figure ownership and
+  review files in `Sources/Images/`; their changes are planned, applied, and
+  rolled back with the rename. A custom figure-extract `--review-file` ledger
+  is never updated and must not be hand-edited: report any known one as still
+  holding old-stem marks.
+- **Publication-date updates** gives the old and new `published` values of
+  owned paper-summary notes when the canonical source year changes. The
+  note's source link and this value are one staged rewrite and share the same
+  stale-file guard and rollback. A target `nd` uses `null`. A valid date
+  already in the numeric target year is the document's own date and is kept
+  unchanged, so it is not listed. A null or a date from another year becomes
+  `<year>-01-01`, which you report as padding. Only the document's own
+  evidence, through a paper-summarize correction, may supply a more precise
+  date, never the old note's month/day. Missing, duplicate, quoted, invalid,
+  multiline, or contradictory date metadata is a blocker; correct that field
+  from the document before re-planning. A frontmatter fence shape also blocks:
+  a UTF-8 byte-order mark, blank lines or indentation before the opening
+  `---`, or trailing spaces or tabs on either fence. The blocker names the
+  cause; fix those bytes in the note itself, since the date is not at fault.
+  Notes that merely cite the PDF never receive this metadata repair.
 
-`edits` maps note paths to their new text. Three associated fields are separate:
-
-- `edits.unreadable` lists notes that could not be read as UTF-8 and that do
-  not cite a name being changed. They remain untouched and must be reported
-  as unread, not verified clean. An unreadable note that cites this rename
-  is a blocker.
-- `edits.sidecars` tracks only the default figure ownership and review files
-  in `Sources/Images/`; their changes are planned, applied, and rolled back
-  with the rename. A custom figure-extract `--review-file` ledger is never
-  updated and must not be hand-edited: report any known one as still holding
-  old-stem marks.
-- `edits.published_updates` records `(old, new)` publication-date scalars for
-  owned paper-summary notes when the canonical source year changes. The note's
-  source link and this field are one staged rewrite and share the same stale-file
-  guard and rollback. A target `nd` uses `null`; a numeric target retains a
-  valid month/day, or uses `01-01` when the old value was null. Missing,
-  duplicate, quoted, invalid, multiline, or contradictory date metadata is a
-  blocker, as is a month/day that is invalid in the target year. Correct the
-  metadata from the document before re-planning; never discard date components
-  to force the rename through. Notes that merely cite the PDF never receive
-  this metadata repair.
-
-## API calls and verification
-
-Prefer the CLI unless a Python caller needs the API. Import the shipped
-implementation; use the same interpreter selected in runtime setup:
-
-```python
-import os, sys
-sys.path.insert(0, "<skill>/scripts")
-from organize import keyed_dirs, keyed_files, obsolete_names, references, rename_all
-
-keyed = keyed_files(vault, path)
-old_dirs = keyed_dirs(vault, keyed)
-old_folders = {name for p, name in keyed.items()
-               if os.path.isdir(p) and not os.path.islink(p)}
-refs = references(vault, set(keyed.values()), dirs=old_dirs,
-                  directory_names=old_folders)
-moves, edits, blockers = rename_all(
-    vault, path, new_basename, dest=dest, apply=False
-)
-```
-
-Pass `dirs` and `directory_names` to both reference checks, exactly as the
-CLI does, and compute both **before** any move or filing. Without them the
-checks count links to same-named notes in other folders, or to the chapter
-folder itself, as references; recomputed afterwards, they make a correct
-rename read as incomplete. Do not pass a prebuilt `vault_names` map
-to the rename API; it scans afresh on each plan. Only the splitting API
-accepts that map.
-
-After all blockers are resolved and any required authorization is established:
-
-```python
-moves, edits, blockers = rename_all(
-    vault, path, new_basename, dest=dest, apply=True
-)
-if blockers:
-    raise RuntimeError("Rename blocked: " + "; ".join(blockers))
-left = references(vault, obsolete_names(moves), dirs=old_dirs,
-                  directory_names=old_folders)
-if left:
-    raise RuntimeError("Incomplete rename; report remaining references: " + repr(left))
-```
-
-Verify **all obsolete names**, not just the old PDF basename: an image embed
-or source-note link can otherwise remain broken. `obsolete_names(moves)`
-excludes basenames preserved during filing and changes of case alone. The
-CLI performs this verification automatically.
-
-On a failed verification, stop and report the remaining references. Do not
-hand-patch them with global replacement: an old stem can be part of the new
-stem, so a second replacement may corrupt already-correct links. If applying
-raises `RenameFailed`, report whether rollback completed (`rolled_back`) and
-any state or recovery paths the exception names, then handle it as in
-[SKILL step 4](../SKILL.md#4-apply-then-verify-the-whole-family).
+On a failed apply or verification, follow
+[SKILL step 4](../SKILL.md#4-apply-then-verify-the-whole-family): report the
+remaining references and the rollback result, and never hand-patch them with
+a global replacement, since an old stem can be part of the new stem.

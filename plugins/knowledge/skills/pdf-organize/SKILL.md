@@ -36,7 +36,7 @@ chain of all these skills.
   select notes in `Wiki/`, `Articles/`, or the vault root, or figures in
   `Sources/Images/`, as independent rename targets. Derived files may follow
   their source through the guarded rename below.
-- Skip [feed-owned attachments](../../shared/CONVENTIONS.md#1-vault-folder-layout)
+- Skip [feed-owned attachments](../../shared/CONVENTIONS.md#1c-feed-owned-attachments)
   in every sweep, even under `Sources/PDFs/` (`canonical` reports
   `feed-owned, skipped`); their paths belong to the collector's receipts.
   `check` and `rename` refuse even a named one.
@@ -164,15 +164,24 @@ edition, bytes):
   as a last resort (never for a book); then re-plan.
 - **Own basename shared.** When another vault file shares the basename of
   the selected PDF or of a chapter in its family, the helper blocks the plan
-  unless [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
+  unless [conventions §1a](../../shared/CONVENTIONS.md#shared-pdf-basenames)
   exempts that copy. Report both paths and relay the helper's remedy.
 - **Target stem occupied.** `<new stem>_fig*` images or an
   `Articles/<new stem>.md` note outside the family, for the PDF or any of its
   renamed chapters, block the plan even when the figure manifest records the
-  images. If they came from this same document (for example, figures a
-  deck already embeds), report them and the notes that embed them, and ask
-  the user to clear them from that name before filing and restore them
-  afterward. Otherwise use a distinguishing title.
+  images. Report them and the notes citing them, which the blocker lists.
+  For figure-extract crops or a reading note of this same document, ask the
+  user to clear them from that name before filing and restore them
+  afterward (an unrecorded crop then goes through figure-extract's legacy
+  adoption). A clipping-clean note and its images keep their own name even
+  when they capture this same document: ask the user to rename them to a
+  free slug through clipping-clean before filing. Another tool's images,
+  such as a slide deck's crops, belong under that note's own stem
+  (`Doe_Study_2025_Slides_fig_1A.png`): ask the user to move them there
+  permanently, updating that note's embeds, before filing. Never put a
+  clipping's or another tool's files back under `<stem>_fig*` or
+  `Articles/<stem>.md`, where every figure inventory and summary lookup
+  counts them as the PDF's own. Otherwise use a distinguishing title.
 
 Never delete or move either copy yourself. Other blockers need their actual
 cause resolved. If the file is referenced and approval is absent, present the
@@ -191,14 +200,12 @@ including figures and notes. If verification fails, **report and stop that
 repair; do not hand-patch the reported notes**. Report the actual rollback
 result. A file changed after the scan is preserved and fails the apply
 closed: re-plan from the current files, and keep every recovery path the
-error names until reconciled. API callers must
-perform the verification described in
-[rename repair](references/rename-repair.md#api-calls-and-verification).
+error names until reconciled.
 
 In batches, handle each file independently with its own `check` and
 `rename` plan, never reusing names or collision decisions from the start of
-the batch. Record referenced files awaiting approval, `OSError`,
-unreadable/encrypted PDFs, and `SplitRefused`, then continue.
+the batch. Record referenced files awaiting approval, failed or refused
+plans and splits (nonzero exit), and unreadable/encrypted PDFs, then continue.
 
 ### 5. Test for a book and split only when justified
 
@@ -223,13 +230,14 @@ sets. A rename blocked in step 3 must be resolved before a dependent split.
 Name the old and new paths, explain uncertain metadata choices, and list
 chapters with their page ranges. Include note/sidecar repairs and any notes
 that could not be read. When the year changed, include the planned old and new
-`published` values for each owned summary note. Separate already-canonical
-files, already-split books, skipped feed-owned attachments, duplicate
-basenames, pending authorization, and failures. List Markdown captures and
-other non-PDF files in their own groups, so an inbox-wide request does not
-falsely read as empty. Do not delete originals, figures, or raw captures as
-cleanup.
+`published` values for each owned summary note, and say that a new dated value
+is `01-01` padding. A date already in the new year is the document's own and
+stays unchanged. Separate already-canonical files, already-split books,
+skipped feed-owned attachments, duplicate basenames, pending authorization,
+and failures. List Markdown captures and other non-PDF files in their own
+groups, so an inbox-wide request does not falsely read as empty. Do not delete
+originals, figures, or raw captures as cleanup.
 
-At closeout, read the [shared suggestion-log rules](../../shared/SUGGESTIONS.md)
-and apply them to `Reviews/pdf-organize-suggestions.md` and to the logs of
-producers whose outputs this run consumed.
+At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
+`Reviews/pdf-organize-suggestions.md` and to the logs of producers whose
+outputs this run consumed.

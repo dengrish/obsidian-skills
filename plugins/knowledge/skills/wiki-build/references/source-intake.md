@@ -9,7 +9,13 @@ in [source cases](source-cases.md).
 A source must be a durable file in the selected vault; an entry's URL item is never a builder source. For a bare URL, request
 its Web Clipper capture and route that capture through `clipping-clean` first.
 For pasted text, use an existing user-named vault file or obtain the exact
-destination before saving it. Never invent a persistent source
+destination before saving it. An apply run writes the text to a scratch file
+and saves it with `publish_files.py`: snapshot the destination to
+`<scratch>/source-snapshots.json`, which must record `absent`, then publish a
+one-item `<scratch>/source-manifest.json`, kept apart from the entry manifest
+(`--create-dir` only for an absent folder). A preview or no-apply run saves
+nothing and cites the proposed path provisionally. The saved file is an
+unpaired Markdown source. Never invent a persistent source
 filename or publish entries with unresolvable citations. Markdown sources keep
 their literal on-disk names.
 
@@ -32,17 +38,25 @@ python3 '<plugin>/shared/scripts/vault_artifacts.py' pdfs \
 
 Read the inventory JSON even on a nonzero exit. A non-canonical filename, an
 incomplete inventory, or a selection that is not `unique` blocks PDF
-processing:
+processing; `unique` proves only who owns the basename, not that a PDF outside
+the vault is that owner:
 
 - A non-canonical vault PDF: route it through `pdf-organize`, unless it is an
   explicitly named
   [feed-owned attachment](source-cases.md#inbox-captures-feed-attachments-and-research-extracts),
   the only naming exception.
-- No vault owner (a PDF outside the vault): unless the user asked to import
-  it, ask before copying it into `Inbox/` for `pdf-organize`; without
-  approval, stop and report. Leave the external original in place.
+- A PDF outside the vault whose basename one vault PDF owns
+  (`selection.matches`): that vault PDF is the cited document. First confirm
+  the external file is the same document (identical bytes, matching page count
+  and first-page text, or the user's word); then read the vault PDF, or use the
+  external file only as its readable copy (such as a decrypted scratch copy).
+  Otherwise stop and report both paths. Never import it under that basename.
+- No vault owner (a PDF outside the vault with empty `selection.matches`):
+  unless the user asked to import it, ask before copying it into `Inbox/` for
+  `pdf-organize`; without approval, stop and report. Leave the external
+  original in place.
 - Several owners: report both paths and follow the
-  [duplicate-basename remedy](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
+  [duplicate-basename remedy](../../../shared/CONVENTIONS.md#shared-pdf-basenames).
 - Anything else, such as an incomplete inventory: report the blocker.
 
 After a fix, restart intake from the final path and rerun both checks.
