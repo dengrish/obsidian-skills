@@ -26,7 +26,7 @@ Choose by the requested result, not just the input's file type.
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → new requested entries citing vault sources or web pages by URL, plus any newly filed PDFs |
-| Audit, correct, deepen or explicitly refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources or an exact producer mapping → scoped repairs, links, parents and MOCs |
+| Audit and repair existing wiki entries, or refactor them on request | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources, open note suggestions or an exact producer mapping → content repairs, retitles, missing entries, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
 
@@ -52,7 +52,7 @@ Inbox/*.md → clipping-clean → Articles/ cleaned clipping
 
 add-to-wiki.md or named topics → wiki-add → missing requested entries in Wiki/ (web pages cited by URL)
 
-Existing Wiki/ → wiki-lint → entry repairs, links, parents, MOCs and proposals
+Existing Wiki/ + open note suggestions → wiki-lint → entry repairs, missing entries, links, parents and MOCs
 
 Investments/x-accounts.md + rss-feeds.md → feed-collect → X notes + RSS articles
   → stock-research
@@ -86,17 +86,38 @@ wiki-build adds source-supported content only to the entries in its current
 run. wiki-lint owns retrospective work across the existing wiki. Their
 [linking ownership](shared/CONVENTIONS.md#9-ownership-split-for-linking) prevents
 later source merges from reversing deliberate maintenance decisions.
-For a named existing entry, wiki-lint may correct or deepen it from sources it
-already cites or carry out an explicitly requested structural or producer-mapped
-repair. Enriching an existing entry with new-source evidence still belongs to
-wiki-build.
+
+A default wiki-lint run, such as "lint my wiki", works in this order:
+
+1. **Task 1** checks every entry against the writing rules and fixes what
+   needs no source.
+2. **Task 1b** repairs content from the sources each entry already cites or
+   accurate background. It corrects and simplifies claims, deepens thin
+   explanations, settles conflicting claims (reading standard references
+   online, never citing them), consolidates an explanation duplicated across
+   entries into its owner, aligns notation, retitles ambiguous bare titles and
+   creates the missing entries the wiki's own entries need.
+3. **Task 2** adds and prunes links, including links to the new entries.
+4. **Task 3** rebuilds `parents:` and the MOCs.
+
+The run also works through the open items in
+`Reviews/wiki-notes-suggestions.md`: it re-verifies each one, fixes it and
+moves it to Fixed, leaving open only what it cannot complete, with the reason.
+A request for a narrower task or a set of entries limits the run. A thin entry
+whose teaching lives only in a chapter not yet built waits for that chapter's
+wiki-build. Splits, merges, deletions and producer-mapped repairs still need
+an explicit request. Enriching an existing entry with new-source evidence
+still belongs to wiki-build.
 
 [wiki-add](skills/wiki-add/SKILL.md) is the create-only research route for
 topics queued in `add-to-wiki.md` or a backlog the user selects, or named
 directly without a source document. It leaves every existing entry unchanged
 and checks off only queued topics it created or found already present;
 enriching an existing entry from a new source remains wiki-build's job, and
-deepening it from the sources it already cites is wiki-lint's.
+deepening it from the sources it already cites is wiki-lint's. wiki-lint also
+creates a missing entry its own run establishes, researched the same way but
+citing only a document the entries using the term already cite or a web page
+by URL, and links and places it in the same run.
 
 stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum
@@ -287,7 +308,7 @@ the origin used for deduplication, and a body marker distinguishes legacy
 wiki-add research extracts from full-text clippings. wiki-add reuses existing source
 notes only when Wiki entries already cite them (or, read-only, a legacy
 research extract), and reuses existing images,
-without overwriting either. Market research, MOCs, proposal logs and the topic
+without overwriting either. Market research, MOCs, suggestion logs and the topic
 queue stay outside `Wiki/` so they are not treated as entries.
 
 Each Wiki entry has exactly one discipline tag, or `"#misc"` alone when none
@@ -295,7 +316,8 @@ fits. Each active tag has a `Wiki/<discipline>.md` root with empty parents, a ci
 source like every entry (often the reference page it is derived from) and a
 generated outline in `MOCs/<discipline>-moc.md`; `parents:` name Wiki entries
 only, a root by its bare slug such as `[[biology]]`. New entries from wiki-build and wiki-add start with `parents: []` and
-stay out of the MOCs until wiki-lint places them. wiki-lint reviews every tree
+stay out of the MOCs until wiki-lint places them; wiki-lint places the entries
+it creates in the same run. wiki-lint reviews every tree
 and parent for conceptual coherence, without a fixed depth limit. The
 [tag and hierarchy rules](shared/CONVENTIONS.md#3-the-discipline-tag-enum) and
 wiki-lint's [MOC procedure](skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files)
@@ -315,9 +337,10 @@ ordinary temporary material when no longer needed and report anything retained
 for review, retry, or guarded-write recovery. Same-filesystem publication
 staging keeps its separate [safe-write rules](shared/SAFE_WRITES.md#stage-complete-bytes-off-the-public-path).
 
-No skill discards user content. An authorized reprocess or refactor may
-conditionally remove an obsolete path only after its replacement and dependent
-references are safely published and verified; a later occupant always survives.
+No skill discards user content. A reprocess, retitle or refactor within its
+workflow's authorized scope may conditionally remove an obsolete path only
+after its replacement and dependent references are safely published and
+verified; a later occupant always survives.
 Content the user explicitly names for deletion, such as a wiki-lint deletion
 refactor or a named card removal, is removed only through that protocol, after
 its inbound references are resolved.

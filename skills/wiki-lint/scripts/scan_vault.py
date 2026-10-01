@@ -207,12 +207,14 @@ from entry_checks import (  # noqa: E402
     BOLD_OUTER_RE as _BOLD_OUTER_RE,
     BOLD_PAREN_RE,
     COMMON_NOUNS,
+    CROSS_DOMAIN_PHRASES,
     LEGACY_EXTRA_PREFIX,
     PAREN_LEADIN_RE,
     SHARED_MUTATIONS,
     SHARED_QUIET,
     SOURCE_REFERENCE_FORMS,
     acronym_counterpart,
+    acronym_expansion_missing,
     api_surface_findings,
     bare_common_noun_slug,
     bare_word_alias_candidate,
@@ -916,11 +918,14 @@ def _index_surfaces(surf_map):
     by_tokens, maxwords = {}, 0
     for s in surf_map:
         # Plurals and aliases cannot make a forbidden bare destination safe:
-        # excluding only "entropy" still proposed [[entropy|entropies]].
-        if s in COMMON_NOUNS or fold_name(surf_map[s]) in COMMON_NOUNS: continue
+        # excluding only "entropy" still proposed [[entropy|entropies]]. A
+        # cross-domain phrase ("tree of life") is excluded like a set word.
+        if s in COMMON_NOUNS or bare_common_noun_slug(fold_name(surf_map[s])):
+            continue
         m = list(WORD.finditer(s))
         if not m: continue
         key = " ".join(t.group(0) for t in m)
+        if key in CROSS_DOMAIN_PHRASES: continue
         by_tokens.setdefault(key, []).append((s, m[0].start()))
         maxwords = max(maxwords, len(m))
     for cands in by_tokens.values():       # longest surface first, as the alternation was
@@ -2628,7 +2633,7 @@ def scan(wiki, images=None, vault=None):
             e["path_key"]
             if fold_name(sl) in ambiguous_files else "")
         fm_raw, title = e["fm_raw"], e["title"]
-        # ---- item 5: slug == filename; bare-slug common noun ----
+        # ---- item 5: slug == filename; bare-slug cross-domain term ----
         _newslug = slug(title) if title else ""
         if title and not _newslug:
             problems.append((sl,"item5",f'title "{title[:60]}" cannot be slugged automatically (it reduces to '
@@ -2637,7 +2642,10 @@ def scan(wiki, images=None, vault=None):
         elif title and _newslug != sl:
             problems.append((sl,"item5",f'title "{title}" slugs to "{_newslug}" ≠ filename'))
         if bare_common_noun_slug(sl):
-            problems.append((sl,"item5",f'bare-slug common noun "{sl}" — qualify the title'))
+            problems.append((sl,"item5",f'bare-slug cross-domain term "{sl}" — retitle it through '
+                                        f'the entry-retitle protocol when special-titles.md determines '
+                                        f'its qualified title and that slug is free; the bare slug never '
+                                        f'stays an alias'))
         # ---- item 2: field order, required keys, duplicate keys, quoting ----
         known = [k for k in e["key_order"] if k in CANON]
         if [CANON.index(k) for k in known] != sorted(CANON.index(k) for k in known):
@@ -3113,13 +3121,29 @@ def scan(wiki, images=None, vault=None):
                                              f'wiki-build/references/rare-types.md '
                                              f'(including qualifier punctuation and '
                                              f'en-dash spacing)'))
+        # An all-capital acronym title (MNIST, not ROC curve or MLOps) opens
+        # with its full form: the shared floor lint_entry also runs. An
+        # all-capital name that is no acronym (ELIZA) still matches the shape,
+        # so the message names that exit rather than demanding an expansion.
+        if acronym_expansion_missing(title, opening_paragraph(e["prose"].lstrip())):
+            problems.append((
+                sl, "item9/acronym-expansion",
+                f'acronym title "{base_term(title)}" has no full-form '
+                f'parenthetical directly after its bolded opener title — add '
+                f'the expansion there (wiki-build writing.md principle 5(f)) '
+                f'from the cited source or accurate background; then apply '
+                f"item 17's alias gates and, when the alias is added, item "
+                f"19's line-3 counterpart. A title whose letters stand for no "
+                f'established full form keeps its opener'))
         for line_no, cue_line in navigation_only_link_lines(e["prose"]):
             problems.append((
                 sl, "item9/imperative-link",
                 f'navigation-only cross-reference on prose line {line_no}: '
-                f'"{cue_line[:100]}" — integrate it only when adjacent prose '
-                f'already states the relationship without adding a claim; '
-                f'otherwise preserve it and propose a source-backed correction'))
+                f'"{cue_line[:100]}" — integrate it where adjacent prose already '
+                f'states the relationship without adding a claim; otherwise '
+                f'Task 1b states the relationship from the entry\'s or the '
+                f'linked entry\'s cited source, or accurate background, and '
+                f'integrates the link'))
         # Listings are presentation samples and must not be parsed as
         # headings, but inline code is itself forbidden heading markup.
         heading_lines = strip_indented(strip_fenced(e["prose"])).split("\n")
@@ -4358,9 +4382,11 @@ def scan(wiki, images=None, vault=None):
     problems.current_path = ""
 
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
-    # not an automatic deletion. It caught a full optimization sentence copied
-    # verbatim into both Logistic regression and Log loss: each entry was clean
-    # in isolation, while only one was the appropriate conceptual owner.
+    # not proof that either copy is wrong: each entry is clean in isolation,
+    # while only one is the explanation's owner. Task 1b keeps the owner's
+    # copy and trims the others to their role plus a link; refactors.md, not
+    # this message, chooses the owner (a family-wide property goes to the
+    # family's entry, not to the most specific one).
     sentence_owners = {}
     for _slug, _entry in sorted(entries.items()):
         for _normalized, _surface in duplicate_sentence_surfaces(
@@ -4379,10 +4405,10 @@ def scan(wiki, images=None, vault=None):
             problems.append((
                 _slug, "item9/duplicate-sentence",
                 "a long prose sentence has the same normalized word sequence "
-                "in %s: %r — preserve both until source evidence and conceptual "
-                "ownership support consolidation; apply it only under explicit "
-                "refactor authorization naming the operation or affected "
-                "entries and outcome (a generic lint/fix request is insufficient)"
+                "in %s: %r — Task 1b consolidates it in its owner under the "
+                "refactors.md consolidation rule and trims every other copy "
+                "to its role plus a link to the owner; normalized similarity "
+                "alone never chooses the owner"
                 % (", ".join(_peers), _snippet)))
 
     # ---- discipline-tag census (VALID enum slugs vs off-enum/malformed) ----
@@ -4426,7 +4452,7 @@ def scan(wiki, images=None, vault=None):
                  for item,(cnt,ents) in sorted(tally.items(),
                                                key=lambda kv: (-len(kv[1][1]), -kv[1][0], kv[0]))]
 
-    # ---- Rename candidates (item 5): filename != slug(title). PROPOSE for approval — never auto-apply (a rename rewrites links vault-wide). ----
+    # ---- Rename candidates (item 5): filename != slug(title). Task 1b applies one through the entry-retitle protocol when its slug is free (a rename rewrites links vault-wide). ----
     inbound = {}
     for _e in entries.values():
         # Count actual entry links against the path record they resolve to.
@@ -6161,26 +6187,68 @@ def run_self_test():
               duplicate_sentence_surfaces(math_a)[0][1].find("$x+y$") >= 0,
               True)
 
-        # special-titles.md's common-noun corpus is the scanner's mechanical
-        # minimum.  A single fixture over every term prevents additions to one
-        # copied list from silently escaping both the filename and backfill
-        # gates.
+        # special-titles.md's cross-domain corpus, its words and its phrases,
+        # is the scanner's mechanical minimum.  A single fixture over every
+        # term prevents additions to one copied list from silently escaping
+        # both the filename and backfill gates.
         v = os.path.join(tmp, "v4d")
-        for term in sorted(COMMON_NOUNS):
+        _phrase_slugs = {phrase.replace(" ", "-") for phrase in CROSS_DOMAIN_PHRASES}
+        _corpus = sorted(COMMON_NOUNS | CROSS_DOMAIN_PHRASES)
+        for term in _corpus:
             title = term.capitalize()
-            _st_write(v, term + ".md", _st_entry(
+            _st_write(v, term.replace(" ", "-") + ".md", _st_entry(
                 title, "**%s** is a worked example." % title, card=title))
         _st_write(v, "reader.md", _st_entry(
-            "Reader", "**Reader** compares " + ", ".join(sorted(COMMON_NOUNS))
-            + "."))
+            "Reader", "**Reader** compares " + ", ".join(_corpus) + "."))
         res4d = scan(v)
+        _bare = {p["slug"] for p in res4d["problems"]
+                 if p["item"] == "item5"
+                 and "bare-slug cross-domain term" in p["message"]}
         check("every explicitly named common noun is rejected as a bare slug",
-              {p["slug"] for p in res4d["problems"]
-               if p["item"] == "item5" and "bare-slug common noun" in p["message"]},
-              COMMON_NOUNS)
+              _bare - _phrase_slugs, COMMON_NOUNS)
+        check("every cross-domain phrase is rejected as a bare hyphenated slug",
+              _bare & _phrase_slugs, _phrase_slugs)
         check("none of the common-noun corpus becomes an automatic backfill target",
               [b for b in res4d["backfill_candidates"]
                if b["slug"] == "reader" and b["target"] in COMMON_NOUNS], [])
+        check("no cross-domain phrase becomes an automatic backfill target either",
+              [b for b in res4d["backfill_candidates"]
+               if b["slug"] == "reader" and b["target"] in _phrase_slugs], [])
+        check("a bare cross-domain slug is retitled, never kept as an alias",
+              ("entry-retitle protocol" in _st_msg(res4d, "tree-of-life", "item5"),
+               "never stays an alias" in _st_msg(res4d, "tree-of-life", "item5")),
+              (True, True))
+
+        # wiki-build writing.md principle 5(f): an all-capital acronym title
+        # opens with its full form; ROC curve and MLOps are outside the floor.
+        v = os.path.join(tmp, "v4e-acronym")
+        _st_write(v, "mnist.md", _st_entry(
+            "MNIST", "**MNIST** is a dataset of handwritten digits."))
+        _st_write(v, "atp.md", _st_entry(
+            "ATP", "**ATP** (adenosine triphosphate) is a cell's chemical fuel.",
+            aliases=('"adenosine-triphosphate"',),
+            card="ATP (adenosine triphosphate)"))
+        _st_write(v, "ilsvrc.md", _st_entry(
+            "ILSVRC", "**ILSVRC** (2010–2017) was an annual competition.",
+            type_="Event"))
+        _st_write(v, "roc-curve.md", _st_entry(
+            "ROC curve", "A **ROC curve** plots two error rates."))
+        _st_write(v, "mlops.md", _st_entry(
+            "MLOps", "**MLOps** applies DevOps practice to models."))
+        res4e = scan(v)
+        check("an acronym title without its opener expansion is item9's "
+              "acronym finding, also after a date alone",
+              [(slug, "item9/acronym-expansion" in _st_keys(res4e, slug))
+               for slug in ("mnist", "ilsvrc", "atp", "roc-curve", "mlops")],
+              [("mnist", True), ("ilsvrc", True), ("atp", False),
+               ("roc-curve", False), ("mlops", False)])
+        check("the acronym finding names the title, the principle and the "
+              "no-full-form exit",
+              ('"MNIST"' in _st_msg(res4e, "mnist", "item9/acronym-expansion"),
+               "5(f)" in _st_msg(res4e, "mnist", "item9/acronym-expansion"),
+               "no established full form" in _st_msg(
+                   res4e, "mnist", "item9/acronym-expansion")),
+              (True, True, True))
 
         # ------------------------------------------------------------------
         # 5. item 13 (stray key) and item 2 (unexpected key)

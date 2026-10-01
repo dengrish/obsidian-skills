@@ -41,7 +41,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   5   5-slug                  re-run slugify on title:; must equal the filename
   5   5-bare-common-noun      the filename is a bare term from
                               special-titles.md's cross-domain corpus (shared
-                              COMMON_NOUNS)
+                              COMMON_NOUNS and CROSS_DOMAIN_PHRASES);
+                              report-only, since an existing entry's
+                              retitle is wiki-lint's
   6   6-api-surface           non-Software entry: fenced code or any
                               backticked identifier (error); a
                               code-identifier title or a library/how-to
@@ -56,6 +58,12 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   9   9-person-event-date     Person/Event opener has a date parenthetical in
                               a documented form immediately after its bold
                               subject
+      9-acronym-expansion     an all-capital acronym title (MNIST, not ROC
+                              curve or MLOps) whose bolded opener title has no
+                              expansion parenthetical directly after it, past
+                              a date (warning, review-only: a recorded
+                              decision that the title is a name, not an
+                              acronym, resolves it)
       9-link-integration      navigation-only cue points directly at a body
                               wikilink (listings/displays masked)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
@@ -186,13 +194,14 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               an inflected or derived head, an alias, or a term
                               the target defines in italics passes (warning)
 
-Items 5, 6, 13, 14, 16 and 18, item 7's description subject, and item 19's
-card set, primary answer (card line 3), primary card, Spaced Repetition
-marker floor and discipline-root test, share their per-entry rules with
-wiki-lint's scanner through ``shared/scripts/entry_checks.py``; the
-Related/Flashcards section markers come from ``entry_structure.py``. Item
-10's self-link rule is implemented here and in the scanner;
-``SHARED_MUTATIONS`` holds both to the same fixtures.
+Items 5, 6, 13, 14, 16 and 18, item 7's description subject, item 9's
+acronym-title expansion, and item 19's card set, primary answer (card line
+3), primary card, Spaced Repetition marker floor and discipline-root test,
+share their per-entry rules with wiki-lint's scanner through
+``shared/scripts/entry_checks.py``; the Related/Flashcards section markers
+come from ``entry_structure.py``. Item 10's self-link rule is implemented
+here and in the scanner; ``SHARED_MUTATIONS`` holds both to the same
+fixtures.
 
 NOT implemented (out of scope by design): item 4's file existence and page
 correctness, item 9's semantic flow/atomicity judgments, item 10's dangling
@@ -380,6 +389,7 @@ from entry_checks import (  # noqa: E402
     SHARED_QUIET,
     SOURCE_REFERENCE_FORMS,
     acronym_counterpart,
+    acronym_expansion_missing,
     api_surface_findings,
     bare_common_noun_slug,
     bare_word_alias_candidate,
@@ -1555,6 +1565,30 @@ def _check_person_event_date(fm, sections, findings):
             "en-dash spacing)" % entry_type))
 
 
+def _check_acronym_expansion(fm, sections, findings):
+    """Item 9: an acronym title's opener gives its full form (warning).
+
+    The shared floor (``acronym_expansion_missing``) reads only all-capital
+    titles such as MNIST; whether the parenthetical is the right expansion
+    stays with the executing agent. An all-capital name that is no acronym
+    (ELIZA) matches the same shape, so the finding is ``review_only``: a
+    recorded decision that the title is a name resolves it, and a run never
+    invents an expansion to silence it.
+    """
+    title, _aliases, opener, _type = _primary_answer_inputs(fm, sections)
+    if acronym_expansion_missing(title, opener):
+        term = base_term(title) if has_parenthetical(title) else title
+        findings.append(_f(
+            "9-acronym-expansion", "warning",
+            "acronym title %r: put its full form in parentheses directly "
+            "after the bolded opener title, after any Person/Event date "
+            "(writing.md principle 5(f): **DBSCAN** (Density-Based Spatial "
+            "Clustering of Applications with Noise)); review-only: a "
+            "recorded decision that %r is a name, not an acronym, resolves "
+            "it" % (term, term),
+            {"title": title, "review_only": True}))
+
+
 def _check_code_typography(sections, findings):
     """Enforce item 16's backticks on safe, recognizable prose shapes."""
     body = "\n".join(sections["prose_lines"])
@@ -1594,18 +1628,20 @@ def _file_line(first_line, finding):
 def _check_bare_common_noun(findings, filename):
     """Item 5: a bare filename from special-titles.md's cross-domain corpus.
 
-    The error is ``report_only``: a merge into an existing bare-slug entry
-    reports the rename proposal it may not apply, while a new entry must
-    still be qualified.
+    The corpus holds single words and short phrases (``tree-of-life``). The
+    error is ``report_only``: a merge into an existing bare-slug entry
+    reports the retitle it may not apply, which the next ordinary wiki-lint
+    run applies, while a new entry must still be qualified.
     """
     stem = os.path.splitext(os.path.basename(filename))[0]
     if bare_common_noun_slug(stem):
         findings.append(_f(
             "5-bare-common-noun", "error",
-            "bare-slug common noun %r -- qualify a new entry's title as "
+            "bare-slug cross-domain term %r -- qualify a new entry's title as "
             "special-titles.md's cross-domain tests require and re-run "
-            "find_collisions.py on it; an existing entry's rename stays a "
-            "proposal" % stem,
+            "find_collisions.py on it; the next ordinary wiki-lint run "
+            "retitles an existing entry and never keeps the bare slug as an "
+            "alias" % stem,
             {"slug": stem, "report_only": True}))
 
 
@@ -2276,6 +2312,7 @@ def lint_text(text, filename):
     _check_self_links(fm, sections, findings, filename)
     _check_integrated_wikilinks(fm, sections, findings)
     _check_person_event_date(fm, sections, findings)
+    _check_acronym_expansion(fm, sections, findings)
     _check_image_captions(fm, sections, findings)
     _check_equation_coverage_candidates(fm, sections, findings, extras)
     _check_literal_dollars("\n".join(sections["prose_lines"]), findings)
@@ -4888,6 +4925,42 @@ def run_self_test():
               entropy, "entropy.md")["findings"]
            if f["item"] == "5-bare-common-noun"],
           [("error", {"slug": "entropy", "report_only": True})])
+    tree = retitled(
+        "Tree of life", "phylogenetic-tree",
+        "The tree of life models the evolutionary relationships of organisms.",
+        "The **tree of life** models the evolutionary relationships of "
+        "organisms.", "Tree of life")
+    check("a bare cross-domain phrase slug is item 5's error; its qualified "
+          "title is not",
+          (found(tree, "5-", "tree-of-life.md"),
+           found(tree.replace('title: "Tree of life"',
+                              'title: "Tree of life (biology)"'),
+                 "5-", "tree-of-life-biology.md")),
+          ([("5-bare-common-noun", "error")], []))
+    mnist = retitled(
+        "MNIST", "modified-national-institute-of-standards-and-technology",
+        "MNIST is a dataset of handwritten digit images.",
+        "**MNIST** (Modified National Institute of Standards and Technology) "
+        "is a dataset of handwritten digit images.",
+        "MNIST (Modified National Institute of Standards and Technology)",
+        type_="Dataset")
+    check("an acronym title that expands in the opener passes item 9",
+          items(mnist, "mnist.md"), [])
+    check("an acronym title without its expansion is item 9's warning",
+          [(f["item"], f["severity"], f["evidence"]) for f in lint_text(
+              mnist.replace(" (Modified National Institute of Standards and "
+                            "Technology) is", " is", 1)
+              .replace("MNIST (Modified National Institute of Standards and "
+                       "Technology)\n", "MNIST\n"), "mnist.md")["findings"]],
+          [("9-acronym-expansion", "warning",
+            {"title": "MNIST", "review_only": True})])
+    check("item 9's acronym floor leaves a mixed-case or multiword title alone",
+          (found(good, "9-"),
+           found(retitled("MLOps", "machine-learning-operations",
+                          "MLOps applies DevOps practice to machine learning.",
+                          "**MLOps** applies DevOps practice to machine "
+                          "learning.", "MLOps"), "9-", "mlops.md")),
+          ([], []))
     check("item 6: identifiers and fences are errors, framing is a warning",
           sorted((f["evidence"]["check"], f["severity"])
                  for f in lint_text(with_paragraph(

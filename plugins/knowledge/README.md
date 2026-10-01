@@ -12,7 +12,15 @@ both may use the same selected vault.
 | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | Clean Web Clipper captures |
 | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | Build or enrich entries from new sources |
 | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | Research missing queued or named topics |
-| [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | Maintain entries, links, parents and MOCs |
+| [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | Repair entries, add missing ones, and maintain links, parents and MOCs |
+
+A default wiki-lint run fixes what it finds. It checks every entry, repairs
+content from the sources each entry already cites or accurate background,
+settles conflicting claims against standard references read online,
+consolidates duplicated explanations, retitles ambiguous titles and creates
+missing entries the wiki needs, then maintains links, parents and MOCs. It
+also works through the open items in `Reviews/wiki-notes-suggestions.md`.
+Splits, merges and deletions need an explicit request.
 
 ## Setup
 

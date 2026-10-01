@@ -6028,7 +6028,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 96,
+    "shared/scripts/entry_checks.py": 101,
     "shared/scripts/equation_coverage.py": 192,
     "shared/scripts/figure_state.py": 14,
     "shared/scripts/introduced_aliases.py": 36,
@@ -6088,13 +6088,13 @@ SELFTEST_MIN_CASES = {
     "skills/figure-extract/scripts/render_page.py": 68,
     "skills/pdf-organize/scripts/organize.py": 415,
     "skills/wiki-add/scripts/backlog.py": 54,
-    "skills/wiki-build/scripts/find_collisions.py": 78,
+    "skills/wiki-build/scripts/find_collisions.py": 79,
     # 2026-09-30: lowered after the discipline-root empty-sources exemption
     # and its cases were removed (roots now cite a source like every entry).
-    "skills/wiki-build/scripts/lint_entry.py": 446,
+    "skills/wiki-build/scripts/lint_entry.py": 450,
     "skills/wiki-build/scripts/review_tree.py": 40,
     "skills/wiki-build/scripts/vault_index.py": 88,
-    "skills/wiki-lint/scripts/scan_vault.py": 625,
+    "skills/wiki-lint/scripts/scan_vault.py": 630,
 }
 
 
