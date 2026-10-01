@@ -463,6 +463,20 @@ def run_self_test(verbose=False):
             ["**Archaea** (singular, *archaeon*) are prokaryotes."],
             "Archaea", [], "archaea"),
         [])
+    add("irregular plural of a canonical singular is not a missing alias",
+        missing_introduced_aliases(
+            ["A **cilium** (plural *cilia*) is a hairlike projection."],
+            "Cilium", [], "cilium"),
+        [])
+    add("a listed cross-domain word or phrase is never a missing alias",
+        [missing_introduced_aliases([prose], title, [], slug)
+         for prose, title, slug in (
+             ("**Multicollinearity**, also called *collinearity*, couples "
+              "features.", "Multicollinearity", "multicollinearity"),
+             ("**Online machine learning**, also called *online learning*, "
+              "learns incrementally.", "Online machine learning",
+              "online-machine-learning"))],
+        [[], []])
 
     failed = 0
     for name, got, expected in cases:

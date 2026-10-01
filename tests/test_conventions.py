@@ -6028,10 +6028,10 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 95,
+    "shared/scripts/entry_checks.py": 96,
     "shared/scripts/equation_coverage.py": 192,
     "shared/scripts/figure_state.py": 14,
-    "shared/scripts/introduced_aliases.py": 34,
+    "shared/scripts/introduced_aliases.py": 36,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
@@ -6040,7 +6040,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/publish_files.py": 25,
-    "shared/scripts/plurals.py": 259,
+    "shared/scripts/plurals.py": 265,
     "shared/scripts/slugify.py": 80,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 72,
     "shared/scripts/yaml_scalars.py": 16,
@@ -6094,7 +6094,7 @@ SELFTEST_MIN_CASES = {
     "skills/wiki-build/scripts/lint_entry.py": 446,
     "skills/wiki-build/scripts/review_tree.py": 40,
     "skills/wiki-build/scripts/vault_index.py": 88,
-    "skills/wiki-lint/scripts/scan_vault.py": 624,
+    "skills/wiki-lint/scripts/scan_vault.py": 625,
 }
 
 
@@ -7290,6 +7290,51 @@ def check_link_rules(rep, conv):
             n_files)
 
 
+def check_cross_domain_corpus(rep, _conv):
+    """special-titles.md test (c) and the checkers' floor name the same terms.
+
+    ``entry_checks.COMMON_NOUNS`` and ``CROSS_DOMAIN_PHRASES`` are the
+    explicit mechanical floor of wiki-build's cross-domain test (c). A term
+    added to only one of them either escapes the checkers or is enforced
+    without a written rule, so both must hold exactly the same terms.
+    """
+    check = "cross-domain-corpus"
+    doc = os.path.join(SKILLS_DIR, "wiki-build", "references",
+                       "special-titles.md")
+    try:
+        text = read(doc)
+    except OSError as exc:
+        rep.fail(check, "special-titles.md cannot be read (%s)" % exc,
+                 rel(doc))
+        return
+    m = re.search(r"^- \*\*\(c\) Common-noun test\.\*\*.*$", text, re.M)
+    if not m:
+        rep.fail(check, "special-titles.md no longer has its test (c) "
+                        "bullet, the written floor the checkers mirror",
+                 rel(doc))
+        return
+    written = {term for term in re.findall(r"`([^`]+)`", m.group(0))
+               if term == term.lower()}
+    path = os.path.join(SHARED_DIR, "scripts", "entry_checks.py")
+    try:
+        module = _load_module(path, "_shared_entry_checks_corpus")
+        floor = (set(module.COMMON_NOUNS)
+                 | set(module.CROSS_DOMAIN_PHRASES))
+    except (HarnessError, OSError, SyntaxError, AttributeError) as exc:
+        rep.fail(check, "entry_checks.py's cross-domain floor cannot be "
+                        "loaded (%s)" % exc, rel(path))
+        return
+    only_written, only_code = sorted(written - floor), sorted(floor - written)
+    if only_written or only_code:
+        rep.fail(check, "special-titles.md test (c) and entry_checks' "
+                        "cross-domain floor differ: written only %s; code "
+                        "only %s" % (only_written, only_code),
+                 at(doc, m.start(), text))
+    else:
+        rep.ok(check, "test (c) and the checkers' floor name the same %d "
+                      "terms" % len(floor), rel(doc))
+
+
 def check_physical_page(rep, conv):
     """§7's physical-page rule: every `#page=` explanation stays physical.
 
@@ -8118,6 +8163,7 @@ CHECKS = [
     check_equation_policy,
     check_moc_placement,
     check_link_rules,
+    check_cross_domain_corpus,
     check_physical_page,
     check_autonomous_wiki_lint,
     check_review_before_publication,

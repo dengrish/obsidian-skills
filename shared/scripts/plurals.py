@@ -74,7 +74,8 @@ IRREGULAR_PLURALS = {
     "taxon": "taxa", "phylum": "phyla", "alga": "algae",
     "larva": "larvae", "vertebra": "vertebrae", "ovum": "ova",
     "stratum": "strata", "focus": "foci", "locus": "loci",
-    "cortex": "cortices", "apex": "apices",
+    "cortex": "cortices", "apex": "apices", "cilium": "cilia",
+    "flagellum": "flagella",
 }
 IRREGULAR_SINGULARS = {
     IRREGULAR_PLURALS[key]: key for key in IRREGULAR_PLURALS
@@ -298,7 +299,8 @@ PLURAL_PAIRS = [
     ("taxa", "taxon"), ("phyla", "phylum"), ("algae", "alga"),
     ("larvae", "larva"), ("vertebrae", "vertebra"), ("ova", "ovum"),
     ("strata", "stratum"), ("foci", "focus"), ("loci", "locus"),
-    ("cortices", "cortex"), ("apices", "apex"),
+    ("cortices", "cortex"), ("apices", "apex"), ("cilia", "cilium"),
+    ("flagella", "flagellum"),
     # --- -f / -fe plurals that really are -ves ---
     ("halves", "half"), ("knives", "knife"), ("wolves", "wolf"),
     ("shelves", "shelf"), ("lives", "life"), ("wives", "wife"),
