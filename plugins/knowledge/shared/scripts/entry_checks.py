@@ -3,9 +3,9 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 7's description subject, item 17's single-word alias hint, and item 19's
-card set, primary answer on card line 3, primary card and Spaced Repetition
-markers in the body and on card lines)
+item 7's description subject, item 9's acronym-title expansion, item 17's
+single-word alias hint, and item 19's card set, primary answer on card line
+3, primary card and Spaced Repetition markers in the body and on card lines)
 and the discipline-root test from this one copy, so an entry that passes the
 builder gate does not fail the next scan on the same mechanical rule. Each
 check returns dictionaries with a ``check`` name, a ``message`` and evidence,
@@ -67,6 +67,7 @@ __all__ = [
     "SR_INLINE_SEPARATORS",
     "SOURCE_REFERENCE_FORMS",
     "acronym_counterpart",
+    "acronym_expansion_missing",
     "api_surface_findings",
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
@@ -121,10 +122,12 @@ COMMON_NOUNS = frozenset({
 
 #: The same floor's short common-word phrases, whose other sense is as
 #: familiar as the discipline one (``online learning`` also names
-#: internet-based education). Like a set word, a phrase is never proposed as
-#: an alias; a target that introduces one in italics accepts it as a label.
+#: internet-based education; ``tree of life`` the mythological motif). Like
+#: a set word, a phrase is never proposed as an alias and never a bare
+#: filename; a target that introduces one in italics accepts it as a label.
 CROSS_DOMAIN_PHRASES = frozenset({
     "online learning",
+    "tree of life",
 })
 
 #: Appended to an item-17 alias-candidate message for a single-word candidate
@@ -136,8 +139,15 @@ BARE_WORD_ALIAS_HINT = (
 
 
 def bare_common_noun_slug(slug):
-    """Whether a filename stem is a bare term from the cross-domain floor."""
-    return "-" not in (slug or "") and slug in COMMON_NOUNS
+    """Whether a filename stem is a bare term from the cross-domain floor.
+
+    A hyphen-free stem is bare when it is a :data:`COMMON_NOUNS` word; a
+    hyphenated one when it spells a :data:`CROSS_DOMAIN_PHRASES` phrase
+    (``tree-of-life``). A qualified stem (``tree-of-life-biology``) is not.
+    """
+    slug = slug or ""
+    return (("-" not in slug and slug in COMMON_NOUNS)
+            or slug.replace("-", " ") in CROSS_DOMAIN_PHRASES)
 
 
 def bare_word_alias_candidate(candidate_slug, title, surface=""):
@@ -333,6 +343,51 @@ def description_subject_findings(description, title):
                     % ", ".join('"%s"' % form for form in forms)),
         "evidence": {"description": description, "expected_subjects": forms},
     }]
+
+
+# ---------------------------------------------------------------------------
+# item 9: an acronym title's expansion
+# ---------------------------------------------------------------------------
+
+#: One token of capital letters and digits, optionally hyphenated (``MNIST``,
+#: ``GPT-3``); the caller also requires two capitals.
+_ACRONYM_TITLE_RE = re.compile(r"[A-Z0-9]+(?:-[A-Z0-9]+)*")
+
+#: An expansion parenthetical directly after the bold, past the noun
+#: ``algorithm`` and a date parenthetical as in :data:`BOLD_PAREN_RE`, but
+#: without its 60-character cap, which a long expansion exceeds.
+_EXPANSION_AFTER_BOLD_RE = re.compile(
+    r"(?:\s+algorithm)?\s*"
+    r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)[^()\n]*\)\s*)?"
+    r"\([A-Za-z*_]", re.IGNORECASE)
+
+
+def acronym_expansion_missing(title, opener):
+    """Item 9: whether an acronym-titled entry's opener omits its full form.
+
+    wiki-build writing.md principle 5(f) opens an acronym-titled entry with
+    its expansion in parentheses directly after the bolded title, past a
+    Person or Event date: ``**DBSCAN** (Density-Based Spatial Clustering of
+    Applications with Noise)``. The floor applies only when the title, or a
+    disambiguated title's base term, is one token of capital letters and
+    digits, optionally hyphenated, with at least two capitals and no
+    lowercase letter (``MNIST``, ``ATP``; not ``ROC curve``, ``MLOps`` or
+    ``SARS-CoV-2``). ``opener`` is the opening paragraph, hard wraps allowed.
+    It reports only an opener that bolds the title, since a missing or
+    different bold is the bold-opener check's finding, and it does not judge
+    the parenthetical's wording.
+    """
+    title = (title or "").strip()
+    term = base_term(title) if has_parenthetical(title) else title
+    if (not _ACRONYM_TITLE_RE.fullmatch(term)
+            or sum(1 for ch in term if ch.isupper()) < 2):
+        return False
+    opening = " ".join(line.strip() for line in (opener or "").splitlines())
+    bolds = [match for match in BOLD_OUTER_RE.finditer(opening)
+             if first_letter_ci_equal(
+                 math_title_plain_text(bold_parts(match)[0].strip()), term)]
+    return bool(bolds) and not any(
+        _EXPANSION_AFTER_BOLD_RE.match(opening, match.end()) for match in bolds)
 
 
 # ---------------------------------------------------------------------------
@@ -1477,6 +1532,15 @@ def run_self_test(verbose=False):
           [bare_common_noun_slug(value) for value in
            ("entropy-information-theory", "precision", "", None)],
           [False, False, False, False])
+    check("a corpus word or a hyphenated corpus phrase is a bare slug",
+          [bare_common_noun_slug(value) for value in
+           ("entropy", "tree-of-life", "online-learning")],
+          [True, True, True])
+    check("a qualified or longer phrase slug passes the floor",
+          [bare_common_noun_slug(value) for value in
+           ("tree-of-life-biology", "online-machine-learning",
+            "Tree-of-life")],
+          [False, False, False])
     check("single-word alias candidates of qualified or common subjects",
           [bare_word_alias_candidate(slug, title) for slug, title in (
               ("sensitivity", "Recall (machine learning)"),
@@ -1968,6 +2032,42 @@ def run_self_test(verbose=False):
     check("a valid subject has no item-7 subject finding",
           description_subject_findings("A feature supplies an input.",
                                        "Feature (machine learning)"), [])
+
+    # item 9: an acronym title's expansion (one copy for both tools)
+    check("an acronym title whose bolded opener title has no parenthetical "
+          "misses its expansion",
+          [acronym_expansion_missing(title, opener) for title, opener in (
+              ("MNIST", "**MNIST** is a dataset of handwritten digits."),
+              ("MNIST", "The **MNIST** dataset (1998) holds digits."),
+              ("GPT-3", "**GPT-3** is a language model."),
+              ("ILSVRC", "**ILSVRC** (2010–2017) ranked models."),
+              ("DNA (biology)", "**DNA** is the genetic material."))],
+          [True, True, True, True, True])
+    check("an expansion directly after the bolded title, past a date, a hard "
+          "wrap or a short-for lead-in, satisfies the floor",
+          [acronym_expansion_missing(title, opener) for title, opener in (
+              ("MNIST", "**MNIST** (Modified National Institute of Standards "
+                        "and Technology) is a dataset."),
+              ("ATP", "**ATP**\n(adenosine triphosphate) is the fuel."),
+              ("ILSVRC", "**ILSVRC** (2010–2017) (ImageNet Large Scale Visual "
+                         "Recognition Challenge) ranked models."),
+              ("DBSCAN", "**DBSCAN** (short for *density-based spatial "
+                         "clustering of applications with noise*) clusters."))],
+          [False, False, False, False])
+    check("titles that are not one all-capital token, and openers without "
+          "the bolded title, are outside the floor",
+          [acronym_expansion_missing(title, opener) for title, opener in (
+              ("ROC curve", "A **ROC curve** plots rates."),
+              ("MLOps", "**MLOps** is a practice."),
+              ("SARS-CoV-2", "**SARS-CoV-2** is a coronavirus."),
+              ("AdaBoost", "**AdaBoost** reweights mistakes."),
+              ("1984", "***1984*** is a novel."),
+              ("X", "**X** is a variable."),
+              ("MNIST", "MNIST is a dataset."),
+              ("MNIST", "**EMNIST** (Extended MNIST) extends it."),
+              ("", "**MNIST** is a dataset."),
+              (None, None))],
+          [False] * 10)
 
     # item 19: the primary answer on card line 3 (one copy for both tools)
     check("acronym/full-form pairs, including compound and shared-tail forms",

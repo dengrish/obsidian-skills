@@ -1,19 +1,24 @@
-# QC items — source-independent enforcement (Task 1)
+# QC items — enforcement and routing (Tasks 1 and 1b)
 
-**Read this before Task 1 fixes any entry.** The numbered acceptance rules
+**Read this before Task 1 or Task 1b fixes any entry.** The numbered acceptance rules
 come from wiki-build's [Quality Checklist](../../wiki-build/SKILL.md#quality-checklist)
 and the canonical guides it links. This file does not duplicate those guides in full. It
-owns wiki-lint's finding-to-action rules, source-independent review, and
-repair boundaries.
+owns wiki-lint's finding-to-action rules, source-independent review, the
+hand-off to Task 1b, and repair boundaries.
 
 All semantic-review instructions here are carried out autonomously by the executing agent.
 They do not require the user or another human to inspect every
-note or approve an ordinary correction. When the note and vault do not establish
-a safe answer, preserve the content and report an optional source-backed or
-separately scoped follow-up; that follow-up does not block the current run.
+note or approve an ordinary correction. Task 1 repairs what the note and vault
+establish. A semantic finding they do not settle goes to
+[Task 1b](../SKILL.md#task-1b--content-repair), which repairs it in the same
+run from the entry's cited sources or accurate background. Only a split, merge
+or deletion, a conflict no evidence settles, or a user-owned state decision
+stays a report, and it does not block the current run.
 
 Related procedures:
 
+- [Content repair (Task 1b)](../SKILL.md#task-1b--content-repair) and its
+  [source-backed correction protocol](source-backed-corrections.md)
 - [Scanner keys and coverage](scanner.md#item-keys-in-problems)
 - [Flashcard definition review](flashcards.md#flashcard-definition-review-item-19)
 - [Dangling-link protocol](link-hygiene.md#dangling-links-target-missing)
@@ -28,7 +33,7 @@ ownership.
 
 | Finding or worklist | Action |
 | --- | --- |
-| Ordinary `itemN` | Apply only the determinate, source-independent correction allowed by item N below. Report semantic or ownership uncertainty. |
+| Ordinary `itemN` | Apply the determinate, source-independent correction allowed by item N below. Hand a finding that needs the entry's sources, accurate background or a coordinated cross-entry change to Task 1b; report only what Task 1b cannot settle, such as ambiguous ownership. |
 | `item0` | Report the unreadable path and error; there is no parsed entry to repair. Its unknown aliases suppress dependent link actions until readability is restored and the vault is rescanned; direct-filename checks remain usable. |
 | `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. |
 | `item2/read-type` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
@@ -40,14 +45,16 @@ ownership.
 | `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Legacy metadata is read-only compatibility data; do not add or refresh it or infer a historical creator. |
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
 | `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source; otherwise report. |
-| `item9/imperative-link` | Integrate the link only when adjacent prose already states the relationship and the edit adds no claim; otherwise report a source-backed proposal. |
-| `item9/duplicate-sentence` | This is a cross-entry ownership candidate. Preserve both copies and report the pair and likely owner unless the request explicitly names the consolidation or redistribution operation, or the affected entries and intended outcome. Normalized similarity alone never authorizes deletion. |
+| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or accurate background, and integrates the link. |
+| `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it under [item 9](#9-body-structure-coherence-flow-and-scope): the owner keeps the explanation, receiving the fullest version when it lacks one, and every other copy is trimmed to its role there plus a link to the owner. Normalized similarity alone proves neither copy wrong and never chooses the owner. |
+| `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or accurate background, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Report only: [item 10](#10-wikilinks); the target file's `item0` or `item1` governs repair. |
 | `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
-| `item10/dangling`, `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
+| `item10/dangling` | Task 1b first creates the missing entry when the target is a real knowledge gap that meets the [missing-entry rule](refactors.md#create-a-missing-entry); Task 2 resolves every other dangler under its [dangler protocol](link-hygiene.md#dangling-links-target-missing). |
+| `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
@@ -57,21 +64,22 @@ ownership.
 | `item12/panel-composite`, `item12/remote-image`, `item12/missing-image` | Report only: [item 12](#12-equations-images-and-tables). |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
-| `item18/partial-label` | Task 1 repair, or report a label naming another entity: [item 18](#18-alias-form-collisions-and-display-labels). |
+| `item18/partial-label` | Task 1 repair; a label naming another entity goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Content after a card's line 3 that is not a recognized attachment is report-only. |
 | `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars) and shorten it only when the card's bar allows; the candidate alone is never an order. |
 | `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars): when the card's bar allows, drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
-| `rename_candidates` | Propose with inbound count and collision warning; apply only under an explicit rename request, through the [entry-retitle protocol](refactors.md#retitle-an-entry). |
+| `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. An occupied destination stays a duplicate/disambiguation proposal with its collision warning. |
 | `collision_candidates` | Report; routine lint never merges existing entries. |
 | `hierarchy_diagnostic` (every field) | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. Actions are in [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion). |
-| Semantic-invalid alias | Propose the canonical owner and inbound rewrite; remove only under an explicit request, through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
+| Semantic-invalid alias | Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias) when the canonical owner is unambiguous; ambiguous ownership is reported. |
 
-## Source-independent item guide
+## Item guide
 
 For every item, first apply the canonical builder rule at the linked location,
-then use only the linter-specific action stated here. The scanner's
+then use only the linter-specific action stated here: Task 1 makes the
+source-independent repairs, and each item names what it hands to Task 1b. The scanner's
 [`problems` contract](scanner.md#item-keys-in-problems) is the source of truth
 for its mechanical coverage; do not infer permission from a scanner message.
 
@@ -126,8 +134,10 @@ Use the canonical [source format](../../wiki-build/references/writing.md#sources
 Every entry, a [discipline root](hierarchy.md#establish-discipline-roots)
 included, cites at least one source; an empty `sources:` is reported, never
 filled from memory. An online page's URL item is valid as a quoted,
-full http(s) address; routine lint never fetches it, never converts it to or
-from a vault citation, and reports a malformed one without guessing a repair.
+full http(s) address. Task 1 never fetches it; Task 1b may read the page to
+verify a repair under the [source-backed correction protocol](source-backed-corrections.md).
+Lint never converts it to or from a vault citation, and reports a malformed one
+without guessing a repair.
 Remove an exact repeated list item, URL items included. A same-stem PDF/Markdown pair remains
 `item4/source-identity` until decoded `sources:` or legacy `source:` in the
 Markdown note proves that it summarizes that PDF. Only then keep the anchored
@@ -138,8 +148,10 @@ page-anchor form; the physical page's factual correctness needs the source.
 ### 5. Filename, collision, and disambiguation
 
 Apply the canonical [naming rules](../../wiki-build/references/writing.md#3-wikilinks-and-naming).
-A title/filename mismatch is a rename proposal, never an automatic rewrite.
-If the proposed slug is occupied, preserve both files and report their paths
+Task 1 never renames. A title/filename mismatch goes to Task 1b, which
+retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry)
+when the canonical name is determinate and its slug is free.
+If the slug is occupied, preserve both files and report their paths
 as an unresolved duplicate/disambiguation proposal; the lint run still completes.
 Report collision-probe matches as candidates; do not merge them. Whole-vault
 maintenance uses slug equality, micro-sign normalization, singular/plural,
@@ -149,9 +161,16 @@ an entry owner. The linter deliberately omits the noisy create-time
 token-superset probe. While reading, also report semantic synonym duplicates
 that shape probes cannot find.
 
-A bare-slug common-noun finding is a rename proposal under the cross-domain
-naming rule: report the qualified title. Report an unsluggable title with a
-representable alternative. Neither is renamed without an explicit request.
+A bare cross-domain title is retitled the same way. The scanner flags a slug
+that is a word or phrase of the builder's corpus (`tree-of-life`); the semantic
+pass tests every other bare title against the
+[cross-domain naming rule](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation),
+whose test (a) also fires when the bare encyclopedia landing is another sense
+(Tree of life lands on the mythological motif). When that rule makes the
+qualified title determinate and its slug is free, Task 1b retitles the entry;
+the old bare slug never stays as an alias. An occupied slug or an
+indeterminate qualifier stays a report. Report an unsluggable title with a
+representable alternative.
 
 ### 6. Type and API surface
 
@@ -161,8 +180,9 @@ in code form, implementation signposts, recipes, or identifier catalogs.
 `Software` may retain identifiers only when they explain an artifact-wide
 interface or design convention; counting tokens cannot establish that scope.
 Use [the strip-or-reclassify procedure](#coding-content-in-non-software-entries-item-6)
-for determinate non-`Software` findings. Source-backed selection is required to
-trim substantive prose from an existing `Software` entry.
+for determinate non-`Software` findings. Trimming substantive prose from an
+existing `Software` entry needs source-backed selection, which Task 1b makes
+from the entry's cited source.
 
 ### 7. Description
 
@@ -174,8 +194,16 @@ completeness, and whether it describes the prototype rather than a variant
 Repair awkward wording or empty framing only when it is a
 concrete clarity defect; do not rewrite an already clear description. A
 plain-language mathematical definition must retain every operation that
-determines the quantity. Fix only when the note establishes the corrected
-wording; otherwise report a source-backed proposal.
+determines the quantity. Task 1 fixes it when the note establishes the
+corrected wording. Otherwise Task 1b corrects a variant, a wrong sense or a
+wrong fact from the entry's cited source or accurate background, leading with
+the prototype, and keeps the description, opener and card aligned in the same
+edit. A wrong sense includes a definition that leads with a property of the
+subject, such as its selectivity, regulation, distribution or a consequence,
+instead of what the subject is, even when the source's sentence is phrased
+that way; the property moves to the body (gene expression is the process by
+which a gene's information makes RNA and protein, and differential expression
+follows in the body).
 
 ### 8. Tags
 
@@ -206,18 +234,39 @@ Apply builder [item 9](../../wiki-build/SKILL.md#quality-checklist), the
 There is no body sentence, paragraph, word, or heading-count target.
 
 **Coherence review.** Compare the title and qualifier with the description,
-opener, equations, flashcard, and close neighbors. They must identify the same
+opener, equations, flashcard, and the neighbors the builder's
+[overlap audit](../../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
+names: body and Related link targets, backlinkers, entries citing the same
+source, and family members. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
-notation. A conflict that requires choosing or changing a fact is a
-source-backed proposal. Prefer proposing a plain claim at the source's
-confidence, or trimming a neighbor's detail to the relationship and a
-wikilink, over appending qualifications. The description, opener and primary
-card lead with the prototype, never a variant; when the note already states
-both the prototype and the variant, keep only the prototype on those surfaces;
-otherwise propose the change. A
-neighbor conflict may expose
-a wrong link, duplicate, or split candidate; it does not authorize cross-entry
-redistribution.
+notation. A conflict that requires choosing or changing a fact goes to
+Task 1b, which corrects every affected entry under the correction protocol's
+[*Conflicts*](source-backed-corrections.md#correct-and-publish) rule: from the
+cited built source when it settles the point, otherwise from agreeing standard
+references or a direct derivation from a formula the entry or its cited source
+states, keeping the source's figure only when its scope makes it true.
+A conflict neither settles stays an open log item naming the blocker;
+recollection alone never settles one. State
+the plain claim under principle 3 (a hedge or caveat that covers only an edge
+case goes even when the source makes it; evidence-bearing uncertainty stays),
+or trim a neighbor's detail to the relationship and a wikilink, rather than
+appending qualifications. The
+description, opening paragraph and primary card lead with the prototype, never
+a variant: a variant, a secondary sense of the name or another application is
+named once, later in the body, after the general explanation. When the body
+already states the prototype, Task 1 repairs the description under item 7 and
+the card under item 19; moving an opening-paragraph mention is Task 1b's,
+which folds it, with its link, into the later passage (Learning rate's
+boosting clause), applying builder
+[item 13](../../wiki-build/SKILL.md#quality-checklist)'s each-sense-once rule
+outside merges too. When the prototype is missing, Task 1b writes it from the
+cited source or accurate background and keeps the variant as one linked
+example. Task 1b likewise frames an entry in its
+[own field](../../wiki-build/references/writing.md#prose-principles): a
+general concept's display never borrows one application's parameter notation,
+and the entry names and links its nearest contrast when the subject has one. A
+neighbor conflict may also expose a wrong link, a duplicated explanation
+(consolidated below), or a split candidate, which stays a proposal.
 
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
@@ -225,40 +274,69 @@ to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
 Judge a concrete defect, not a preference for different wording. Inspect
 equation lead-ins and paragraph endings as well as the opening sentences.
 Bullets are parallel, not sequential; body links sit in sentences that state
-their relationships. Report source/tutorial scaffolding and application
-catalogs only when they do not serve the entry, and report duplicated
-explanatory treatments by conceptual owner. A passage that re-explains a
-concept with its own entry is trimmed to that concept's role here and a link
-when the linked entry already explains it (a local repair below); when the
-linked entry lacks the explanation, propose moving it there. A statement the
-entry leaves unexplained, such as an equation without its meaning, a
-complexity without its reason or a term with neither definition nor link, is
-a depth proposal. Length, a missing transition word,
-list shape, or lexical similarity alone proves nothing.
+their relationships. Task 1b trims source/tutorial scaffolding and
+application catalogs that do not serve the entry, after checking the cited
+source. It consolidates an explanation, argument, worked example or property
+with its justification duplicated across entries into its owner: the entry
+whose subject it is about, the most specific such entry; between equally
+specific entries, the one already holding the fullest version, then the
+alphabetically first slug. A property every member of a family shares belongs
+to the family's entry (weight penalties' scale sensitivity to Regularization,
+not Ridge regression), and an argument about how a metric behaves to that
+metric (the rare-positive argument to False positive rate); a plot built on
+the metric keeps the consequence and a link. When the owner lacks the
+explanation, Task 1b first moves the fullest version there, verified against
+the owner's cited sources or accurate background under
+[refactors](refactors.md#establish-evidence-and-complete-scope) step 1, and
+carries a moved claim's existing citation into the owner's `sources:`. Every
+other copy is trimmed to its role there and a link to the owner; the trim may
+drop that copy's other links and follows [Dates](../SKILL.md#dates). While
+a conflict in the passage stays unresolved, every copy stays unchanged and the
+conflict open; a copy that disagrees with the owner's is never trimmed.
 
-**Caveat review.** Inspect qualifications, final paragraphs and the
+A statement the entry leaves unexplained, such as an equation without its
+meaning, a complexity without its reason, a derivation step or a result, gets
+its reason in Task 1b, in one sentence from the cited source or accurate
+background; a term with neither definition nor link follows
+[item 14](#14-self-containment). When no accurate reason exists because the
+stated result is itself wrong or imprecise, the defect is a conflict between
+the cited source and standard references, resolved as in the coherence review:
+Task 1b corrects the result, keeping the source's figure only within the scope
+that makes it true, and never invents a reason. Length, a missing transition
+word, list shape, or lexical similarity alone proves nothing.
+
+**Caveat review.** Inspect qualifications, final paragraphs, captions and the
 description for the hedges and caveats
 [principle 3](../../wiki-build/references/writing.md#prose-principles)
 excludes, including a claim hedged below its source; card line 1 follows
-[item 19](#19-flashcards). Never add caveats from memory; a limitation the
-source teaches is explanation. Routine lint removes only empty rhetoric and
-repetition (the local repairs below) and well-definedness boilerplate
-(item 12). Log every other over-qualified passage as an
-[Over-qualification](backlogs.md#proposing-note-improvements) proposal. An
-explicit simplification request activates source-backed correction across the
-requested scope, including similar cases beyond named examples; it verifies
-each passage against the entry's cited sources, and a source-supported detail
-can still be unnecessary.
+[item 19](#19-flashcards). Never add caveats from memory; a main limitation
+the source teaches is explanation. Task 1 removes empty rhetoric and repetition
+(the local repairs below) and well-definedness boilerplate (item 12). Task 1b
+simplifies every other over-qualified passage in the run's scope against the
+entry's cited sources: it removes a hedge the source does not make; a hedge or
+caveat that covers only an edge case, even when the source itself makes it
+(the source's own "in general" before the precision rule, or the precision
+dip when the threshold rises); and an availability hedge such as "varies by
+lab", which is not removing a claim for lack of a citation. It keeps a limit
+only when the plain claim is false for the ordinary case, naming the condition
+instead of a hedge word, and keeps evidence-bearing uncertainty in research
+findings; a source-supported detail can still be unnecessary.
 
-**Depth review.** Could a reader knowing only a Concept note explain how it
-works and apply it once? If not, log a
-[Depth & gaps](backlogs.md#proposing-note-improvements) proposal naming what
-is missing (a core facet, a model's prediction step or objective, a display's
-verbal reading) and its route: a deepen request from the entry's cited
-sources or accurate background. A gap that only an unbuilt source would fill
+**Depth review.** Apply the builder's
+[core-facet check](../../wiki-build/references/writing.md#prose-principles) to
+every in-scope entry, whatever its type and however detailed it already is.
+Task 1b supplies each missing facet: a model's or ensemble's prediction step
+and training objective, a display's verbal reading, a concrete case, a
+category's canonical members (at least three) that have entries, or a discipline
+root's form. It then asks whether a reader of the note alone could explain how
+it works and apply it once, and fills whatever else that reveals. Both work
+under the source-backed [deepening](source-backed-corrections.md) rules, from
+the entry's cited sources and accurate background. A gap that only an unbuilt source would fill
 (any source the entry does not cite, even one another entry cites) is expected
 until a wiki-build request naming that whole source fills it in, and is not
-proposed. Routine lint never fills it.
+proposed. Neither task fills it from that source. This governs deepening an
+existing entry; a new entry's source follows the
+[missing-entry rule](refactors.md#create-a-missing-entry).
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -280,24 +358,26 @@ establishes an unambiguous meaning:
 - Rewrite parallel facts about several items (the same gene in several
   organisms, one property per variant) as one bullet per item, keeping every
   claim.
-- Trim a re-explanation of a concept that has its own entry to its role here
-  and the link, when that entry already explains the concept; the claims stay
-  recorded in the linked entry.
+- Trim a re-definition of a linked concept to its role here and the link,
+  when the linked entry already defines it; the claims stay recorded there. A
+  duplicated argument, worked example or property with its justification is
+  Task 1b's consolidation above, never a Task 1 repair.
 
-**Preservation and verification.** These repairs change prose expression, not
+**Preservation and verification.** Task 1's local repairs change prose expression, not
 the knowledge recorded. Preserve every substantive claim, condition, degree,
 uncertainty, attribution, and scenario boundary. An illustrative example must
 remain an example; a small improvement must not become an unqualified one.
 Nor may an edit add a caveat, exception, or clarification the explanation
 does not need. Keep existing link tokens, citations, math spans and numerical values,
 image/table-plus-caption units, the complete flashcard section, and frontmatter
-verbatim during an item 9 edit. Do not drop a link or a qualifier when removing
+verbatim during a Task 1 item 9 edit. Do not drop a link or a qualifier when removing
 repetition. After any removal, including item 12's boilerplate removals,
 re-read the whole note and repair what it left behind: a connective or
 referent that now points at nothing ("still", "this"), or a claim now stated
 twice. Descriptions follow item 7; links, equations, exhibits, and cards
 may change only under their own authorized checks, recorded separately.
-During ordinary lint, editorial changes never advance dates or reset review state.
+Task 1's editorial changes never advance dates or reset review state; Task 1b's
+changes follow [Dates](../SKILL.md#dates).
 
 Compare protected content before and after the edit and apply the shared
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread)
@@ -306,8 +386,14 @@ before publication. Leave conforming prose untouched and report the defect and
 repair for each changed entry; there is no shortening quota or human sign-off.
 
 If the change crosses a section, changes a fact, removes substantive content,
-chooses between claims, or redistributes material across entries, preserve it
-and propose a source-backed follow-up.
+chooses between claims, or redistributes material across entries, Task 1
+preserves it and hands it to Task 1b. Task 1b verifies the change against
+every affected entry's cited sources or accurate background, changes a degree,
+number, caption or math span only to match them or to drop a hedge or caveat
+the caveat review excludes, and touches only the
+surfaces the repair needs. Every Task 1b repair fixes a concrete defect a
+builder rule names; it never rewrites conforming prose, so a rerun on
+unchanged evidence changes nothing.
 
 For a missing `Person`/`Event` opener date, copy the exact date only when it is
 already present elsewhere in the entry. Normalize an existing malformed date
@@ -359,13 +445,17 @@ plain-text italic caption immediately below it; inline LaTeX is the only
 caption markup. Keep exhibits beside the prose they clarify, never before the
 opener, detached at the end, or grouped as a gallery; one motivating paragraph
 supports at most one image or table. A clear local placement or format repair
-is allowed. Ambiguous caption content or placement is proposed.
+is allowed. Task 1b corrects caption content against the cited figure or page,
+whose numbers a caption matches exactly; a caption drops a hedge principle 3
+excludes even when the source's own caption carries it. An ambiguous placement
+is reported.
 
 Never delete a missing embed or caption: repair belongs to extraction or an
 approved source rename. Preserve a composite and lowercase-suffixed panel until
 source-backed review decides whether the entry needs the default composite or
 the panel-specific view. Figure selection, source fidelity, table values, and
-retained rows or columns remain source-dependent. An unused image file is not
+retained rows or columns remain source-dependent: Task 1b checks them against
+the cited source when a repair depends on them. An unused image file is not
 itself a missing-content finding.
 
 **Equation coverage and usefulness.** The scanner emits a conservative
@@ -373,18 +463,22 @@ itself a missing-content finding.
 it as a command to add math. Apply the canonical explanatory-value test first.
 A simple verbal rule such as hard voting can remain prose-only even when every
 operation is specified. Do not manufacture an argmax/indicator formalism for
-it. Insert a useful equation in ordinary maintenance only when the note's own
+it. Task 1 inserts a useful equation only when the note's own
 prose supplies every operand, operation, and essential assumption. A verified
-standard equation absent from that prose may be worthwhile, but adding it
-follows the source-backed or builder workflow authorized for this run.
-Never invent a denominator or silently generalize a restricted case.
+standard equation absent from that prose, such as a confidence interval's
+estimate plus or minus a critical value times its standard error, is Task 1b's
+to add from the cited source or accurate background, with every symbol bound
+and the relation explained. Never invent a denominator or generalize a
+restricted case without a source or standard form.
 
 Preserve assumptions that determine the mathematical claim, following the
 [equation guide](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation).
 Do not add exhaustive boundary handling from memory or turn an explanatory
-formula into an implementation specification. Under an explicit simplification
-request, verify and remove unhelpful equations, notation-only prose, corresponding card math, and unnecessary caveats through source-backed correction;
-ordinary lint does not silently remove substantive conditions. The
+formula into an implementation specification. Task 1b verifies and removes
+unhelpful equations, notation-only prose, symbols no display uses,
+corresponding card math, and unnecessary caveats through source-backed
+correction, reporting each removal; no substantive condition is removed
+silently. The
 well-definedness boilerplate that guide lists for body prose is not a
 substantive condition: ordinary lint removes it, including from symbol
 bindings, and reports the removal. The scanner's
@@ -396,16 +490,29 @@ Flashcard line 1 follows [flashcard maintenance](flashcards.md).
 
 **Equation form and notation.** Promote a defining inline equation to its own
 display block; keep inline symbol references, bounds, complexity, and worked
-parameter choices inline. Bind every symbol nearby. Normalize symbols to the
-canonical table or a linked entry's notation for the same quantity, updating
-every prose reference in the same edit. Preserve field-specific standard
-notation and report genuinely ambiguous choices.
+parameter choices inline. Bind every symbol nearby. Task 1 normalizes only
+typography within one entry (bold vectors, `\text{}` names, the
+instance/component index form). Renaming a symbol to the
+[canonical table](../../wiki-build/references/equations.md)'s,
+to the field's standard or to a linked entry's notation for the same quantity,
+and normalizing the minority of disagreeing siblings, is Task 1b's; it updates
+every display and prose reference in the same edit. When siblings disagree,
+the table wins (entropy $H(p)$,
+cross entropy $H(p, q)$, Kullback–Leibler divergence
+$D_{\text{KL}}(p \parallel q)$); outside the table, the field's standard
+symbol wins, then the notation the most-linked entry uses. A logarithm base
+that defines the unit is stated once in prose (bits), not as a subscript on
+the symbol. Preserve field-specific standard notation, and report a choice
+only when none of these rules decides.
 
-Per [Dates](../SKILL.md#dates), equation fixes write neither `created:`,
+Per [Dates](../SKILL.md#dates), Task 1's equation fixes write neither `created:`,
 `updated:`, nor `read:`. An insertion into an entry whose `read:` is `true` is
 named under *Notes for the user* with the slug and equation, so the user may
-decide whether to clear their checkbox. Group every insertion, promotion,
-removal, and notation change under item 12 in the run report.
+decide whether to clear their checkbox. In Task 1b an inserted equation
+follows wiki-build's [body-change rule](../../wiki-build/references/merge.md#the-read-reset)
+instead, and a notation rename advances `updated:` and keeps `read:`. Group
+every insertion, promotion, removal, and notation change under item 12 in the
+run report.
 
 ### 13. Merge integrity
 
@@ -419,11 +526,27 @@ source-merge integrity is not applicable without a merge.
 
 ### 14. Self-containment
 
-Apply [prose principle 5](../../wiki-build/references/writing.md#prose-principles).
-Re-subject source-meta prose on the entity, or name people directly, only when
-the surrounding sentence makes the replacement unambiguous without changing
-claim, attribution, or certainty. Otherwise preserve and propose a
-source-backed correction. Preserve the named-work exception: “the GPT-3 paper”
+Apply [prose principle 5](../../wiki-build/references/writing.md#prose-principles)
+in full. Task 1 re-subjects source-meta prose on the entity, or names people
+directly, when the surrounding sentence makes the replacement unambiguous
+without changing claim, attribution, or certainty; otherwise Task 1b corrects
+it from the cited source. Task 1b completes the rest of principle 5 from the
+cited source or accurate background:
+
+- A term the entry uses with neither definition nor link is linked when its
+  entry exists, and otherwise gets a brief defining clause. A term at least
+  three entries use without a resolving link (a one-clause inline gloss still
+  counts as a use; count before adding any gloss), with a stable identity that passes wiki-build's
+  substance and atomicity tests, gets its own entry instead under the
+  [missing-entry rule](refactors.md#create-a-missing-entry), which Task 2 then
+  links.
+- The subject shows its acronym ↔ full-form counterpart on first mention under
+  5(e)–(f): `the **standard deviation** (SD)`,
+  `**MNIST** (Modified National Institute of Standards and Technology)`.
+  Item 17's alias gates and item 19's line-3 counterpart follow in the same
+  edit.
+
+Preserve the named-work exception: “the GPT-3 paper”
 and “the authors of SGDR” identify wiki entities; bare “the paper” and “the
 authors” do not.
 
@@ -433,9 +556,12 @@ Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) and
 [prose principle 7](../../wiki-build/references/writing.md#prose-principles)
 during semantic review, judging an example by purpose, never by length.
 Trimming an unnecessary, tangential or repetitive example needs the source, so
-record a specific proposal in `Reviews/wiki-notes-suggestions.md`. An
-abstract, quantitative or procedural Concept with no concrete case is a Depth
-& gaps proposal. Scaffolding and application catalogs belong to item 9,
+Task 1b does it after reading the cited source. A worked example lives in one
+entry, its owner under item 9's consolidation; the others state the
+consequence and link the owner. A Concept that is abstract, quantitative or
+procedural (a task such as binary classification, a method, a model, a
+quantity or a process) and whose body names no concrete instance gets one in
+Task 1b, from the cited source or accurate background. Scaffolding and application catalogs belong to item 9,
 `Software` API catalogs to item 6.
 
 ### 16. Bold, italic, and code typography
@@ -450,8 +576,9 @@ Preserve the exact special opener forms for symbols, `Work` titles, and
 evidence-backed scientific `Organism` names, including plain strain/isolate/
 serovar/subtype suffixes.
 
-An ambiguous taxon-shaped, rank-marked, or genus-only title needs the source.
-Record that verification proposal and leave plausible typography unchanged.
+An ambiguous taxon-shaped, rank-marked, or genus-only title needs the source:
+Task 1b verifies it against the cited source, and plausible typography stays
+unchanged when the source does not settle it.
 Once visible title text matches, either plausible emphasis may remain without
 creating a recurring finding.
 
@@ -464,8 +591,10 @@ common-name, and whole-vault collision gates. A word from the builder's
 [cross-domain corpus](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation)
 never becomes an alias, so the scanner does not propose one; its italic
 introduction stays in the body. A semantic-invalid existing alias
-is not list cleanup: preserve it during routine lint and propose the canonical
-owner plus complete inbound rewrite.
+is not list cleanup: Task 1 preserves it, and Task 1b removes it through the
+[alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias), with
+the canonical owner and complete inbound rewrite. Ambiguous ownership is
+reported.
 
 ### 18. Alias form, collisions, and display labels
 
@@ -476,7 +605,8 @@ alias form and duplicates; report cross-entry ownership conflicts. Never
 auto-retarget a display whose exact surface belongs to another entry. Do not
 create an ambiguous alias merely to silence a display-label finding. When an `item18` label is a
 cross-domain synonym its target does not introduce, reword the label to a
-claimed form or report the missing introduction under the notes log. A
+claimed form, or let Task 1b add the synonym's italic introduction to the
+target when its cited source or standard usage gives the target that name. A
 recurring finding on a cross-domain word outside the corpus is a
 [proposal](backlogs.md#proposal-scope) to extend the corpus.
 
@@ -485,8 +615,12 @@ An `item18/partial-label` keeps only the target title's modifiers
 target, reword it so the label is the title, an alias, an inflection, or a
 derived form, preserving the claim (`CART's greedy choices` → `CART is a
 greedy algorithm: its choices`). When the label names a different entity
-(`[[feature-engineering|features]]` for input features), leave the link and
-report the target question under the notes log; never retarget it.
+(`[[feature-engineering|features]]` for input features), Task 1 leaves the
+link, and Task 1b settles from the sentence and the cited source which entity
+it means. It rewords the sentence so the label names the target when the
+target is meant, retargets the link to the meant entity's existing entry with
+the label kept, or unlinks the label to plain text when that entity has no
+entry. A surface match alone never retargets a link.
 
 ### 19. Flashcards
 
@@ -507,7 +641,9 @@ and every recognized scheduling or block-ID attachment byte-for-byte and in
 place. Routine lint applies the
 [rewrite bars](flashcards.md#card-freshness-and-the-rewrite-bars), the low
 bar included for a card the scan proves fresh; a
-[legacy extra](flashcards.md#card-set) stays report-only.
+[legacy extra](flashcards.md#card-set) stays report-only. When a Task 1b
+repair changes the claim the primary card tests, the card follows in the same
+edit under those bars.
 
 ## Coding content in non-Software entries (item 6)
 
@@ -527,9 +663,12 @@ floor does not decide why the code is present. Choose between two actions:
   their prose contains code.
 
 A title that is itself an API identifier, such as `SGDClassifier` or
-`cross_val_predict`, needs a rename and conceptual restructure around the
-underlying entity. Propose that approved refactor and leave the file and inbound
-references intact until it runs.
+`cross_val_predict`, is a wrong title. When the underlying entity's conceptual
+title is determinate and its slug is free, Task 1b retitles the entry through
+the [entry-retitle protocol](refactors.md#retitle-an-entry) and strips the
+remaining API detail as for a conceptual entry above. An indeterminate entity,
+or an occupied slug, which makes it a duplicate/disambiguation proposal, is
+reported with the file and inbound references left intact.
 
 When the distinction is unclear, preserve and report. Do not gut an entry or
 flip its type merely to silence a mechanical finding.

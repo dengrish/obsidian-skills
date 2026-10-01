@@ -21,6 +21,8 @@ fits) and `parents: []`, the handoff to wiki-lint. A missing topic that is
 itself a discipline (`Wiki/<discipline>.md` tagged only `#<discipline>`) is
 that discipline's root: write it in the
 [root form](../wiki-lint/references/hierarchy.md#establish-discipline-roots),
+which defines the field, states its method of inquiry and names its main
+branches as subfields under the builder's [tag rules](../wiki-build/references/writing.md#tags),
 citing the reference page it is derived from like any other topic.
 
 Read [runtime setup](../../shared/RUNTIME.md) once per task. Before reading or
@@ -127,6 +129,8 @@ that cannot form a conforming entry stays pending.
 ## 4. Draft and review the new entry
 
 Use the builder's [writing rules](../wiki-build/references/writing.md),
+including its [core-facet check](../wiki-build/references/writing.md#prose-principles),
+hedge and acronym rules and [editorial reread](../wiki-build/references/writing.md#editorial-reread),
 [flashcards and emphasis](../wiki-build/references/flashcards-and-emphasis.md)
 and [entry shape](../wiki-build/SKILL.md#the-entry), plus its
 [equations](../wiki-build/references/equations.md),
@@ -135,10 +139,17 @@ and [entry shape](../wiki-build/SKILL.md#the-entry), plus its
 [special titles](../wiki-build/references/special-titles.md) and
 [tag calibration](../wiki-build/references/calibration.md) references when
 their [reading-plan](../wiki-build/SKILL.md#what-to-read-and-when) triggers
-apply. Draft complete bytes privately under the canonical title's
-reported slug, with today's creation/update dates and `read: false`. When the
-collision decision settles that slug, snapshot `Wiki/<slug>.md` with the
-builder's [step-3 command](../wiki-build/SKILL.md#3-resolve-against-existing-entries),
+apply. Before drafting, read the entries that link to or mention the topic,
+and its nearest siblings: the draft links an explanation, argument or example
+one of them owns instead of repeating it, and states the numbers and senses
+they verifiably state. It uses the symbols of the builder's
+[notation table](../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide),
+and outside the table the symbols they state; a sibling that departs from the
+table is never a model to copy and becomes a note-content proposal for
+closeout. Draft complete bytes privately under the
+canonical title's reported slug, with today's creation/update dates and
+`read: false`. When the collision decision settles that slug, snapshot
+`Wiki/<slug>.md` with the builder's [step-3 command](../wiki-build/SKILL.md#3-resolve-against-existing-entries),
 which must record it absent (otherwise redo the collision decision), and list
 the draft in the builder's [manifest format](../wiki-build/SKILL.md#scope-and-files).
 Give each request fresh files, such as `<scratch>/snapshots-<n>.json` and
@@ -152,17 +163,22 @@ never create a note just to cite it.
 Link under [conventions §9](../../shared/CONVENTIONS.md#wiki-add--inside-new-requested-entries-only)
 and the builder's relevance and display rules: only to existing entries,
 including ones this run already published; a requested entry published later
-stays plain text. Never backfill existing notes or create prerequisite topics.
+stays plain text. Never backfill existing notes or create prerequisite topics:
+a prerequisite with no entry is glossed in one clause on first use, and one
+that three or more entries, this one included, use without a resolving link,
+counted as the builder's [load-bearing rule](../wiki-build/SKILL.md#2-extract-entities)
+says, is a missing-entry candidate for closeout.
 
 Review each draft under the builder's [Quality Checklist](../wiki-build/SKILL.md#quality-checklist)
 and [step 7](../wiki-build/SKILL.md#7-review-and-report) up to publication,
-repairing only the new draft. Skip missed-entity recovery, merges, the orphan
-audit's create-the-entry branch and the builder's run report. Existing notes
-are read-only context: an overlap with the new entry, or a contradiction the
-research exposed, becomes a note-content proposal for closeout, and step 7's
-report-only overlay findings block neither publication nor completion. Resolve
-ownership uncertainty and every other finding affecting the new entry before
-publishing.
+repairing only the new draft. Skip missed-entity recovery, merges, the
+ownership handoff, the orphan audit's create-the-entry branch and the
+builder's run report. Existing notes are read-only context: only the
+neighbor's side of an overlap or conflict becomes a note-content proposal for
+closeout (a copy the new entry should own, or a neighbor claim the research
+contradicts), and step 7's report-only findings on existing entries in the
+overlay block neither publication nor completion. Resolve ownership
+uncertainty and every other finding affecting the new entry before publishing.
 
 ## 5. Publish and verify
 
@@ -212,11 +228,11 @@ failed, retain it and report that state.
 
 Report each item's outcome (created, existing, checked off, or pending with a
 reason), its sources and image decisions, plain-text mentions of later
-entries, validation with review-only lint dispositions, and whatever the steps
-above and the research reference say to report. Do not describe a preview as
-applied. Resolve routine research and identity choices autonomously; ask only
-when an item cannot be resolved safely from the request and inspected
-evidence.
+entries, missing-entry candidates, validation with review-only lint
+dispositions, and whatever the steps above and the research reference say to
+report. Do not describe a preview as applied. Resolve routine research and
+identity choices autonomously; ask only when an item cannot be resolved safely
+from the request and inspected evidence.
 
 Close every report with one standing line: *New entries keep `parents: []`
 and stay out of the MOCs until `wiki-lint` places them and links them from
@@ -225,5 +241,6 @@ existing entries — run it to connect and file them.*
 At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
 `Reviews/wiki-add-suggestions.md`, the logs of producers whose outputs this run
 consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`, which
-receives §4 note-content proposals; search it for open items naming an entry
-this run created.
+receives §4 note-content proposals and missing-entry candidates (as
+`[missing-<slug>] Missing entry: <Title>`) for wiki-lint's next ordinary run
+to work through; search it for open items naming an entry this run created.

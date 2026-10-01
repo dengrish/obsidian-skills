@@ -55,11 +55,12 @@ existing-entry match gives in ``entry_path`` the file a merge would target;
 a peer match names the other candidate in ``matched_candidate``. ``error``
 explains an ``adjudicate`` verdict: an unsluggable title, unsafe owner
 metadata, several existing owners, or index problems that can hide ownership.
-``naming: ["bare-common-noun"]`` marks a slug from special-titles.md's
-cross-domain corpus; it never changes the verdict (SKILL.md says how to act on
-it). Every index problem is reported, but only one that can hide slug, title
-or alias ownership (``_creation_blockers``) turns an otherwise-new candidate,
-or a merge that rests on an alias alone, into ``adjudicate``.
+``naming: ["bare-common-noun"]`` marks a slug that is a word or phrase from
+special-titles.md's cross-domain corpus (``entropy``, ``tree-of-life``); it
+never changes the verdict (SKILL.md says how to act on it). Every index
+problem is reported, but only one that can hide slug, title or alias
+ownership (``_creation_blockers``) turns an otherwise-new candidate, or a
+merge that rests on an alias alone, into ``adjudicate``.
 
 For source-derived or otherwise untrusted titles, always use ``--titles``;
 never interpolate title text into a shell command. ``--title`` remains a
@@ -968,6 +969,11 @@ def run_self_test():
                   probe("Entropy (information theory)"))],
               [(["bare-common-noun"], "create"), (None, "create"),
                (None, "create")])
+        check("a bare cross-domain phrase slug is flagged too; its qualified "
+              "title is not",
+              [r.get("naming") for r in (
+                  probe("Tree of life"), probe("Tree of life (biology)"))],
+              [["bare-common-noun"], None])
 
         # -- verdict arithmetic ---------------------------------------------
         check("a merge match outranks an adjudicate match on the same candidate",

@@ -47,20 +47,31 @@ the roots the authorized closure needs. It never fabricates citations,
 alters the user's topic queue or extracts unrelated entities.
 
 A discipline root is a short explanation of the field, not a duplicate MOC.
-It defines the field, states its method of inquiry and names its main
-branches, linking those with entries. The misc root is `Wiki/misc`, titled
+It gives the field's definition, its method of inquiry and its main branches,
+linking those with entries. The method of inquiry is how the field gains and
+tests knowledge: mathematics proves theorems from axioms, and medicine tests
+treatments in clinical trials. The main branches are named as the field's
+recognized subfields, not the objects it studies: algebra, geometry, analysis
+and number theory, not numbers and shapes. The misc root is `Wiki/misc`, titled
 `Misc`: a brief definition of a miscellany that makes no claim about this
 vault's contents. Use the ordinary entry schema, one matching tag,
 `parents: []` and no Flashcards section; an existing root keeps its card
 unless the user asks to remove it. Like every entry, a root cites at least
 one source: the page or document it is derived from.
 New roots use today's date for `created:` and `updated:` and set
-`read: false`; the maintenance date freeze covers existing notes only.
+`read: false`; the date freeze of Tasks 1, 2 and 3 covers existing notes only.
 Stage a new root under its own filename and lint it with
 `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`;
 resolve every finding before publication.
-Preserve existing roots' substantive content, review state, and card history
-under the normal correction rules. An ambiguous root owner blocks that
+An existing root whose body lacks part of the root form above is repaired in
+[Task 1b](../SKILL.md#task-1b--content-repair) from the root's cited source,
+an overview page read online included, or accurate background: it replaces a
+subject-matter list with the main branches and adds a missing definition or
+method of inquiry, keeping its other claims and its card byte-for-byte; dates
+follow the
+[body-change rule](../../wiki-build/references/merge.md#the-read-reset).
+Otherwise preserve existing roots' substantive content, review state, and card
+history under the normal correction rules. An ambiguous root owner blocks that
 group's publication; never fall back to an MOC parent.
 
 ## Derive the hierarchy
