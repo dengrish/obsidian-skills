@@ -59,6 +59,7 @@ __all__ = [
     "BOLD_OUTER_RE",
     "BOLD_PAREN_RE",
     "COMMON_NOUNS",
+    "CROSS_DOMAIN_PHRASES",
     "LEGACY_EXTRA_PREFIX",
     "PAREN_LEADIN_RE",
     "SHARED_MUTATIONS",
@@ -111,11 +112,19 @@ __all__ = [
 #: an alias; a target that introduces one in italics accepts it as a label.
 COMMON_NOUNS = frozenset({
     "activation", "agent", "attention", "attribute", "bias", "cell",
-    "classification", "clustering", "domain", "ensemble", "entropy",
-    "feature", "field", "filter", "function", "gradient", "inertia", "kernel",
-    "label", "model", "normalization", "policy", "predictor", "regression",
-    "return", "sensitivity", "shrinkage", "target", "temperature", "tensor",
-    "transformer", "vector",
+    "classification", "clustering", "collinearity", "domain", "ensemble",
+    "entropy", "feature", "field", "filter", "function", "gradient", "inertia",
+    "kernel", "label", "model", "normalization", "policy", "predictor",
+    "regression", "return", "sensitivity", "shrinkage", "target",
+    "temperature", "tensor", "transformer", "vector",
+})
+
+#: The same floor's short common-word phrases, whose other sense is as
+#: familiar as the discipline one (``online learning`` also names
+#: internet-based education). Like a set word, a phrase is never proposed as
+#: an alias; a target that introduces one in italics accepts it as a label.
+CROSS_DOMAIN_PHRASES = frozenset({
+    "online learning",
 })
 
 #: Appended to an item-17 alias-candidate message for a single-word candidate
@@ -146,18 +155,26 @@ def bare_word_alias_candidate(candidate_slug, title, surface=""):
 
 
 def cross_domain_word(text):
-    """The :data:`COMMON_NOUNS` word a one-word surface folds to, else "".
+    """The cross-domain floor term a surface folds to, else "".
 
-    Case and a regular plural fold (``Targets`` -> ``target``). A multiword
-    or hyphenated surface, or a word outside the set, folds to "". Such a
-    word never becomes an alias; a link may still use it as a
-    context-resolved label (:func:`cross_domain_synonym_label`).
+    A one-word surface folds to its :data:`COMMON_NOUNS` word, with case and
+    a regular plural folded (``Targets`` -> ``target``). A multiword or
+    hyphenated surface folds only to a :data:`CROSS_DOMAIN_PHRASES` phrase,
+    its last word's plural folded too (``Online-learning`` -> ``online
+    learning``). Any other surface folds to "". Such a term never becomes an
+    alias; a link may still use it as a context-resolved label
+    (:func:`cross_domain_synonym_label`).
     """
     tokens = _label_tokens(text)
-    if len(tokens) != 1:
+    if not tokens:
         return ""
-    words = singular_forms(tokens[0]) & COMMON_NOUNS
-    return min(words) if words else ""
+    if len(tokens) == 1:
+        words = singular_forms(tokens[0]) & COMMON_NOUNS
+        return min(words) if words else ""
+    head = " ".join(tokens[:-1])
+    phrases = {head + " " + form
+               for form in singular_forms(tokens[-1])} & CROSS_DOMAIN_PHRASES
+    return min(phrases) if phrases else ""
 
 
 # ---------------------------------------------------------------------------
@@ -1712,6 +1729,11 @@ def run_self_test(verbose=False):
               "target", "Targets", "attributes", "sensitivities",
               "target variable", "self-attention", "precision", "")],
           ["target", "target", "attribute", "sensitivity", "", "", "", ""])
+    check("a multiword surface folds only to a listed cross-domain phrase",
+          [cross_domain_word(text) for text in (
+              "online learning", "Online-learning", "collinearity",
+              "online machine learning", "multicollinearity")],
+          ["online learning", "online learning", "collinearity", "", ""])
     label_prose = "A label is an answer. The word *target* is a near-synonym."
     check("a cross-domain synonym passes only where its target introduces it",
           [cross_domain_synonym_label(label, surfaces, prose)

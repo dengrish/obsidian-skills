@@ -153,7 +153,7 @@ def fold_name(s):
 # conformance suite.  Do NOT paste a copy back.
 # ===========================================================================
 from plurals import (  # noqa: E402
-    real_permutation, singular_keys,
+    real_permutation, singular_forms, singular_keys,
     stem_key, wordorder_key_singular,
 )
 from organism_names import (  # noqa: E402
@@ -1189,13 +1189,41 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                        and inner_end - inner_start > end - start
                        for inner_start, inner_end in italic_spans + bold_spans)
 
+        title_words = set()
+        for token in WORD.findall(e.get("title") or ""):
+            title_words |= singular_forms(token.lower())
+        own_terms = []
+        for inner_start, inner_end in italic_spans:
+            words = [w.lower() for w in WORD.findall(masked[inner_start:inner_end])]
+            if words and all(singular_forms(w) & title_words for w in words):
+                own_terms.append([singular_forms(w) for w in words])
+
+        def _own_title_term(start, end):
+            """Whether a hit names a facet this entry defines from its title.
+
+            An entry that sets words of its own title in italics (a
+            Bias/variance trade-off bullet's `*Variance*`) defines them as its
+            own facet, which other entries may use as a label for this entry
+            (`[[bias-variance-trade-off|variance]]`). Throughout the entry the
+            words then name that facet ("high variance"), so neither the
+            backfill proposal nor the late-link check counts them as a
+            mention of another target.
+            """
+            words = [w.lower() for w in WORD.findall(masked[start:end])]
+            return any(len(term) == len(words)
+                       and all(forms & singular_forms(word)
+                               for forms, word in zip(term, words))
+                       for term in own_terms)
+
         def _earlier_mention(owner, start, end, surface):
             """A plain mention before the first link that could carry it.
 
             Alias-only bare nouns of qualified destinations (`covariate`), a
-            part of a longer term (see `_inside_longer_term`), a discipline
-            root inside a compound (`cell biology`), a descriptor immediately
-            followed by the link itself (`fission yeast
+            part of a longer term (see `_inside_longer_term`), a facet word the
+            entry defines in italics from its own title (see
+            `_own_title_term`), a discipline root inside a compound (`cell
+            biology`), a descriptor immediately followed by the link itself
+            (`fission yeast
             [[schizosaccharomyces-pombe|…]]`), and an italic gene symbol
             before a link to its Gene/Protein entry (`*cdc2*` before the Cdc2
             kinase) are not separate first mentions.
@@ -1203,7 +1231,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             link_start = first_link[owner][0]
             if start >= link_start or surface in quiet_surfaces:
                 return False
-            if _inside_longer_term(start, end):
+            if _inside_longer_term(start, end) or _own_title_term(start, end):
                 return False
             if owner in root_targets and _compound_modifier_before(masked, start):
                 return False
@@ -1232,7 +1260,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             if tgt in root_targets and _compound_modifier_before(masked, start):
                 continue
             # A later standalone mention may still carry the link.
-            if _inside_longer_term(start, end):
+            if _inside_longer_term(start, end) or _own_title_term(start, end):
                 continue
             proposed.add(tgt)
             backfill.append((sl, tgt, matched, surface,
@@ -9690,6 +9718,20 @@ def run_self_test():
                 ("italic-same", "**Italic same** fits a *training set* first. "
                                 "It then reuses the [[training-set|training "
                                 "set]]."),
+                ("open-compound", "**Open compound** reports the training "
+                                  "set size first. It then reuses the "
+                                  "[[training-set|training set]]."),
+                ("italic-bullet", "**Italic bullet** has two parts.\n\n"
+                                  "- *Training set* comes from the fitted "
+                                  "split.\n- *Base split* is the rest.\n\n"
+                                  "It reuses the [[training-set|training "
+                                  "set]]."),
+                ("training-set-split", "**Training set split** has two "
+                                       "parts.\n\n- *Training set* is the "
+                                       "fitted part, and a large training "
+                                       "set helps.\n- *Rest* is held out."
+                                       "\n\nIt reuses the [[training-set|"
+                                       "training set]]."),
                 ("math-sub", "**Math sub** predicts $\\hat{y}_{i}$ for each "
                              "training set example $\\mathbf{x}_{i}$. It "
                              "reuses the [[training-set|training set]]."),
@@ -9737,6 +9779,13 @@ def run_self_test():
               ["item10/late-link" in _st_keys(res, slug_) for slug_ in
                ("longer-italic", "gene-symbol", "italic-same")],
               [False, False, True])
+        check("a modifier inside an open compound (`training set size`) and "
+              "an italic bullet term naming the target are earlier mentions; "
+              "words the entry defines in italics from its own title name "
+              "its own facet, italic or plain, and are not",
+              ["item10/late-link" in _st_keys(res, slug_) for slug_ in
+               ("open-compound", "italic-bullet", "training-set-split")],
+              [True, True, False])
         check("a `_` or `*` inside LaTeX math opens no italic span, so the "
               "mention between two math spans is still a late link; an "
               "italic term that starts with math still is one term",
