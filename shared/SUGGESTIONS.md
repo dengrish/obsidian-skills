@@ -46,11 +46,10 @@ the first timestamp and update latest only on a new occurrence. `Reported by`
 names the observing skill or skills, or `plugin review` for a
 source-development review.
 
-A skill log has this form; substitute its actual skill name and issue data:
+A skill log has this form, substituting its actual issue data. It has no H1
+title: Obsidian already shows the filename as the note's title.
 
 ```markdown
-# <current-skill> suggestions
-
 Open issues come first. A fixed issue moves to Fixed and stays until the user removes it.
 
 ## Open
@@ -133,9 +132,9 @@ that uncertainty without inventing an upstream owner.
 
 ## Log format and maintenance
 
-The note-content log uses `# Wiki notes suggestions` with a skill log's intro,
-sections, and item format; its **Fixed in** names the run that changed the
-notes, such as `wiki-lint run, YYYY-MM-DD HH:MM`.
+The note-content log uses a skill log's intro, sections, and item format; its
+**Fixed in** names the run that changed the notes, such as
+`wiki-lint run, YYYY-MM-DD HH:MM`.
 
 **Fixing.** Move an item to Fixed when a released plugin version or a
 completed run fixes it. Keep its heading and **Issue** line, drop the other
@@ -160,7 +159,7 @@ than deleted.
 **Older logs.** A log without `## Open` and `## Fixed` predates this format.
 The next run that writes it replaces the old intro with the current one, puts
 the existing items under `## Open`, one heading level lower, and adds an empty
-`## Fixed`.
+`## Fixed`. A log that still opens with an H1 title drops it on its next write.
 
 ## Setup and migration
 
