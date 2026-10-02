@@ -142,9 +142,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
    version and keeps its mode. The other two publications use a private driver
    under the shared
    [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api):
-   `publish_files.py` offers no conditional removal (step 9), cannot give a
-   new name the original note's permissions, and refuses a case alias. The
-   driver rebuilds the expected token from the old note's JSON record `r` as
+   `publish_files.py` cannot give a new name the original note's permissions
+   and refuses a case alias. The driver rebuilds the expected token from the
+   old note's JSON record `r` as
    `atomic_move.RegularFileSnapshot(identity=tuple(r["identity"]), digest=r["digest"], mode=r["mode"], size=r["size"])`,
    never from a fresh snapshot. At a free destination (a changed slug), it calls
    `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`.
@@ -238,12 +238,16 @@ never moved, deleted or rewritten, including after a successful reprocess.
    external dependencies around every retirement. A newly introduced link causes
    rollback. If any check fails, it retains both sets and reports the blocker or
    recovery path.
-9. After finalize succeeds, conditionally remove the distinct old note in the
-   private driver with
-   `atomic_move.remove_expected(old_note, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`,
-   passing the token rebuilt from the old note's record (made before the
-   rewrite, or when finishing a pending handoff) and a fresh `stage_dir`; clean
-   that `stage_dir` only after success.
+9. After finalize succeeds, conditionally remove the distinct old note against
+   its record (made before the rewrite, or when finishing a pending handoff):
+
+   ```bash
+   python3 '<plugin>/shared/scripts/publish_files.py' remove --vault '<vault>' \
+       --snapshots '<scratch>/clipping-snapshots.json' 'Articles/<old_slug>.md'
+   ```
+
+   It refuses a path with no record or one whose bytes, identity or mode
+   changed, and reports any retained stage directory in its JSON outcome.
    Do not use a check followed by `unlink`, remove it for the same-file
    spelling case, or remove it if it changed. A cleanup refusal
    keeps the path; never delete first and report broken references afterward.
@@ -261,7 +265,7 @@ When the user asks to finish or resume a pending handoff left by step 6
 web origin, the old note embeds the old-slug images and the new note embeds
 their mapped names. Record the old note with `publish_files.py snapshot
 --replace` in this run's snapshot file before reading it for this check; step 9
-rebuilds its token from that record. Rerun
+removes it against that record. Rerun
 `rename --phase prepare --dry-run` with the original paths and slugs, review
 it, then run the identical live command. Copies prepared earlier are verified
 as `already-prepared`, and it returns the current mapping and dependency

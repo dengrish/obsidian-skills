@@ -97,7 +97,7 @@ The extractor writes whole figures. Existing vaults can also contain legacy pane
 
 **Never both.** A composite and a panel of it under one claim is the same picture twice, and the panel is inside the plate directly above it.
 
-**Panels do not inflate the counts.** The four-embed cap counts embeds, so three panels of one figure are three of the four (above). And an unplaced panel is **not** an unused figure: placing the composite discharges every panel under it, placing any panel discharges the composite, and the report's "figures available but not used" count is over composites only. A paper whose 4 figures yielded 27 files has 4 exhibits, not 27.
+**Panels do not inflate the unused-figure count.** An unplaced panel is **not** an unused figure: placing the composite discharges every panel under it, placing any panel discharges the composite, and the report's "figures available but not used" count is over composites only. A paper whose 4 figures yielded 27 files has 4 exhibits, not 27.
 
 
 ## When the figure you need is not there
@@ -132,7 +132,7 @@ The shape, exactly, and it mirrors the figure shape:
 *No-till plots held about 6 t/ha more soil carbon after twelve years on this Iowa farm. Final means cover two of four regimes. The other regimes and per-depth rows are omitted.*
 ```
 
-- **In the third, contribution section, under the claim it supports.** Same rule as a figure; `note_lint.py` calls this slot `Results` and enforces it.
+- **In the third, contribution section, under the claim it supports.** Same rule as a figure.
 - **Italic caption on the very next line**, no blank line between — again as for a figure, and for the same rendering reason.
 - **No table number**, in the caption or anywhere else.
 - **Values verbatim.** Copy the digits the source printed. Do not round, rescale, convert units, or recompute an average from the subset of rows you kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the source never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.

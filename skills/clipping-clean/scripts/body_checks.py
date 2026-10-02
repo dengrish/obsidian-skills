@@ -5,7 +5,7 @@ Every check here finds *candidates*: a match is a place to inspect against the
 source, never permission to rewrite. The rules that decide what a match means
 are in references/review-checklist.md and references/nested-lists.md.
 
-  sweep PATH      the review checklist's numbered mechanical sweep (1-15,
+  sweep PATH      the review checklist's numbered mechanical sweep (1-16,
                   including 12b), each with its expectation and the matching
                   lines. The leading YAML block and fenced code are skipped;
                   an unclosed fence is reported and its lines are scanned.
@@ -15,6 +15,16 @@ are in references/review-checklist.md and references/nested-lists.md.
   outline PATH    the heading outline and coarse counts (list lines, quote
                   lines, links, image embeds, tables, code blocks) for
                   comparing the draft's structure with the source.
+  source PATH [--base-url URL]
+                  the same outline and counts for saved page markup, plus one
+                  JSON row per figure-like element (image, picture, inline
+                  SVG, video, canvas, iframe, Lottie player, figure): best
+                  image URL resolved against URL, alt, figcaption, figure
+                  number, nearest preceding heading and Lottie source. Counts
+                  are elements outside nav/aside and page-level header/footer,
+                  whose headings and rows are tagged instead. Read-only: the
+                  stdlib html.parser reads the file; nothing is fetched or
+                  executed.
   repair --op OP --lines RANGES PATH [--dry-run]
                   apply one confirmed nested-list repair to the listed lines
                   only (1-based, `12` or `12-18`, comma-separated), keeping any
@@ -35,11 +45,16 @@ Run ``python3 body_checks.py --test`` for the self-test.
 """
 
 import argparse
+import collections
+import contextlib
+import html.parser
+import io
 import json
 import os
 import re
 import sys
 import tempfile
+import urllib.parse
 
 
 #: POSIX [[:space:]] without the newline a split line never carries.
@@ -79,6 +94,18 @@ TABLE_DELIMITER_RE = re.compile(
     r"(?:[ \t]*:?-+:?)?[ \t]*$", re.M)
 HR_RE = re.compile(r"^(?:[-*_]{3,}|<hr>)%s*$" % SP)
 SEPARATOR_RE = re.compile(r"^___%s*$" % SP)
+#: A top-level bullet of the Summary callout.
+SUMMARY_BULLET_RE = re.compile(r"^>[ \t]?[-*+][ \t]+(.*)$")
+#: A URL, wikilink, Markdown link target or footnote marker in a bullet.
+SUMMARY_LINK_RE = re.compile(r"https?://|www\.|\[\[|\]\(|\[\^")
+#: Terminal punctuation and closers, then a space before a new sentence.
+SENTENCE_END_RE = re.compile(r"[.!?][\"'”’)\]*_]*\s+(?=[\"'“‘(*_]*[A-Z0-9])")
+#: Text ending in an abbreviation whose full stop does not end a sentence.
+ABBREVIATION_RE = re.compile(
+    r"(?:^|[\s(])(?:(?:[A-Za-z]\.)+|vs\.|etc\.|Dr\.|Mr\.|Mrs\.|Ms\.|St\."
+    r"|No\.|Fig\.|Inc\.|Ltd\.|Co\.|Jr\.|Sr\.|al\.|Jan\.|Feb\.|Mar\.|Apr\."
+    r"|Jun\.|Jul\.|Aug\.|Sept?\.|Oct\.|Nov\.|Dec\.|approx\.|ca\.|cf\.|pp?\."
+    r"|vol\.|ch\.)$")
 
 #: The quote prefix the sibling scan and the repairs peel off and re-attach.
 QUOTE_PREFIX_RE = re.compile(r"^((?:>\s?)*)")
@@ -240,6 +267,56 @@ def decorative_rules(body):
     return out
 
 
+def sentence_count(text):
+    """Sentences in one bullet; a full stop after an abbreviation is not an end."""
+    return 1 + sum(1 for m in SENTENCE_END_RE.finditer(text)
+                   if not ABBREVIATION_RE.search(text[:m.start() + 1]))
+
+
+def summary_size(body):
+    """Sweep item 16: the first Summary's bullets against the body's length.
+
+    A bullet runs from its marker to the next marker or blank `>` line. Lists
+    each bullet over 45 words or 2 sentences, or holding a link or footnote.
+    """
+    start = next((k for k, (_n, line) in enumerate(body)
+                  if SUMMARY_RE.match(line)), None)
+    bullets, end = [], 0
+    if start is not None:
+        end, prev, current = start + 1, body[start][0], None
+        while (end < len(body) and body[end][0] == prev + 1
+               and body[end][1].startswith(">")):
+            n, line = body[end]
+            m = SUMMARY_BULLET_RE.match(line)
+            if m:
+                current = [n, m.group(1).strip()]
+                bullets.append(current)
+            elif current is not None and line[1:].strip():
+                current[1] += " " + line[1:].strip()
+            else:
+                current = None
+            prev, end = n, end + 1
+    words = sum(len(line.split()) for _n, line in body[end:]
+                if not SEPARATOR_RE.match(line))
+    out = ["bullets: %d, body words: %d (expect ~5-8 for a short post, 10-15 "
+           "for longform, at most 20)" % (len(bullets), words),
+           "bullets over 30 words: %d" % sum(
+               1 for _n, t in bullets if len(t.split()) > 30)]
+    for n, t in bullets:
+        count, sentences = len(t.split()), sentence_count(t)
+        link = SUMMARY_LINK_RE.search(t)
+        if count <= 45 and sentences <= 2 and not link:
+            continue
+        entry = "L%d: %dw" % (n, count)
+        if sentences > 2:
+            entry += ", %d sentences" % sentences
+        if link:
+            entry += ", link or footnote: %s" % snippet(
+                t, link.start(), link.end())
+        out.append(entry)
+    return out
+
+
 def sweep_report(text):
     """The numbered sweep as ``[(header, [result lines])]`` plus notes."""
     lines = text.split("\n")
@@ -292,6 +369,8 @@ def sweep_report(text):
          grep(body, TABLE_RE)),
         ("15 decorative HR below the ___ separator — NONE",
          decorative_rules(body)),
+        ("16 Summary size — candidates, judge against SKILL.md step 4",
+         summary_size(body)),
     ]
     return report, notes
 
@@ -316,6 +395,343 @@ def outline_report(text):
         code_blocks=len(openers),
     )
     return heads, counts
+
+
+# --- saved source markup ------------------------------------------------------
+
+#: Elements whose open/close depth the parser tracks.
+TRACKED = frozenset((
+    "a", "article", "aside", "blockquote", "button", "figcaption", "figure",
+    "footer", "header", "main", "nav", "noscript", "picture", "script",
+    "section", "style", "svg", "template", "video",
+    "h1", "h2", "h3", "h4", "h5", "h6"))
+HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
+#: Sectioning elements that keep a header/footer from being page chrome.
+SECTIONING = ("article", "aside", "main", "nav", "section")
+CHROME = ("nav", "aside", "header", "footer")
+#: Element bodies that are not page content: no headings, counts or rows.
+INERT = ("script", "style", "template", "svg")
+IMG_TAGS = ("img", "amp-img")
+LOTTIE_TAGS = ("lottie-player", "dotlottie-player", "dotlottie-wc")
+LOTTIE_PATH_ATTRS = ("data-animation-path", "data-anim-path", "data-bm-path")
+LOTTIE_FILE_RE = re.compile(r"\.(?:json|lottie)(?:[?#]|$)", re.I)
+PERMALINK_GLYPHS = frozenset("#¶§🔗")
+SRCSET_DESCRIPTOR_RE = re.compile(r"^([0-9]*\.?[0-9]+)([wx])$")
+ROW_FIELDS = ("line", "tag", "url", "src", "alt", "caption", "figure",
+              "heading", "lottie", "poster", "in", "noscript")
+
+
+def parse_srcset(value):
+    """``[(url, descriptor)]``; a URL ends at whitespace, so its commas stay."""
+    out, pos, n = [], 0, len(value)
+    while pos < n:
+        while pos < n and (value[pos].isspace() or value[pos] == ","):
+            pos += 1
+        start = pos
+        while pos < n and not value[pos].isspace():
+            pos += 1
+        url, descriptor = value[start:pos], ""
+        if url.endswith(","):
+            url = url.rstrip(",")
+        else:
+            begin, depth = pos, 0
+            while pos < n and (value[pos] != "," or depth):
+                if value[pos] == "(":
+                    depth += 1
+                elif value[pos] == ")" and depth:
+                    depth -= 1
+                pos += 1
+            descriptor = value[begin:pos].strip()
+        if url:
+            out.append((url, descriptor))
+    return out
+
+
+def _srcset_rank(candidate):
+    """``(width, density)``; a candidate with no descriptor is 1x."""
+    m = SRCSET_DESCRIPTOR_RE.match(candidate[1].split(" ")[0])
+    if not m:
+        return (0.0, 1.0)
+    size = float(m.group(1))
+    return (size, 0.0) if m.group(2) == "w" else (0.0, size)
+
+
+def best_image_url(attrs, extra_srcsets=()):
+    """The largest srcset candidate, else data-lazy-src, data-src, then src.
+
+    A `data:` placeholder yields to any other URL.
+    """
+    candidates = []
+    for value in [attrs.get("srcset"), attrs.get("data-srcset")] + list(
+            extra_srcsets):
+        if value:
+            candidates.extend(parse_srcset(value))
+    ordered = [max(candidates, key=_srcset_rank)[0]] if candidates else []
+    ordered += [attrs.get(k) or "" for k in ("data-lazy-src", "data-src", "src")]
+    ordered = [u.strip() for u in ordered if u.strip()]
+    real = [u for u in ordered if not u.lower().startswith("data:")]
+    return (real or ordered or [""])[0]
+
+
+def shown_url(url):
+    """A data URI abbreviated to its media type and length."""
+    if url.lower().startswith("data:"):
+        return "%s,… (%d chars)" % (url.split(",", 1)[0], len(url))
+    return url
+
+
+def _text(parts):
+    return " ".join("".join(parts).split())
+
+
+class SourceInventory:
+    """Headings, coarse counts and figure-like media of saved page markup.
+
+    Script and style bodies are character data to html.parser, so markup in
+    them is never parsed; template and inline-SVG contents are skipped, and
+    inside `<noscript>` only an image not already listed is reported.
+    """
+
+    def __init__(self, base_url=None):
+        # html.parser dispatches through instance attributes, so bound
+        # handlers stand in for a subclass of the imported parser.
+        self.parser = html.parser.HTMLParser(convert_charrefs=True)
+        self.parser.handle_starttag = self.handle_starttag
+        self.parser.handle_endtag = self.handle_endtag
+        self.parser.handle_data = self.handle_data
+        self.feed, self.close = self.parser.feed, self.parser.close
+        self.getpos = self.parser.getpos
+        self.base = base_url or ""
+        self.base_seen = False
+        self.depth = collections.Counter()
+        self.page_chrome = collections.Counter()
+        self.header_footer = {"header": [], "footer": []}
+        self.headings, self.media = [], []
+        self.counts = dict(list_lines=0, quote_lines=0, links=0,
+                           image_embeds=0, tables=0, code_blocks=0)
+        self.last_heading = ""
+        self.heading = None
+        self.figures, self.pictures, self.quotes = [], [], []
+        self.figure_count = 0
+        self.video = None
+        self.seen_urls = set()
+
+    def resolve(self, url):
+        url = (url or "").strip()
+        if not url or url.lower().startswith("data:") or not self.base:
+            return url
+        return urllib.parse.urljoin(self.base, url)
+
+    def chrome(self):
+        """The nav, aside, page header or page footer around the parser."""
+        for tag in CHROME:
+            if self.depth[tag] if tag in ("nav", "aside") \
+                    else self.page_chrome[tag]:
+                return tag
+        return None
+
+    def row(self, tag, **fields):
+        row = {"line": self.getpos()[0], "tag": tag}
+        row.update((k, v) for k, v in fields.items() if v)
+        if self.figures:
+            row["figure"] = self.figures[-1]["no"]
+            self.figures[-1]["rows"].append(row)
+        if self.last_heading:
+            row["heading"] = self.last_heading
+        chrome = self.chrome()
+        if chrome:
+            row["in"] = chrome
+        if self.depth["noscript"]:
+            row["noscript"] = True
+        elif tag in IMG_TAGS + ("picture",) and not chrome:
+            self.counts["image_embeds"] += 1
+        self.media.append(row)
+        return row
+
+    def image_row(self, tag, attrs, extra_srcsets=()):
+        url = self.resolve(best_image_url(attrs, extra_srcsets))
+        src = self.resolve(attrs.get("src"))
+        if self.depth["noscript"] and url in self.seen_urls:
+            return
+        self.seen_urls.update(u for u in (url, src) if u)
+        self.row(tag, url=shown_url(url),
+                 src=shown_url(src) if src != url else "",
+                 alt=_text([attrs.get("alt") or ""]))
+
+    def handle_starttag(self, tag, attrs):
+        attrs = dict((k, v or "") for k, v in attrs)
+        if any(self.depth[t] for t in INERT):
+            if tag in INERT:
+                self.depth[tag] += 1
+            return
+        if tag == "base" and not self.base_seen and attrs.get("href"):
+            self.base_seen = True
+            self.base = self.resolve(attrs["href"]) if self.base \
+                else attrs["href"]
+        if tag in ("header", "footer"):
+            landmark = not any(self.depth[t] for t in SECTIONING)
+            self.header_footer[tag].append(landmark)
+            self.page_chrome[tag] += landmark
+        if tag in TRACKED:
+            self.depth[tag] += 1
+        if self.depth["noscript"]:
+            if tag in IMG_TAGS and not self.pictures:
+                self.image_row(tag, attrs)
+            return
+        chrome = self.chrome()
+        if tag in HEADING_TAGS:
+            self.finish_heading()
+            self.heading = (int(tag[1]), [], chrome)
+        elif tag == "br" and self.heading is not None:
+            self.heading[1].append(" ")
+        elif tag == "a" and not chrome:
+            href = attrs.get("href", "").strip()
+            if href and not href.startswith("#") \
+                    and not href.lower().startswith("javascript:"):
+                self.counts["links"] += 1
+        elif tag in ("table", "pre") and not chrome:
+            self.counts["tables" if tag == "table" else "code_blocks"] += 1
+        elif tag == "blockquote":
+            self.quotes.append(0)
+        if tag in ("p", "li") and self.quotes:
+            self.quotes[-1] += 1
+        if tag == "li" and not chrome:
+            self.counts["list_lines"] += 1
+        self.media_start(tag, attrs, chrome)
+
+    def media_start(self, tag, attrs, chrome):
+        lottie = [attrs[k] for k in ("src", "data-src") + LOTTIE_PATH_ATTRS
+                  if LOTTIE_FILE_RE.search(attrs.get(k, ""))]
+        if tag in LOTTIE_TAGS or any(attrs.get(k) for k in LOTTIE_PATH_ATTRS) \
+                or attrs.get("data-animation-type", "").lower() == "lottie" \
+                or (lottie and "lottie" in attrs.get("class", "").lower()):
+            self.row(tag, lottie=self.resolve(lottie[0]) if lottie else "")
+        elif tag == "figure":
+            self.figure_count += 1
+            # Listed in place now; dropped at </figure> if media fill it.
+            stub = {"line": self.getpos()[0], "tag": "figure",
+                    "figure": self.figure_count}
+            if self.last_heading:
+                stub["heading"] = self.last_heading
+            if chrome:
+                stub["in"] = chrome
+            self.media.append(stub)
+            self.figures.append({"no": self.figure_count, "rows": [],
+                                 "caption": [], "stub": stub})
+        elif tag == "picture":
+            self.pictures.append({"sources": [], "img": False})
+        elif tag == "source" and self.video is not None:
+            if "url" not in self.video and attrs.get("src"):
+                self.video["url"] = self.resolve(attrs["src"])
+        elif tag == "source" and self.pictures:
+            self.pictures[-1]["sources"].extend(
+                attrs[k] for k in ("srcset", "data-srcset") if attrs.get(k))
+        elif tag in IMG_TAGS:
+            if self.pictures:
+                self.pictures[-1]["img"] = True
+                self.image_row("picture", attrs, self.pictures[-1]["sources"])
+            else:
+                self.image_row(tag, attrs)
+        elif tag == "video":
+            self.video = self.row(
+                "video", url=self.resolve(attrs.get("src")),
+                poster=self.resolve(attrs.get("poster")))
+        elif tag == "iframe":
+            url = next((attrs[k].strip() for k in
+                        ("data-lazy-src", "data-src", "src")
+                        if attrs.get(k, "").strip()
+                        and attrs[k].strip().lower() != "about:blank"), "")
+            self.row("iframe", url=self.resolve(url))
+        elif tag == "canvas":
+            self.row("canvas")
+        elif tag == "svg" and not self.depth["a"] and not self.depth["button"]:
+            self.row("svg", alt=_text([attrs.get("aria-label", "")]))
+
+    def handle_endtag(self, tag):
+        if any(self.depth[t] for t in INERT):
+            if tag in INERT and self.depth[tag]:
+                self.depth[tag] -= 1
+            return
+        if tag in TRACKED and not self.depth[tag]:
+            return
+        if not self.depth["noscript"]:
+            if tag in HEADING_TAGS:
+                self.finish_heading()
+            elif tag == "figure" and self.figures:
+                self.finish_figure()
+            elif tag == "picture" and self.pictures:
+                self.finish_picture()
+            elif tag == "video":
+                self.video = None
+            elif tag == "blockquote" and self.quotes:
+                paragraphs = self.quotes.pop()
+                if not self.chrome():
+                    self.counts["quote_lines"] += max(paragraphs, 1)
+        if tag in ("header", "footer") and self.header_footer[tag]:
+            self.page_chrome[tag] -= self.header_footer[tag].pop()
+        if tag in TRACKED:
+            self.depth[tag] -= 1
+
+    def handle_data(self, data):
+        if self.depth["noscript"] or any(self.depth[t] for t in INERT):
+            return
+        if self.heading is not None and not (
+                self.depth["a"] and data.strip()
+                and set(data.strip()) <= PERMALINK_GLYPHS):
+            self.heading[1].append(data)
+        if self.depth["figcaption"] and self.figures:
+            self.figures[-1]["caption"].append(data)
+
+    def finish_heading(self):
+        if self.heading is not None:
+            level, parts, chrome = self.heading
+            self.heading = None
+            text = _text(parts)
+            if text:
+                self.headings.append((level, text, chrome))
+                if chrome not in ("nav", "aside"):
+                    self.last_heading = text
+
+    def finish_picture(self):
+        picture = self.pictures.pop()
+        if not picture["img"] and picture["sources"]:
+            self.image_row("picture", {}, picture["sources"])
+
+    def finish_figure(self):
+        figure = self.figures.pop()
+        caption = _text(figure["caption"])
+        for row in figure["rows"] or [figure["stub"]]:
+            if caption:
+                row.setdefault("caption", caption)
+        if figure["rows"]:
+            self.media = [r for r in self.media if r is not figure["stub"]]
+            if self.figures:
+                # A nested figure's media fill its parent, e.g. a gallery.
+                self.figures[-1]["rows"].extend(figure["rows"])
+
+    def finish(self):
+        """Close what the markup left open."""
+        self.finish_heading()
+        while self.pictures:
+            self.finish_picture()
+        while self.figures:
+            self.finish_figure()
+
+
+def source_report(text, base_url=None):
+    """``(headings, counts, media rows, notes)`` of saved page markup."""
+    parser = SourceInventory(base_url)
+    notes = [] if base_url else [
+        "no --base-url: relative URLs are left unresolved"]
+    try:
+        parser.feed(text)
+        parser.close()
+    except Exception as exc:  # html.parser is lenient; keep a partial result
+        notes.append("parser stopped near L%d: %s" % (parser.getpos()[0], exc))
+    parser.finish()
+    media = [dict((k, r[k]) for k in ROW_FIELDS if k in r)
+             for r in parser.media]
+    return parser.headings, parser.counts, media, notes
 
 
 # --- region-scoped repairs --------------------------------------------------
@@ -557,7 +973,53 @@ def run_self_test():
     check("every numbered sweep item is present, 12b included",
           [h.split()[0] for h, _r in sweep_report("")[0]],
           ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
-           "12b", "13", "14", "15"])
+           "12b", "13", "14", "15", "16"])
+
+    long_bullet = " ".join(["word"] * 50) + "."
+    summary = "\n".join([
+        "---", "title: x", "---",
+        "> [!Summary]",
+        "> - Short claim one.",
+        "> - " + long_bullet,
+        "> - One. Two. Three sentences here.",
+        "> - Smith et al. found it, e.g. U.S. data. Fine.",
+        "> - A bullet that wraps",
+        ">   onto a second line with a [[Wiki Link]].",
+        "> - Cites [a page](https://x.test) and a note[^1].",
+        "> - " + " ".join(["thirty-one"] * 31),
+        "", "___", "",
+        "Body has six words in it.",
+        "```", "code words are not counted", "```",
+    ])
+    size = items(summary)["16"]
+    check("item 16 counts bullets beside body words, code excluded",
+          size[0].split(" (")[0], "bullets: 7, body words: 6")
+    check("item 16 counts bullets over 30 words", size[1],
+          "bullets over 30 words: 2")
+    check("item 16 lists a bullet over 45 words",
+          [e for e in size if e.startswith("L6:")], ["L6: 50w"])
+    check("item 16 lists a bullet of more than two sentences",
+          [e for e in size if e.startswith("L7:")], ["L7: 5w, 3 sentences"])
+    check("item 16 does not end sentences at abbreviations",
+          [e for e in size if e.startswith("L8:")], [])
+    check("item 16 does not end sentences at months or approx.",
+          items("\n".join([
+              "> [!Summary]",
+              "> - Hamas attacked on Oct. 7. Israel responded.",
+              "> - On Jan. 20, 2025, Trump signed the order. It took effect.",
+              "> - Costs fell approx. 5 percent. Margins rose.",
+              "> - It used ca. 2e25 FLOP. It cost $100m.",
+          ]))["16"][2:], [])
+    check("item 16 joins a wrapped bullet and finds its wikilink",
+          [e.split(",")[0] for e in size if e.startswith("L9:")], ["L9: 12w"])
+    check("item 16 lists a bullet with a URL or footnote marker",
+          [e.split(" link")[0] for e in size if e.startswith("L11:")],
+          ["L11: 6w,"])
+    check("item 16 leaves a 31-word single sentence to the count alone",
+          [e for e in size if e.startswith("L12:")], [])
+    check("item 16 without a Summary counts the whole body",
+          items("One two three.\n")["16"][0].split(" (")[0],
+          "bullets: 0, body words: 3")
     long_line = "a" * 400 + " subscribe " + "b" * 400
     check("a long line is windowed around its match",
           "subscribe" in grep([(1, long_line)], CHROME_RE)[0]
@@ -578,6 +1040,149 @@ def run_self_test():
     check("outline does not count an unclosed fence as a code block",
           outline_report("```a\nx\n```\n```\nnever closed")[1]["code_blocks"],
           1)
+
+    check("srcset keeps commas inside a URL and reads descriptors",
+          parse_srcset("https://c.test/w_400,h_300/a.jpg 400w,"
+                       "https://c.test/w_800,h_600/a.jpg 800w"),
+          [("https://c.test/w_400,h_300/a.jpg", "400w"),
+           ("https://c.test/w_800,h_600/a.jpg", "800w")])
+    check("srcset accepts a bare URL and trailing commas",
+          parse_srcset(" a.png, b.png 2x,, "), [("a.png", ""), ("b.png", "2x")])
+    check("the largest srcset candidate is the best URL",
+          best_image_url({"src": "s.jpg", "srcset": "a.jpg 1x, b.jpg 2x"}),
+          "b.jpg")
+    check("a lazy data-src beats a data: placeholder src",
+          best_image_url({"src": "data:image/gif;base64,R0lG",
+                          "data-src": "real.png"}), "real.png")
+
+    page = "\n".join([
+        "<!doctype html><html><head><base href=\"/blog/\"><title>T</title>",
+        "<script>var s = \"<img src='nope.png'><h2>No</h2>\";</script>",
+        "<style>h2 { color: red }</style></head><body>",
+        "<header><nav><a href=\"/\">Home</a><h2>Menu</h2>"
+        "<img src=\"logo.png\" alt=\"logo\"></nav></header>",
+        "<article><header><h1>Title <a href=\"#t\">#</a></h1></header>",
+        "<p>Intro <a href=\"https://ex.test/x\">link</a> "
+        "<a href=\"#fn1\">1</a>.</p>",
+        "<h2>Charts</h2>",
+        "<figure><img src=\"data:image/gif;base64,R0lGOD\" "
+        "data-src=\"img/a.png\" alt=\"Chart A\">",
+        "<figcaption>Figure 1. <em>Growth</em>.</figcaption></figure>",
+        "<picture><source srcset=\"b-400.webp 400w, b-1200.webp 1200w\">"
+        "<img src=\"b.jpg\" alt=\"B\"></picture>",
+        "<noscript><img src=\"img/a.png\"><iframe src=\"t.html\"></iframe>"
+        "</noscript>",
+        "<h3>Animation</h3>",
+        "<figure><lottie-player src=\"anim/spin.json\"></lottie-player>"
+        "<img src=\"poster.png\" alt=\"poster\"></figure>",
+        "<div class=\"lottie\" data-src=\"//cdn.test/x.lottie\"></div>",
+        "<video poster=\"v.jpg\"><source src=\"v.mp4\"></video>",
+        "<iframe src=\"https://player.test/embed/1\"></iframe><canvas></canvas>",
+        "<svg aria-label=\"diagram\"><svg></svg><image href=\"i.png\"/></svg>",
+        "<a href=\"/x\"><svg><path d=\"\"/></svg></a>",
+        "<figure><table><tr><td>1</td></tr></table>"
+        "<figcaption>Table 1</figcaption></figure>",
+        "<ul><li>one<li>two</ul>",
+        "<blockquote><p>q1</p><p>q2</p></blockquote>"
+        "<blockquote>bare</blockquote><pre><code>x</code></pre>",
+        "</article><template><img src=\"tpl.png\"></template>",
+        "<footer><img src=\"f.png\"></footer></body></html>",
+    ])
+    heads, counts, media, notes = source_report(
+        page, "https://site.test/post/1")
+    check("source headings skip script text, tag chrome and drop a "
+          "permalink glyph", heads,
+          [(2, "Menu", "nav"), (1, "Title", None), (2, "Charts", None),
+           (3, "Animation", None)])
+    check("source counts skip chrome and in-page fragment links", counts,
+          dict(list_lines=2, quote_lines=3, links=2, image_embeds=3,
+               tables=1, code_blocks=1))
+    rows = dict((r["url"] if "url" in r else r["tag"], r) for r in media)
+    check("source rows: chrome, lazy image with its figure caption, "
+          "pictures, Lottie, video, iframe, canvas, svg and an empty figure, "
+          "in document order",
+          [r.get("url") or r.get("lottie") or r["tag"] for r in media],
+          ["https://site.test/blog/logo.png",
+           "https://site.test/blog/img/a.png",
+           "https://site.test/blog/b-1200.webp",
+           "https://site.test/blog/anim/spin.json",
+           "https://site.test/blog/poster.png",
+           "https://cdn.test/x.lottie",
+           "https://site.test/blog/v.mp4",
+           "https://player.test/embed/1", "canvas", "svg", "figure",
+           "https://site.test/blog/f.png"])
+    check("a lazy figure image keeps its placeholder src, alt, caption, "
+          "figure number and heading",
+          rows["https://site.test/blog/img/a.png"],
+          {"line": 8, "tag": "img", "url": "https://site.test/blog/img/a.png",
+           "src": "data:image/gif;base64,… (28 chars)", "alt": "Chart A",
+           "caption": "Figure 1. Growth.", "figure": 1,
+           "heading": "Charts"})
+    check("a Lottie player and its poster share one figure",
+          [(r.get("figure"), r.get("heading")) for r in media
+           if r.get("figure") == 2],
+          [(2, "Animation"), (2, "Animation")])
+    check("a video takes its <source> and poster",
+          (rows["https://site.test/blog/v.mp4"].get("poster")),
+          "https://site.test/blog/v.jpg")
+    check("chrome rows are tagged; a header inside an article is not",
+          (rows["https://site.test/blog/logo.png"].get("in"),
+           rows["https://site.test/blog/f.png"].get("in"),
+           rows["svg"].get("alt")),
+          ("nav", "footer", "diagram"))
+    check("a figure with no media is one row carrying its caption",
+          (rows["figure"]["caption"], rows["figure"]["figure"]),
+          ("Table 1", 3))
+    check("without --base-url relative URLs stay as given, with a note",
+          (source_report("<img src=\"a/b.png\">")[2][0]["url"],
+           source_report("<img src=\"a/b.png\">")[3]),
+          ("a/b.png", ["no --base-url: relative URLs are left unresolved"]))
+    check("an unclosed figure is still reported, its caption attached",
+          source_report("<figure><img src=\"https://x.test/a.png\">"
+                        "<figcaption>Cap", "https://x.test/")[2],
+          [{"line": 1, "tag": "img", "url": "https://x.test/a.png",
+            "caption": "Cap", "figure": 1}])
+    check("a heading inside an aside is not the heading of later content",
+          [r.get("heading") for r in source_report(
+              "<article><h2>Results</h2><aside><h3>Read more</h3></aside>"
+              "<figure><img src=\"chart.png\"><figcaption>Figure 2"
+              "</figcaption></figure></article>", "https://x.test/")[2]],
+          ["Results"])
+    check("a gallery's nested figures give captioned media rows, no stub",
+          [(r["tag"], r.get("caption")) for r in source_report(
+              "<figure class=\"wp-block-gallery\"><figure><img src=a.jpg>"
+              "</figure><figure><img src=b.jpg></figure>"
+              "<figcaption>Two views</figcaption></figure>",
+              "https://x.test/")[2]],
+          [("img", "Two views"), ("img", "Two views")])
+    check("a lazy iframe reports its embed URL, not about:blank",
+          source_report("<iframe src=\"about:blank\" data-lazy-src="
+                        "\"https://www.youtube.com/embed/xyz\"></iframe>",
+                        "https://x.test/")[2][0].get("url"),
+          "https://www.youtube.com/embed/xyz")
+    check("a noscript image the page did not list is reported and tagged",
+          [(r["url"], r.get("noscript")) for r in source_report(
+              "<noscript><img src=\"https://x.test/n.png\"></noscript>",
+              "https://x.test/")[2]],
+          [("https://x.test/n.png", True)])
+
+    with tempfile.TemporaryDirectory() as tmp:
+        markup = os.path.join(tmp, "page.html")
+        with open(markup, "w", encoding="utf-8") as fh:
+            fh.write(page)
+        before = os.stat(markup).st_mtime_ns
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["source", markup, "--base-url",
+                         "https://site.test/post/1"])
+        lines = out.getvalue().split("\n")
+        media_at = lines.index("MEDIA:")
+        check("the source command prints headings, counts and one JSON row "
+              "per media element, and leaves the file unchanged",
+              (code, lines[0], lines[media_at - 1].startswith("COUNTS: {"),
+               len([json.loads(x) for x in lines[media_at + 1:] if x]),
+               os.stat(markup).st_mtime_ns == before),
+              (0, "HEADINGS:", True, len(media), True))
 
     check("stacked collapse keeps the last marker",
           collapse_stacked_markers("- - **Q:** why"), "- **Q:** why")
@@ -670,6 +1275,11 @@ def build_parser():
             ("outline", "heading outline and coarse structure counts")):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("path", metavar="PATH")
+    source = sub.add_parser(
+        "source", help="outline, counts and media rows of saved page markup")
+    source.add_argument("--base-url", metavar="URL",
+                        help="the capture URL relative sources resolve against")
+    source.add_argument("path", metavar="PATH")
     repair = sub.add_parser("repair", help="apply one confirmed list repair")
     repair.add_argument("--op", required=True, choices=sorted(REPAIRS))
     repair.add_argument("--lines", required=True, metavar="RANGES",
@@ -687,7 +1297,8 @@ def main(argv=None):
     if args.test:
         return run_self_test()
     if not args.command:
-        ap.error("give a subcommand (sweep, siblings, outline, repair) or --test")
+        ap.error("give a subcommand (sweep, siblings, outline, source, repair) "
+                 "or --test")
     if args.command == "repair":
         payload, code = cmd_repair(args.path, args.op, args.lines, args.dry_run)
         print(json.dumps(payload, indent=2, ensure_ascii=False))
@@ -711,6 +1322,20 @@ def main(argv=None):
         for level, title in heads:
             print("  %s %s" % ("#" * level, title))
         print("COUNTS:", json.dumps(counts))
+        return 0
+    if args.command == "source":
+        heads, counts, media, notes = source_report(text, args.base_url)
+        for note in notes:
+            print("[note] " + note)
+        print("HEADINGS:")
+        for level, title, chrome in heads:
+            print("  %s %s%s" % ("#" * level, title,
+                                 "  [%s]" % chrome if chrome else ""))
+        print("COUNTS:", json.dumps(counts))
+        print("MEDIA:")
+        for row in media or ["(none)"]:
+            print("  " + (row if isinstance(row, str)
+                          else json.dumps(row, ensure_ascii=False)))
         return 0
     report, notes = sweep_report(text)
     for note in notes:

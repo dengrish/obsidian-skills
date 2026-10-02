@@ -123,9 +123,12 @@ A `new` row must record `absent` and a `done` row `file`; otherwise rescan it.
 Before selecting exhibits, compare each selected PDF's inventory with the
 figures its text cites. When `<stem>_fig_ED*` files exist, or no
 `<stem>_fig*` crop exists yet and the captions number Extended Data figures
-alongside main ones, pass `--ed-prefix ED` here and to every extractor command
-below. Otherwise keep the default prefix; switching existing crops is
-figure-extract's [Extended Data procedure](../figure-extract/references/review-and-repair.md#extended-data-and-supplementary-figures):
+alongside main ones
+(`python3 '<skill>/scripts/paper_text.py' '<pdf path>' --find 'Extended Data'`
+reports pages that mention them; a MISSING line, exit 1, means none), pass
+`--ed-prefix ED` here and to every extractor command below. Otherwise keep the
+default prefix; switching existing crops is figure-extract's
+[Extended Data procedure](../figure-extract/references/review-and-repair.md#extended-data-and-supplementary-figures):
 
 ```bash
 python3 '<skill>/scripts/paper_text.py' '<pdf path>' --cites

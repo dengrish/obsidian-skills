@@ -2353,6 +2353,23 @@ A compact definition used only to exercise the shared contract.
             "introduced-alias", "Introduced alias",
             "**Introduced alias** — which many people call *alternate name* — "
             "is a worked example.")
+        # The acronym-expansion, bare-slug and cross-domain-alias floors are
+        # shared checks (entry_checks.py); both tools must apply them alike.
+        write_entry("mnist", "MNIST", "**MNIST** is a handwritten-digit dataset.")
+        write_entry(
+            "atp", "ATP", "**ATP** (adenosine triphosphate) carries energy.",
+            aliases=("adenosine-triphosphate",),
+            card="ATP (adenosine triphosphate)")
+        write_entry(
+            "tree-of-life", "Tree of life", "The **tree of life** models descent.")
+        write_entry(
+            "entropy-information-theory", "Entropy (information theory)",
+            "**Entropy** is the expected information content of a variable.",
+            aliases=("entropy",), card="Entropy")
+        write_entry(
+            "online-machine-learning", "Online machine learning",
+            "**Online machine learning** updates a model one instance at a time.",
+            aliases=("online-learning",))
         write_entry(
             "two-sentence-description", "Two sentence description",
             "**Two sentence description** is a deliberately malformed fixture.",
@@ -2516,8 +2533,16 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes"):
+                     "canonical-code-shapes", "atp"):
             self.assertEqual(lint_items[slug], set(), slug)
+        for slug, item in (("mnist", "9-acronym-expansion"),
+                           ("tree-of-life", "5-bare-common-noun")):
+            self.assertIn(item, lint_items[slug], (slug, lint_findings[slug]))
+        for slug in ("entropy-information-theory", "online-machine-learning"):
+            self.assertTrue(any(
+                finding["item"] == "18-alias-form"
+                and "bare cross-domain term" in finding["message"]
+                for finding in lint_findings[slug]), (slug, lint_findings[slug]))
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
                      "singular-parenthetical"):
@@ -2560,8 +2585,13 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes"):
+                     "canonical-code-shapes", "atp"):
             self.assertEqual(scan_items.get(slug, set()), set(), slug)
+        self.assertIn("item9/acronym-expansion", scan_items.get("mnist", set()))
+        self.assertTrue(any(
+            problem["slug"] == "tree-of-life" and problem["item"] == "item5"
+            and "bare-slug" in problem["message"]
+            for problem in scan["problems"]), scan_items.get("tree-of-life"))
         for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
                      "synonym-parenthetical", "wrong-title-case",
                      "singular-parenthetical"):
@@ -2632,6 +2662,9 @@ A compact definition used only to exercise the shared contract.
             scan_items.setdefault(problem["slug"], set()).add(problem["item"])
         self.assertIn("item17/alias-candidate",
                       scan_items.get("introduced-alias", set()))
+        for slug in ("entropy-information-theory", "online-machine-learning"):
+            self.assertIn("item18/cross-domain-alias",
+                          scan_items.get(slug, set()), slug)
         self.assertIn("10-duplicate-wikilink",
                       lint_items["duplicate-link-forms"])
         self.assertIn("item10/dup",

@@ -26,21 +26,13 @@ under the builder's [read-and-classify rule](../../wiki-build/references/source-
 Seek an accessible alternative when needed; do not bypass access controls or
 invent missing content.
 
-Track which source and section/page supports each claim, and keep each claim's
-units, conditions, attribution and the uncertainty principle 3 keeps:
-evidence-bearing uncertainty, or a condition under which the plain claim is
-false for the ordinary case. A source's edge-case or availability hedge (the
-"generally" in "prokaryotes generally lack membrane-bound organelles") stays
-out. The entry explains the topic under the builder's
-[prose principles](../../wiki-build/references/writing.md#prose-principles),
-including their caveat, priority-claim and no-open-questions rules: every
-complexity, iteration bound, derivation result or stated mechanism the entry
-gives carries its one-line reason, from the inspected source or as 5(h)
-background. A stated result that no accurate reason supports is suspect: never
-invent a reason; check it against standard references (the original paper,
-official documentation, a standard textbook or an encyclopedia article),
-which count as evidence here, and state it accurately, keeping the source's
-figure only within the scope that makes it true; omit it when they disagree.
+Track which source and section or page supports each claim, with its units,
+conditions and attribution. Write under the builder's
+[prose principles](../../wiki-build/references/writing.md#prose-principles)
+and [editorial reread](../../wiki-build/references/writing.md#editorial-reread).
+When its term audit finds a result no accurate reason supports, standard
+references (the original paper, official documentation, a standard textbook or
+an encyclopedia article) count as evidence here.
 Do not add unrelated claims to justify another source or image.
 
 ## Reuse before acquiring

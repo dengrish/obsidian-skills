@@ -159,7 +159,11 @@ def _cue_names_subject(prefix, subject_forms):
     if copula:
         subject = re.split(r"\b(?:that|and|but)\b", copula.group("subject"),
                            flags=re.IGNORECASE)[-1].strip(" ,;:—–-")
-        return bool(_surface_keys(subject) & wanted)
+        # A leading consequence connective (", so the logit is") is not part
+        # of the subject; a title that contains one ("If-then rule") still is.
+        bare = re.sub(r"^(?:so|hence|thus|therefore|then)\s+", "", subject,
+                      flags=re.IGNORECASE)
+        return bool((_surface_keys(subject) | _surface_keys(bare)) & wanted)
     return False
 
 
@@ -458,6 +462,22 @@ def run_self_test(verbose=False):
             "Recall (machine learning)", [], "recall-machine-learning"),
         [("true positive rate", "opener parenthetical",
           "true-positive-rate")])
+    add("a synonym after a so connective names the subject",
+        missing_introduced_aliases(
+            ["The **logit** of a probability is the log of its odds, so the "
+             "logit is also called the *log-odds*."], "Logit", [], "logit"),
+        [("log-odds", "italicized synonym", "log-odds")])
+    add("a synonym after a hence connective names the subject",
+        missing_introduced_aliases(
+            ["The **logit** of a probability is the log of its odds, hence the "
+             "logit is also called the *log-odds*."], "Logit", [], "logit"),
+        [("log-odds", "italicized synonym", "log-odds")])
+    add("a connective word inside the title stays part of the subject",
+        missing_introduced_aliases(
+            ["An **if-then rule** maps a condition to an action; the if-then "
+             "rule is also called a *production rule*."], "If-then rule", [],
+            "if-then-rule"),
+        [("production rule", "italicized synonym", "production-rule")])
     add("irregular singular of a canonical plural is not a missing alias",
         missing_introduced_aliases(
             ["**Archaea** (singular, *archaeon*) are prokaryotes."],

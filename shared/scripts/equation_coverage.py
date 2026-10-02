@@ -171,19 +171,6 @@ _PROSE_CALCULATION_PATTERNS = [
          r"[^.!?;\n\x00]{0,100}\b(?:then|and)[ \t]+"
          r"divid(?:e|es|ed|ing)\b[^.!?;\n\x00]{0,100}"
          r"\bstandard[ \t]+deviation\b", re.IGNORECASE)),
-    ("averaged-probability",
-     re.compile(
-         r"(?:\b(?:class[ \t]+)?probabilit(?:y|ies)\b[ \t,*]{0,20}"
-         r"(?:(?:is|are)[ \t]+)?averag(?:ed|ing)\b|"
-         r"\baverag(?:e|es|ed|ing)\b[^.!?;\n\x00]{0,40}"
-         r"\b(?:class[ \t]+)?probabilit(?:y|ies)\b)",
-         re.IGNORECASE)),
-    ("majority-vote",
-     re.compile(
-         r"\b(?:majority[ \t]+(?:class|vote)[ \t]+"
-         r"(?:wins|is[ \t]+returned)|class[ \t]+"
-         r"(?:that[ \t]+receives|with)[ \t]+the[ \t]+most[ \t]+votes?)\b",
-         re.IGNORECASE)),
     ("average-or-sum-of-predictions",
      re.compile(
          r"(?:\b(?:average|mean)[ \t]+of[ \t]+(?:the[ \t]+)?"
@@ -191,13 +178,6 @@ _PROSE_CALCULATION_PATTERNS = [
          r"\bpredictions?\b|\bpredicts?\b[^.!?;\n\x00]{0,80}"
          r"\bby[ \t]+summ(?:ing|ation)\b[^.!?;\n\x00]{0,60}"
          r"\bpredictions?\b)", re.IGNORECASE)),
-    ("regression-average",
-     re.compile(
-         r"(?:\bfor[ \t]+regression\b[^.!?;\n\x00]{0,80}"
-         r"\b(?:it|aggregation)[ \t]+is[ \t]+the[ \t]+average\b|"
-         r"\bfor[ \t]+regression\b[^.!?;\n\x00]{0,100}\bleaf\b"
-         r"[^.!?;\n\x00]{0,80}\b(?:predicts?|returns?)\b"
-         r"[^.!?;\n\x00]{0,60}\b(?:mean|average)\b)", re.IGNORECASE)),
     ("neighbor-value-average",
      re.compile(
          r"\baverage[ \t]+of[ \t]+(?:their|the)[ \t]+values?\b",
@@ -342,7 +322,11 @@ _LHS_NOISE_RE = re.compile(r"\\[,;:! ]|~|\s")
 
 
 def _display_relation_segments(content):
-    """Split display math at top-level ``\\quad``/``\\qquad``/``,\\;`` gaps.
+    """Split display math at top-level gaps, connectives and where-clauses.
+
+    A gap is ``\\quad``, ``\\qquad`` or a comma before ``\\;``, ``\\ `` or
+    ``\\,``; a connective is ``\\Rightarrow``, ``\\implies``, ``\\iff`` or a
+    kin; a ``\\text{where}`` or ``\\text{with}`` clause opens a new segment.
 
     Braces (literal ``\\{`` too), parentheses, brackets and
     ``\\begin``...``\\end`` environments nest.  Returns
@@ -377,16 +361,29 @@ def _display_relation_segments(content):
                 depth += 1
             elif command in (r"\}", r"\rbrace"):
                 depth = max(0, depth - 1)
-            elif top and (command in (r"\quad", r"\qquad") or (
-                    command == r"\;"
-                    and content[start:token.start()].rstrip().endswith(","))):
+            elif top and (
+                    command in (r"\quad", r"\qquad", r"\Rightarrow",
+                                r"\Longrightarrow", r"\implies", r"\iff",
+                                r"\Leftrightarrow", r"\therefore")
+                    or (command in (r"\;", r"\ ", r"\,")
+                        and content[start:token.start()].rstrip()
+                        .endswith(",")
+                        # Not a list or range (i = 1,\, \ldots,\, m): a
+                        # relation must follow before the next comma.
+                        and re.match(
+                            r"[^,]*?(?:(?<![<>!=])=(?!=)|\\(?:coloneqq|"
+                            r"triangleq|equiv|defeq)(?![A-Za-z]))",
+                            content[index:]))
+                    or (command in (r"\text", r"\textrm", r"\mathrm")
+                        and re.match(r"\s*\{\s*(?:where|with)\b",
+                                     content[index:]))):
                 close(token.start())
                 start, lhs_end, range_qualifier = index, None, False
             elif top and command in _DEFINING_RELATION_COMMANDS:
                 lhs_end = token.start() if lhs_end is None else lhs_end
             elif top and command in _RANGE_DOTS_COMMANDS:
-                range_qualifier = range_qualifier or content[
-                    start:token.start()].rstrip().endswith(",")
+                range_qualifier = range_qualifier or bool(re.search(
+                    r",(?:\s|\\[,;:! ])*$", content[start:token.start()]))
             continue
         if char in "{([":
             depth += 1
@@ -456,15 +453,15 @@ def find_multi_relation_display_candidates(masked_prose,
     in one display line puts two side by side, as does a derivation joined by
     ``\\Rightarrow`` or a ``\\text{where}`` clause defining another quantity.
     A line is the whole display, or each row of an ``aligned``, ``gathered``
-    or similar layout; it is split into equations only at top-level
-    ``\\quad``, ``\\qquad`` or ``,\\;`` gaps, outside every group and
-    environment, so a ``cases`` or matrix body never splits it. Conditions
-    are not equations: an index range (``i = 1, \\ldots, m``), a segment led
-    by ``\\forall`` or a ``\\text{for|if|when|given|subject to|...}`` word,
-    and the segment after a standalone condition such as
-    ``\\text{subject to}``. Every result is an agent-review candidate: the
-    agent confirms each flagged line really holds two equations and gives
-    each its own line, leaving the math unchanged.
+    or similar layout; it is split into equations only at top-level gaps,
+    connectives and where/with clauses (:func:`_display_relation_segments`),
+    outside every group and environment, so a ``cases`` or matrix body never
+    splits it. Conditions are not equations: an index range
+    (``i = 1, \\ldots, m``), a segment led by ``\\forall`` or a
+    ``\\text{for|if|when|given|subject to|...}`` word, and the segment after
+    a standalone condition such as ``\\text{subject to}``. Every result is an
+    agent-review candidate: the agent confirms each flagged line really holds
+    two equations and gives each its own line, leaving the math unchanged.
     """
     prose = masked_prose or ""
     excluded = {
@@ -585,14 +582,6 @@ def _probability_fraction_operands_are_named(compact, context):
                               rhs)))
 
 
-def _probability_average_operands_are_named(compact):
-    """Whether an average aggregates probabilities rather than raw values."""
-    rhs = compact.split("=", 1)[1] if "=" in compact else compact
-    return ("probab" in rhs or r"\pr" in rhs
-            or bool(re.search(
-                r"(?:^|[^a-z\\])p(?:[_({]|(?=$|[^a-z]))", rhs)))
-
-
 _GENERIC_SUBJECT_WORDS = {
     "a", "an", "each", "its", "measure", "one", "quantity", "result",
     "that", "the", "this", "value", "within",
@@ -621,23 +610,6 @@ def _lhs_matches_named_context(lhs, context, boundary_pattern):
     if len(words) > 1:
         markers.add("".join(word[:1] for word in words))
     return _lhs_has_symbol(lhs, markers)
-
-
-def _majority_aggregation_is_named(compact):
-    """Require a vote/count aggregation, not merely a generic argmax."""
-    if any(marker in compact for marker in ("mode", "majority", "vote")):
-        return True
-    if "argmax" not in compact:
-        return False
-    rhs = compact.split("=", 1)[1] if "=" in compact else compact
-    has_vote_sum = "\\sum" in rhs
-    has_indicator = any(marker in rhs for marker in
-                        (r"\mathbf{1}", r"\mathbb{1}", r"\mathbbm{1}",
-                         r"\indicator", r"\delta"))
-    # In compact hard-voting notation, an equality inside the argmax RHS is
-    # normally the indicator predicate ``h_m(x)=c``.
-    has_class_equality = "=" in rhs
-    return has_vote_sum and (has_indicator or has_class_equality)
 
 
 def _named_fraction_result_is_named(compact, context):
@@ -876,13 +848,7 @@ def _display_supports(kind, block, context=""):
                         (r"\sigma", "std", "stdev"))
         return (("\\frac" in compact or "/" in compact)
                 and "-" in compact and has_mean and has_scale)
-    if kind == "averaged-probability":
-        return (_display_has_average_operator(compact)
-                and _probability_average_operands_are_named(compact))
-    if kind == "majority-vote":
-        return _majority_aggregation_is_named(compact)
-    if kind in {"average-or-sum-of-predictions", "regression-average",
-                "neighbor-value-average"}:
+    if kind in {"average-or-sum-of-predictions", "neighbor-value-average"}:
         context_words = context.lower()
         explicitly_summed = (kind == "average-or-sum-of-predictions"
                              and ("sum of" in context_words
@@ -894,12 +860,6 @@ def _display_supports(kind, block, context=""):
             rhs = compact.split("=", 1)[1] if "=" in compact else compact
             has_relevant_operand = bool(re.search(
                 r"(?:^|[^a-z\\])y(?:[_({]|(?=$|[^a-z]))", rhs))
-        elif kind == "regression-average":
-            rhs = compact.split("=", 1)[1] if "=" in compact else compact
-            has_relevant_operand = (
-                _prediction_operands_are_named(compact)
-                or bool(re.search(
-                    r"(?:^|[^a-z\\])y(?:[_({^]|(?=$|[^a-z]))", rhs)))
         else:
             has_relevant_operand = _prediction_operands_are_named(compact)
         return (has_operation and _prediction_result_is_named(compact)
@@ -927,7 +887,10 @@ def _has_covering_display(kind, line_index, display_spans, lines, context=""):
     """Whether a matching canonical display follows the prose nearby."""
     nearby_blocks = []
     for start, end in display_spans:
-        if 0 < start - line_index <= 3:
+        # At most one short paragraph may sit between, never a heading.
+        if (0 < start - line_index <= 6
+                and not any(re.match(r"[ \t]{0,3}#{1,6}[ \t]", lines[i])
+                            for i in range(line_index + 1, start))):
             block = "\n".join(lines[start:end + 1])
             if _display_supports(kind, block, context):
                 return True
@@ -1065,8 +1028,10 @@ def find_missing_display_equation_candidates(masked_prose,
     Each result has ``kind``, ``phrase``, and one-based ``line``. A prose cue is
     satisfied only by a nearby canonical display block; an unrelated equation
     elsewhere in the entry no longer hides it. A defining formula found inline
-    is always reported because its placement, rather than mere coverage, is the
-    problem. The executing agent still verifies context before editing.
+    is reported because its placement, rather than mere coverage, is the
+    problem, unless it directly follows a wikilink, where it restates the
+    linked entry's formula. The executing agent still verifies context before
+    editing.
     """
     prose = masked_prose or ""
     excluded = set()
@@ -1103,14 +1068,17 @@ def find_missing_display_equation_candidates(masked_prose,
             plain_chars[index] = " "
     plain_visible = "".join(plain_chars)
     calculation_visible = _fold_hard_wraps(plain_visible)
-    opening_break = re.search(r"\n[ \t]*\n", plain_visible)
-    opening_end = opening_break.start() if opening_break else len(plain_visible)
 
     candidates = []
 
     for match in _INLINE_MATH_RE.finditer(visible):
         formula = match.group(1)
         if not _inline_formula_is_substantive(formula):
+            continue
+        # A formula directly after a wikilink restates the linked owner's
+        # definition (review.md: a one-line restatement of a neighbor's
+        # formula); it is not this entry's defining equation.
+        if visible[:match.start()].rstrip().endswith("]]"):
             continue
         cue_tail = _sentence_tail(plain_visible, match.start())
         cue_matches = list(_INLINE_DEFINITION_CUE_RE.finditer(cue_tail))
@@ -1147,12 +1115,6 @@ def find_missing_display_equation_candidates(masked_prose,
 
     for kind, pattern in _PROSE_CALCULATION_PATTERNS:
         for match in pattern.finditer(calculation_visible):
-            # Averaged probabilities name soft voting itself. Outside the
-            # opener they commonly occur only as a comparison/link from a
-            # different ensemble method, where duplicating soft voting's
-            # equation would work against atomic notes.
-            if kind == "averaged-probability" and match.start() > opening_end:
-                continue
             if _predicate_is_negated(
                     calculation_visible, match.start(), match.end()):
                 continue
@@ -1172,8 +1134,8 @@ def find_missing_display_equation_candidates(masked_prose,
             })
 
     # One paragraph can match two overlapping descriptions of the same
-    # calculation (for example "majority class" and "most votes"). Keep the
-    # first stable candidate per kind/line/phrase, then report in source order.
+    # calculation. Keep the first stable candidate per kind/line/phrase, then
+    # report in source order.
     unique = {}
     for candidate in candidates:
         key = (candidate["kind"], candidate["line"], candidate["phrase"].lower())
@@ -1588,19 +1550,23 @@ def run_self_test(verbose=False):
          r"The budget is \$5, and the score is $s = f(x)$.", 1, ()),
         ("a defining equality may contain an inequality on its right side",
          r"The cumulative function is $F(x) = P(X \le x)$.", 1, ()),
-        ("averaged class probabilities are a prose calculation candidate",
+        ("a formula right after a wikilink restates the linked definition",
+         r"The logit function is the inverse of the "
+         r"[[logistic-function|logistic function]] "
+         r"$\sigma(t) = 1/(1 + \exp(-t))$.", 0, ()),
+        ("an unlinked defining formula after a cue is still reported",
+         r"The loss function is $L = (y-\hat y)^2$ for one instance.", 1, ()),
+        ("a one-sentence soft-voting rule is not a prose-calculation "
+         "candidate",
          "It predicts from class probabilities averaged over all classifiers.",
-         1, ()),
-        ("a soft-voting display covers its probability operands",
-         "It predicts from class probabilities averaged over all classifiers."
-         "\n\n$$\n\\hat{y}(x) = \\operatorname*{argmax}_k "
-         "\\frac{1}{N} \\sum_j \\hat{p}_{j,k}(x)\n$$", 0, ()),
+         0, ()),
         ("an average-error comparison is not a defining calculation",
          "The average prediction error is lower on this dataset.", 0, ()),
         ("an on-average probability comparison is not a calculation",
          "The probability of error is lower on average for this model.", 0, ()),
-        ("a majority vote is a prose calculation candidate",
-         "Each member votes and the majority class wins.", 1, ()),
+        ("a one-sentence hard-voting rule is not a prose-calculation "
+         "candidate",
+         "Each member votes and the majority class wins.", 0, ()),
         ("a following negation rejects an unused prediction average",
          "The average of predictions is not used.", 0, ()),
         ("following not-only wording keeps prediction averaging affirmative",
@@ -1615,20 +1581,22 @@ def run_self_test(verbose=False):
          "replaces the average of predictions with the median", 0, ()),
         ("avoidance wording rejects averaged probabilities",
          "avoids averaging class probabilities", 0, ()),
-        ("avoidance in a coordinated predicate does not reject averaging",
+        ("a coordinated one-sentence averaging rule is not a "
+         "prose-calculation candidate",
          "The method avoids hard voting and averages class probabilities.",
-         1, ()),
+         0, ()),
         ("omission in a coordinated predicate does not reject an equation",
          "The method omits missing values and computes the score as "
          "$s=f(x)$.", 1, ()),
         ("an average of neighbor values is a prose calculation candidate",
          "Regression returns the average of their values.", 1, ()),
-        ("a regression ensemble average is a prose calculation candidate",
+        ("a one-sentence regression-averaging rule is not a "
+         "prose-calculation candidate",
          "For classification aggregation is the mode; for regression it is "
-         "the average.", 1, ()),
-        ("a regression leaf mean is a prose calculation candidate",
+         "the average.", 0, ()),
+        ("a one-sentence leaf-mean rule is not a prose-calculation candidate",
          "For regression, each leaf predicts the mean target of the training "
-         "instances that reach it.", 1, ()),
+         "instances that reach it.", 0, ()),
         ("a named fraction is a prose calculation candidate",
          "The class probability is the fraction of training instances in "
          "that class.", 1, ()),
@@ -1665,6 +1633,17 @@ def run_self_test(verbose=False):
         ("an adjacent display satisfies a prose calculation cue",
          "The class probability is the fraction of class-k instances in a "
          "leaf.\n\n$$\np_k = m_k / m\n$$", 0, ()),
+        ("a display after one plain-words paragraph covers the opener",
+         "The **false positive rate** (FPR) is the fraction of actual "
+         "negative instances that a classifier wrongly predicts as "
+         "positive.\n\nEvery actual negative is either a false positive or "
+         "a true negative.\n\n$$\n\\text{FPR} = \\frac{\\text{FP}}"
+         "{\\text{FP} + \\text{TN}}\n$$\n", 0, ()),
+        ("a display under a later heading does not cover the opener",
+         "The **false positive rate** (FPR) is the fraction of actual "
+         "negative instances that a classifier wrongly predicts as "
+         "positive.\n\n## Formula\n\n$$\n\\text{FPR} = \\frac{\\text{FP}}"
+         "{\\text{FP} + \\text{TN}}\n$$\n", 1, ()),
         ("an adjacent unrelated display does not satisfy the prose cue",
          "The class probability is the fraction of class-k instances in a "
          "leaf.\n\n$$\nx = 1\n$$", 1, ()),
@@ -1724,16 +1703,6 @@ def run_self_test(verbose=False):
         ("an unrelated arbitrary fraction does not cover a named score",
          "The Jaccard score is the ratio of intersection to union.\n\n$$\n"
          "x = |A \\cap B| / |A \\cup B|\n$$", 1, ()),
-        ("an average of unrelated values does not cover averaged probabilities",
-         "It predicts from class probabilities averaged over all classifiers."
-         "\n\n$$\np=1/N\\sum_i x_i\n$$", 1, ()),
-        ("a generic argmax does not cover majority voting",
-         "Each member votes and the majority class wins.\n\n$$\n"
-         "\\hat y = \\operatorname*{argmax}_k s_k\n$$", 1, ()),
-        ("an indicator-count argmax covers majority voting",
-         "Each member votes and the majority class wins.\n\n$$\n"
-         "\\hat y = \\operatorname*{argmax}_k \\sum_j "
-         "\\mathbf{1}[h_j(x)=k]\n$$", 0, ()),
         ("nearest-center assignment plus a mean update is a candidate",
          "The algorithm assigns each point to its nearest center, then "
          "updates each center to the mean of its assigned points.", 1, ()),
@@ -1802,6 +1771,10 @@ def run_self_test(verbose=False):
          "$$a = 1,\\; b = 2$$", [1], ()),
         ("an index range qualifies rather than adds a relation",
          "$$\nw^{(i)} = \\frac{1}{m}, \\qquad i = 1, \\ldots, m\n$$", [], ()),
+        ("a thin-spaced index range after a gap adds no equation",
+         "$$\ny_i = w x_i, \\quad i = 1,\\, \\ldots,\\, m\n$$", [], ()),
+        ("a control-spaced index range adds no equation",
+         "$$\ny_i = w x_i,\\ i = 1,\\ \\ldots,\\ m\n$$", [], ()),
         ("an elided vector is not an index range",
          "$$\nx = (x_1, \\ldots, x_n), \\quad y = (y_1, \\ldots, y_n)\n$$",
          [2], ()),
@@ -1817,6 +1790,19 @@ def run_self_test(verbose=False):
         ("a where or with clause defines a second equation",
          "$$\ny = m x + b, \\quad \\text{where } m = 2\n$$\n\n"
          "$$\ny = m x, \\quad \\text{with } m = 2\n$$", [2, 6], ()),
+        ("a derivation joined by a bare connective is two equations",
+         "$$\na = t \\Rightarrow p = \\sigma(t)\n$$\n\n"
+         "$$\na = t \\implies p = \\sigma(t)\n$$", [2, 6], ()),
+        ("a bare where or with clause defines a second equation",
+         "$$\na = \\log(o), \\text{ where } o = p/(1-p)\n$$\n\n"
+         "$$\na = \\log(o) \\text{ with } o = p/(1-p)\n$$", [2, 6], ()),
+        ("a comma before a control space separates two equations",
+         "$$\na = b,\\ c = d\n$$", [2], ()),
+        ("a connective condition, a thin-space range and a with-phrase "
+         "add no equation",
+         "$$\nx = 1 \\Rightarrow y > 0\n$$\n\n"
+         "$$\ny_i = w x_i,\\, i = 1, \\ldots, m\n$$\n\n"
+         "$$\np = 0.5 \\text{ with probability } q\n$$", [], ()),
         ("side-by-side relations and a repeated side are reported",
          "$$\nx = 1, \\quad y = 2\n$$\n\n"
          "$$\na = 1 \\quad \\text{and} \\quad b = 2\n$$\n\n"

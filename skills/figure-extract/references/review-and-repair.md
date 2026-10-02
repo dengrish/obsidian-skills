@@ -18,7 +18,7 @@ files, and review findings. Do not merge these into one extraction count.
 
 | Finding | What to inspect or do |
 |---|---|
-| Caption collisions | The first caption wins when two labels normalize to one filename. Render both reported pages and follow the summary's printed next step; an Extended Data/Supplementary pair uses [Extended Data and Supplementary figures](#extended-data-and-supplementary-figures). A continuation's later pages are not extracted; report that limitation. |
+| Caption collisions | The first caption wins when two labels normalize to one filename. Render both reported pages and follow the summary's printed next step; an Extended Data/Supplementary pair uses [Extended Data and Supplementary figures](#extended-data-and-supplementary-figures). A continuation's later pages are not extracted; report that limitation. If the kept crop is prose or another figure, set an explicit crop for the dropped caption's figure on its page before marking the label reviewed. |
 | Suspicious bboxes | Inspect the page and PNG. Reasons include a very small crop, low coverage of the figure region or of the content the caption was read against, a running head or body prose inside the crop, and caption overlap. A suspicious PNG may still have been written. |
 | Caption text in crop | Re-crop before anything embeds it. Check all nearby captions, including the neighboring column's, not just the target figure's caption. |
 | Caption position ambiguous | The detector has competing “beside” and “below” interpretations. “Contested” and “thin” describe different evidence; neither proves the crop is wrong. Compare both readings with the page. Margin-caption layouts commonly need this review. |

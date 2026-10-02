@@ -120,31 +120,6 @@ class CiContractTests(unittest.TestCase):
         with self.assertRaises(CI.ContractError):
             CI.parse_semver("1.2.3-rc.01")
 
-    def test_packaged_change_selection_uses_both_inventories(self):
-        changed = {
-            ".github/workflows/validate.yml",
-            "skills/new.md",
-            "skills/removed.md",
-            "skills/unlisted.svg",
-            "skills/cache/__pycache__/helper.pyc",
-            "tools/.DS_Store",
-            "tools/package-files.txt",
-        }
-        self.assertEqual(
-            CI.packaged_changes(
-                changed,
-                {"skills/removed.md", "tools/package-files.txt"},
-                {"skills/new.md", "tools/package-files.txt"},
-            ),
-            ["skills/new.md", "skills/removed.md", "skills/unlisted.svg",
-             "tools/package-files.txt"],
-        )
-        self.assertEqual(
-            CI.packaged_changes(changed, None, {"skills/new.md"}),
-            ["skills/new.md", "skills/removed.md", "skills/unlisted.svg",
-             "tools/package-files.txt"],
-        )
-
     def test_workflow_pins_actions_and_uses_a_portable_locale(self):
         workflow = (HERE.parent / "workflows/validate.yml").read_text(
             encoding="utf-8")
@@ -193,59 +168,12 @@ class CiContractTests(unittest.TestCase):
             [path for path in cached if not (root / path).is_file()], [],
             "validate.yml caches on a missing requirements file")
 
-    def test_version_gate_ignores_ci_and_requires_packaged_change_bump(self):
+    def test_version_gate_requires_a_verifiable_base_revision(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-ci-version-") as tmp:
             root = Path(tmp)
-            (root / ".claude-plugin").mkdir()
-            (root / ".github").mkdir()
-            (root / "skills").mkdir()
-            (root / "tools").mkdir()
-            manifest = root / ".claude-plugin/plugin.json"
-            manifest.write_text(
-                json.dumps({"name": "fixture", "version": "1.2.3"}) + "\n",
-                encoding="utf-8")
-            (root / "skills/entry.md").write_text("one\n", encoding="utf-8")
-            inventory = [
-                ".claude-plugin/plugin.json",
-                "skills/entry.md",
-                "tools/package-files.txt",
-            ]
-            (root / "tools/package-files.txt").write_text(
-                "\n".join(inventory) + "\n", encoding="utf-8")
-            self.git(root, "init", "-q")
-            self.git(root, "config", "user.name", "CI fixture")
-            self.git(root, "config", "user.email", "ci@example.invalid")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "base")
-            base = CI._git_text(root, "rev-parse", "HEAD").strip()
-
-            (root / ".github/workflow.yml").write_text(
-                "name: changed\n", encoding="utf-8")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "ci only")
-            CI.check_version_bump(root, base, "pull-request")
-
-            self.git(
-                root, "update-index", "--chmod=+x", "skills/entry.md")
-            self.git(root, "commit", "-q", "-m", "mode only")
-            CI.check_version_bump(root, base, "pull-request")
-
-            (root / "skills/unlisted.svg").write_text(
-                "<svg/>\n", encoding="utf-8")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "package without bump")
-            with self.assertRaisesRegex(
-                    CI.ContractError,
-                    r"skills/unlisted\.svg.*does not advance base version"):
-                CI.check_version_bump(root, base, "pull-request")
-
-            manifest.write_text(
-                json.dumps({"name": "fixture", "version": "1.2.4"}) + "\n",
-                encoding="utf-8")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "bump")
-            CI.check_version_bump(root, base, "pull-request")
-
+            self.split_fixture(root)
+            self.initialize_repository(root)
+            self.commit(root, "base")
             with self.assertRaisesRegex(CI.ContractError, "base revision"):
                 CI.check_version_bump(root, "", "push")
             with self.assertRaisesRegex(
@@ -255,46 +183,38 @@ class CiContractTests(unittest.TestCase):
                     CI.ContractError, "no prior revision"):
                 CI.check_version_bump(root, "0" * 40, "push")
 
+    def test_version_gate_requires_the_split_layout_on_both_sides(self):
+        with tempfile.TemporaryDirectory(prefix="obsidian-ci-unsplit-") as tmp:
+            root = Path(tmp)
+            self.write(root, "README.md", "Before the split layout\n")
+            self.initialize_repository(root)
+            unsplit = self.commit(root, "unsplit base")
+            self.write(root, "skills/entry.md", "Changed\n")
+            self.commit(root, "still unsplit")
+            with self.assertRaisesRegex(CI.ContractError, "must both carry"):
+                CI.check_version_bump(root, unsplit, "push")
+            self.split_fixture(root)
+            self.commit(root, "split candidate")
+            for comparison in ("push", "pull-request"):
+                with self.subTest(comparison=comparison):
+                    with self.assertRaisesRegex(CI.ContractError,
+                                                "must both carry"):
+                        CI.check_version_bump(root, unsplit, comparison)
+
     def test_force_push_compares_old_and_new_tips(self):
         with tempfile.TemporaryDirectory(prefix="obsidian-ci-force-push-") as tmp:
             root = Path(tmp)
-            (root / ".claude-plugin").mkdir()
-            (root / ".github").mkdir()
-            (root / "skills").mkdir()
-            (root / "tools").mkdir()
-            manifest = root / ".claude-plugin/plugin.json"
-            entry = root / "skills/entry.md"
-            inventory = [
-                ".claude-plugin/plugin.json",
-                "skills/entry.md",
-                "tools/package-files.txt",
-            ]
-            manifest.write_text(
-                json.dumps({"name": "fixture", "version": "1.2.3"}) + "\n",
-                encoding="utf-8")
-            entry.write_text("base\n", encoding="utf-8")
-            (root / "tools/package-files.txt").write_text(
-                "\n".join(inventory) + "\n", encoding="utf-8")
-            self.git(root, "init", "-q")
-            self.git(root, "config", "user.name", "CI fixture")
-            self.git(root, "config", "user.email", "ci@example.invalid")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "base")
-            common = CI._git_text(root, "rev-parse", "HEAD").strip()
+            self.split_fixture(root)
+            self.initialize_repository(root)
+            common = self.commit(root, "base")
 
-            manifest.write_text(
-                json.dumps({"name": "fixture", "version": "1.2.4"}) + "\n",
-                encoding="utf-8")
-            entry.write_text("published\n", encoding="utf-8")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "published tip")
-            old_tip = CI._git_text(root, "rev-parse", "HEAD").strip()
+            self.version(root, "knowledge", "1.0.1")
+            self.write(root, "skills/wiki-add/SKILL.md", "Published\n")
+            old_tip = self.commit(root, "published tip")
 
             self.git(root, "checkout", "-q", "--detach", common)
-            (root / ".github/rewrite.yml").write_text(
-                "name: rewritten history\n", encoding="utf-8")
-            self.git(root, "add", ".")
-            self.git(root, "commit", "-q", "-m", "rewritten tip")
+            self.write(root, ".github/rewrite.yml", "name: rewritten history\n")
+            self.commit(root, "rewritten tip")
 
             # A pull-request comparison sees only the CI-only change from the
             # common ancestor. A push comparison sees the packaged rollback
@@ -418,39 +338,14 @@ class CiContractTests(unittest.TestCase):
                 self.commit(root)
                 CI.check_version_bump(root, base, "push")
 
-    def test_legacy_split_transition_starts_two_new_release_histories(self):
-        with tempfile.TemporaryDirectory(prefix="split-ci-transition-") as tmp:
-            root = Path(tmp)
-            self.write(root, CI.LEGACY_MANIFEST,
-                       json.dumps({"name": "obsidian", "version": "1.47.3"}))
-            self.initialize_repository(root)
-            base = self.commit(root, "legacy distribution")
-            self.split_fixture(root)
-            (root / CI.LEGACY_MANIFEST).unlink()
-            split = self.commit(root, "new identities")
-            CI.check_version_bump(root, base, "push")
-            CI.check_version_bump(root, base, "pull-request")
-            # A first-release exemption cannot be repeated after the split.
-            self.write(root, "skills/market-research/SKILL.md", "Changed\n")
-            self.commit(root)
-            with self.assertRaisesRegex(CI.ContractError,
-                                        "investments packaged source changed"):
-                CI.check_version_bump(root, split, "push")
-
-    def test_split_transition_rejects_partial_and_ambiguous_release_layouts(self):
-        for corruption in ("missing-investments", "old-manifest", "wrong-name",
-                           "missing-map", "wrong-legacy-name"):
+    def test_split_gate_rejects_partial_and_ambiguous_release_layouts(self):
+        for corruption in ("missing-investments", "wrong-name", "missing-map"):
             with self.subTest(corruption=corruption), \
                     tempfile.TemporaryDirectory(prefix="split-ci-invalid-") as tmp:
                 root = Path(tmp)
-                legacy_name = "other" if corruption == "wrong-legacy-name" else "obsidian"
-                self.write(root, CI.LEGACY_MANIFEST,
-                           json.dumps({"name": legacy_name, "version": "1.47.3"}))
+                self.split_fixture(root)
                 self.initialize_repository(root)
                 base = self.commit(root)
-                self.split_fixture(root)
-                if corruption != "old-manifest":
-                    (root / CI.LEGACY_MANIFEST).unlink()
                 if corruption == "missing-investments":
                     (root / "plugins/investments/.claude-plugin/plugin.json").unlink()
                 elif corruption == "wrong-name":
@@ -465,12 +360,10 @@ class CiContractTests(unittest.TestCase):
     def test_split_force_push_rejects_rollback_and_disappearing_distributions(self):
         with tempfile.TemporaryDirectory(prefix="split-ci-rollback-") as tmp:
             root = Path(tmp)
-            self.write(root, CI.LEGACY_MANIFEST,
-                       json.dumps({"name": "obsidian", "version": "1.47.3"}))
+            self.write(root, "README.md", "Before the split layout\n")
             self.initialize_repository(root)
-            legacy = self.commit(root)
+            unsplit = self.commit(root)
             self.split_fixture(root)
-            (root / CI.LEGACY_MANIFEST).unlink()
             split = self.commit(root)
             self.version(root, "investments", "1.0.1")
             self.write(root, "skills/market-research/SKILL.md", "Published\n")
@@ -482,7 +375,7 @@ class CiContractTests(unittest.TestCase):
             with self.assertRaisesRegex(CI.ContractError,
                                         "investments packaged source changed"):
                 CI.check_version_bump(root, published, "push")
-            self.git(root, "checkout", "-q", "--detach", legacy)
+            self.git(root, "checkout", "-q", "--detach", unsplit)
             with self.assertRaisesRegex(CI.ContractError, "cannot roll back"):
                 CI.check_version_bump(root, published, "push")
 

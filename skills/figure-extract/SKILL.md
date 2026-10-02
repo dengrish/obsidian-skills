@@ -135,11 +135,12 @@ to delete files.
 
 **Visually review the output.** View every PNG this run wrote or replaced
 (listed under each PDF as `wrote:`); verified skips need no re-check. Compare
-these with their rendered pages: every flagged crop, every crop from a
-multi-column page, and any PNG showing caption text, neighboring content or a
-cut-off edge (a crop can hold its neighbor's chart without a warning). If
-viewing every new PNG is impractical, as in a large folder sweep, view at
-least the flagged and multi-column crops and report the rest as not visually
+these with their rendered pages: every flagged crop, every crop on a page the
+summary lists under `multi-column pages`, and any PNG showing caption text,
+neighboring content or a cut-off edge (a crop can hold its neighbor's chart
+without a warning). If viewing every new PNG is impractical, as in a large
+folder sweep, view at least the flagged crops and every crop on a page the
+summary lists under `multi-column pages`, and report the rest as not visually
 verified. If image viewing is unavailable, report that limit and leave
 uncertain crops unresolved.
 

@@ -40,6 +40,8 @@ their `Inbox/`, `Articles/` and `Sources/` routes; entries remain in `Wiki/`
 and generated navigation stays in `MOCs/`. This plugin leaves `Investments/`
 records outside its intake and repair scope. Open and fixed suggestions are
 kept in `Reviews/<skill>-suggestions.md` under the [shared protocol](shared/SUGGESTIONS.md).
+wiki-lint also keeps its settled link decisions, private run state rather
+than a suggestion log, in `Reviews/.wiki-lint-settled.json`.
 
 ## Reviewing flashcards
 

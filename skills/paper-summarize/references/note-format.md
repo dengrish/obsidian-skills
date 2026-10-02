@@ -268,6 +268,12 @@ meaning, scope or qualification less clear. Use the shortest clear version and
 explain the exception in the run report, not in the note. A word-count advisory
 calls for this judgment; it is not permission to retain avoidable detail.
 
+When the contribution needs display math, put each equation in its own
+`$$…$$` display or its own row of an `aligned`/`gathered` block, never two per
+line (no `\qquad`-joined pairs, `\Rightarrow` chains or `\text{where}`
+definitions), and say beside it what each term means and where the relation
+comes from.
+
 The Summary callout holds 3–7 `> - ` bullets, one line per bullet. Each bullet
 makes one claim in one or two sentences, at most about 45 words, and leaves
 procedure detail and secondary numbers to the body. Bullet 1 gives the main

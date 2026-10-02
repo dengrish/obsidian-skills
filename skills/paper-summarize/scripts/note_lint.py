@@ -212,6 +212,13 @@ MIN_BULLETS, MAX_BULLETS = 3, 7
 #: Advisory target for one callout bullet: one key message in one or two
 #: sentences, not a second summary.
 MAX_CALLOUT_BULLET_WORDS = 45
+MAX_CALLOUT_BULLET_SENTENCES = 2
+#: Callout bold marks an entry-worthy term.  A bold span of more words, or one
+#: closing on a full stop, is a whole phrase or sentence (advisory).
+MAX_CALLOUT_BOLD_WORDS = 5
+#: A caption is the message, what is shown, and at most one more sentence
+#: (references/figures.md); more is advisory.
+MAX_CAPTION_SENTENCES = 3
 
 # Self-test sentinel: this case must produce no findings at all.
 CLEAN = object()
@@ -224,6 +231,8 @@ _NUMBER = re.compile(r"[-+]?(?:[0-9][0-9_]*(?:\.[0-9_]*)?"
                      r"|0[xob][0-9a-fA-F_]+|\.(?:inf|nan))", re.I)
 _EMBED = re.compile(r"\A!\[\[([^\]]+)\]\]\Z")
 _ANY_EMBED = re.compile(r"!\[\[[^\]\n]+\]\]")
+# A `**bold**` span; `***term***` (bold italic) yields `*term`.
+_BOLD = re.compile(r"\*\*(.+?)\*\*")
 _AVAILABILITY_BULLET = re.compile(
     r"\A-\s+\*\*(Data|Code|Materials|Sources|Record|Evidence)\.\*\*\s+",
     re.I)
@@ -268,8 +277,11 @@ _EXHIBIT_NUM = re.compile(
     r"|\b(?:figures|tables|figs(?:\.|\s)|tabs(?:\.|\s))\s*[A-Za-z]?[0-9]+"
     r"(?:\s*(?:-|–|to|and|,)\s*[A-Za-z]?[0-9]+)+)", re.I)
 # A bare URL, stripped before the exhibit sweep: `.../figures/fig2` is a path
-# segment, not a pointer out of the note.
-_URLS = re.compile(r"(?:https?://|www\.)\S+|\b[\w.-]+\.(?:com|org|net|io|ai)/\S*")
+# segment, not a pointer out of the note.  A schemeless host with any
+# alphabetic TLD counts once a path follows it: `huggingface.co/x` and
+# `datadryad.edu/doe` are links as surely as `.com` ones.
+_URLS = re.compile(r"(?:https?://|www\.)\S+"
+                   r"|\b[\w-]+(?:\.[\w-]+)*\.(?!js/)[A-Za-z]{2,24}/\S*")
 # The only second source item a local-document note may carry. Provenance
 # (whether the identifier is actually printed in the PDF) remains a source
 # review; this enforces the normalized shapes the schema can check.
@@ -638,6 +650,23 @@ def _check_callout(note, body_start, fenced):
                                    "detail and secondary numbers to the body "
                                    "(references/note-format.md)"
                             % (words, MAX_CALLOUT_BULLET_WORDS))
+            count = len(sentences(stripped[4:]))
+            if count > MAX_CALLOUT_BULLET_SENTENCES:
+                note.advise(i + 1, "a callout bullet holds %d sentences, over "
+                                   "%d -- one claim in one or two sentences "
+                                   "(references/note-format.md)"
+                            % (count, MAX_CALLOUT_BULLET_SENTENCES))
+            for m in _BOLD.finditer(stripped[4:]):
+                span = m.group(1).strip("*_ ")
+                last = span.split()[-1].rstrip(_TRAILING_MARKUP) if span else ""
+                if (len(span.split()) > MAX_CALLOUT_BOLD_WORDS
+                        or (last[-1:] in (".", "!", "?")
+                            and last.casefold() not in _ABBREVIATIONS)):
+                    note.advise(i + 1, "the callout bolds %r -- bold only "
+                                       "entry-worthy terms, never whole phrases "
+                                       "(references/note-format.md)"
+                                % span[:60])
+                    break
             if _URLS.search(stripped[4:]):
                 note.fail(i + 1, "the Summary callout contains a URL; keep "
                                  "source links in frontmatter or Availability")
@@ -968,6 +997,10 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
                                    "steps; keep at most %d in a concise reading "
                                    "note (references/note-format.md)"
                       % (len(steps), MAX_STEPS))
+        if not steps and mode == "empirical":
+            note.advise(span[0] + 1, "no numbered procedure; confirm the "
+                                     "document reports none "
+                                     "(references/note-format.md)")
         numbers = [int(_STEP.match(s).group(1)) for s in steps]
         if numbers and numbers != list(range(1, len(numbers) + 1)):
             note.fail(span[0] + 1, "the procedure steps are numbered %s; they "
@@ -1134,6 +1167,16 @@ def _direct_regular_image(images, name):
     return stat.S_ISREG(item.st_mode)
 
 
+def _check_caption_sentences(note, n, caption):
+    """Advise on a caption over the sentence target; `n` is 0-indexed."""
+    count = len(sentences(caption))
+    if count > MAX_CAPTION_SENTENCES:
+        note.advise(n + 1, "a caption holds %d sentences, over %d -- give the "
+                           "message, then what is shown, and at most one more "
+                           "sentence (references/figures.md)"
+                    % (count, MAX_CAPTION_SENTENCES))
+
+
 def _check_figures(note, bounds, images, fenced, source=None):
     """Returns the set of line numbers that are captions, for later checks.
 
@@ -1193,6 +1236,7 @@ def _check_figures(note, bounds, images, fenced, source=None):
                              % name)
         else:
             captions.add(n + 1)
+            _check_caption_sentences(note, n + 1, nxt)
             if _CAP_NUM.match(nxt.strip()):
                 note.fail(n + 2, "caption opens with an exhibit number, which this "
                                  "note never carries: %r" % nxt.strip()[:60])
@@ -1257,6 +1301,7 @@ def _check_tables(note, bounds, fenced):
                                 "caption)")
         else:
             captions.add(stop + 1)
+            _check_caption_sentences(note, stop + 1, nxt)
             if _CAP_NUM.match(nxt.strip()):
                 note.fail(stop + 2, "caption opens with an exhibit number, which "
                                     "this note never carries: %r"
@@ -1446,6 +1491,10 @@ Prose.
 
 Prose.
 
+1. The team enrolled 219 adults.
+2. The team gave capsules or placebo.
+3. The team counted recurrences.
+
 ## Recurrence fell from 45% to 8% within eight weeks
 
 A claim with a citation.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>
@@ -1487,6 +1536,11 @@ def _cases():
     M_H = "## A 219-patient double-blind trial of transplant capsules"
     AV_H = "## Participant data on request, no analysis code"
     LIM_H = "## Eight weeks of follow-up and one dominant donor"
+    # The fixture's whole Methods body: a case that writes its own procedure
+    # replaces this, so the fixture's steps do not run on after it.
+    M_ALL = (M_H + "\n\nProse.\n\n1. The team enrolled 219 adults.\n"
+             "2. The team gave capsules or placebo.\n"
+             "3. The team counted recurrences.")
     return [
         ("clean", GOOD, CLEAN),
         ("foreign figure despite a plausible filename",
@@ -1596,7 +1650,7 @@ def _cases():
          _mutate("Prose.", "One is stated.\n\nTwo follows.\n\nThree lands.\n\n"
                  "Four holds.\n\nFive stands.\n\nSix ends.\n\nSeven follows."), CLEAN),
         ("a wrapped numbered step keeps its tighter target",
-         _mutate(M_H + "\n\nProse.", M_H + "\n\nProse.\n\n"
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n"
                  "1. The investigators collected the original measurements from every participant\n"
                  "   and compared those measurements with the same measurements from matched controls across all participating hospitals.\n"
                  "2. They fitted the model.\n3. They evaluated the predictions."),
@@ -1625,6 +1679,11 @@ def _cases():
         ("URL in Summary callout",
          _mutate("> - Three.", "> - Details are at https://example.org/data."),
          "callout contains a URL"),
+        ("a bare host on any alphabetic TLD is a URL too",
+         _mutate("> - Three.", "> - The weights are at huggingface.co/x."),
+         "callout contains a URL"),
+        ("NEAR MISS: a .js library pair is not a URL",
+         _mutate("> - Three.", "> - The tool runs on Node.js/Deno."), CLEAN),
         ("quoted read", _mutate("read: false", 'read: "false"'), "bare boolean"),
         ("bare year", _mutate("published: 2025-01-03", "published: 2025"),
          "full YYYY-MM-DD"),
@@ -2144,6 +2203,37 @@ def _cases():
                  "> - " + " ".join(["Message"] * 23) + ". "
                  + " ".join(["Message"] * (MAX_CALLOUT_BULLET_WORDS - 23)) + "."),
          CLEAN),
+        ("a callout bullet over two sentences is advisory only",
+         _mutate("> - Two.", "> - One claim held. A second followed. A third "
+                 "closed it."),
+         "__ADVISORY__a callout bullet holds 3 sentences"),
+        ("NEAR MISS: abbreviations do not add callout sentences",
+         _mutate("> - Two.", "> - Recurrence fell vs. placebo, e.g. in adults. "
+                 "The trial was double-blind."), CLEAN),
+        ("a whole bold sentence in the callout is advisory only",
+         _mutate("> - Three.", "> - **Follow-up ended at 8 weeks, so "
+                 "durability is untested.**"),
+         "__ADVISORY__never whole phrases"),
+        ("a six-word bold phrase in the callout is advisory only",
+         _mutate("> - Three.", "> - The **capsule route avoided colonoscopy "
+                 "in every patient** here."),
+         "__ADVISORY__never whole phrases"),
+        ("NEAR MISS: a four-word bold term in the callout is clean",
+         _mutate("> - Three.", "> - **Encapsulated faecal microbiota "
+                 "transplant** cut ***Clostridioides difficile*** recurrence."),
+         CLEAN),
+        ("a figure caption over three sentences is advisory only",
+         _mutate("curves for the two arms.*", "curves for the two arms. Bars "
+                 "show 95% intervals. Numbers at risk sit below.*"),
+         "__ADVISORY__a caption holds 4 sentences"),
+        ("a table caption over three sentences is advisory only",
+         _mutate("the secondary outcomes are in the paper.*",
+                 "the secondary outcomes are in the paper. Rates are per "
+                 "arm. Values are as printed.*"),
+         "__ADVISORY__a caption holds 4 sentences"),
+        ("NEAR MISS: a three-sentence caption is clean",
+         _mutate("curves for the two arms.*", "curves for the two arms. Bars "
+                 "show 95% intervals.*"), CLEAN),
         ("Methods prose over the character target is advisory only",
          _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
                  "## A 219-patient double-blind trial of transplant capsules\n\n"
@@ -2151,7 +2241,7 @@ def _cases():
          "__ADVISORY__over the %d-character target" % MAX_METHODS_CHARS),
         ("NEAR MISS: Methods prose at the target is clean, and wrapped "
          "numbered steps are not counted",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\n"
                  + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200))
                  + "\n\n" + "\n".join(
@@ -2166,48 +2256,53 @@ def _cases():
          "__ADVISORY__Methods/basis section holds", "argument"),
 
         # --- numbered steps in Methods --------------------------------------
+        ("an empirical Methods without numbered steps asks for a check",
+         _mutate(M_ALL, M_H + "\n\nProse."),
+         "__ADVISORY__no numbered procedure"),
+        ("NEAR MISS: a non-empirical basis without steps is clean",
+         _mutate(M_ALL, M_H + "\n\nProse."), CLEAN, "argument"),
         ("Methods steps run past the cap",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  + "\n".join("%d. The team did a thing." % i
                               for i in range(1, MAX_STEPS + 2))),
          "empirical procedure lists"),
         ("NEAR MISS: a list at the cap is clean",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  + "\n".join("%d. The team did a thing." % i
                               for i in range(1, MAX_STEPS + 1))),
          CLEAN),
         ("too few steps to be a procedure",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The team did a thing.\n2. The team did another thing."),
          "empirical procedure lists"),
         ("one reported procedure step is valid outside empirical mode",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The standards committee recorded its final decision."),
          CLEAN, "argument"),
         ("two reported procedure steps are valid outside empirical mode",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The committee reviewed the proposal.\n"
                  "2. The committee published its decision."),
          CLEAN, "argument"),
         ("a non-empirical reported procedure retains the concise cap",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  + "\n".join("%d. The committee completed one stage." % i
                               for i in range(1, MAX_STEPS + 2))),
          "keep at most", "argument"),
         ("steps out of order",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The team did a thing.\n3. The team did another.\n"
                  "4. The team did a third."),
          "must run 1.."),
         ("non-empirical procedure numbering remains contiguous",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The committee reviewed the proposal.\n"
                  "3. The committee published its decision."),
@@ -2220,7 +2315,7 @@ def _cases():
                  "2021. Capsules came from two stool banks."),
          CLEAN),
         ("a wrapped year indented under a step continues that step",
-         _mutate(M_H + "\n\nProse.",
+         _mutate(M_ALL,
                  M_H + "\n\nProse.\n\n"
                  "1. The team enrolled adults from March 2019 to\n"
                  "   2021. It used two banks.\n"
@@ -2228,7 +2323,7 @@ def _cases():
                  "3. The team followed them for eight weeks."),
          CLEAN),
         ("NEAR MISS: an unindented number after a step starts a new item",
-         _mutate(M_H + "\n\nProse.",
+         _mutate(M_ALL,
                  M_H + "\n\nProse.\n\n"
                  "1. The team enrolled adults from March 2019 to\n"
                  "2021. It used two banks.\n"
@@ -2236,7 +2331,7 @@ def _cases():
                  "3. The team followed them for eight weeks."),
          "must run 1.."),
         ("NEAR MISS: a list starting at 1 still interrupts a paragraph",
-         _mutate(M_H + "\n\nProse.",
+         _mutate(M_ALL,
                  M_H + "\n\nThe trial ran in two phases.\n"
                  "1. The team did a thing.\n2. The team did another thing."),
          "empirical procedure lists 2"),
@@ -2246,14 +2341,14 @@ def _cases():
                  "2021. Seven."),
          "__ONLY__a paragraph holds 7 sentences"),
         ("a step over the 20-word target is advisory only",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. " + " ".join(["The"] * (MAX_STEP_WORDS + 1)) + ".\n"
                  "2. The team did another.\n3. The team did a third."),
          "__ADVISORY__a step runs %d words" % (MAX_STEP_WORDS + 1)),
         ("NEAR MISS: a step exactly at 20 words is clean, though the same "
          "words as prose would still be under the 25-word target",
-         _mutate("## A 219-patient double-blind trial of transplant capsules\n\nProse.",
+         _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. " + " ".join(["The"] * MAX_STEP_WORDS) + ".\n"
                  "2. The team did another.\n3. The team did a third."),

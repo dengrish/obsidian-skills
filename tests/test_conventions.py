@@ -6028,10 +6028,13 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 101,
-    "shared/scripts/equation_coverage.py": 192,
+    "shared/scripts/entry_checks.py": 104,
+    # 2026-10-02: the cases for the removed prose-calculation cues
+    # (averaged probability, majority vote, regression average) went with
+    # them; the new cue and denominator cases still raise the floor net.
+    "shared/scripts/equation_coverage.py": 198,
     "shared/scripts/figure_state.py": 14,
-    "shared/scripts/introduced_aliases.py": 36,
+    "shared/scripts/introduced_aliases.py": 39,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
@@ -6039,14 +6042,14 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/entry_structure.py": 172,
     "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
-    "shared/scripts/publish_files.py": 25,
+    "shared/scripts/publish_files.py": 30,
     "shared/scripts/plurals.py": 265,
     "shared/scripts/slugify.py": 80,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 72,
     "shared/scripts/yaml_scalars.py": 16,
-    "skills/clipping-clean/scripts/body_checks.py": 50,
-    "skills/clipping-clean/scripts/dedup_index.py": 176,
-    "skills/clipping-clean/scripts/fetch_images.py": 575,
+    "skills/clipping-clean/scripts/body_checks.py": 79,
+    "skills/clipping-clean/scripts/dedup_index.py": 180,
+    "skills/clipping-clean/scripts/fetch_images.py": 593,
     "skills/clipping-clean/scripts/lottie_to_gif.py": 42,
     "skills/clipping-clean/scripts/slug.py": 157,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
@@ -6079,11 +6082,11 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_prices.py": 28,
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
-    "skills/paper-summarize/scripts/note_lint.py": 264,
+    "skills/paper-summarize/scripts/note_lint.py": 276,
     "skills/paper-summarize/scripts/paper_scan.py": 183,
     "skills/paper-summarize/scripts/paper_text.py": 87,
-    "skills/figure-extract/scripts/auto_fig_bbox.py": 364,
-    "skills/figure-extract/scripts/batch_extract.py": 433,
+    "skills/figure-extract/scripts/auto_fig_bbox.py": 370,
+    "skills/figure-extract/scripts/batch_extract.py": 439,
     "skills/figure-extract/scripts/extract_figures.py": 223,
     "skills/figure-extract/scripts/render_page.py": 68,
     "skills/pdf-organize/scripts/organize.py": 415,
@@ -6091,10 +6094,10 @@ SELFTEST_MIN_CASES = {
     "skills/wiki-build/scripts/find_collisions.py": 79,
     # 2026-09-30: lowered after the discipline-root empty-sources exemption
     # and its cases were removed (roots now cite a source like every entry).
-    "skills/wiki-build/scripts/lint_entry.py": 450,
+    "skills/wiki-build/scripts/lint_entry.py": 451,
     "skills/wiki-build/scripts/review_tree.py": 40,
     "skills/wiki-build/scripts/vault_index.py": 88,
-    "skills/wiki-lint/scripts/scan_vault.py": 630,
+    "skills/wiki-lint/scripts/scan_vault.py": 652,
 }
 
 
@@ -7382,7 +7385,12 @@ def check_autonomous_wiki_lint(rep, conv):
     """wiki-lint's semantic pass belongs to the agent, not a human gate.
 
     Each pinned file states the autonomy where a reader could otherwise infer
-    a gate.  The retired gate phrasing must not return, in two scopes.
+    a gate.  Since knowledge 1.17.0 that includes content repair: an ordinary
+    run's Task 1b corrects, consolidates and retitles on its own, and only
+    splits, merges and deletions wait for an explicit request, so the pins
+    also hold that contract and the proposal-only wording it retired ("generic
+    lint only proposes", ...) joins the retired tokens.  The retired gate
+    phrasing must not return, in two scopes.
     wiki-lint's own retired tokens (`item3/user-action`, `read-reviewed`, ...)
     mean nothing outside it, so they are swept over every canonical source.
     The generic gate phrases ("require human judgment", "so the user can
@@ -7407,13 +7415,25 @@ def check_autonomous_wiki_lint(rep, conv):
          None, "not a required review queue"),
         (os.path.join(SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py"),
          None, "no user or other human review is required"),
+        # The 1.17.0 content-repair contract: Task 1b repairs unasked, and
+        # only splits, merges and deletions need an explicit request.
+        (os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"), None,
+         "Only splits, merges and deletions need an explicit request"),
+        (os.path.join(SHARED_DIR, "CONVENTIONS.md"), None,
+         "never applies them unasked"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "refactors.md"),
+         None, "Task 1b runs this protocol when all of these hold"),
     ]
     # Retired wiki-lint vocabulary: no other skill has a reason to use it.
+    # The last three are the proposal-only gate 1.17.0 retired.
     retired_tokens = (
         "semantic selection remains manual",
         "read-reviewed",
         "read-detected",
         "item3/user-action",
+        "generic lint only proposes",
+        "Generic maintenance requests do not activate this mode",
+        "propose a source-backed correction",
     )
     # Ordinary English that implied a gate only in wiki-lint's contract.
     gate_phrases = (
@@ -7683,14 +7703,15 @@ def check_safe_write_programmatic_api(rep, _conv):
         ("builder", "shared/scripts/publish_files.py' publish --vault"),
         ("linter", "shared/scripts/publish_files.py' snapshot --vault"),
         ("linter", "shared/scripts/publish_files.py' publish --vault"),
+        ("linter", "shared/scripts/publish_files.py' remove --vault"),
+        ("linter", "shared/scripts/publish_files.py' move --vault"),
         ("clipping", "shared/scripts/publish_files.py' snapshot --vault"),
         ("clipping", "shared/scripts/publish_files.py' publish --vault"),
         ("clipping", "`snapshot --replace`"),
         ("reprocess", "SAFE_WRITES.md#call-the-shared-python-api"),
         ("reprocess", "`atomic_move.publish_new(staged, target, "
                       "atomic_move.regular_file_snapshot, stage_parent)`"),
-        ("reprocess", "`publish_files.py` offers no conditional removal "
-                      "(step 9)"),
+        ("reprocess", "shared/scripts/publish_files.py' remove --vault"),
         ("paper", "shared/scripts/publish_files.py' snapshot --vault"),
         ("paper", "shared/scripts/publish_files.py' publish --vault"),
         ("suggestions",

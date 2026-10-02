@@ -298,7 +298,8 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 ├── add-to-wiki.md            wiki-add's requested-topic queue
 └── Reviews/                  suggestion logs: open issues, then fixed ones
     ├── <current-skill>-suggestions.md  one per skill
-    └── wiki-notes-suggestions.md      note-content backlog
+    ├── wiki-notes-suggestions.md      note-content backlog
+    └── .wiki-lint-settled.json        wiki-lint's private ledger of settled link decisions
 ```
 
 PDFs move out of `Inbox/`; raw clippings stay as the record of what was

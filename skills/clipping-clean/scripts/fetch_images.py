@@ -54,6 +54,11 @@ final write is left to the rendering step, because a script that does its own
 publish verified new-name copies while retaining the old names, then `finalize`
 only after the reported dependencies have been rewritten and an unchanged
 re-probe passes. Both phases require the old and new published owner notes.
+A same-note re-stem passes one renamed `Articles/<new_slug>.md` as both owner
+notes for images a rename left under the old stem. It applies only while no
+`Articles/<old_slug>.md` exists. Prepare requires every old-stem image to be
+that note's exact rendered embed; finalize requires the republished note to
+embed the mapped new names instead, and `dependencies --new-slug` re-probes.
 
 `rename`'s required `--sources` is the vault's `Sources/PDFs`: a `<old_slug>.pdf`
 found anywhere beneath (the folder is recursive — book chapters live in
@@ -140,7 +145,7 @@ Importable
                         owner_note=..., new_owner_note=..., dry_run=False) -> dict
     finalize_slug_rename(attachments, old_slug, new_slug, *, sources=...,
                          owner_note=..., new_owner_note=..., dry_run=False) -> dict
-    dependency_status(attachments, owner_note, old_slug) -> dict
+    dependency_status(attachments, owner_note, old_slug, new_slug=None) -> dict
     validate_slug(slug, what="--slug") -> str          # raises ValueError
     validate_index(index, what="figure index") -> int  # raises ValueError
     run_self_test() -> int                             # also `selftest`
@@ -1188,8 +1193,12 @@ def _local_target_basename(target, *, wikilink=False):
     return target.rsplit("/", 1)[-1].strip() or None
 
 
-def _markdown_dependency_names(text, image_names, old_slug):
-    """Known old image/note targets referenced by rendered Markdown."""
+def _markdown_dependency_names(text, image_names, old_slug, include_note=True):
+    """Known old image/note targets referenced by rendered Markdown.
+
+    A same-note re-stem has no old note to retire, so it passes
+    ``include_note=False`` and only old image names are dependencies.
+    """
     visible = _visible_markdown(text)
     images = {_manifest_name_key(name): name for name in image_names}
     note_key = _manifest_name_key(old_slug)
@@ -1203,7 +1212,8 @@ def _markdown_dependency_names(text, image_names, old_slug):
         if image is not None:
             found.add(image)
         stem, extension = os.path.splitext(base)
-        if ((_manifest_name_key(base) == note_key and not extension)
+        if include_note and (
+                (_manifest_name_key(base) == note_key and not extension)
                 or (extension.casefold() == ".md"
                     and _manifest_name_key(stem) == note_key)):
             found.add(old_slug + ".md")
@@ -1327,7 +1337,7 @@ def _dependency_prefilter_views(text):
             _manifest_name_key(urllib.parse.unquote(text.replace("%%", "  "))))
 
 
-def _vault_dependency_blockers(owner, old_slug, image_names):
+def _vault_dependency_blockers(owner, old_slug, image_names, include_note=True):
     """External old-note/image references, or incomplete-scan blockers."""
     vault = owner.get("vault")
     if vault is None:
@@ -1350,7 +1360,8 @@ def _vault_dependency_blockers(owner, old_slug, image_names):
                 if not any(needle in view for view in views
                            for needle in needles):
                     continue
-            found = _markdown_dependency_names(text, image_names, old_slug)
+            found = _markdown_dependency_names(text, image_names, old_slug,
+                                               include_note=include_note)
             if found:
                 blockers.append({"path": os.path.abspath(path),
                                  "references": found})
@@ -1524,7 +1535,7 @@ def _load_clipping_owner(owner_note, slug, attachments, *, require_vault=False):
             "vault-wide dependency scan cannot be bypassed")
     return {"path": path, "slug": slug, "attachments": attachments,
             "snapshot": snapshot, "embeds": embeds, "vault": vault,
-            "origin": normalize_url(origin),
+            "text": note_text, "origin": normalize_url(origin),
             "research_extract": is_research_extract_text(note_text)}
 
 
@@ -2854,8 +2865,15 @@ _STRADDLE = ("refused: this set is renamed all or nothing, and %s blocked it. "
              "Nothing was renamed. Resolve that one and re-run.")
 
 
-def dependency_status(attachments, owner_note, old_slug):
-    """Report external references that prevent retiring an old clipping stem."""
+def dependency_status(attachments, owner_note, old_slug, new_slug=None):
+    """Report external references that prevent retiring an old clipping stem.
+
+    With ``new_slug``, ``owner_note`` is the renamed Articles/<new_slug>.md of
+    a same-note re-stem (see ``_restem_dependency_status``).
+    """
+    if new_slug is not None:
+        return _restem_dependency_status(attachments, owner_note, old_slug,
+                                         new_slug)
     validate_slug(old_slug, "--old-slug")
     owner = _load_clipping_owner(owner_note, old_slug, attachments,
                                  require_vault=True)
@@ -2875,7 +2893,7 @@ def dependency_status(attachments, owner_note, old_slug):
 
 
 def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
-                      owner_note=None, require_vault=False):
+                      owner_note=None, require_vault=False, restem=None):
     """Plan the complete owned image mapping without changing any files.
 
     Both supported handoff phases use this inventory. A current byte-identical
@@ -2884,6 +2902,10 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
     while PDF stems, manifests, supplementary labels and missing embeds block
     the handoff. The loose consumer glob keeps all existing image spellings
     visible without authorizing files from their names alone.
+
+    ``restem`` ("prepare" or "finalize") plans a same-note re-stem: the owner
+    is Articles/<new_slug>.md, which embeds each old name before its embeds
+    are republished and each mapped new name afterwards.
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
@@ -2908,8 +2930,8 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
                  "error": "refusing to rename: the destination stem %s belongs "
                           "to a PDF in %s; choose an unused clipping slug"
                           % (new_slug, sources)}]
-    owner = _load_clipping_owner(owner_note, old_slug, attachments,
-                                 require_vault=require_vault)
+    owner = _load_clipping_owner(owner_note, new_slug if restem else old_slug,
+                                 attachments, require_vault=require_vault)
     _refuse_research_extract(owner, "rename")
     owned = {_manifest_name_key(name)
              for name in read_manifest(os.path.join(attachments, MANIFEST_FILE))}
@@ -2936,6 +2958,7 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
             attachments, new_slug, glob.escape(os.path.splitext(tail)[0]) + ".*")
         entry = {"from": base, "to": os.path.basename(dst), "ok": False,
                  "error": None}
+        embedded = os.path.basename(dst) if restem == "finalize" else base
         if _manifest_name_key(base) in owned:
             entry["error"] = "recorded in the PDF figure manifest; not this skill's to rename"
         elif any(name.startswith(destination_prefix) for name in owned):
@@ -2944,10 +2967,13 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
             entry["error"] = ("label spelling only figure-extract "
                               "writes; this file is a PDF's figure, not this "
                               "note's")
-        elif sum(_manifest_name_key(name) == _manifest_name_key(base)
+        elif sum(_manifest_name_key(name) == _manifest_name_key(embedded)
                  for name in owner["embeds"]) != 1:
-            entry["error"] = ("not a unique portable rendered filename-only "
-                              "embed in %s; ownership is unproven" % owner["path"])
+            entry["error"] = ("%snot a unique portable rendered filename-only "
+                              "embed in %s; ownership is unproven" % (
+                                  "" if embedded == base else
+                                  "its new name %s is " % embedded,
+                                  owner["path"]))
         elif not os.path.lexists(src):
             entry["error"] = "source missing"
         elif os.path.islink(src) or not os.path.isfile(src):
@@ -3105,6 +3131,159 @@ def _handoff_plan(attachments, sources, owner_note, new_owner_note,
     return old_owner, new_owner, mapping, dependency
 
 
+def _same_note_restem(owner_note, new_owner_note, old_slug, new_slug):
+    """Whether ``rename`` names one note as both owners: a same-note re-stem."""
+    return (old_slug != new_slug and owner_note is not None
+            and new_owner_note is not None
+            and os.path.abspath(os.fspath(owner_note))
+            == os.path.abspath(os.fspath(new_owner_note)))
+
+
+def _restem_owner(attachments, owner_note, old_slug, new_slug):
+    """Load the renamed note a same-note re-stem acts for.
+
+    A note renamed outside the two-owner handoff can keep embedding images
+    under its former stem. Only Articles/<new_slug>.md may own them, and only
+    while no Articles/<old_slug>.md remains: a live old note still owns its
+    stem and needs the handoff instead.
+    """
+    validate_slug(old_slug, "--old-slug")
+    validate_slug(new_slug, "--new-slug")
+    if _manifest_name_key(old_slug) == _manifest_name_key(new_slug):
+        raise ValueError("a same-note re-stem needs two distinct portable stems")
+    owner = _load_clipping_owner(owner_note, new_slug, attachments,
+                                 require_vault=True)
+    _refuse_research_extract(owner, "rename")
+    old_key = _manifest_name_key(old_slug + ".md")
+    try:
+        with os.scandir(os.path.dirname(owner["path"])) as entries:
+            occupied = sorted(entry.name for entry in entries
+                              if _manifest_name_key(entry.name) == old_key)
+    except OSError as exc:
+        raise ValueError("cannot inventory the owner note's Articles folder: %s"
+                         % exc) from exc
+    if occupied:
+        raise ValueError("Articles/%s still exists; a same-note re-stem applies "
+                         "only when no old note remains, so use the two-owner "
+                         "handoff" % occupied[0])
+    return owner
+
+
+def _restem_dependency_status(attachments, owner_note, old_slug, new_slug,
+                              image_names=None):
+    """Report what still references a re-stemmed note's old image names.
+
+    No old note remains, so links to its name are not dependencies. Other
+    notes' references are ``blockers``, as in the handoff; the renamed note's
+    own are ``owner_references``, which its republished embeds clear. The
+    rename phases pass their fixed mapping so that a retired name stays in
+    every later probe; otherwise the old-stem files and embeds are read.
+    """
+    owner = _restem_owner(attachments, owner_note, old_slug, new_slug)
+    if image_names is None:
+        image_names = {os.path.basename(path) for path in
+                       _glob_slug(attachments, old_slug, _FIG_GLOB)}
+        image_names |= {name for name in owner["embeds"]
+                        if _embedded_figure_tail(name, old_slug) is not None}
+    image_names = sorted(set(image_names), key=lambda item: (
+        _manifest_name_key(item), item))
+    blockers = _vault_dependency_blockers(owner, old_slug, image_names,
+                                          include_note=False)
+    references = _markdown_dependency_names(owner["text"], image_names,
+                                            old_slug, include_note=False)
+    _validate_clipping_owner(owner)
+    return {"ok": not blockers and not references,
+            "vault": os.path.abspath(owner["vault"]), "old_slug": old_slug,
+            "new_slug": new_slug, "images": image_names, "blockers": blockers,
+            "owner_references": references}
+
+
+def _probe_error(report):
+    """The refusal for a dependency report that is not ``ok``."""
+    errors = []
+    if report.get("owner_references"):
+        errors.append("the re-stemmed note still references old image(s) %s; "
+                      "republish them under the new stem first" %
+                      ", ".join(report["owner_references"]))
+    if report.get("blockers") or not errors:
+        errors.append(_dependency_error(report.get("blockers", ())))
+    return "; ".join(errors)
+
+
+def _restem_plan(attachments, sources, owner_note, old_slug, new_slug, phase):
+    """Validate a same-note re-stem's image mapping without changing files.
+
+    Prepare requires every old-stem file to be an exact rendered embed of the
+    renamed note, and no mapped new name to be embedded yet. Finalize
+    requires the republished note to embed every mapped new name and no old
+    one, with each new name holding a prepared copy.
+    """
+    owner = _restem_owner(attachments, owner_note, old_slug, new_slug)
+    if phase == "finalize":
+        stale = sorted(name for name in owner["embeds"]
+                       if _embedded_figure_tail(name, old_slug) is not None)
+        if stale:
+            raise ValueError("%s still embeds old image(s) %s; republish its "
+                             "embeds under the new stem before finalizing" %
+                             (owner["path"], ", ".join(stale)))
+    results = _plan_slug_rename(
+        attachments, old_slug, new_slug, sources=sources,
+        owner_note=owner_note, require_vault=True, restem=phase)
+    failed = [row for row in results if not row.get("ok")]
+    if failed:
+        raise ValueError("image re-stem preflight failed: " + "; ".join(
+            "%s (%s)" % (row.get("from"), row.get("error"))
+            for row in failed))
+
+    mapping = []
+    for row in results:
+        old_name, new_name = row["from"], row["to"]
+        new_path = os.path.join(attachments, new_name)
+        if _same_file(os.path.join(attachments, old_name), new_path):
+            raise ValueError("%s and %s resolve to the same file; retain the "
+                             "existing names" % (old_name, new_name))
+        if phase == "prepare" and any(
+                _manifest_name_key(name) == _manifest_name_key(new_name)
+                for name in owner["embeds"]):
+            raise ValueError("%s already embeds %s; resolve that embed before "
+                             "re-stemming" % (owner["path"], new_name))
+        if phase == "finalize" and (os.path.islink(new_path)
+                                    or not os.path.isfile(new_path)):
+            raise ValueError("%s has no prepared copy; run prepare first"
+                             % new_name)
+        mapping.append({"from": old_name, "to": new_name})
+
+    dependency = _restem_dependency_status(
+        attachments, owner_note, old_slug, new_slug,
+        [item["from"] for item in mapping])
+    incomplete = [row for row in dependency["blockers"] if row.get("error")]
+    if incomplete:
+        raise ValueError(_dependency_error(incomplete))
+    _validate_clipping_owner(owner)
+    return owner, mapping, dependency
+
+
+def _rename_plan(attachments, sources, owner_note, new_owner_note,
+                 old_slug, new_slug, phase):
+    """Plan one rename phase as a two-owner handoff or a same-note re-stem.
+
+    Returns the owners to revalidate, the mapping, the dependency report, a
+    probe that repeats that report for the same old names, and whether this
+    is a re-stem.
+    """
+    if _same_note_restem(owner_note, new_owner_note, old_slug, new_slug):
+        owner, mapping, dependency = _restem_plan(
+            attachments, sources, owner_note, old_slug, new_slug, phase)
+        names = [item["from"] for item in mapping]
+        return ((owner,), mapping, dependency,
+                lambda: _restem_dependency_status(
+                    attachments, owner_note, old_slug, new_slug, names), True)
+    old_owner, new_owner, mapping, dependency = _handoff_plan(
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug)
+    return ((old_owner, new_owner), mapping, dependency,
+            lambda: dependency_status(attachments, owner_note, old_slug), False)
+
+
 def _rollback_new_publications(published, stage, stage_parent):
     """Withdraw only new-name copies this prepare call published."""
     failures = []
@@ -3124,8 +3303,9 @@ def _rollback_new_publications(published, stage, stage_parent):
 def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
                         owner_note, new_owner_note, dry_run=False):
     """Publish verified new-name image copies while retaining every old name."""
-    old_owner, new_owner, mapping, dependency = _handoff_plan(
-        attachments, sources, owner_note, new_owner_note, old_slug, new_slug)
+    owners, mapping, dependency, probe, restem = _rename_plan(
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug,
+        "prepare")
     rows = []
     for item in mapping:
         src = os.path.join(attachments, item["from"])
@@ -3134,7 +3314,8 @@ def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
             "would-copy" if dry_run else "copy")
         rows.append(dict(item, ok=True, action=action))
     if dry_run:
-        return {"ok": True, "phase": "prepare", "old_slug": old_slug,
+        return {"ok": True, "phase": "prepare", "restem": restem,
+                "old_slug": old_slug,
                 "new_slug": new_slug, "mapping": mapping,
                 "dependency": dependency, "results": rows,
                 "prepared": 0}
@@ -3147,9 +3328,9 @@ def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
         for index, (item, row) in enumerate(zip(mapping, rows), 1):
             src = os.path.join(attachments, item["from"])
             dst = os.path.join(attachments, item["to"])
-            _validate_clipping_owner(old_owner)
-            _validate_clipping_owner(new_owner)
-            current = dependency_status(attachments, owner_note, old_slug)
+            for owner in owners:
+                _validate_clipping_owner(owner)
+            current = probe()
             incomplete = [blocker for blocker in current["blockers"]
                           if blocker.get("error")]
             if incomplete:
@@ -3182,9 +3363,9 @@ def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
             row["sha256"] = old_snapshot[1]
             row["bytes"] = old_snapshot[3]
 
-        _validate_clipping_owner(old_owner)
-        _validate_clipping_owner(new_owner)
-        dependency = dependency_status(attachments, owner_note, old_slug)
+        for owner in owners:
+            _validate_clipping_owner(owner)
+        dependency = probe()
         incomplete = [blocker for blocker in dependency["blockers"]
                       if blocker.get("error")]
         if incomplete:
@@ -3199,7 +3380,8 @@ def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
         shutil.rmtree(stage, ignore_errors=True)
         raise
     shutil.rmtree(stage, ignore_errors=True)
-    return {"ok": True, "phase": "prepare", "old_slug": old_slug,
+    return {"ok": True, "phase": "prepare", "restem": restem,
+            "old_slug": old_slug,
             "new_slug": new_slug, "mapping": mapping,
             "dependency": dependency, "results": rows,
             "prepared": sum(row["action"] == "copied" for row in rows)}
@@ -3237,10 +3419,11 @@ def _restore_retired_images(retired, stage_parent):
 def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
                          owner_note, new_owner_note, dry_run=False):
     """Retire only exact old images after every old dependency has disappeared."""
-    old_owner, new_owner, mapping, dependency = _handoff_plan(
-        attachments, sources, owner_note, new_owner_note, old_slug, new_slug)
+    owners, mapping, dependency, probe, restem = _rename_plan(
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug,
+        "finalize")
     if not dependency["ok"]:
-        raise ValueError(_dependency_error(dependency["blockers"]))
+        raise ValueError(_probe_error(dependency))
 
     snapshots = []
     rows = []
@@ -3257,7 +3440,8 @@ def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
                          action="would-retire" if dry_run else "retire",
                          sha256=old_snapshot[1], bytes=old_snapshot[3]))
     if dry_run:
-        return {"ok": True, "phase": "finalize", "old_slug": old_slug,
+        return {"ok": True, "phase": "finalize", "restem": restem,
+                "old_slug": old_slug,
                 "new_slug": new_slug, "mapping": mapping,
                 "dependency": dependency, "results": rows, "retired": 0}
 
@@ -3265,11 +3449,11 @@ def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
     retired = []
     try:
         for src, dst, old_snapshot, new_snapshot in snapshots:
-            _validate_clipping_owner(old_owner)
-            _validate_clipping_owner(new_owner)
-            current = dependency_status(attachments, owner_note, old_slug)
+            for owner in owners:
+                _validate_clipping_owner(owner)
+            current = probe()
             if not current["ok"]:
-                raise ValueError(_dependency_error(current["blockers"]))
+                raise ValueError(_probe_error(current))
             if (_stable_regular_snapshot(src) != old_snapshot
                     or _stable_regular_snapshot(dst) != new_snapshot):
                 raise ValueError("an old or new image changed after finalization "
@@ -3294,15 +3478,15 @@ def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
             if _stable_regular_snapshot(dst) != new_snapshot:
                 raise ValueError("new image changed while its old duplicate was "
                                  "being retired: %s" % dst)
-            current = dependency_status(attachments, owner_note, old_slug)
+            current = probe()
             if not current["ok"]:
-                raise ValueError(_dependency_error(current["blockers"]))
+                raise ValueError(_probe_error(current))
 
-        _validate_clipping_owner(old_owner)
-        _validate_clipping_owner(new_owner)
-        dependency = dependency_status(attachments, owner_note, old_slug)
+        for owner in owners:
+            _validate_clipping_owner(owner)
+        dependency = probe()
         if not dependency["ok"]:
-            raise ValueError(_dependency_error(dependency["blockers"]))
+            raise ValueError(_probe_error(dependency))
         for _src, dst, _old_snapshot, new_snapshot in snapshots:
             if _stable_regular_snapshot(dst) != new_snapshot:
                 raise ValueError("new image changed before finalization completed: %s"
@@ -3319,7 +3503,8 @@ def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
         shutil.rmtree(stage, ignore_errors=True)
     for row in rows:
         row["action"] = "retired"
-    return {"ok": True, "phase": "finalize", "old_slug": old_slug,
+    return {"ok": True, "phase": "finalize", "restem": restem,
+            "old_slug": old_slug,
             "new_slug": new_slug, "mapping": mapping,
             "dependency": dependency, "results": rows,
             "retired": len(rows)}
@@ -5779,6 +5964,167 @@ continues here`
                [_path.read_bytes() for _path in retained]),
               (True, [b"another writer's old-path occupant", _PNG], [_PNG, _PNG], [_PNG]))
 
+        # A same-note re-stem: the note was renamed but its images kept the
+        # old stem, and no old note remains to hand them off from.
+        def restem_case(label, names=("_fig_1.png", "_fig_2.png")):
+            vault, images, pdfs, old_note, old_names = canonical_rename_fixture(
+                label, "Old_Stem_2025", names)
+            owner = os.path.join(vault, "Articles", "New_Stem_2026.md")
+            os.rename(old_note, owner)
+            new_names = [name.replace("Old_Stem_2025", "New_Stem_2026", 1)
+                         for name in old_names]
+            args = {"attachments": images, "old_slug": "Old_Stem_2025",
+                    "new_slug": "New_Stem_2026", "sources": pdfs,
+                    "owner_note": owner, "new_owner_note": owner}
+            return (vault, args, [os.path.join(images, name) for name in old_names],
+                    [os.path.join(images, name) for name in new_names])
+
+        def republish(args, extra=""):
+            with open(args["owner_note"], encoding="utf-8") as fh:
+                text = fh.read().replace("Old_Stem_2025", "New_Stem_2026")
+            with open(args["owner_note"], "w", encoding="utf-8") as fh:
+                fh.write(text + extra)
+
+        restem_old_names = ["Old_Stem_2025_fig_1.png", "Old_Stem_2025_fig_2.png"]
+        _vault, restem_args, restem_old, restem_new = restem_case("restem")
+        planned = prepare_slug_rename(**restem_args, dry_run=True)
+        check("re-stem prepare --dry-run maps the note's old-stem images without copying",
+              (planned["restem"], [item["to"] for item in planned["mapping"]],
+               [row["action"] for row in planned["results"]],
+               [os.path.lexists(path) for path in restem_new]),
+              (True, ["New_Stem_2026_fig_1.png", "New_Stem_2026_fig_2.png"],
+               ["would-copy", "would-copy"], [False, False]))
+        prepared = prepare_slug_rename(**restem_args)
+        check("re-stem prepare copies exact bytes, keeps old names and lists the "
+              "note's own old references apart from blockers",
+              (prepared["prepared"], current_bytes(restem_old),
+               current_bytes(restem_new), prepared["dependency"]["blockers"],
+               prepared["dependency"]["owner_references"]),
+              (2, [_PNG, _PNG], [_PNG, _PNG], [], restem_old_names))
+        check("re-stem finalize refuses until the note's embeds are republished",
+              ("still embeds old image" in failure(
+                  lambda: finalize_slug_rename(**restem_args)),
+               current_bytes(restem_old)), (True, [_PNG, _PNG]))
+        republish(restem_args)
+        probe_stdout = io.StringIO()
+        with patch.object(sys, "stdout", probe_stdout):
+            probe_code = main([
+                "dependencies", "--attachments", restem_args["attachments"],
+                "--owner-note", restem_args["owner_note"],
+                "--old-slug", "Old_Stem_2025", "--new-slug", "New_Stem_2026"])
+        probe_report = json.loads(probe_stdout.getvalue())
+        check("the re-stem dependency re-probe CLI is clean after republication",
+              (probe_code, probe_report["ok"], probe_report["images"]),
+              (0, True, restem_old_names))
+        finalized = finalize_slug_rename(**restem_args)
+        check("re-stem finalize retires only the old copies of republished embeds",
+              (finalized["restem"], finalized["retired"],
+               [os.path.lexists(path) for path in restem_old],
+               current_bytes(restem_new)),
+              (True, 2, [False, False], [_PNG, _PNG]))
+
+        # Each refusal leaves every old image and creates no new one.
+        restem_vault, restem_args, restem_old, restem_new = restem_case("old-live")
+        touch(os.path.join(restem_vault, "Articles", "Old_Stem_2025.md"),
+              b"---\nsources:\n  - https://example.com/old-live\n---\n")
+        check("a re-stem is refused while Articles/<old-slug>.md exists",
+              ("still exists" in failure(
+                  lambda: prepare_slug_rename(**restem_args)),
+               [os.path.lexists(path) for path in restem_new]), (True, [False, False]))
+        _vault, restem_args, restem_old, restem_new = restem_case("unembedded")
+        touch(os.path.join(restem_args["attachments"], "Old_Stem_2025_fig_3.png"),
+              _PNG)
+        check("a re-stem is refused when an old-stem file is not the note's embed",
+              ("ownership is unproven" in failure(
+                  lambda: prepare_slug_rename(**restem_args)),
+               [os.path.lexists(path) for path in restem_new]), (True, [False, False]))
+        check("a re-stem owner must be Articles/<new-slug>.md",
+              "must be Articles/Other_Stem_2026.md" in failure(
+                  lambda: prepare_slug_rename(**dict(
+                      restem_args, new_slug="Other_Stem_2026"))), True)
+        check("a re-stem needs two distinct portable stems",
+              "two distinct portable stems" in failure(
+                  lambda: prepare_slug_rename(**dict(
+                      restem_args, old_slug="new_stem_2026"))), True)
+        _vault, restem_args, restem_old, restem_new = restem_case("restem-extract")
+        with open(restem_args["owner_note"], encoding="utf-8") as fh:
+            marked = fh.read().replace(
+                "---\n![[", "---\n<!-- obsidian:wiki-add-research-source -->\n"
+                "Research extract\n![[", 1)
+        with open(restem_args["owner_note"], "w", encoding="utf-8") as fh:
+            fh.write(marked)
+        check("a re-stem refuses a research extract",
+              ("research extract" in failure(
+                  lambda: prepare_slug_rename(**restem_args)),
+               [os.path.lexists(path) for path in restem_new]), (True, [False, False]))
+        _vault, restem_args, restem_old, restem_new = restem_case("restem-pdf")
+        touch(os.path.join(restem_args["sources"], "Old_Stem_2025.pdf"),
+              b"%PDF-1.7\n")
+        check("a re-stem refuses figures whose old stem is a PDF's",
+              ("belong to that document" in failure(
+                  lambda: prepare_slug_rename(**restem_args)),
+               [os.path.lexists(path) for path in restem_new]), (True, [False, False]))
+        _vault, restem_args, restem_old, restem_new = restem_case("new-embedded")
+        with open(restem_args["owner_note"], "a", encoding="utf-8") as fh:
+            fh.write("![[New_Stem_2026_fig_1.png]]\n")
+        check("re-stem prepare refuses a note already embedding a mapped new name",
+              ("already embeds" in failure(
+                  lambda: prepare_slug_rename(**restem_args)),
+               [os.path.lexists(path) for path in restem_new]), (True, [False, False]))
+        _vault, restem_args, restem_old, restem_new = restem_case("missing-old")
+        os.remove(restem_old[1])
+        check("a missing old-stem attachment blocks the whole re-stem",
+              ("exact attachment is missing" in failure(
+                  lambda: prepare_slug_rename(**restem_args)),
+               [os.path.lexists(path) for path in restem_new]), (True, [False, False]))
+        _vault, restem_args, restem_old, restem_new = restem_case("unprepared")
+        republish(restem_args)
+        check("re-stem finalize refuses a mapped name with no prepared copy",
+              ("no prepared copy" in failure(
+                  lambda: finalize_slug_rename(**restem_args)),
+               current_bytes(restem_old)), (True, [_PNG, _PNG]))
+
+        restem_vault, restem_args, restem_old, restem_new = restem_case("external")
+        os.makedirs(os.path.join(restem_vault, "Wiki"))
+        restem_wiki = touch(os.path.join(restem_vault, "Wiki", "entry.md"),
+                            b"[[Old_Stem_2025]] and ![[Old_Stem_2025_fig_1.png]]\n")
+        prepared = prepare_slug_rename(**restem_args)
+        check("re-stem blockers are other notes' old-image references, not "
+              "links to the absent old note",
+              prepared["dependency"]["blockers"],
+              [{"path": os.path.realpath(restem_wiki),
+                "references": ["Old_Stem_2025_fig_1.png"]}])
+        republish(restem_args)
+        check("re-stem finalize refuses while another note references an old image",
+              ("dependencies block" in failure(
+                  lambda: finalize_slug_rename(**restem_args)),
+               current_bytes(restem_old)), (True, [_PNG, _PNG]))
+        touch(restem_wiki, b"[[Old_Stem_2025]] and ![[New_Stem_2026_fig_1.png]]\n")
+        republish(restem_args, "[full size](Old_Stem_2025_fig_2.png)\n")
+        check("re-stem finalize refuses while the note itself links an old image",
+              ("still references old image" in failure(
+                  lambda: finalize_slug_rename(**restem_args)),
+               current_bytes(restem_old)), (True, [_PNG, _PNG]))
+
+        # Every probe keeps the fixed mapping: an image already retired is no
+        # longer on disk, but a new reference to it still restores the set.
+        restem_vault, restem_args, restem_old, restem_new = restem_case("late-ref")
+        prepare_slug_rename(**restem_args)
+        republish(restem_args)
+
+        def reference_retired(target, *args, **kwargs):
+            result = real_remove(target, *args, **kwargs)
+            touch(os.path.join(restem_vault, "late.md"),
+                  ("![[%s]]\n" % os.path.basename(target)).encode("utf-8"))
+            return result
+
+        with patch.dict(globals(), remove_expected=reference_retired):
+            error = failure(lambda: finalize_slug_rename(**restem_args))
+        check("a reference to an already retired re-stem image restores the old set",
+              ("dependencies block" in error, current_bytes(restem_old),
+               current_bytes(restem_new)),
+              (True, [_PNG, _PNG], [_PNG, _PNG]))
+
         nfd_old = unicodedata.normalize("NFD", "Müller_Dependency_2025")
         nfd_vault, nfd_images, nfd_pdfs, nfd_owner, nfd_names = \
             canonical_rename_fixture("normalization", nfd_old)
@@ -6516,11 +6862,15 @@ def main(argv=None):
     r.add_argument("--new-slug", required=True)
     r.add_argument("--owner-note", required=True,
                    help="the unchanged Articles/<old-slug>.md; every renamed "
-                        "attachment must be an exact rendered filename-only embed")
+                        "attachment must be an exact rendered filename-only "
+                        "embed. The same path as --new-owner-note selects a "
+                        "same-note re-stem")
     r.add_argument("--new-owner-note", required=True,
                    help="published Articles/<new-slug>.md with the same web "
                         "origin and exact mapped new embeds; required for "
-                        "prepare/finalize")
+                        "prepare/finalize. In a same-note re-stem it is the "
+                        "--owner-note path, which embeds the old names at "
+                        "prepare and the mapped new names only at finalize")
     r.add_argument("--phase", choices=("prepare", "finalize"),
                    required=True,
                    help="required: prepare publishes new-name copies while "
@@ -6535,7 +6885,11 @@ def main(argv=None):
     q.add_argument("--old-slug", required=True)
     q.add_argument("--owner-note", required=True,
                    help="the unchanged Articles/<old-slug>.md whose old image "
-                        "embeds define the dependency inventory")
+                        "embeds define the dependency inventory, or with "
+                        "--new-slug the re-stemmed Articles/<new-slug>.md")
+    q.add_argument("--new-slug",
+                   help="same-note re-stem: only the old-stem image names "
+                        "are dependencies")
 
     o = sub.add_parser(
         "preflight", help="check whether a proposed clipping slug already has "
@@ -6564,7 +6918,7 @@ def main(argv=None):
     if args.cmd == "dependencies":
         try:
             report = dependency_status(args.attachments, args.owner_note,
-                                       args.old_slug)
+                                       args.old_slug, new_slug=args.new_slug)
         except (OSError, UnicodeError, ValueError) as exc:
             report = {"ok": False, "old_slug": args.old_slug,
                       "error": str(exc), "blockers": []}

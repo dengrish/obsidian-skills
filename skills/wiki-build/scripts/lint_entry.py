@@ -178,8 +178,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   18  18-alias-collision      across a folder, no two entries share an alias
   18  18-alias-duplicate      the same alias listed twice within one entry
   18  18-alias-form           every alias is itself in slug form (warning); a
-                              non-list field, empty item or self alias is an
-                              error
+                              non-list field, empty item, self alias or bare
+                              cross-domain floor term is an error
   18  18-display-label        a wikilink display label carries LaTeX, code,
                               bold or italic markup
   18  18-label-target         folder mode, body prose: a label exactly names a
@@ -394,6 +394,7 @@ from entry_checks import (  # noqa: E402
     bare_common_noun_slug,
     bare_word_alias_candidate,
     bold_parts as _bold_parts,
+    cross_domain_alias_findings,
     cross_domain_synonym_label,
     description_has_entity_subject,
     description_subject_findings,
@@ -1078,6 +1079,14 @@ def _check_aliases(fm, findings, filename):
                 "18-alias-form", "error",
                 "aliases: contains an empty item -- remove the item; an empty "
                 "string is not an alternate name",
+                {"line": line, "alias": value}))
+    cross_domain = cross_domain_alias_findings(field.values)
+    for value, line in zip(field.values, field.item_lines):
+        if value and value in cross_domain:
+            findings.append(_f(
+                "18-alias-form", "error",
+                "alias %r is a bare cross-domain term, which is never an alias "
+                "-- remove it under the alias-removal protocol" % value,
                 {"line": line, "alias": value}))
     for dup in sorted({v for v in values if values.count(v) > 1}):
         findings.append(_f(
@@ -4816,6 +4825,12 @@ def run_self_test():
     check("a singular/plural-only alias of the canonical slug is rejected",
           items(mutate('  - "auroc"', '  - "roc-curves"')),
           ["18-alias-form"])
+    check("a bare cross-domain word or phrase alias is an ERROR",
+          [[(f["item"], f["severity"])
+            for f in lint_text(mutate('  - "auroc"', '  - "%s"' % alias),
+                               "roc-curve.md")["findings"]]
+           for alias in ("entropy", "tree-of-life")],
+          [[("18-alias-form", "error")]] * 2)
 
     # -- checks shared with wiki-lint's scanner (shared/entry_checks.py) ----
     def with_paragraph(paragraph, base=None):
