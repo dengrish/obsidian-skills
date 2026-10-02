@@ -24,12 +24,15 @@ enrich an entry, apply the builder's creation-time teaching rules to it: the
 learner arc, core-facet check and examples of its
 [prose principles](../../wiki-build/references/writing.md#prose-principles),
 and its [equation rules](../../wiki-build/references/equations.md).
-Fill gaps from the entry's cited sources and 5(h) background. When the missing
-teaching lives only in a chapter or document the entry does not cite, leave the
-entry thin and report that a wiki-build request naming that whole source fills
-it in, even when another entry already cites it: a citation does not show the
-source was built as a whole, and the fill-in leaves entries citing it
-untouched. Never route a named-entity build from it, which would mark the
+Fill gaps from the entry's cited sources and 5(h) background. Before adding
+an example, search the entries this one links for the same worked values; a
+neighbor that holds them owns them, so state this entry's facet in one clause
+and link it, or choose an example that shows a different facet. When the
+missing teaching lives only in a chapter or document the entry does not cite,
+leave the entry thin and report that a wiki-build request naming that whole
+source fills it in, even when another entry already cites it: a citation does
+not show the source was built as a whole, and the fill-in leaves entries
+citing it untouched. Never route a named-entity build from it, which would mark the
 source covered so folder runs skip its other topics. Keep every existing claim unless
 it is wrong, and every card and attachment byte-for-byte and in place.
 
@@ -89,24 +92,35 @@ caveat or add the missing explanation, preserving essential assumptions and
 the ordinary mechanism. Never remove an accurate claim merely because the
 cited source does not state it. In each entry, change only the surfaces needed
 to keep it coherent: for example its description, opener, equation, or primary
-card. Then re-read the whole note: merge claims the change left duplicated and
-restore teaching order under the builder's
+card. Then apply the builder's
+[editorial reread](../../wiki-build/references/writing.md#editorial-reread)
+and principle 4's paragraph-flow test to the whole note, and to each linked
+neighbor that states the same relationship. Merge a claim now stated twice.
+Keep each fact before its first use. Reread the passage after each inserted
+paragraph or display so its opening still follows. Make every sentence about
+the quantity the repair changed agree, stated in one unit. Restore teaching
+order under the
 [integration principle](../../wiki-build/references/merge.md#integration-principle),
-losing no claim. Deepening may restructure the whole body this way.
+losing no claim. Deepening may restructure the whole body this way. List
+every sentence the repair deleted; each must be a hedge or caveat principle 3
+excludes, a consolidation trim that links its owner, a claim merged into its
+other statement, a corrected error, or an equation removed under the
+[usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
+with its notation-only prose; a sentence giving the reason for a constant or
+factor in a display that stays is none of these.
 Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments.
 
 **Hedges.** Keep a limit only when the plain claim is false for the ordinary
 case, and then name its condition instead of a hedge word
 ([principle 3](../../wiki-build/references/writing.md#prose-principles)).
-Remove a hedge or caveat that covers only an edge case, even when the source
-itself makes it, such as "in general" before the rule that raising the
-threshold raises precision, or precision dipping as the threshold rises.
-Remove an availability hedge, such as "with interface and runtime
-differences" or "varies by lab"; this is not removing a claim for lack of a
-citation. Evidence-bearing uncertainty in research findings stays. Inspect
-captions too: a caption drops an excluded hedge even when the source's
-caption carries it. Never add caveats.
+Remove every hedge and caveat principle 3 excludes, its full "Leave out" list
+included (defensive terminology distinctions, implementation and numerical
+details such as a routine's tolerance, rare failure modes, troubleshooting
+about neighbors), even when the source itself makes it; this is not removing
+a claim for lack of a citation. Evidence-bearing uncertainty in research
+findings stays. Inspect captions too: a caption drops an excluded hedge even
+when the source's caption carries it. Never add caveats.
 
 **Conflicts.** This covers a conflict between entries, between an entry and
 its cited source, or between a cited source's figure or reason and standard
@@ -129,29 +143,22 @@ or none is reachable; the item names them.
 **Notation.** When sibling entries write the same quantity differently, the
 builder's [notation table](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
 wins; outside the table, the field's standard symbol wins, then the notation
-of the most-linked entry. Pure-statistics entries keep their field's notation
+of the most-linked entry. Statistics-tagged entries write a sample's or
+dataset's size as $n$
 ([equations §4](../../wiki-build/references/equations.md#4-normalization--the-sources-symbols-do-not-survive-contact)),
 so a statistics entry and a machine-learning entry are not siblings for this
 rule. Normalize the minority entries and every prose reference to the renamed
 symbol. Report a choice only when none of these rules decides it.
 
-Dates and review state follow [Dates](../SKILL.md#dates). If the final entry
-changed, set `updated:` to today's local date. Reset `read: false` only when
-the repair adds or rewrites explanatory content, such as deepening (an added
-example, reason or core facet included), a rewritten explanation, an inserted
-equation or an explanation moved into its owner, under the builder's
-[body-change rule](../../wiki-build/references/merge.md#the-read-reset). A
-trim, hedge removal, notation rename, added acronym or full-form
-parenthetical, a contrast named and linked in an existing sentence, or a
-metadata-, link- or format-only correction preserves it; any other genuinely
-close call does not reset and is reported. Missing or unknown review state is
-never invented.
+Dates and review state follow [Dates](../SKILL.md#dates); report each
+`read:` decision and every close no-reset call.
 
 Stage the complete private draft under the entry's own filename, since the
 lint derives slug and root checks from it, and lint it with
 `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`. Before
-publication, check every added or changed wikilink and alias against the Step 0
-inventory: each target must be an existing, unambiguous entry, and a changed
+publication, check every added or changed wikilink and alias against the
+current inventory, Step 0 plus every entry this run has published or
+retitled: each target must be an existing, unambiguous entry, and a changed
 alias must not collide with another entry's title or alias. Then review the
 draft's source fidelity and paragraph flow. The correction must introduce no new lint
 finding, and every baseline finding on a field or passage changed by this run

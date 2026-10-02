@@ -81,18 +81,24 @@ it is limited to a concept the wiki already relies on.
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
   `updated:` and `read:`. Report conflicting user-owned metadata from an entry
   that may be removed rather than silently selecting a value.
-- A consolidation keeps the full treatment of an explanation, argument or
-  worked example duplicated across entries in its owner: the most specific
-  entry whose subject it is about. A property every member of a family shares
-  belongs to the family's entry (weight penalties' scale sensitivity to
-  Regularization, not Ridge regression), and an argument about how a metric
-  behaves belongs to that metric (the rare-positive argument to False positive
-  rate); plots built on the metric keep the consequence and a link. Between
-  equally specific entries, the owner is the one already holding the fullest
-  version, then the alphabetically first slug. If the owner already explains
-  it, trim each other copy to its role there plus a link to the owner;
-  otherwise move the fullest version into the owner, verified against the
-  owner's cited sources or accurate background and carrying each
+- A consolidation keeps the full treatment of an explanation, argument,
+  worked example or property with its justification duplicated across
+  entries in its owner: the most specific entry whose subject it is about. A
+  property every member of a family shares belongs to the family's entry
+  (weight penalties' scale sensitivity to Regularization, not Ridge
+  regression), and an argument about how a metric behaves belongs to that
+  metric (the rare-positive argument to False positive rate); plots built on
+  the metric keep the consequence and a link. Before choosing the owner,
+  search the whole Wiki for the passage's distinctive tokens (a figure with
+  its unit, a gene or experiment name) and plan every hit in the same
+  consolidation. Between equally specific entries, the owner is the one
+  already holding the fullest version, then the alphabetically first slug.
+  If the owner already explains it, trim each other copy to its consequence
+  for that entry in one clause, linked to the owner; the clause drops the
+  owner's reasoning (no because- or since-clause restating it) and keeps a
+  source verdict only in the owner, but never drops a fact that entry's core
+  facets need. Otherwise move the fullest version into the owner, verified
+  against the owner's cited sources or accurate background and carrying each
   source-specific claim's existing citation (adding that source to the
   owner's `sources:` when needed), then trim the others. A trimmed copy may
   lose links that served only the removed passage. A worked example lives in
@@ -116,9 +122,9 @@ it is limited to a concept the wiki already relies on.
 
 Stage complete drafts under `<scratch>` and publish creates and replacements
 with `publish_files.py` ([publishing](../SKILL.md#publishing)). Step 4's
-conditional removal uses `remove_expected` in a private driver under the
+conditional removal uses `publish_files.py remove` under the
 [shared safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally),
-with the token rebuilt from the old entry's original snapshot record as
+against the old entry's original snapshot record, as
 [publishing](../SKILL.md#publishing) describes. A refactor spans several files
 but is not one filesystem transaction, so order prevents a disappearing
 target:
@@ -170,9 +176,9 @@ Task 1b runs this protocol when all of these hold:
 
 Otherwise it reports the case with its blocker. For an existing entry, test
 (a) must actually fire, its encyclopedia landing checked as a disambiguation
-page or another sense; “qualify even when in doubt” governs new titles only,
-so doubt alone is reported. A request that explicitly authorizes a retitle
-also activates this protocol.
+page or another sense; the unchecked-landing default governs new titles
+only, so doubt alone is reported. A request that explicitly authorizes a
+retitle also activates this protocol.
 
 1. Derive the destination with `slugify.py`, then run every create-time
    collision probe against filenames, aliases and the other planned names
@@ -205,8 +211,8 @@ also activates this protocol.
 4. Publish [in dependency order](#publish-in-dependency-order): the
    destination entry exclusively, then every snapshotted inbound and hierarchy
    file conditionally, re-reading every result. Before removing the exact old
-   entry version with `remove_expected` against step 1's source record,
-   re-scan: every changed link must resolve uniquely to the new entry, the
+   entry version with `publish_files.py remove` against step 1's source
+   record, re-scan: every changed link must resolve uniquely to the new entry, the
    old slug must have no unresolved inbound surface apart from untouched
    historical records, and the new entry must pass the current entry rules.
    Then rebuild the connected Task 3 closure from the resulting tree, which a
@@ -236,7 +242,10 @@ Task 1b creates a missing entry for a concept with a stable identity that
 passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities)
 when an open note-content item names it, or when it is a load-bearing term:
 one at least three entries use without a resolving link (a one-clause inline
-gloss still counts as a use). A concept failing those tests is reported. It
+gloss still counts as a use). A use is a sentence that needs the term's
+meaning to make its point; a word inside a dataset column or variable name
+("median house value"), a measurement ("135 million nucleotide pairs") or a
+list of examples is not a use. A concept failing those tests is reported. It
 extracts no other topic from the evidence.
 
 1. Derive the canonical title under the builder's
@@ -261,11 +270,18 @@ extracts no other topic from the evidence.
    [writing guide](../../wiki-build/references/writing.md) and
    [Quality Checklist](../../wiki-build/SKILL.md#quality-checklist), one
    discipline tag, one `??` definition card, `parents: []`, `read: false`, and
-   today's `created:` and `updated:`. Stage it under its slug and resolve every
+   today's `created:` and `updated:`. Run wiki-build's
+   [overlap/ownership audit](../../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
+   on the draft against the entries it links and the entries using the term.
+   Stage it under its slug and resolve every
    `lint_entry.py` finding as wiki-build's
    [step 7](../../wiki-build/SKILL.md#7-review-and-report) does.
 4. Publish it with `publish_files.py` ([publishing](../SKILL.md#publishing)),
    which creates the file exclusively. Then trim each using entry's inline
    re-definition of the term to its role there plus a link to the new entry,
-   as a consolidation trim under [Dates](../SKILL.md#dates). The refreshed
-   scan then lets Task 2 link its other mentions and Task 3 place it.
+   as a consolidation trim under [Dates](../SKILL.md#dates). Task 1b hands
+   Task 2 the mentions it counted for the three-use test as the new entry's
+   link worklist; Task 2 judges each under the closeness bar and links the
+   using entry's first eligible body-prose occurrence under the
+   [backfill rules](link-hygiene.md#backfill-add-missing-links), and Task 3
+   places the entry.

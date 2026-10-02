@@ -171,7 +171,7 @@ routinely; that does not license the note to. The reverse also holds: when a
 rung-1 design's authors hedge, write at their hedge and attribute it to them;
 do not invent a design weakness to explain it.
 
-**Peer-review status does not move a rung**, and this note does not report it ([scope](note-format.md#body-content)). A preprint's design is its design; describe the design and let the rung follow from it. "Preprint" is not a design and can never stand in for one.
+**Peer-review status does not move a rung.** A preprint's design is its design; describe the design and let the rung follow from it. "Preprint" is not a design and can never stand in for one.
 
 
 ## Statistical statements

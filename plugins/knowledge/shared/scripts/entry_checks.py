@@ -72,6 +72,7 @@ __all__ = [
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
     "bold_parts",
+    "cross_domain_alias_findings",
     "cross_domain_synonym_label",
     "cross_domain_word",
     "description_has_entity_subject",
@@ -148,6 +149,12 @@ def bare_common_noun_slug(slug):
     slug = slug or ""
     return (("-" not in slug and slug in COMMON_NOUNS)
             or slug.replace("-", " ") in CROSS_DOMAIN_PHRASES)
+
+
+def cross_domain_alias_findings(aliases):
+    """Aliases that are cross-domain floor terms, which are never aliases."""
+    return [a for a in aliases or ()
+            if a and bare_common_noun_slug(portable_identity(str(a)))]
 
 
 def bare_word_alias_candidate(candidate_slug, title, surface=""):
@@ -457,7 +464,7 @@ def merge_scar_findings(prose, separator_line=None):
 
 #: Source-meta patterns for every entry type.
 SOURCE_META_PATTERNS = (
-    r"\bthis paper\b", r"\bthe chapter\b",
+    r"\bthis paper\b", r"\bthe chapter\b", r"\bthis (?:chapter|section)\b",
     # “source code” names software material, not the document; the other
     # technical compounds (“the source domain/node/sentence”) name a concept's
     # own source side, and “the source of” names an origin (the source of a
@@ -472,13 +479,16 @@ SOURCE_META_PATTERNS = (
     r"\bin the previous section\b", r"\bas we saw\b",
     r"\bthe figure (?:above|below)\b",
 )
-#: In a Work entry, “the paper”, “the book” or “the article” can name the
-#: entry's own subject, so these are source-meta only outside Work entries.
-#: Finance's book value and book-to-market ratio are not the document.
+#: In a Work entry, “the paper”, “the book” or “the article” (also “this book”
+#: or “this article”) can name the entry's own subject, so these are
+#: source-meta only outside Work entries. Finance's book value and
+#: book-to-market ratio are not the document.
 NON_WORK_META_PATTERNS = (
     r"\bthe paper\b",
     r"\bthe book\b(?![\s-]+(?:value|values|to-market)\b)",
-    r"\bthe article\b")
+    r"\bthe article\b",
+    r"\bthis book\b(?![\s-]+(?:value|values|to-market)\b)",
+    r"\bthis article\b")
 
 _WIKILINK_START_RE = re.compile(r"\[\[[^\[\]\n]+\]\]")
 _EMPHASIZED_TITLE_RE = re.compile(r"([*_]{1,3})[^*_\n]+\1")
@@ -1541,6 +1551,11 @@ def run_self_test(verbose=False):
            ("tree-of-life-biology", "online-machine-learning",
             "Tree-of-life")],
           [False, False, False])
+    check("a cross-domain floor term is never an alias, in any case or form",
+          cross_domain_alias_findings(
+              ["entropy", "Tree of life", "online-learning",
+               "tree-of-life-biology", "shannon-entropy", "", None]),
+          ["entropy", "Tree of life", "online-learning"])
     check("single-word alias candidates of qualified or common subjects",
           [bare_word_alias_candidate(slug, title) for slug, title in (
               ("sensitivity", "Recall (machine learning)"),
@@ -1636,6 +1651,17 @@ def run_self_test(verbose=False):
            for prose in ("The book argues it.", "The paper argues it.",
                          "In this paper we argue it.")],
           [[["phrase"], []], [["phrase"], []], [["phrase"], ["phrase"]]])
+    check("this chapter and this section are source-meta everywhere; this "
+          "book and this article only outside Work entries",
+          [[checks(source_meta_findings(prose, kind))
+            for kind in ("Concept", "Work")]
+           for prose in ("As this chapter shows, voting helps.",
+                         "In this section, voting helps.",
+                         "This book says voting helps.",
+                         "This article notes it.",
+                         "It divides the price by this book value.")],
+          [[["phrase"], ["phrase"]], [["phrase"], ["phrase"]],
+           [["phrase"], []], [["phrase"], []], [[], []]])
     check("the source of an origin and finance's book value are not "
           "source-meta",
           [checks(source_meta_findings(prose, "Concept")) for prose in (
@@ -2054,6 +2080,12 @@ def run_self_test(verbose=False):
               ("DBSCAN", "**DBSCAN** (short for *density-based spatial "
                          "clustering of applications with noise*) clusters."))],
           [False, False, False, False])
+    check("an expansion after the bolded title's algorithm head noun "
+          "satisfies the floor",
+          acronym_expansion_missing(
+              "RANSAC", "**RANSAC** algorithm (random sample consensus) fits "
+                        "models."),
+          False)
     check("titles that are not one all-capital token, and openers without "
           "the bolded title, are outside the floor",
           [acronym_expansion_missing(title, opener) for title, opener in (

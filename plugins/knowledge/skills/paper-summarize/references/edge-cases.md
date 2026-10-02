@@ -11,7 +11,7 @@ second-position requirements, not a second ladder.
 
 | Design | What the second position must make visible |
 |---|---|
-| Preprint | Name the actual design and analysis stage, such as a planned interim analysis. Venue is not a design or a confidence adjustment. Use the date printed on this version, without adding venue/review status to the note. |
+| Preprint | Name the actual design and analysis stage, such as a planned interim analysis. Venue is not a design or a confidence adjustment. Use the date printed on this version. |
 | Systematic review / meta-analysis | Give the number and designs of studies, total participants, search cut-off and pooling model. Do not let pooled *n* look like one primary study. Keep evidence limitations separate from review-process limitations using the [design taxonomy](summary-standards.md#the-limitations-taxonomy-by-mode-and-design). |
 | Model / simulation | Name the model class, calibration/fitting data, assumptions and scenarios, including the counterfactual comparator. Carry sensitivity ranges with estimates. Scope findings to the model, not the real population it represents; fit is not external validation. |
 | Machine-learning benchmark | Name systems, benchmark version/split, number of runs, fixed data/compute/prompt budgets and dated baselines. Separate the measured score from the capability it is a proxy for. |

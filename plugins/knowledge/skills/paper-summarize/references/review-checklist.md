@@ -96,8 +96,9 @@ Walk the callout, headings, body and captions with their supporting pages open:
   methodological disclosures are stated plainly without inventing empirical
   shortcomings for a non-empirical source.
 - [ ] No needed scope or design limit was lost and none was added without
-  support; each document-level caveat appears in Limitations and at most one
-  short callout bullet, nowhere else.
+  support; each document-level caveat appears once, in Limitations; only the
+  single chief caveat (or bullet 1's rung limit) may also appear, in one short
+  callout bullet, and nowhere else.
 
 ## Check provenance and exhibits
 

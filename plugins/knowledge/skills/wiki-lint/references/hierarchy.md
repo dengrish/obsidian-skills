@@ -52,7 +52,8 @@ linking those with entries. The method of inquiry is how the field gains and
 tests knowledge: mathematics proves theorems from axioms, and medicine tests
 treatments in clinical trials. The main branches are named as the field's
 recognized subfields, not the objects it studies: algebra, geometry, analysis
-and number theory, not numbers and shapes. The misc root is `Wiki/misc`, titled
+and number theory, not numbers and shapes. Together they cover the scales and
+questions the definition names. The misc root is `Wiki/misc`, titled
 `Misc`: a brief definition of a miscellany that makes no claim about this
 vault's contents. Use the ordinary entry schema, one matching tag,
 `parents: []` and no Flashcards section; an existing root keeps its card
@@ -66,8 +67,9 @@ resolve every finding before publication.
 An existing root whose body lacks part of the root form above is repaired in
 [Task 1b](../SKILL.md#task-1b--content-repair) from the root's cited source,
 an overview page read online included, or accurate background: it replaces a
-subject-matter list with the main branches and adds a missing definition or
-method of inquiry, keeping its other claims and its card byte-for-byte; dates
+subject-matter list with the main branches, adds a missing definition or
+method of inquiry, and adds the branches the definition's scales and questions
+still need, keeping its other claims and its card byte-for-byte; dates
 follow the
 [body-change rule](../../wiki-build/references/merge.md#the-read-reset).
 Otherwise preserve existing roots' substantive content, review state, and card
@@ -92,7 +94,8 @@ already coherent structure stable rather than reorganizing for variety.
   broader/narrower relationship: a quantity computed from an entry (precision
   from a confusion matrix), an application of it, or an independent general
   tool it merely uses (a radial basis function used to build features) is not
-  its child.
+  its child; the logistic, logit and softmax functions are general functions
+  that share one home, never the models that apply them.
 - Keep closely related definitions together, such as loss function and cost
   function. Place a model that serves one task under that task rather than by
   its name (logistic and softmax regression are classifiers), and a model used
@@ -238,11 +241,12 @@ root links stay ambiguous. Task 3 migrates it instead of initializing a
 second MOC, within an authorized closure for that discipline:
 
 1. When the old file is readable and uniquely owned and the canonical path is
-   free, move it there with `move_noreplace` under the shared
+   free, move it there with `publish_files.py move` under the shared
    [safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally).
    Record both paths with `publish_files.py snapshot` before reading the old
-   file. The driver takes its expected identity from the old file's record,
-   and the canonical path is re-recorded after the move, as
+   file and move against that snapshot file; `move` refuses a changed old
+   file or an occupied canonical path. Then re-record the canonical path with
+   `snapshot --replace` before regenerating it, as
    [publishing](../SKILL.md#publishing) describes.
 2. Rewrite links that resolved to the old file, `[[MOCs/<discipline-slug>…]]`,
    to the new name, preserving anchors and labels. A bare

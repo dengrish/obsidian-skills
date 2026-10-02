@@ -46,7 +46,7 @@ ownership.
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
 | `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source; otherwise report. |
 | `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or accurate background, and integrates the link. |
-| `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it under [item 9](#9-body-structure-coherence-flow-and-scope): the owner keeps the explanation, receiving the fullest version when it lacks one, and every other copy is trimmed to its role there plus a link to the owner. Normalized similarity alone proves neither copy wrong and never chooses the owner. |
+| `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or accurate background, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
@@ -65,6 +65,7 @@ ownership.
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item18/partial-label` | Task 1 repair; a label naming another entity goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
+| `item18/cross-domain-alias` | The alias is a bare cross-domain term, which is never an alias. Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Content after a card's line 3 that is not a recognized attachment is report-only. |
 | `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars) and shorten it only when the card's bar allows; the candidate alone is never an order. |
 | `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars): when the card's bar allows, drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
@@ -203,7 +204,9 @@ subject, such as its selectivity, regulation, distribution or a consequence,
 instead of what the subject is, even when the source's sentence is phrased
 that way; the property moves to the body (gene expression is the process by
 which a gene's information makes RNA and protein, and differential expression
-follows in the body).
+follows in the body). So is a definition by exclusion
+([principle 1](../../wiki-build/references/writing.md#prose-principles)): a
+rule stated as a prohibition leads with what it allows.
 
 ### 8. Tags
 
@@ -241,12 +244,7 @@ source, and family members. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
 notation. A conflict that requires choosing or changing a fact goes to
 Task 1b, which corrects every affected entry under the correction protocol's
-[*Conflicts*](source-backed-corrections.md#correct-and-publish) rule: from the
-cited built source when it settles the point, otherwise from agreeing standard
-references or a direct derivation from a formula the entry or its cited source
-states, keeping the source's figure only when its scope makes it true.
-A conflict neither settles stays an open log item naming the blocker;
-recollection alone never settles one. State
+[*Conflicts*](source-backed-corrections.md#correct-and-publish) rule. State
 the plain claim under principle 3 (a hedge or caveat that covers only an edge
 case goes even when the source makes it; evidence-bearing uncertainty stays),
 or trim a neighbor's detail to the relationship and a wikilink, rather than
@@ -276,23 +274,10 @@ equation lead-ins and paragraph endings as well as the opening sentences.
 Bullets are parallel, not sequential; body links sit in sentences that state
 their relationships. Task 1b trims source/tutorial scaffolding and
 application catalogs that do not serve the entry, after checking the cited
-source. It consolidates an explanation, argument, worked example or property
-with its justification duplicated across entries into its owner: the entry
-whose subject it is about, the most specific such entry; between equally
-specific entries, the one already holding the fullest version, then the
-alphabetically first slug. A property every member of a family shares belongs
-to the family's entry (weight penalties' scale sensitivity to Regularization,
-not Ridge regression), and an argument about how a metric behaves to that
-metric (the rare-positive argument to False positive rate); a plot built on
-the metric keeps the consequence and a link. When the owner lacks the
-explanation, Task 1b first moves the fullest version there, verified against
-the owner's cited sources or accurate background under
-[refactors](refactors.md#establish-evidence-and-complete-scope) step 1, and
-carries a moved claim's existing citation into the owner's `sources:`. Every
-other copy is trimmed to its role there and a link to the owner; the trim may
-drop that copy's other links and follows [Dates](../SKILL.md#dates). While
-a conflict in the passage stays unresolved, every copy stays unchanged and the
-conflict open; a copy that disagrees with the owner's is never trimmed.
+source. It consolidates a definition, explanation, argument, worked example
+or property with its justification duplicated across entries into its owner
+under the [consolidation rule](refactors.md#build-the-refactored-entries);
+every such trim follows [Dates](../SKILL.md#dates).
 
 A statement the entry leaves unexplained, such as an equation without its
 meaning, a complexity without its reason, a derivation step or a result, gets
@@ -312,12 +297,11 @@ excludes, including a claim hedged below its source; card line 1 follows
 [item 19](#19-flashcards). Never add caveats from memory; a main limitation
 the source teaches is explanation. Task 1 removes empty rhetoric and repetition
 (the local repairs below) and well-definedness boilerplate (item 12). Task 1b
-simplifies every other over-qualified passage in the run's scope against the
-entry's cited sources: it removes a hedge the source does not make; a hedge or
-caveat that covers only an edge case, even when the source itself makes it
-(the source's own "in general" before the precision rule, or the precision
-dip when the threshold rises); and an availability hedge such as "varies by
-lab", which is not removing a claim for lack of a citation. It keeps a limit
+removes every hedge and caveat principle 3 excludes, its full "Leave out" list
+included (defensive terminology distinctions, implementation and numerical
+details such as a routine's tolerance, rare failure modes, troubleshooting
+about neighbors), under
+[*Hedges*](source-backed-corrections.md#correct-and-publish). It keeps a limit
 only when the plain claim is false for the ordinary case, naming the condition
 instead of a hedge word, and keeps evidence-bearing uncertainty in research
 findings; a source-supported detail can still be unnecessary.
@@ -326,12 +310,15 @@ findings; a source-supported detail can still be unnecessary.
 [core-facet check](../../wiki-build/references/writing.md#prose-principles) to
 every in-scope entry, whatever its type and however detailed it already is.
 Task 1b supplies each missing facet: a model's or ensemble's prediction step
-and training objective, a display's verbal reading, a concrete case, a
+and how it trains, a display's verbal reading, a concrete case, a
 category's canonical members (at least three) that have entries, or a discipline
-root's form. It then asks whether a reader of the note alone could explain how
-it works and apply it once, and fills whatever else that reveals. Both work
-under the source-backed [deepening](source-backed-corrections.md) rules, from
-the entry's cited sources and accurate background. A gap that only an unbuilt source would fill
+root's form. For a Concept, it then applies the builder's
+[row-9 test](../../wiki-build/SKILL.md#quality-checklist) (could a reader
+explain how it works from the note alone?) and supplies only what that test or
+principle 5's [term audit](../../wiki-build/references/writing.md#editorial-reread)
+names as missing. Both work under the source-backed
+[*Deepening*](source-backed-corrections.md) rules, from the entry's cited
+sources and accurate background. A gap that only an unbuilt source would fill
 (any source the entry does not cite, even one another entry cites) is expected
 until a wiki-build request naming that whole source fills it in, and is not
 proposed. Neither task fills it from that source. This governs deepening an
@@ -358,10 +345,6 @@ establishes an unambiguous meaning:
 - Rewrite parallel facts about several items (the same gene in several
   organisms, one property per variant) as one bullet per item, keeping every
   claim.
-- Trim a re-definition of a linked concept to its role here and the link,
-  when the linked entry already defines it; the claims stay recorded there. A
-  duplicated argument, worked example or property with its justification is
-  Task 1b's consolidation above, never a Task 1 repair.
 
 **Preservation and verification.** Task 1's local repairs change prose expression, not
 the knowledge recorded. Preserve every substantive claim, condition, degree,
@@ -539,7 +522,11 @@ cited source or accurate background:
   counts as a use; count before adding any gloss), with a stable identity that passes wiki-build's
   substance and atomicity tests, gets its own entry instead under the
   [missing-entry rule](refactors.md#create-a-missing-entry), which Task 2 then
-  links.
+  links. A use is a sentence that needs the term's meaning to make its point;
+  a word inside a dataset column or variable name ("median house value"), a
+  measurement ("135 million nucleotide pairs") or a list of examples is not a
+  use. Keep this count across the whole Task 1b sweep and adjudicate every
+  term that reaches three entries in the same run.
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.

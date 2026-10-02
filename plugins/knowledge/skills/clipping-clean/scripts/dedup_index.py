@@ -38,13 +38,15 @@ Importable
     check(entries, index) -> list[dict]
     article_name_index(cleaned_dir) -> {portable_name: [paths]}
     check_slugs(slugs, name_index) -> list[dict]
+    stem_mismatches(paths) -> list[dict]
     run_self_test() -> int
 
 Output: one JSON object on stdout. Exit status is 0 whenever the scan ran.
 Each `checked` row lists, in `research_extracts`, the matching Articles notes
 that are legacy research extracts written by earlier wiki-add versions (current
-wiki-add creates none). Dot-prefixed subfolders (private stages, hidden
-folders) are not scanned. Stdlib only.
+wiki-add creates none). `stem_mismatch` lists URL-owning notes whose rendered
+`![[…_fig…]]` embeds use another stem. Dot-prefixed subfolders (private
+stages, hidden folders) are not scanned. Stdlib only.
 """
 
 import argparse
@@ -56,7 +58,8 @@ import sys
 import unicodedata
 from urllib.parse import unquote_plus, urlsplit, urlunsplit
 
-_OBSIDIAN_SHARED_MODULES = ('yaml_scalars',)
+_OBSIDIAN_SHARED_MODULES = (
+    'entry_structure', 'markdown_tables', 'slugify', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -95,6 +98,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from entry_structure import mask_body_comments
 from yaml_scalars import read_note_origin, read_regular_text
 
 
@@ -114,9 +118,11 @@ from yaml_scalars import read_note_origin, read_regular_text
 # exactly what the naming gate (SKILL.md step 2) exists to catch. Strip what is
 # provably noise, and no further.
 TRACKING_PARAMS = {
-    "fbclid", "gclid", "mc_cid", "mc_eid",
+    "fbclid", "gclid", "mc_cid", "mc_eid", "triedredirect",
 }
 TRACKING_PREFIXES = ("utm_",)
+#: Substack also serves custom domains; there the `/p/<post>` path marks the
+#: platform, so its referral parameters are stripped on those hosts too.
 SUBSTACK_TRACKING_PARAMS = {"r", "showwelcome"}
 X_TRACKING_PARAMS = {"s", "t"}
 
@@ -182,7 +188,8 @@ def normalize_url(url):
     normalized_host_name = (host_name[4:] if host_name.startswith("www.")
                             else host_name)
     is_substack = (normalized_host_name == "substack.com"
-                   or normalized_host_name.endswith(".substack.com"))
+                   or normalized_host_name.endswith(".substack.com")
+                   or re.fullmatch(r"/p/[^/]+", path) is not None)
     is_x = normalized_host_name in {
         "x.com", "twitter.com", "mobile.twitter.com"}
     query_fields = []
@@ -421,6 +428,58 @@ def _portable_name(name):
     return unicodedata.normalize("NFC", name).casefold()
 
 
+#: A rendered Obsidian embed; an escaped `\![[` is literal text.
+_EMBED = re.compile(r"(?<!\\)!\[\[([^\]\r\n]+)\]\]")
+
+
+def _foreign_figure_embeds(text, stem):
+    """Filename-only `…_fig…` file embeds in ``text`` not under ``stem``."""
+    own = _portable_name(stem) + "_fig"
+    found = []
+    for match in _EMBED.finditer(text):
+        target = match.group(1).split("|", 1)[0].split("#", 1)[0].strip()
+        if ("/" in target or "\\" in target
+                or os.path.splitext(target)[1].lower() in ("", ".md")):
+            continue
+        key = _portable_name(target)
+        if "_fig" in key and not key.startswith(own):
+            found.append(target)
+    return found
+
+
+def _embed_stem(name):
+    """The text before an embed's last `_fig`, else its whole stem."""
+    match = re.match(r"(?is)(.*)_fig", name)
+    return match.group(1) if match else os.path.splitext(name)[0]
+
+
+def stem_mismatches(paths):
+    """Notes whose `![[…_fig…]]` embeds use another source stem.
+
+    A clipping files its images under its own note stem (CONVENTIONS §8), so
+    a note renamed without its images is invisible to every stem-based figure
+    inventory. Each row names the note, its other-stem embeds and their
+    stems; references/images.md says how to re-stem them on request. Code,
+    comments and path-qualified targets do not count.
+    """
+    rows = []
+    for path in sorted(set(paths)):
+        text = _read_regular_text(path)
+        split = split_frontmatter(text) if text is not None else None
+        if split is None:
+            continue
+        stem = os.path.splitext(os.path.basename(path))[0]
+        # The raw body is a cheap prefilter; the lexer runs only on a hit.
+        if not _foreign_figure_embeds(split[1], stem):
+            continue
+        embeds = sorted(set(_foreign_figure_embeds(
+            mask_body_comments(split[1], mask_code=True), stem)))
+        if embeds:
+            rows.append({"path": path, "embeds": embeds,
+                         "stems": sorted({_embed_stem(name) for name in embeds})})
+    return rows
+
+
 def article_name_index(cleaned_dir, exclude=()):
     """Map each portable direct-child Markdown name to every occupant.
 
@@ -620,6 +679,11 @@ def run_self_test():
         differ("?%s= is preserved on an unrelated origin" % param,
                "https://example.com/a?%s=1" % param,
                "https://example.com/a?%s=2" % param)
+    same("a custom-domain Substack post drops its referral and redirect flags",
+         "https://www.noahpinion.blog/p/x?r=a&utm_medium=ios&triedRedirect=true",
+         "https://noahpinion.blog/p/x")
+    differ("?r= off a Substack post path still distinguishes pages",
+           "https://example.com/docs?r=main", "https://example.com/docs?r=dev")
     same("www normalization does not disable X sharing-parameter cleanup",
          "https://www.x.com/example/status/1?s=20",
          "https://x.com/example/status/1")
@@ -1122,6 +1186,31 @@ def run_self_test():
         case("a hidden Inbox subfolder is not scanned for captures",
              _md_files(os.path.join(tmp, "hidden-inbox")), [visible_raw])
 
+        # A note renamed without its images keeps embedding the old stem.
+        # Only rendered filename-only embeds of another stem are reported.
+        renamed = article(
+            "Doe_I_Test_2026.md",
+            '---\nsources:\n  - "https://example.com/renamed"\n---\n'
+            "![[Doe_Test_2026_fig_1.png]]\n![[Doe_I_Test_2026_fig_2.png|300]]\n"
+            "`![[Code_Only_2020_fig_1.png]]`\n```\n![[Fenced_2020_fig_1.png]]\n```\n"
+            "<!-- ![[Commented_2020_fig_1.png]] -->\n"
+            "![[Sources/Images/Pathed_2020_fig_1.png]]\n![[Doe_Test_2026_fig_3.png]]\n")
+        own_stem = article("Fig_Facts_2025.md",
+                           '---\nsources:\n  - "https://example.com/figfacts"\n---\n'
+                           "![[fig_facts_2025_FIG_1.png]]\n")
+        article("Paper_Summary_2025.md",
+                '---\nsources:\n  - "[[Paper_Summary_2025_src.pdf]]"\n---\n'
+                "![[Paper_Summary_2025_src_fig_1.png]]\n")
+        case("stem_mismatches lists only rendered other-stem figure embeds",
+             stem_mismatches([renamed, own_stem]),
+             [{"path": renamed,
+               "embeds": ["Doe_Test_2026_fig_1.png", "Doe_Test_2026_fig_3.png"],
+               "stems": ["Doe_Test_2026"]}])
+        code, result = scan([vault, "--url", URL])
+        case("the scan reports stem mismatches for URL-owning notes only",
+             (code, [row["path"] for row in result.get("stem_mismatch", [])]),
+             (0, [renamed]))
+
         # Naming must precede image writes, and a late collision must return
         # to that decision. Check the linked action gates without requiring
         # historical step numbers or several copies of the repair procedure.
@@ -1258,6 +1347,8 @@ def main(argv=None):
         "checked": results,
         "counts": counts,
         "slug_checks": slug_checks,
+        "stem_mismatch": stem_mismatches(
+            path for paths in index.values() for path in paths),
     }
     if args.dump_index:
         out["index"] = index

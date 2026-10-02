@@ -79,11 +79,12 @@ The clipping-specific choices are:
   `published` is a full evidence-backed date or the explicit null for an undated
   page; `created` is never its substitute.
 - `description`: one factual, informative sentence of at most 110 characters,
-  quoted by the same rule as `title`. Attribute an argued thesis, forecast or
-  recommendation to its named author ('Aschenbrenner argues…'), or to the
-  publication or issuing body when `author` is `[]`; this is summary
-  attribution, not an `author:` value. Count characters before publication;
-  retain essential scope when shortening.
+  in plain text (write `$1T`, never `\$1T`) and quoted by the same rule as
+  `title`. Attribute an argued thesis, forecast or recommendation to its
+  named author ('Aschenbrenner argues…'), or to the publication or issuing
+  body when `author` is `[]`; this is summary attribution, not an `author:`
+  value. Count characters before publication; retain essential scope when
+  shortening.
 - `tags`: choose one or more subjects from the shared
   [discipline enum](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum).
   Judge the article's substance, not an incidental mention or the publication's

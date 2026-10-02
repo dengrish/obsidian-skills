@@ -185,6 +185,7 @@ from auto_fig_bbox import (
     degenerate,
     detect_figures,
     find_caption_blocks,
+    is_multi_column,
 )
 from extract_figures import (extract_one_figure, normalize_fig_num,
                              validated_figure_suffix, vault_refusal,
@@ -1057,6 +1058,11 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             text. A subset of `warnings` by mechanism, its own
                             bucket by meaning: it is the one thing this skill
                             promises its output never contains.
+        multi_column: list — one-based pages carrying a written or flagged
+                            crop whose body text runs in columns
+                            (`is_multi_column`). Every crop on them needs
+                            viewing: a crop there can hold the neighbouring
+                            column's chart without a warning.
         had_text:   bool  — False if the PDF appears to be a pure scan
         open_error: str   — non-empty when the file could not be opened or
                             fully analyzed (truncated download, HTML saved
@@ -1091,6 +1097,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         "blank": [],
         "occupied": [],
         "caption_in": [],
+        "multi_column": [],
         "had_text": False,
         "open_error": "",
         "no_pages": False,
@@ -1165,6 +1172,8 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
     # re-walked a 2,000-file image folder once per figure. A writing run
     # still inventories afresh before each crop.
     dry_inventory = []
+    # Zero-based pages of every written or flagged crop, for `multi_column`.
+    crop_pages = set()
 
     def slot_conflict_for(fig_suffix, out_path):
         if not dry_run or not os.path.lexists(out_dir):
@@ -1218,6 +1227,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     result["reviewed"].append((fig_num, reason))
                 else:
                     result["warnings"].append((fig_num, reason))
+                    crop_pages.add(page_idx)
                     if reason.startswith(CAPTION_IN_CROP_TAG):
                         result["caption_in"].append((fig_num, reason))
 
@@ -1293,6 +1303,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 result["extracted"] += 1
                 result["written"].append(written_name)
                 written_this_run[out_path] = (raw_label, page_idx + 1)
+                crop_pages.add(page_idx)
                 continue
 
             try:
@@ -1310,6 +1321,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 result["extracted"] += 1
                 result["written"].append(written_name)
                 written_this_run[out_path] = (raw_label, page_idx + 1)
+                crop_pages.add(page_idx)
                 if replace_digest is not None:
                     # A duplicate found against the replaced bytes compares
                     # with bytes that are gone. One found later against the
@@ -1440,6 +1452,12 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         )
         print(f"  ERROR: {pdf_path.name}: {result['open_error']}", file=sys.stderr)
     finally:
+        # Crops written before an analysis failure still need this scope.
+        try:
+            result["multi_column"] = sorted(
+                p + 1 for p in crop_pages if is_multi_column(doc[p]))
+        except Exception:
+            pass
         doc.close()
     return result
 
@@ -1773,6 +1791,10 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             print("  Render both pages. After confirming the kept crop is the right figure")
             print("  (the dropped line is prose, a list entry or a continuation page), record")
             print("  --mark-reviewed for that label; the dropped caption is not extracted.")
+            print("  If the kept crop is prose or another figure, do not mark it: set an")
+            print("  explicit crop for the dropped caption's figure on its page")
+            print("  (review-and-repair.md, 'Set and verify an explicit crop'), view it,")
+            print("  then --mark-reviewed that label.")
         if ed_pairs:
             print("  Extended Data and Supplementary figures share _fig_S<N> under the default")
             print("  prefix. For each collision above that kept an Extended Data caption, the")
@@ -2459,6 +2481,8 @@ def run_self_test():
         check("a normal PDF: nothing failed", r["failures"], [])
         check("a normal PDF: it has text", r["had_text"], True)
         check("a normal PDF: it opened", r["open_error"], "")
+        check("a normal PDF: no crop is on a multi-column page",
+              r["multi_column"], [])
         ok("the PNGs are on disk under the PDF's stem",
            os.path.exists(os.path.join(out, "Doe_Figs_2025_fig_1.png"))
            and os.path.exists(os.path.join(out, "Doe_Figs_2025_fig_S2.png")))
@@ -2590,6 +2614,33 @@ def run_self_test():
            "'Figure 2'" in twocol["caption_in"][0][1])
         ok("...and it is a warning as well, so the flag count still sees it",
            ("1", twocol["caption_in"][0][1]) in twocol["warnings"])
+
+        # Every crop on a page whose body text runs in columns is in the
+        # visual-review scope, so the run names those pages.
+        from auto_fig_bbox import _st_two_column_doc
+        multicol_pdf = os.path.join(tmp, "Doe_MultiCol_2025.pdf")
+        mcdoc = _st_two_column_doc()
+        mcdoc.save(multicol_pdf)
+        mcdoc.close()
+        multicol = process_pdf(
+            Path(multicol_pdf), out, dpi=72, dry_run=True,
+            manifest=geometry_manifests[os.fspath(out)])
+        check("a page whose body text runs in columns is multi-column",
+              (len(multicol["written"]), multicol["multi_column"]), (2, [1]))
+
+        # A lower-case "figure 1." wrapped mid-sentence on an earlier page won
+        # the label from the real caption overleaf: the batch wrote a crop of
+        # body prose as _fig_1.png and dropped the figure as a collision.
+        from auto_fig_bbox import _st_wrapped_reference_doc
+        wrapped_pdf = os.path.join(tmp, "Doe_WrappedRef_2025.pdf")
+        wdoc = _st_wrapped_reference_doc()
+        wdoc.save(wrapped_pdf)
+        wdoc.close()
+        wrapped = process_pdf(
+            Path(wrapped_pdf), out, dpi=72, dry_run=True,
+            manifest=geometry_manifests[os.fspath(out)])
+        check("a wrapped lower-case reference is no caption and no collision",
+              (wrapped["figures"], wrapped["collisions"]), (["1"], []))
 
         # Resolve duplicate output labels before recording geometry findings.
         # A dropped caption has no PNG of its own, so saying that its caption is
@@ -3620,6 +3671,11 @@ def run_self_test():
         text = summary({one: r_one})
         ok("a real run reports the duplicate count plainly",
            "byte-identical to a figure already written" in text)
+        # An ordinary collision's next step covers a kept crop that is wrong.
+        text = summary({collision_reason_pdf: dropped_reason})
+        ok("an ordinary collision says what to do when the kept crop is wrong",
+           "If the kept crop is prose or another figure, do not mark it" in text
+           and "explicit crop for the dropped caption's figure" in text)
 
         # --- main(), end to end --------------------------------------------
         def run(argv):
@@ -3802,6 +3858,16 @@ def run_self_test():
         ok("the failed collision run names the dropped caption",
            "later caption dropped" in so
            and "Extended Data Figure 1" in so)
+
+        # Each PDF with a written or flagged crop names its multi-column pages.
+        code, so, se = run(["--src", multicol_pdf, "--out", run_out,
+                            "--dpi", "72", "--dry-run"])
+        ok("the run lists a PDF's multi-column pages",
+           "\n    multi-column pages: p. 1\n" in so)
+        code, so, se = run(["--src", wrapped_pdf, "--out", run_out,
+                            "--dpi", "72", "--dry-run"])
+        ok("...and says none for a single-column PDF",
+           "\n    multi-column pages: none\n" in so)
 
         # An unorganized filename is refused, and the run says so in its exit
         # code as well as its output: a batch that extracted nothing must not
@@ -5302,6 +5368,12 @@ def main(argv=None):
                 # replacement from a new file or a review-protected keep.
                 print(("    would write: " if args.dry_run else "    wrote: ")
                       + ", ".join(result["written"]))
+            if result["written"] or result["warnings"]:
+                # The visual-review scope names every crop on these pages.
+                pages = result.get("multi_column", ())
+                print("    multi-column pages: "
+                      + ("p. " + ", ".join(str(p) for p in pages)
+                         if pages else "none"))
             if manifest_commit_failed[0]:
                 break
 

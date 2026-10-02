@@ -766,6 +766,12 @@ def find_caption_blocks(page):
                     and CONTINUED_FIGURE_REFERENCE_RE.search(
                         lines[first - 1][1])):
                 continue
+            # A lower-case 'figure N' wrapped mid-sentence is a reference, not
+            # a caption.
+            kw = text[match.start():].lstrip()
+            if (first > 0 and not match.group(1) and kw[:1].islower()
+                    and not re.search(r'[.!?:]\s*$', lines[first - 1][1])):
+                continue
             matches.append(match)
         for k, m in enumerate(matches):
             first = _line_index(line_start, m.start())
@@ -1817,7 +1823,10 @@ MAX_PROSE_CHARS = 150
 
 
 def prose_chars_in(page, bbox):
-    """Characters of body-size text inside `bbox`.  0 when it cannot tell."""
+    """Characters of body-size text at least half inside `bbox`.
+
+    0 when it cannot tell.
+    """
     try:
         d = _text_dict(page)
     except Exception:
@@ -1841,10 +1850,61 @@ def prose_chars_in(page, bbox):
         if abs(sz - modal) > 0.3 or not sb:
             continue
         r = fitz.Rect(sb)
-        if r.x0 >= bbox.x0 - 1 and r.x1 <= bbox.x1 + 1 \
-                and r.y0 >= bbox.y0 - 1 and r.y1 <= bbox.y1 + 1:
-            n += ln
+        inter = r & bbox
+        if inter.is_empty or inter.width * inter.height < 0.5 * r.width * r.height:
+            continue
+        n += ln
     return n
+
+
+#: A page is multi-column when at least this many body-size lines of at least
+#: `MULTI_COLUMN_MIN_CHARS` characters lie wholly on EACH side of its midline.
+#: A single-column page's lines cross the midline; a caption or a label beside
+#: a figure is too short or too few to pass.
+MULTI_COLUMN_MIN_LINES = 5
+MULTI_COLUMN_MIN_CHARS = 20
+
+
+def is_multi_column(page):
+    """True when body text runs in columns on both sides of the midline.
+
+    The visual-review scope names every crop on such a page, because a crop
+    there can hold the neighbouring column's chart without any warning.
+    False when it cannot tell.
+    """
+    try:
+        d = _text_dict(page)
+    except Exception:
+        return False
+    sizes = {}
+    lines = []
+    for blk in d.get("blocks", []):
+        for line in blk.get("lines", []):
+            chars = {}
+            for sp in line.get("spans", []):
+                txt = sp.get("text", "")
+                if not txt.strip():
+                    continue
+                sz = round(float(sp.get("size", 0)), 1)
+                sizes[sz] = sizes.get(sz, 0) + len(txt)
+                chars[sz] = chars.get(sz, 0) + len(txt)
+            if chars and line.get("bbox"):
+                lines.append((max(chars, key=chars.get), sum(chars.values()),
+                              fitz.Rect(line["bbox"])))
+    if not sizes:
+        return False
+    modal = max(sizes, key=sizes.get)
+    cr = content_rect(page)
+    mid = cr.x0 + cr.width / 2
+    left = right = 0
+    for sz, n, r in lines:
+        if abs(sz - modal) > 0.3 or n < MULTI_COLUMN_MIN_CHARS:
+            continue
+        if r.x1 <= mid:
+            left += 1
+        elif r.x0 >= mid:
+            right += 1
+    return left >= MULTI_COLUMN_MIN_LINES and right >= MULTI_COLUMN_MIN_LINES
 
 
 def header_bands(doc, min_share=0.4):
@@ -2594,6 +2654,41 @@ def _st_prose_doc():
     return doc
 
 
+def _st_wide_prose_doc():
+    """Ten full-width lines of body prose (x 72 to about 480), nothing else."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    line = ("Body prose set across the full width of the text block, so a "
+            "narrow crop cuts every line in two.")
+    for k in range(10):
+        page.insert_text((72, 100 + 14 * k), line, fontsize=10)
+    return doc
+
+
+def _st_wrapped_reference_doc():
+    """Prose wrapping "...similar to that in / figure 1.", then Figure 1 overleaf."""
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for k in range(12):
+        page.insert_text((72, 100 + 13 * k), "Body prose about the loss "
+                         "function and its parameters goes on here at length.",
+                         fontsize=10)
+    for k, line in enumerate((
+            "The model is trained by minimising a loss. The result looks "
+            "similar to that in",
+            "figure 1. The loss function favours parameters that produce "
+            "large values of",
+            "the likelihood at every training point, and we return to it "
+            "below.")):
+        page.insert_text((72, 256 + 13 * k), line, fontsize=10)
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(100, 80, 500, 300), color=(0, 0, 0),
+                   fill=(0.9, 0.6, 0.6))
+    page.insert_text((72, 320), "Figure 1 The real figure one, with its "
+                     "proper caption.", fontsize=9)
+    return doc
+
+
 def _st_bleed_doc():
     """A page-sized bleed rectangle, a small figure, a caption, and prose.
 
@@ -2753,6 +2848,17 @@ def run_self_test():
     page.insert_text((72, 312), "Figure 16-8.11 See the notebook for code.", fontsize=8)
     check("a reference with a glued footnote stays prose after 'see in'",
           find_caption_blocks(page), [])
+    doc.close()
+
+    # A lower-case "figure N." wrapped mid-sentence after a lead-in the phrase
+    # list does not know (Prince chapter 5: "similar to that in / figure 5.6.
+    # The loss ..."). On an earlier page than the real caption it won the label,
+    # and the batch wrote a crop of body prose as _fig_1.png.
+    doc = _st_wrapped_reference_doc()
+    check("a lower-case 'figure N.' wrapped mid-sentence is not a caption",
+          find_caption_blocks(doc[0]), [])
+    check("...so the real caption overleaf is the only one, with no collision",
+          [(row[0], row[1]) for row in detect_figures(doc)], [(1, "1")])
     doc.close()
 
     # Géron chapter 7 contains a prose paragraph beginning "Figure 7-3.
@@ -3041,6 +3147,17 @@ def run_self_test():
     check("suspicious: a crop holding only the figure",
           suspicious(fitz.Rect(90, 240, 510, 410), None, ppage), "")
     pdoc.close()
+    # A crop that cuts through every line still holds the paragraph: counting
+    # only spans wholly inside it read this as 0.
+    wdoc = _st_wide_prose_doc()
+    wpage = wdoc[0]
+    cut = fitz.Rect(40, 80, 400, 240)
+    ok("prose_chars_in counts lines the crop cuts through (%d > %d)"
+       % (prose_chars_in(wpage, cut), MAX_PROSE_CHARS),
+       prose_chars_in(wpage, cut) > MAX_PROSE_CHARS)
+    ok("suspicious: body text the crop cuts through",
+       "characters of body-size text" in suspicious(cut, None, wpage))
+    wdoc.close()
 
     # --- a page-sized bleed rect is the sheet, not a figure -----------------
     # Without the `PAGE_COVER_SHARE` filter this one rect decides everything:
@@ -3381,6 +3498,11 @@ def run_self_test():
     # 2's caption text -- silently, with 0 flagged and exit 0.
     doc = _st_two_column_doc()
     page = doc[0]
+    check("is_multi_column on a two-column page", is_multi_column(page), True)
+    sdoc = _st_wide_prose_doc()
+    check("is_multi_column on a single-column page",
+          is_multi_column(sdoc[0]), False)
+    sdoc.close()
     caps = find_caption_blocks(page)
     check("both columns' captions are found", [c[0] for c in caps], ["1", "2"])
     cap1, cap2 = caps[0][2], caps[1][2]

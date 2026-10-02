@@ -5,9 +5,7 @@
 - [Captions and embeds](#captions-and-embeds)
 - [Failures and readability](#failures-and-readability)
 
-Read when the captured body contains images or the audit recovers one. Naming,
-URL trust and safe publication are shared with the guarded helper; do not
-replace it with a hand-written downloader.
+Read when the captured body contains images or the audit recovers one.
 
 ## Existing embeds on a reprocess
 
@@ -33,6 +31,23 @@ contain both old embeds and new remote images; download only the remote
 images, starting after the highest occupied number, even if they appear
 earlier in document order.
 
+A note renamed outside this workflow can keep embedding images under its old
+stem; `dedup_index.py` lists it under `stem_mismatch`. On request, re-stem
+them with the same prepare and finalize commands, passing
+`'<vault>/Articles/<new_slug>.md'` as both `--owner-note` and
+`--new-owner-note`. This applies only while no `Articles/<old_slug>.md` exists
+and every `<old_slug>_fig*` file is an exact rendered embed of the renamed
+note. Prepare copies each image to its new-stem name and lists the note's own
+old references under `dependency.owner_references`. Then record the note with
+`publish_files.py snapshot`, replace only the old stem in each listed
+reference, and publish it against that record with `publish_files.py publish`.
+Resolve other `dependency.blockers` as in
+[steps 6–7](duplicates-and-reprocessing.md#publish-an-approved-replacement),
+passing the renamed note as both owners and re-probing with
+`dependencies --new-slug '<new_slug>'` and that note as `--owner-note`.
+Finalize refuses while the note still references an old name, and retires the
+old copies only after a clean re-probe.
+
 ## Download and publish
 
 Pass Markdown, HTML, linked-image and data-URI sources through the same helper,
@@ -40,13 +55,11 @@ in source order on one counter. Fresh notes start at 1. Use argument lists or
 [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)
 for source-controlled URLs and names. Give every `stage` call its own new or
 empty child under `<scratch>` (the helper refuses a populated one), and place
-each file from the `path` its stage result returned.
-
-```bash
-python3 '<skill>/scripts/fetch_images.py' stage --vault '<vault>' \
-    --out-dir '<scratch>/images-<unique-id>' --slug '<slug>' --start <N> \
-    '<url1>' '<url2>'
-```
+each file from the `path` its stage result returned. Use the `stage` and
+`place` commands in SKILL.md steps
+[3](../SKILL.md#3-clean-the-body-and-prepare-images) and
+[6](../SKILL.md#6-publish-safely); on a reprocess or audit recovery, `--start`
+is one past the highest occupied number.
 
 For a very large data URI that cannot safely fit in one shell argument, write
 it as one UTF-8 line in a scratch file and pass `--urls-file '<scratch>/urls'`;
@@ -58,20 +71,12 @@ that call's URLs in the file, in source order. Resolve a protocol-relative
 it; the helper refuses a URL with no scheme rather than guessing.
 
 The helper permits HTTP(S) and data URIs and enforces public-address pinning,
-scheme and redirect checks, byte-sniffed formats and exclusive publication;
-never reimplement them with `curl` or `mv`.
+scheme and redirect checks, byte-sniffed formats and exclusive publication.
 
-`stage` writes only to the selected scratch directory outside the vault. After
-the reviewed note is safely public, place each returned file with:
-
-```bash
-python3 '<skill>/scripts/fetch_images.py' place \
-    --attachments '<vault>/Sources/Images' --slug '<slug>' --index <N> \
-    --from-file '<returned path>' --owner-note '<vault>/Articles/<slug>.md'
-```
-
-The owner note must already contain the exact filename-only embed. `place`
-moves the scratch file only after byte sniffing and occupied-slot checks.
+`stage` writes only to the selected scratch directory outside the vault;
+`place` runs only after the reviewed note is safely public. The owner note must
+already contain the exact filename-only embed. `place` moves the scratch file
+only after byte sniffing and occupied-slot checks.
 
 Run the helper where direct egress is available; ambient proxies are ignored
 and there is no proxy fallback.
@@ -117,7 +122,8 @@ For a confirmed caption:
 1. Make it one italic line immediately below its embed. Remove inner emphasis
    markup before wrapping it in one `*…*` pair; retain literal content and links.
 2. Remove a trailing stray footnote/figure marker only when it is clipping
-   litter, not part of the caption. End with a single period.
+   litter, not part of the caption. Keep a source-final `?`, `!` or `…`;
+   otherwise end with a single period.
 3. Leave one blank line before the embed and one after the caption.
 
 ```text

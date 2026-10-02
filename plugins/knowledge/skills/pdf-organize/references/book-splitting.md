@@ -151,13 +151,9 @@ book in increasing chapter order, remain under 200 bytes, and have an
 unoccupied destination both locally and vault-wide. With a vault, a new
 chapter stem must not already name any `Articles/` note or `_fig*` image, even
 one left by an earlier split of this book, because the helper cannot tell who
-derived it. Resolve that blocker as for a
-[rename](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan):
-ask the user to clear figure-extract crops or a reading note of this same chapter off that name
-before splitting and restore them afterward, to rename a clipping-clean note
-and its images to a free slug through clipping-clean, or to move another
-tool's images permanently to their own note's stem; otherwise choose another
-chapter name. Occupied symlinks and case-equivalent names also block.
+derived it. Resolve that blocker as the helper's message directs; otherwise
+choose another chapter name. Occupied symlinks and case-equivalent names also
+block.
 A refused split lists every unresolved problem and exits nonzero; do not
 bypass one by extracting just the chapters that passed.
 

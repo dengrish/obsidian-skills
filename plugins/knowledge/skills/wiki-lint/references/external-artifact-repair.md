@@ -21,6 +21,14 @@ retitle, or permission to rename, finalize or remove the artifacts.
   before repair. An absent mapping, changed origin, unequal image pair, duplicate
   basename, unreadable blocker, or incomplete dependency inventory blocks the
   affected rewrite.
+- A same-note re-stem report instead names one renamed
+  `Articles/<new_slug>.md` as both the old and the new owner, for images a
+  rename left under the old stem. Require that no `Articles/<old_slug>.md`
+  exists, that the renamed note still identifies the origin prepare verified,
+  and the image pairs above; snapshot that one note. No old note remains to
+  rewrite links to, so only exact mapped old image references are rewritten.
+  Its re-probe is `fetch_images.py dependencies --new-slug '<new_slug>'` with
+  that note as `--owner-note`.
 - Work only on blocker paths named by the producer that are Wiki entries or
   recognized MOCs in `MOCs/` or legacy vault-root MOCs. Markdown elsewhere remains
   the producer's blocker and is reported unchanged.

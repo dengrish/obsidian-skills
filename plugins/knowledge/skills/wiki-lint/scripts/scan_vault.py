@@ -6,9 +6,10 @@ vault_index.py) and emits a single JSON object: the vault inventory, the
 deterministic QC violations ("problems"), and the worklists the executing agent must
 judge — collision candidates (item-5 probes), rename candidates, backfill
 candidates and hub footer items (Task 2), and card rivals (item 19) — plus the
-Task 3 hierarchy diagnostic. Outside `Wiki/` it reads the MOCs and, for the
-advisory `spaced_repetition` report, the Spaced Repetition plugin's settings
-file; it never writes either.
+Task 3 hierarchy diagnostic. Outside `Wiki/` it reads the MOCs, for the
+advisory `spaced_repetition` report the Spaced Repetition plugin's settings
+file, and with `--settled` wiki-lint's settled-decisions ledger; it never
+writes any of them.
 
 A file that cannot be read (not UTF-8, dangling symlink, permission error) is
 reported as an `item0` problem and skipped; it never aborts the scan. Unknown
@@ -37,6 +38,7 @@ deleting a file.
 
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import posixpath
@@ -219,7 +221,9 @@ from entry_checks import (  # noqa: E402
     bare_common_noun_slug,
     bare_word_alias_candidate,
     bold_parts as _bold_parts,
+    cross_domain_alias_findings,
     cross_domain_synonym_label,
+    cross_domain_word,
     description_has_entity_subject,
     description_subject_findings,
     display_label_links,
@@ -1005,6 +1009,20 @@ def _compound_modifier_before(text, start):
     return match.group(1).lower() not in _NON_MODIFIER_WORDS
 
 
+def _root_named_as_setting_or_genus(text, start, end):
+    """'In machine learning, …', 'for biology', 'a machine learning system'.
+
+    A discipline root named only as the setting or genus of something else
+    fails the closeness bar. "Of" and "to" stay out: "a branch of biology"
+    places the subject within the field.
+    """
+    before = text[:start]
+    if re.search(r"\b(?:in|for|within|across)\s+(?:the\s+)?$", before, re.I):
+        return True
+    return bool(re.search(r"\b(?:a|an|the)\s+$", before, re.I)
+                and re.match(r"\s+[a-z]", text[end:]))
+
+
 # Italic spans (`*term*`, `_term_`), for the late-link exclusions below.
 _ITALIC_SPAN_RE = re.compile(
     r"(?<![*\w])\*(?![*\s])([^*\n]+?)(?<![\s*])\*(?![*\w])"
@@ -1055,9 +1073,51 @@ def _late_link_index(displays):
     return by_tokens, maxwords
 
 
+#: A line that starts its own block: a list item, quote, heading or table row.
+_BLOCK_START_RE = re.compile(r"[ \t]*(?:[-*+][ \t]|\d+[.)][ \t]|>|#|\|)")
+
+
+def settle_context(text):
+    """SHA-1 hex digest of ``text`` with its whitespace collapsed."""
+    return hashlib.sha1(" ".join((text or "").split()).encode("utf-8")).hexdigest()
+
+
+def _sentence_at(text, offset):
+    """The whitespace-collapsed sentence of ``text`` that holds ``offset``.
+
+    The sentence is split from its block: the run of non-blank lines around
+    ``offset``, cut where a list item, quote, heading or table row starts.
+    """
+    lines = text.split("\n")
+    line_i = text.count("\n", 0, offset)
+    first = last = line_i
+    while (first > 0 and lines[first - 1].strip()
+           and not _BLOCK_START_RE.match(lines[first])):
+        first -= 1
+    while (last + 1 < len(lines) and lines[last + 1].strip()
+           and not _BLOCK_START_RE.match(lines[last + 1])):
+        last += 1
+    block_start = sum(len(line) + 1 for line in lines[:first])
+    block = "\n".join(lines[first:last + 1])
+    before = block[:offset - block_start]
+    position = len(" ".join(before.split()))
+    if position and before[-1:].isspace():
+        position += 1
+    compact = " ".join(block.split())
+    cursor = 0
+    for sentence in split_sentences(block):
+        found = compact.find(sentence, cursor)
+        if found < 0:
+            break
+        cursor = found + len(sentence)
+        if position < cursor:
+            return sentence
+    return compact
+
+
 def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=None,
                    root_targets=frozenset(), late_links=None,
-                   quiet_surfaces=frozenset()):
+                   quiet_surfaces=frozenset(), base_only_surfaces=frozenset()):
     """Task 2 worklist: bare-text mentions of another entry's surface forms.
 
     ``root_targets`` are discipline-root slugs: a root surface directly after a
@@ -1068,10 +1128,13 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
     first-link display label; ``quiet_surfaces`` (alias-only bare nouns of
     qualified destinations) never count as such a mention, and neither does
     the word of a first-link label that is a cross-domain synonym its target
-    introduces.
+    introduces. ``base_only_surfaces``, the quiet surfaces reached only
+    through a parenthetical title's base term, still count as a mention of a
+    first-link label they spell.
 
-    Returns ``(slug, target, matched, surface, line)`` rows, one per target:
-    the first eligible occurrence and its 1-based body line.
+    Returns ``(slug, target, matched, surface, line, context)`` rows, one per
+    target: the first eligible occurrence, its 1-based body line, and the
+    :func:`settle_context` of the sentence holding it.
     """
     by_tokens, maxwords = _index_surfaces(surf_map)
     backfill = []
@@ -1090,6 +1153,11 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         # legitimate proposal for a later prose mention.
         prose = mask_line_spans(
             strip_code(e["prose"]), e.get("table_spans", ()))
+        # The settle context hashes the sentence as written, each wikilink
+        # reduced to its visible text, so linking another candidate in the
+        # same sentence keeps the key.
+        sentence_text = (e["prose"] if len(e["prose"]) == len(prose)
+                         else prose)
         linked = set()
         first_link = {}                   # owner -> (offset, display) of its first link
         for link in WIKILINK.finditer(prose):
@@ -1220,7 +1288,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                                for forms, word in zip(term, words))
                        for term in own_terms)
 
-        def _earlier_mention(owner, start, end, surface):
+        def _earlier_mention(owner, start, end, surface, quiet=quiet_surfaces):
             """A plain mention before the first link that could carry it.
 
             Alias-only bare nouns of qualified destinations (`covariate`), a
@@ -1234,7 +1302,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             kinase) are not separate first mentions.
             """
             link_start = first_link[owner][0]
-            if start >= link_start or surface in quiet_surfaces:
+            if start >= link_start or surface in quiet:
                 return False
             if _inside_longer_term(start, end) or _own_title_term(start, end):
                 return False
@@ -1264,12 +1332,18 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             if tgt in proposed: continue
             if tgt in root_targets and _compound_modifier_before(masked, start):
                 continue
+            if tgt in root_targets and _root_named_as_setting_or_genus(
+                    masked, start, end):
+                continue   # a later occurrence may still be proposed
             # A later standalone mention may still carry the link.
             if _inside_longer_term(start, end) or _own_title_term(start, end):
                 continue
             proposed.add(tgt)
             backfill.append((sl, tgt, matched, surface,
-                             prose.count("\n", 0, start) + 1))
+                             prose.count("\n", 0, start) + 1,
+                             settle_context(WIKILINK.sub(
+                                 lambda m: (m.group(2) or m.group(1)).strip(),
+                                 _sentence_at(sentence_text, start)))))
         if late_links is None:
             continue
         # The first link's own label can be a word the surface index leaves
@@ -1292,11 +1366,13 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         if not displays:
             continue
         display_tokens, display_words = _late_link_index(displays)
+        label_quiet = quiet_surfaces - base_only_surfaces
         for start, end, surface, matched in _scan_surface_spans(
                 masked, display_tokens, display_words):
             owner = displays[surface]
             if (owner in late or _in_math(start, end)
-                    or not _earlier_mention(owner, start, end, surface)):
+                    or not _earlier_mention(owner, start, end, surface,
+                                            label_quiet)):
                 continue
             if any(g_start <= start and end <= g_end
                    and (g_end - g_start) > (end - start)
@@ -2013,7 +2089,94 @@ def _entry_physical_key(wiki, path):
     return os.path.relpath(path, wiki).replace("\\", "/")
 
 
-def scan(wiki, images=None, vault=None):
+#: The settled-decisions ledger's record fields, per row kind
+#: (link-hygiene.md, Settled decisions).
+SETTLED_FIELDS = {"backfill": ("entry", "target", "surface", "context"),
+                  "hub_footer": ("entry", "target", "context")}
+
+
+def read_settled(path):
+    """``({kind: set of record tuples}, error)`` from a settled ledger.
+
+    A missing file is an empty ledger. An unreadable or malformed one yields
+    no records and an error message, so it suppresses nothing.
+    """
+    empty = {kind: set() for kind in SETTLED_FIELDS}
+    try:
+        with open(path, encoding="utf-8") as fh:
+            data = json.load(fh)
+    except FileNotFoundError:
+        return empty, None
+    except (OSError, UnicodeDecodeError, ValueError) as exc:
+        return empty, "cannot read the ledger: %s" % exc
+    if (not isinstance(data, dict) or type(data.get("version")) is not int
+            or data["version"] != 1):
+        return empty, 'the ledger is not a {"version": 1, ...} object'
+    unknown = sorted(set(data) - {"version"} - set(SETTLED_FIELDS))
+    if unknown:
+        return empty, "the ledger has unknown keys: %s" % ", ".join(unknown)
+    records = {}
+    for kind, fields in SETTLED_FIELDS.items():
+        rows = data.get(kind, [])
+        if not isinstance(rows, list):
+            return empty, "the ledger's %s is not a list" % kind
+        records[kind] = set()
+        for row in rows:
+            if (not isinstance(row, dict) or set(row) != set(fields)
+                    or not all(isinstance(row[f], str) and row[f]
+                               for f in fields)
+                    or not re.fullmatch(r"[0-9a-f]{40}", row["context"])):
+                return empty, ("the ledger's %s holds a malformed record: %s"
+                               % (kind, json.dumps(row, ensure_ascii=False)))
+            records[kind].add(tuple(row[f] for f in fields))
+    return records, None
+
+
+def apply_settled(backfill_rows, hub_footer, path, complete=True):
+    """Omit the rows a settled ledger records; return them and ``settled``.
+
+    A ``backfill_candidates`` row or a ``hub_footer`` item is omitted when
+    its ``settle_key`` equals a ledger record, and a hub target left with no
+    item goes too. ``stale`` lists the records that matched no current row,
+    in the ledger's own shape; it stays empty when ``complete`` is false,
+    since the rows themselves were then not computed.
+    """
+    settled = {"path": path, "backfill_suppressed": 0,
+               "hub_footer_suppressed": 0,
+               "stale": {kind: [] for kind in SETTLED_FIELDS}, "error": None}
+    if path is None:
+        return backfill_rows, hub_footer, settled
+    records, settled["error"] = read_settled(path)
+    matched = {kind: set() for kind in SETTLED_FIELDS}
+
+    def _is_settled(kind, key):
+        record = tuple(key[f] for f in SETTLED_FIELDS[kind])
+        if record in records[kind]:
+            matched[kind].add(record)
+            return True
+        return False
+
+    kept = [row for row in backfill_rows
+            if not _is_settled("backfill", row["settle_key"])]
+    settled["backfill_suppressed"] = len(backfill_rows) - len(kept)
+    hubs = []
+    for row in hub_footer:
+        items = [(entry, key)
+                 for entry, key in zip(row["entries"], row["settle_keys"])
+                 if not _is_settled("hub_footer", key)]
+        settled["hub_footer_suppressed"] += len(row["entries"]) - len(items)
+        if items:
+            hubs.append(dict(row, entries=[entry for entry, _key in items],
+                             settle_keys=[key for _entry, key in items]))
+    if complete:
+        settled["stale"] = {
+            kind: [dict(zip(fields, record)) for record
+                   in sorted(records[kind] - matched[kind])]
+            for kind, fields in SETTLED_FIELDS.items()}
+    return kept, hubs, settled
+
+
+def scan(wiki, images=None, vault=None, settled=None):
     """Parse every entry in the `wiki` folder; return the Step 0 model as a dict.
 
     `vault` explicitly selects the root used for qualified entry links, parent
@@ -2028,6 +2191,9 @@ def scan(wiki, images=None, vault=None):
     same embed on an `Articles/` note. It is also the detector CONVENTIONS §1a
     relies on for `Wiki/` — a source rename renames every figure with it, and
     the embeds left pointing at the old stem are silent otherwise.
+
+    `settled` is the settled-decisions ledger's path, or None; the rows it
+    records are omitted (see `apply_settled`).
     """
     vault_root = _vault_root_for(wiki, images, vault)
     img_fold, image_folder_findings = image_index(images)
@@ -3210,19 +3376,23 @@ def scan(wiki, images=None, vault=None):
         if _equation_candidates:
             _lines = ", ".join(str(line) for line in sorted(
                 {candidate["line"] for candidate in _equation_candidates}))
-            _kinds = ", ".join(sorted({candidate["kind"]
-                                        for candidate in _equation_candidates}))
+            _details = "; ".join(
+                f'{candidate["kind"]} "{candidate["phrase"]}" '
+                f'(line {candidate["line"]})'
+                for candidate in _equation_candidates)
             problems.append((
                 sl, "item12/equation-coverage-candidate",
                 "prose or inline math appears to define a calculation "
                 "without a nearby display equation "
-                f"(kind(s): {_kinds}; prose line(s) {_lines}) — executing "
+                f"({_details}; prose line(s) {_lines}) — executing "
                 "agent: first judge explanatory value under "
                 "wiki-build/references/equations.md. Keep simple verbal "
                 "rules in prose when notation adds no understanding; "
-                "otherwise verify the relationship and define its symbols. A "
-                "square-root-of-variance cue never authorizes inferring a "
-                "population or sample denominator"))
+                "otherwise verify the relationship and define its symbols."
+                + (" A square-root-of-variance cue never authorizes "
+                   "inferring a population or sample denominator"
+                   if any(candidate["kind"] == "square-root-of-variance"
+                          for candidate in _equation_candidates) else "")))
         _equation_form_candidates = \
             find_noncanonical_display_equation_candidates(
                 _equation_prose, _equation_tables)
@@ -4089,6 +4259,13 @@ def scan(wiki, images=None, vault=None):
                         "singular/plural normalization — keep one surface family"))
                     break
             _alias_families.append((a, expected, _family))
+        # The never-an-alias rule's floor: the surface index hides such an
+        # alias, so no recurring backfill row would ever expose it.
+        for a in dict.fromkeys(cross_domain_alias_findings(al)):
+            problems.append((
+                sl, "item18/cross-domain-alias",
+                f'alias "{a}" is a bare cross-domain term, which is never an '
+                "alias — remove it under the alias-removal protocol"))
         # Keyed on fold_name, like every other "is this the same name?"
         # comparison in this file (see fold_name's docstring). Two aliases that
         # differ only in case or Unicode normalization share one portable owner
@@ -4111,6 +4288,7 @@ def scan(wiki, images=None, vault=None):
                                     if own_sl == sl else "")))
             elif k not in alias_owner:
                 alias_owner[k] = (sl, a, e["path_key"])
+    _body_label_owners = {}               # body-link display label -> its targets
     for e in diagnostic_records:
         sl = e["slug"]
         problems.current_path = (
@@ -4145,6 +4323,11 @@ def scan(wiki, images=None, vault=None):
                     and target_key not in ambiguous_aliases
                     and target_key in alias_of):
                 target_record = entries.get(alias_of[target_key][0])
+            if (target_record is not None and disp
+                    and _link["line"] <= _display_label_prose_lines):
+                _body_label_owners.setdefault(
+                    " ".join(disp.split()).lower(), set()).add(
+                        target_record["slug"])
             if (target_record is not None and disp
                     and target_record.get("aliases_complete", False)):
                 target_slug = target_record["slug"]
@@ -4299,6 +4482,31 @@ def scan(wiki, images=None, vault=None):
     # byte-for-byte the builder's create-time key rather than a local copy.
     covered_pairs = {frozenset((a, b)) for a, b, _p, _d in collisions}
     group_probe(stem_key, "stem-morphology", skip_pairs=covered_pairs)
+    # A bare entry or alias equal to a qualified title's base term (`outlier`
+    # beside `outlier-statistics`) is a duplicate or naming candidate. This is
+    # not the omitted token-superset probe, which would flood on qualifier-
+    # versus-other-base pairs (`feature-machine-learning`, `machine-learning`).
+    covered_pairs = {frozenset((a, b)) for a, b, _p, _d in collisions}
+    _ident_keys = {}
+    for sl, e in entries.items():
+        for ident in [sl] + e["aliases"]:
+            for key in singular_keys(ident):
+                _ident_keys.setdefault(key, []).append((sl, ident))
+    for sl, e in sorted(entries.items()):
+        t = e.get("title") or ""
+        if not has_parenthetical(t):
+            continue
+        _base_slug = slug(base_term(t))
+        if not _base_slug:
+            continue
+        _matched = {}
+        for key in sorted(singular_keys(_base_slug)):
+            for other, ident in _ident_keys.get(key, ()):
+                if other != sl:
+                    _matched.setdefault(other, ident)
+        for other, ident in sorted(_matched.items()):
+            if frozenset((other, sl)) not in covered_pairs:
+                collisions.append((other, sl, "base-term", f"{ident}~{sl}"))
     # dedup collisions (unordered pair + probe)
     seen_c = set(); collisions2 = []
     for a,b,p,d in collisions:
@@ -4309,12 +4517,24 @@ def scan(wiki, images=None, vault=None):
     # ---- Surface map + backfill candidates (Task 2 worklist; the executing agent judges closeness) ----
     surface_owners = {}                   # lowercased surface form -> all owners
     _title_surf, _alias_surf, _organism_common_surf = set(), set(), set()
+    _base_surf, _real_alias_surf = set(), set()
     for e in diagnostic_records:
         sl = e["slug"]
         forms = ([("title", e["title"])]
                  + [("alias", a.replace("-", " ")) for a in e["aliases"]]
                  + [("organism-common", name)
                     for name in organism_common_name_surfaces(e)])
+        # A parenthetical title's base term is its running-prose form
+        # ("outlier" for Outlier (statistics)). The base term itself is
+        # tested, so a floor word's plural ("features") never enters, and a
+        # base another target already owns as a body-link label ("variance"
+        # for Bias/variance trade-off) names that sense instead.
+        if has_parenthetical(e["title"]):
+            _base = base_term(e["title"])
+            if (_base and not cross_domain_word(_base)
+                    and not any(_body_label_owners.get(v.lower(), set()) - {sl}
+                                for v in (_base, plural_surface(_base)))):
+                forms.append(("base", _base))
         for kind, f in forms:
             if not f or len(f) < 3: continue
             # `plural_surface`, not `pluralize`: the latter takes ONE token, and
@@ -4323,8 +4543,12 @@ def scan(wiki, images=None, vault=None):
                 surface_owners.setdefault(variant.lower(), set()).add(sl)
                 if kind == "title":
                     _title_surf.add(variant.lower())
-                elif kind == "alias":
+                elif kind in ("alias", "base"):
                     _alias_surf.add(variant.lower())
+                    if kind == "base":
+                        _base_surf.add(variant.lower())
+                    else:
+                        _real_alias_surf.add(variant.lower())
                 else:
                     _organism_common_surf.add(variant.lower())
     # A shared title/alias (or plural) supplies no unique link destination.
@@ -4367,7 +4591,8 @@ def scan(wiki, images=None, vault=None):
     _late_links = []
     backfill = (build_backfill(entries, surf_map, _moc_basename_owners, _backfill_owner,
                                root_targets=_root_slugs, late_links=_late_links,
-                               quiet_surfaces=bare_noun_alias)
+                               quiet_surfaces=bare_noun_alias,
+                               base_only_surfaces=_base_surf - _real_alias_surf)
                 if alias_inventory_complete else [])
     for _sl, _target, _matched, _surface in sorted(_late_links):
         _target_title = entries[_target].get("title") or _target
@@ -4384,9 +4609,9 @@ def scan(wiki, images=None, vault=None):
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
     # not proof that either copy is wrong: each entry is clean in isolation,
     # while only one is the explanation's owner. Task 1b keeps the owner's
-    # copy and trims the others to their role plus a link; refactors.md, not
-    # this message, chooses the owner (a family-wide property goes to the
-    # family's entry, not to the most specific one).
+    # copy and trims the others to a one-clause consequence linked to it;
+    # refactors.md, not this message, chooses the owner (a family-wide
+    # property goes to the family's entry, not to the most specific one).
     sentence_owners = {}
     for _slug, _entry in sorted(entries.items()):
         for _normalized, _surface in duplicate_sentence_surfaces(
@@ -4407,8 +4632,8 @@ def scan(wiki, images=None, vault=None):
                 "a long prose sentence has the same normalized word sequence "
                 "in %s: %r — Task 1b consolidates it in its owner under the "
                 "refactors.md consolidation rule and trims every other copy "
-                "to its role plus a link to the owner; normalized similarity "
-                "alone never chooses the owner"
+                "to its consequence in one clause linked to the owner; "
+                "normalized similarity alone never chooses the owner"
                 % (", ".join(_peers), _snippet)))
 
     # ---- discipline-tag census (VALID enum slugs vs off-enum/malformed) ----
@@ -4598,8 +4823,14 @@ def scan(wiki, images=None, vault=None):
                     continue
                 _listed.append(_s)
             if _listed:
-                hub_footer.append({"target": _entry_parent_target(entries[_t]),
-                                   "footers": _n, "entries": _listed})
+                _hub_target = _entry_parent_target(entries[_t])
+                hub_footer.append({
+                    "target": _hub_target, "footers": _n, "entries": _listed,
+                    # One per `entries` item: its footer line's settled record.
+                    "settle_keys": [
+                        {"entry": _s, "target": _hub_target,
+                         "context": settle_context(entries[_s]["rel"])}
+                        for _s in _listed]})
 
     # Item 19's forward check: each primary cue beside its closest rivals.
     card_rivals = build_card_rivals(
@@ -5030,6 +5261,20 @@ def scan(wiki, images=None, vault=None):
             _path.append(_nxt)
             _stack.append((_nxt, iter(sorted(_parent_of.get(_nxt, [])))))
     _cycles.sort()
+    _backfill_rows = []
+    for s, t, f, key, line, context in sorted(backfill):
+        _target = _entry_parent_target(entries[t])
+        _backfill_rows.append({
+            "slug": s, "target": _target, "surface": f,
+            "bare_noun_alias": key in bare_noun_alias,
+            "organism_common_name": key in _organism_common_surf,
+            "discipline_root": t in _root_slugs,
+            "base_term": key in _base_surf,
+            "line": line,
+            "settle_key": {"entry": s, "target": _target, "surface": f,
+                           "context": context}})
+    _backfill_rows, hub_footer, _settled = apply_settled(
+        _backfill_rows, hub_footer, settled, alias_inventory_complete)
     def _public_problem(row):
         slug_value, item, message, path = row
         result = {"slug": slug_value, "item": item, "message": message}
@@ -5064,17 +5309,13 @@ def scan(wiki, images=None, vault=None):
         # `discipline_root`: the target is a Wiki discipline root, which the
         # closeness bar accepts only where the passage discusses the field
         # itself — batch-review these like `bare_noun_alias`.
-        "backfill_candidates": [{"slug": s,
-                                 "target": _entry_parent_target(entries[t]),
-                                 "surface": f,
-                                 "bare_noun_alias": key in bare_noun_alias,
-                                 "organism_common_name":
-                                     key in _organism_common_surf,
-                                 "discipline_root": t in _root_slugs,
-                                 "line": line}
-                                for s,t,f,key,line in sorted(backfill)],
+        # `base_term`: the surface is a parenthetical title's base term.
+        # `settle_key`: the settled-ledger record for a rejection.
+        "backfill_candidates": _backfill_rows,
         # Report-only; Task 2 judges each listed footer item; no write authority.
         "hub_footer": hub_footer,
+        # The --settled ledger's effect; it never suppresses `problems`.
+        "settled": _settled,
         # Item 19's forward-check input: a floor, not an exhaustive rival set.
         "card_rivals": card_rivals,
         # Folder-level, report-only findings.  These are deliberately outside
@@ -6218,6 +6459,102 @@ def run_self_test():
               ("entry-retitle protocol" in _st_msg(res4d, "tree-of-life", "item5"),
                "never stays an alias" in _st_msg(res4d, "tree-of-life", "item5")),
               (True, True))
+        # The same corpus as aliases of QUALIFIED destinations: the surface
+        # test, not the destination test, keeps them out of backfill, and
+        # each alias is itself an item18/cross-domain-alias finding.
+        v = os.path.join(tmp, "v4d-qualified")
+        _st_write(v, "entropy-information-theory.md", _st_entry(
+            "Entropy (information theory)", "**Entropy** is a worked example.",
+            aliases=('"entropy"',), card="Entropy"))
+        _st_write(v, "online-machine-learning.md", _st_entry(
+            "Online machine learning", "**Online machine learning** is a "
+            "worked example.", aliases=('"online-learning"',)))
+        _st_write(v, "tree-of-life-biology.md", _st_entry(
+            "Tree of life (biology)", "**Tree of life** is a worked example.",
+            aliases=('"tree-of-life"',), card="Tree of life"))
+        _st_write(v, "random-forest.md", _st_entry(
+            "Random forest", "**Random forest** is a worked example.",
+            aliases=('"random-decision-forest"',)))
+        _st_write(v, "reader2.md", _st_entry(
+            "Reader two", "**Reader two** mentions entropy, online learning "
+            "and the tree of life."))
+        res = scan(v)
+        check("a cross-domain alias of a qualified destination is not a "
+              "backfill surface",
+              [row for row in res["backfill_candidates"]
+               if row["slug"] == "reader2" and row["target"] in (
+                   "entropy-information-theory", "online-machine-learning",
+                   "tree-of-life-biology")], [])
+        check("an alias that is a cross-domain floor term is an "
+              "item18/cross-domain-alias finding; an ordinary alias is not",
+              sorted(p["slug"] for p in res["problems"]
+                     if p["item"] == "item18/cross-domain-alias"),
+              ["entropy-information-theory", "online-machine-learning",
+               "tree-of-life-biology"])
+        # A parenthetical title's base term is a backfill surface unless it
+        # is a cross-domain floor term (or its plural) or another target's
+        # body-link label; a bare entry equal to it is a collision.
+        def _base_vault(name, labeler):
+            wiki = os.path.join(tmp, name)
+            _st_write(wiki, "outlier-statistics.md", _st_entry(
+                "Outlier (statistics)", "An **outlier** is an observation far "
+                "from the rest.", card="Outlier"))
+            _st_write(wiki, "feature-machine-learning.md", _st_entry(
+                "Feature (machine learning)", "A **feature** is a measured "
+                "input.", card="Feature"))
+            _st_write(wiki, "machine-learning.md", _st_entry(
+                "Machine learning", "**Machine learning** is a worked "
+                "example."))
+            _st_write(wiki, "variance-statistics.md", _st_entry(
+                "Variance (statistics)", "**Variance** measures spread.",
+                card="Variance"))
+            _st_write(wiki, "bias-variance-trade-off.md", _st_entry(
+                "Bias-variance trade-off", "The **bias-variance trade-off** "
+                "balances two errors."))
+            _st_write(wiki, "reader.md", _st_entry(
+                "Reader", "**Reader** removes outliers, scales the features "
+                "and reports the variance."))
+            if labeler:
+                _st_write(wiki, "labeler.md", _st_entry(
+                    "Labeler", "**Labeler** has high "
+                    "[[bias-variance-trade-off|variance]]."))
+            return wiki
+        res = scan(_base_vault("base-term", labeler=True))
+        check("a base term ('outliers') is a base_term backfill surface; a "
+              "floor term's plural ('features') and a base another target "
+              "owns as a body-link label ('variance') are not",
+              [(row["target"], row["surface"], row["base_term"],
+                row["bare_noun_alias"])
+               for row in res["backfill_candidates"]
+               if row["slug"] == "reader"],
+              [("outlier-statistics", "outliers", True, True)])
+        check("without that label the base term 'variance' is proposed",
+              [row["target"] for row in scan(_base_vault(
+                  "base-term-unlabeled", labeler=False))["backfill_candidates"]
+               if row["slug"] == "reader" and row["base_term"]],
+              ["outlier-statistics", "variance-statistics"])
+        _st_write(_base_vault("base-term-collision", labeler=False),
+                  "outlier.md", _st_entry(
+                      "Outlier", "An **outlier** is a worked example."))
+        res = scan(os.path.join(tmp, "base-term-collision"))
+        check("a bare entry equal to a qualified title's base term is a "
+              "base-term collision; a qualifier equal to another entry is not",
+              [(c["a"], c["b"], c["probe"], c["detail"])
+               for c in res["collision_candidates"]],
+              [("outlier", "outlier-statistics", "base-term",
+                "outlier~outlier-statistics")])
+        _base_late = _base_vault("base-term-late", labeler=False)
+        _st_write(_base_late, "reader.md", _st_entry(
+            "Reader", "**Reader** removes outliers first.\n\nLater, "
+            "[[outlier-statistics|outliers]] are trimmed."))
+        _st_write(_base_late, "quiet-reader.md", _st_entry(
+            "Quiet reader", "**Quiet reader** removes outliers first.\n\n"
+            "Later, [[outlier-statistics|Outlier (statistics)]] applies."))
+        res = scan(_base_late)
+        check("a base surface before a link with that label is a late link; "
+              "before a link with another label it is not",
+              ["item10/late-link" in _st_keys(res, slug_)
+               for slug_ in ("reader", "quiet-reader")], [True, False])
 
         # wiki-build writing.md principle 5(f): an all-capital acronym title
         # opens with its full form; ROC curve and MLOps are outside the floor.
@@ -9382,9 +9719,9 @@ def run_self_test():
             "root of variance` as literal text.\n\n```text\n"
             "It is the square root of variance.\n```", type_="Software"))
         _st_write(v, "two-cue-line.md", _st_entry(
-            "Two cue line", "**Two cue line** is a rule. It averages the class "
-            "probabilities and picks the class with the highest average "
-            "probability."))
+            "Two cue line", "**Two cue line** is a rule. Its error rate is the "
+            "fraction of misclassified instances, found by normalizing each "
+            "cell by its row total."))
         res = scan(v)
         check("an explicit square-root-of-variance definition with no display "
               "math becomes an equation-coverage candidate",
@@ -9426,6 +9763,15 @@ def run_self_test():
               "prose line(s) 1)" in _st_msg(
                   res, "two-cue-line", "item12/equation-coverage-candidate"),
               True)
+        _two_cue_msg = _st_msg(
+            res, "two-cue-line", "item12/equation-coverage-candidate")
+        check("a coverage candidate names each matched phrase, and only a "
+              "square-root cue carries the denominator caveat",
+              ('named-fraction-or-ratio "rate is the fraction" (line 1)'
+               in _two_cue_msg, "denominator" in _two_cue_msg,
+               "denominator" in _st_msg(
+                   res, "equationless", "item12/equation-coverage-candidate")),
+              (True, False, True))
 
         v = os.path.join(tmp, "v24-image-captions")
         _st_write(v, "captioned-images.md", _st_entry(
@@ -9882,6 +10228,25 @@ def run_self_test():
                [(row["slug"], row["target"]) for row in res["backfill_candidates"]
                 if row["slug"].startswith(("math", "latex"))]),
               (False, [("latex-title", "k-nearest-neighbors")]))
+        # The own-title facet exclusion on the backfill side: an entry that
+        # defines `*Training set*` from its own title is not proposed a link
+        # for its later plain "training set".
+        v = os.path.join(tmp, "own-title-backfill")
+        _st_write(v, "training-set.md", _st_entry(
+            "Training set", "A **training set** is the data a model learns "
+            "from."))
+        _st_write(v, "training-set-split.md", _st_entry(
+            "Training set split", "A **training set split** divides data in "
+            "two.\n\n- *Training set* is the fitted part.\n\nA large training "
+            "set helps."))
+        _st_write(v, "control-split.md", _st_entry(
+            "Control split", "A **control split** divides data in two.\n\nA "
+            "large training set helps."))
+        check("words an entry defines in italics from its own title are not "
+              "a backfill mention of another target",
+              sorted((row["slug"], row["target"])
+                     for row in scan(v)["backfill_candidates"]),
+              [("control-split", "training-set")])
         # Discipline-root backfill: tagged for batch review; a field name
         # inside a compound ("cell biology") is not the root at all.
         v = os.path.join(tmp, "root-backfill")
@@ -9889,7 +10254,17 @@ def run_self_test():
             "Biology", "**Biology** is the study of life.",
             tags=('"#biology"',)))
         _st_write(v, "setting.md", _st_entry(
-            "Setting", "**Setting** is a topic in biology and elsewhere.",
+            "Setting", "**Setting** is what biology calls a habitat.",
+            tags=('"#biology"',)))
+        _st_write(v, "in-setting.md", _st_entry(
+            "In setting", "**In setting** is a topic in biology.",
+            tags=('"#biology"',)))
+        _st_write(v, "genus.md", _st_entry(
+            "Genus", "**Genus** is a biology lab tool.",
+            tags=('"#biology"',)))
+        _st_write(v, "setting-then-field.md", _st_entry(
+            "Setting then field", "**Setting then field** is a topic in "
+            "biology.\n\nIt is what biology calls a niche.",
             tags=('"#biology"',)))
         _st_write(v, "compound.md", _st_entry(
             "Compound", "**Compound** is studied in cell biology.",
@@ -9903,11 +10278,21 @@ def run_self_test():
             "Root late", "**Root late** is a topic in biology, and it changed "
             "how [[biology]] is taught.", tags=('"#biology"',)))
         res = scan(v)
-        check("a root candidate carries discipline_root; a compound is dropped",
+        check("a root candidate carries discipline_root; a compound, a "
+              "setting ('in biology') and a genus ('a biology lab tool') are "
+              "dropped, and a later field mention is still proposed",
               sorted((row["slug"], row["target"].rsplit("/", 1)[-1],
-                      row["discipline_root"])
+                      row["discipline_root"], row["line"])
                      for row in res["backfill_candidates"]),
-              [("setting", "biology", True)])
+              [("setting", "biology", True, 1),
+               ("setting-then-field", "biology", True, 3)])
+        check("a root named as a setting or genus, never after 'of' or 'to'",
+              [_root_named_as_setting_or_genus(text, text.index("biology"),
+                                               text.index("biology") + 7)
+               for text in ("In biology, cells", "for the biology",
+                            "a biology lab", "a branch of biology",
+                            "close to biology", "the biology.")],
+              [True, True, True, False, False, False])
         check("a root compound is not an earlier mention of a later root link",
               ["item10/late-link" in _st_keys(res, slug_)
                for slug_ in ("compound-late", "root-late")],
@@ -10573,6 +10958,99 @@ def run_self_test():
         check("hub_footer_min grows with the Wiki",
               (hub_footer_min(258), hub_footer_min(400), hub_footer_min(1000)),
               (15, 20, 50))
+        # The settled-decisions ledger (--settled): a recorded rejection or
+        # kept hub item is omitted until its sentence or footer line changes.
+        _text = ("First one. Second\nline here.\n- Item one. Item two.\n\n"
+                 "Last.")
+        check("a settle context is the sentence within its block",
+              [_sentence_at(_text, _text.index(word))
+               for word in ("one.", "line", "two", "Last")],
+              ["First one.", "Second line here.", "Item two.", "Last."])
+        _settle_wiki = _hub_vault("v-hub-settled")
+        _st_write(_settle_wiki, "settle-reader.md", _st_entry(
+            "Settle reader", "**Settle reader** names a hub term once. It "
+            "also names a topic."))
+        _ledger = os.path.join(tmp, "settled.json")
+        res0 = scan(_settle_wiki, settled=_ledger)
+        _bf_key = next(row["settle_key"] for row in res0["backfill_candidates"]
+                       if row["target"] == "hub-term")
+        _hub_row = next(row for row in res0["hub_footer"]
+                        if row["target"] == "hub-term")
+        _hub_key = _hub_row["settle_keys"][_hub_row["entries"].index("u01")]
+        check("a missing ledger is empty; each row carries its settle key",
+              (res0["settled"], _bf_key, _hub_key),
+              ({"path": _ledger, "backfill_suppressed": 0,
+                "hub_footer_suppressed": 0,
+                "stale": {"backfill": [], "hub_footer": []}, "error": None},
+               {"entry": "settle-reader", "target": "hub-term",
+                "surface": "hub term",
+                "context": settle_context("**Settle reader** names a hub "
+                                          "term once.")},
+               {"entry": "u01", "target": "hub-term",
+                "context": settle_context("**Related:** [[hub-term|Hub term]] "
+                                          "· [[statistics|Statistics]]")}))
+        _gone = {"entry": "gone", "target": "hub-term", "surface": "hub term",
+                 "context": "0" * 40}
+        with open(_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 1, "backfill": [_bf_key, _gone],
+                       "hub_footer": [_hub_key]}, fh)
+        res1 = scan(_settle_wiki, settled=_ledger)
+
+        def _settle_view(res):
+            hub = [row["entries"] for row in res["hub_footer"]
+                   if row["target"] == "hub-term"]
+            return (sorted(row["target"] for row in res["backfill_candidates"]
+                           if row["slug"] == "settle-reader"),
+                    "u01" in (hub[0] if hub else []),
+                    res["settled"]["backfill_suppressed"],
+                    res["settled"]["hub_footer_suppressed"],
+                    [len(res["settled"]["stale"][kind])
+                     for kind in ("backfill", "hub_footer")],
+                    res["settled"]["error"])
+        check("a settled row is suppressed and an unmatched record is stale",
+              _settle_view(res1), (["topic"], False, 1, 1, [1, 0], None))
+        check("the ledger never suppresses problems",
+              res1["problems"] == res0["problems"], True)
+        _st_write(_settle_wiki, "settle-reader.md", _st_entry(
+            "Settle reader", "**Settle reader** names a hub term twice. It "
+            "also names a topic."))
+        _st_write(_settle_wiki, "u01.md", _st_entry(
+            "U01", "**U01** is a worked example.",
+            related="[[statistics|Statistics]] · [[hub-term|Hub term]]"))
+        check("an edited sentence or footer line restores the row",
+              _settle_view(scan(_settle_wiki, settled=_ledger)),
+              (["hub-term", "topic"], True, 0, 0, [2, 1], None))
+        _st_write(_settle_wiki, "settle-reader.md", _st_entry(
+            "Settle reader", "**Settle reader** names a hub term and a topic."))
+        _before = next(row["settle_key"] for row in scan(_settle_wiki)
+                       ["backfill_candidates"] if row["target"] == "hub-term")
+        _st_write(_settle_wiki, "settle-reader.md", _st_entry(
+            "Settle reader", "**Settle reader** names a hub term and a "
+            "[[topic]]."))
+        check("linking another candidate in the sentence keeps the key",
+              [row["settle_key"] for row in scan(_settle_wiki)
+               ["backfill_candidates"] if row["target"] == "hub-term"],
+              [_before])
+        _st_write(_settle_wiki, "settle-reader.md", _st_entry(
+            "Settle reader", "**Settle reader** names a hub term twice. It "
+            "also names a topic."))
+        for _bad in ("{not json", '{"version": 2}', '{"version": 1, '
+                     '"backfill": [{"entry": "x"}]}', '{"version": true}',
+                     '{"version": 1, "hub_footers": []}'):
+            with open(_ledger, "w", encoding="utf-8") as fh:
+                fh.write(_bad)
+            _view = _settle_view(scan(_settle_wiki, settled=_ledger))
+            check("a malformed ledger suppresses nothing and is reported: "
+                  + _bad, (_view[:5], bool(_view[5])),
+                  ((["hub-term", "topic"], True, 0, 0, [0, 0]), True))
+        _all_keys = [key for key in scan(_settle_wiki)["hub_footer"][0]
+                     ["settle_keys"]]
+        with open(_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 1, "hub_footer": _all_keys}, fh)
+        res = scan(_settle_wiki, settled=_ledger)
+        check("a hub target left with no item is omitted",
+              (res["hub_footer"], res["settled"]["hub_footer_suppressed"]),
+              ([], len(_all_keys)))
         # One unreadable file hides whatever aliases it holds, so the
         # alias-dependent worklists stay empty until a clean rescan.
         _gap_hub = _hub_vault("v-hub-alias-gap")
@@ -10590,6 +11068,9 @@ def run_self_test():
                 "item17/alias-candidate" in _st_keys(r, "introduced-name"))
                for r in (_complete_hub_res, _gap_hub_res)],
               [(True, True, True), (False, False, False)])
+        check("an alias-inventory gap reports no ledger record as stale",
+              [len(scan(_gap_hub, settled=_ledger)["settled"]["stale"][kind])
+               for kind in ("backfill", "hub_footer")], [0, 0])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -10633,6 +11114,13 @@ def main(argv=None):
                          "(item12/missing-image), and nested or temporary artifacts "
                          "are reported in image_folder_findings. Omitted, neither "
                          "folder check runs")
+    ap.add_argument("--settled", metavar="FILE",
+                    help="the settled-decisions ledger "
+                         "(<vault>/Reviews/.wiki-lint-settled.json): omit the "
+                         "backfill_candidates rows and hub_footer items it "
+                         "records; a missing file is an empty ledger, an "
+                         "unreadable or malformed one suppresses nothing and "
+                         "is reported in settled.error. Never written here")
     ap.add_argument("--out", metavar="FILE",
                     help="write the JSON to FILE instead of stdout")
     ap.add_argument("--indent", type=int, default=2, metavar="N",
@@ -10666,7 +11154,8 @@ def main(argv=None):
         ap.error("--images is not a directory: %s. No embed was checked; this is "
                  "not a vault with no images." % args.images)
     try:
-        report = scan(args.wiki, args.images, vault=args.vault)
+        report = scan(args.wiki, args.images, vault=args.vault,
+                      settled=args.settled)
     except IncompleteWikiInventoryError as exc:
         print("scan blocked: %s" % exc, file=sys.stderr)
         return 1

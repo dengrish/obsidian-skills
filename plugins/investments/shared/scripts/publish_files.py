@@ -1,11 +1,12 @@
-"""Snapshot, verify and publish reviewed vault files without clobbering edits.
+"""Snapshot, verify, publish, remove and move reviewed vault files without clobbering edits.
 
 A command line for the SAFE_WRITES.md recipe on regular files: the version a
 workflow read is recorded with ``atomic_move.regular_file_snapshot``, a new
 file is published with ``atomic_move.publish_new`` and a replacement with
-``atomic_move.replace_expected`` against that recorded version. PATH is
-vault-relative (forward slashes) or absolute and must resolve inside the
-vault's real path. A leaf symlink is never followed. A case alias of an
+``atomic_move.replace_expected`` against that recorded version, a removal with
+``atomic_move.remove_expected`` and a move with ``atomic_move.move_noreplace``.
+PATH is vault-relative (forward slashes) or absolute and must resolve inside
+the vault's real path. A leaf symlink is never followed. A case alias of an
 existing file is unsafe, and a Unicode normalization variant is replaced
 under its on-disk spelling, so a replacement never renames the file. Manifest
 paths that differ only in case or normalization are refused.
@@ -26,6 +27,15 @@ paths that differ only in case or normalization are refused.
       already equals its draft is skipped, so the same command can be rerun
       after a partial failure. Any failed precheck publishes nothing; the
       first publication failure stops the run and leaves later paths pending.
+  remove --vault VAULT --snapshots SNAP.json PATH...
+      Remove each recorded file with ``atomic_move.remove_expected`` only
+      while its bytes, identity and mode match the record. A path with no
+      record, or one that changed, is refused, and any refusal removes
+      nothing. A path that is already absent is reported and skipped.
+  move --vault VAULT --snapshots SNAP.json SRC DST
+      Move a recorded file that still matches its record to an unoccupied DST
+      in an existing directory with ``atomic_move.move_noreplace``. Record DST
+      with ``snapshot --replace`` before publishing to it.
 
 Every command prints JSON and exits 1 unless everything is clean.
 Run ``python3 publish_files.py --test`` for the self-test.
@@ -560,8 +570,193 @@ def cmd_publish(vault_arg, snapshots, manifest, create_dir=None,
     return payload, 0 if ok else 1
 
 
+def _plan_removal(vault, records, path):
+    """Check one path for ``remove`` without writing; return its plan."""
+    plan = {"path": path}
+    try:
+        key = vault_key(vault, path)
+    except InputError as exc:
+        return _refuse(plan, str(exc))
+    plan["path"] = key
+    record = records.get(key)
+    if record is None:
+        return _refuse(plan, "no snapshot record; snapshot the path before "
+                             "reading it")
+    target = _target(vault, key)
+    observed = observe(target)
+    if observed[0] == "absent":
+        plan.update(action="absent", detail="already absent")
+        return plan
+    status, detail = compare(record, observed)
+    if status != "unchanged":
+        return _refuse(plan, "%s: %s" % (status, detail))
+    try:
+        location = _stage_location(vault[1],
+                                   os.path.realpath(os.path.dirname(target)))
+    except OSError as exc:
+        return _refuse(plan, "cannot inspect the target directory (%s)"
+                       % _describe(exc))
+    if location is None:
+        return _refuse(plan, "LinkUnavailable: no parent on the target's "
+                             "filesystem can hold the private stage")
+    plan.update(action="remove", _target=target, _expected=_expected(record),
+                _location=location)
+    return plan
+
+
+def cmd_remove(vault_arg, snapshots, paths):
+    try:
+        vault = _vault(vault_arg)
+        records = load_snapshots(snapshots, vault)
+    except InputError as exc:
+        return {"ok": False, "error": str(exc)}, 1
+
+    plans = [_plan_removal(vault, records, path) for path in paths]
+    keys = [portable_identity(plan["path"]) for plan in plans]
+    for plan, key in zip(plans, keys):
+        if keys.count(key) > 1:
+            _refuse(plan, "listed more than once (up to case or Unicode "
+                          "normalization)")
+    removals = [plan for plan in plans if plan["action"] == "remove"]
+    for plan in removals:
+        if plan["_location"] != removals[0]["_location"]:
+            _refuse(plan, "LinkUnavailable: on a different filesystem from "
+                          "this run's private stage; remove it separately")
+    if any(plan["action"] == "refused" for plan in plans):
+        for plan in plans:
+            if plan["action"] == "remove":
+                plan.update(action="pending",
+                            detail="not attempted: another path was refused")
+
+    stage_parent = None
+    failed = False
+    for plan in plans:
+        if plan["action"] != "remove":
+            continue
+        if failed:
+            plan.update(action="pending",
+                        detail="not attempted after an earlier failure")
+            continue
+        try:
+            if stage_parent is None:
+                stage_parent = tempfile.mkdtemp(
+                    prefix=STAGE_PREFIX, dir=plan["_location"])
+            stage_dir = tempfile.mkdtemp(prefix="remove-", dir=stage_parent)
+            plan["stage_dir"] = stage_dir
+            removed = atomic_move.remove_expected(
+                plan["_target"], plan["_expected"],
+                atomic_move.regular_file_snapshot, stage_dir,
+                stage_parent=stage_parent)
+        except (OSError, ValueError) as exc:
+            failed = True
+            plan.update(action="failed", error=type(exc).__name__,
+                        detail=str(exc))
+            recovery = getattr(exc, "recovery_path", None)
+            if recovery:
+                plan["recovery_path"] = recovery
+        else:
+            # The stage now holds only the verified recorded version.
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            del plan["stage_dir"]
+            plan.update(action="removed" if removed else "absent",
+                        detail="removed the snapshotted version" if removed
+                        else "already absent")
+    if stage_parent is not None:
+        with contextlib.suppress(OSError):
+            os.rmdir(stage_parent)
+
+    ok = all(plan["action"] in ("removed", "absent") for plan in plans)
+    payload = {"ok": ok, "results": [
+        {key: value for key, value in plan.items() if not key.startswith("_")}
+        for plan in plans]}
+    if stage_parent is not None and os.path.lexists(stage_parent):
+        payload["stage_parent"] = stage_parent
+    return payload, 0 if ok else 1
+
+
+def cmd_move(vault_arg, snapshots, source, destination):
+    try:
+        vault = _vault(vault_arg)
+        records = load_snapshots(snapshots, vault)
+    except InputError as exc:
+        return {"ok": False, "error": str(exc)}, 1
+
+    result = {"path": source, "to": destination}
+
+    def refused(detail):
+        result.update(action="refused", detail=detail)
+        return {"ok": False, "results": [result]}, 1
+
+    try:
+        key = vault_key(vault, source)
+        result["path"] = key
+        dst_key = vault_key(vault, destination)
+        result["to"] = dst_key
+    except InputError as exc:
+        return refused(str(exc))
+    if portable_identity(key) == portable_identity(dst_key):
+        return refused("the destination is the source up to case or Unicode "
+                       "normalization; a respelling is not a move")
+    record = records.get(key)
+    if record is None:
+        return refused("no snapshot record; snapshot the path before "
+                       "reading it")
+    if record["state"] != "file":
+        return refused("the source is recorded as absent")
+    target = _target(vault, key)
+    status, detail = compare(record, observe(target))
+    dst_target = _target(vault, dst_key)
+    if (status == "removed"
+            and compare(record, observe(dst_target))[0] == "unchanged"):
+        result.update(action="moved", detail="already moved; snapshot "
+                      "--replace the destination before publishing to it")
+        return {"ok": True, "results": [result]}, 0
+    if status != "unchanged":
+        return refused("%s: %s" % (status, detail))
+    if not os.path.isdir(os.path.dirname(dst_target)):
+        return refused("the destination directory %s does not exist"
+                       % os.path.dirname(dst_key))
+    occupant = observe(dst_target)
+    if occupant[0] != "absent":
+        return refused("the destination is occupied"
+                       + (" (%s)" % occupant[2] if occupant[2] else ""))
+    try:
+        location = _stage_location(vault[1],
+                                   os.path.realpath(os.path.dirname(target)))
+    except OSError as exc:
+        return refused("cannot inspect the source directory (%s)"
+                       % _describe(exc))
+    if location is None:
+        return refused("LinkUnavailable: no parent on the source's "
+                       "filesystem can hold the private stage")
+
+    stage_parent = None
+    try:
+        stage_parent = tempfile.mkdtemp(prefix=STAGE_PREFIX, dir=location)
+        atomic_move.move_noreplace(
+            target, dst_target, expected=_expected(record).identity,
+            stage_parent=stage_parent)
+    except (OSError, ValueError) as exc:
+        result.update(action="failed", error=type(exc).__name__,
+                      detail=str(exc))
+        recovery = getattr(exc, "recovery_paths", None)
+        if recovery:
+            result["recovery_paths"] = list(recovery)
+    else:
+        result.update(action="moved", detail="moved the snapshotted version; "
+                      "snapshot --replace the destination before publishing "
+                      "to it")
+    payload = {"ok": result["action"] == "moved", "results": [result]}
+    if stage_parent is not None:
+        with contextlib.suppress(OSError):
+            os.rmdir(stage_parent)
+        if os.path.lexists(stage_parent):
+            payload["stage_parent"] = stage_parent
+    return payload, 0 if payload["ok"] else 1
+
+
 def run_self_test():
-    """Exercise snapshot, verify and publish on temporary vaults."""
+    """Exercise every command on temporary vaults."""
     cases = []
 
     def check(label, got, want):
@@ -761,6 +956,70 @@ def run_self_test():
                read(os.path.join(vault, "Topics", "t.md"))),
               (0, ["created"], True, b"topic\n"))
 
+        removal = os.path.join(scratch, "removal.json")
+        put(wiki("rm-keep.md"), b"keep\n")
+        put(wiki("rm-edit.md"), b"read\n")
+        cmd_snapshot(vault, ["Wiki/rm-keep.md", "Wiki/rm-edit.md"], removal)
+        put(wiki("rm-edit.md"), b"editor save\n")
+        payload, code = cmd_remove(vault, removal, [
+            "Wiki/rm-keep.md", "Wiki/rm-edit.md", "Wiki/rm-unsnapped.md"])
+        check("remove refuses a changed or unsnapshotted path and removes "
+              "nothing",
+              (code, actions(payload),
+               "changed: bytes differ" in payload["results"][1]["detail"],
+               read(wiki("rm-keep.md")), read(wiki("rm-edit.md")),
+               stage_parents()),
+              (1, ["pending", "refused", "refused"], True, b"keep\n",
+               b"editor save\n", []))
+        payload, code = cmd_remove(vault, removal, ["Wiki/rm-keep.md"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            rerun_code = main(["remove", "--vault", vault, "--snapshots",
+                               removal, "Wiki/rm-keep.md"])
+        check("remove deletes the recorded version and a rerun skips it",
+              (code, actions(payload), os.path.lexists(wiki("rm-keep.md")),
+               stage_parents(), rerun_code,
+               actions(json.loads(out.getvalue()))),
+              (0, ["removed"], False, [], 0, ["absent"]))
+
+        moves = os.path.join(scratch, "moves.json")
+        put(wiki("mv-src.md"), b"moved\n", 0o600)
+        put(wiki("mv-edit.md"), b"read\n")
+        put(wiki("mv-taken.md"), b"occupant\n")
+        cmd_snapshot(vault, ["Wiki/mv-src.md", "Wiki/mv-edit.md"], moves)
+        put(wiki("mv-edit.md"), b"editor save\n")
+        refusals = [cmd_move(vault, moves, src, dst) for src, dst in (
+            ("Wiki/mv-edit.md", "Wiki/mv-free.md"),
+            ("Wiki/mv-src.md", "Wiki/mv-taken.md"),
+            ("Wiki/mv-src.md", "Gone/mv-src.md"),
+            ("Wiki/mv-unsnapped.md", "Wiki/mv-free.md"))]
+        check("move refuses a changed source and an occupied or missing "
+              "destination",
+              ([(code, actions(payload)) for payload, code in refusals],
+               "changed: bytes differ"
+               in refusals[0][0]["results"][0]["detail"],
+               "occupied" in refusals[1][0]["results"][0]["detail"],
+               os.path.lexists(wiki("mv-free.md")), read(wiki("mv-src.md")),
+               read(wiki("mv-edit.md")), read(wiki("mv-taken.md")),
+               stage_parents()),
+              ([(1, ["refused"])] * 4, True, True, False, b"moved\n",
+               b"editor save\n", b"occupant\n", []))
+        identity = atomic_move.file_identity(wiki("mv-src.md"))
+        payload, code = cmd_move(vault, moves, "Wiki/mv-src.md",
+                                 "Wiki/mv-dst.md")
+        check("move publishes the recorded inode at a free destination",
+              (code, actions(payload), os.path.lexists(wiki("mv-src.md")),
+               read(wiki("mv-dst.md")),
+               atomic_move.file_identity(wiki("mv-dst.md")) == identity,
+               stat.S_IMODE(os.stat(wiki("mv-dst.md")).st_mode),
+               stage_parents()),
+              (0, ["moved"], False, b"moved\n", True, 0o600, []))
+        payload, code = cmd_move(vault, moves, "Wiki/mv-src.md",
+                                 "Wiki/mv-dst.md")
+        check("a rerun of a finished move reports it moved",
+              (code, actions(payload), read(wiki("mv-dst.md"))),
+              (0, ["moved"], b"moved\n"))
+
         dups = os.path.join(scratch, "dups.json")
         dup_paths = ["Wiki/Dup.md", "Wiki/dup.md",
                      "Wiki/Caf\u00e9.md", "Wiki/Cafe\u0301.md"]
@@ -936,6 +1195,15 @@ def _build_parser():
                          help="missing direct child of the vault to create")
     publish.add_argument("--dry-run", action="store_true",
                          help="check and plan without writing")
+    remove = sub.add_parser("remove", help="remove snapshotted files")
+    remove.add_argument("--vault", required=True)
+    remove.add_argument("--snapshots", required=True, metavar="SNAP.json")
+    remove.add_argument("paths", nargs="+", metavar="PATH")
+    move = sub.add_parser("move", help="move a snapshotted file to a free path")
+    move.add_argument("--vault", required=True)
+    move.add_argument("--snapshots", required=True, metavar="SNAP.json")
+    move.add_argument("source", metavar="SRC")
+    move.add_argument("destination", metavar="DST")
     return parser
 
 
@@ -953,6 +1221,11 @@ def main(argv=None):
     elif args.command == "publish":
         payload, code = cmd_publish(args.vault, args.snapshots, args.manifest,
                                     args.create_dir, args.dry_run)
+    elif args.command == "remove":
+        payload, code = cmd_remove(args.vault, args.snapshots, args.paths)
+    elif args.command == "move":
+        payload, code = cmd_move(args.vault, args.snapshots, args.source,
+                                 args.destination)
     else:
         parser.print_help()
         return 2

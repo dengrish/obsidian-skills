@@ -126,8 +126,7 @@ The authors conclude that encapsulated transplant should be offered after a seco
   the report records that choice. The DOI is included because the fictional
   document prints it; neither date nor URL requires outside lookup.
 - The short author list follows the eleven-person byline rule. Preregistration
-  remains methodological information, while funding, conflicts and review
-  status are outside this note's scope.
+  remains methodological information.
 - Availability names restricted data access and missing code separately.
 
 ## Illustrative lint and verification

@@ -3,10 +3,11 @@
 Read this before a workflow creates, replaces, or removes a vault artifact.
 The user's permission to edit a file applies to the version the workflow
 inspected. It does not extend to a different file or a newer editor save that
-arrives after planning. A workflow that publishes regular files with
-`publish_files.py` needs only that command's documented steps; the rest of
-this guide governs writes it does not perform, such as moves, removals and
-private drivers.
+arrives after planning. A workflow that publishes, removes or moves regular
+files with `publish_files.py` needs only that command's documented steps; the
+rest of this guide governs writes it does not perform, such as a case
+respelling or a new file that keeps another file's permissions, which use a
+private driver.
 
 ## Snapshot the version being edited
 
@@ -98,9 +99,11 @@ command line intentionally exposes only `--test`. Do not invent positional
 arguments or interpolate a vault path or note bytes into `python -c`, a shell
 heredoc, or command text. When a workflow-specific writer exists, use it.
 For publishing reviewed regular files, `shared/scripts/publish_files.py`
-provides this recipe as a CLI (`snapshot`, `verify`, `publish`); use it instead
-of a private driver unless the operation needs a primitive the CLI does not
-offer.
+provides this recipe as a CLI (`snapshot`, `verify`, `publish`); its `remove`
+and `move` commands perform the conditional removal and no-replace move below
+for snapshotted paths, and a moved destination is re-snapshotted with
+`snapshot --replace` before anything is published to it. Use it instead of a
+private driver unless the operation needs a primitive the CLI does not offer.
 Otherwise, put the publication logic in a private Python driver, pass paths as
 ordinary `sys.argv` values, and import `atomic_move` after putting the trusted
 plugin `shared/scripts/` directory first on `sys.path`, using the actual plugin

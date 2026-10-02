@@ -57,7 +57,19 @@ reported. In batch mode assess and report each capture separately.
 Record figure-like media with caption/alt text, nearest heading and neighboring
 prose: images (including SVG, `data-src`, `data-lazy-src`, `srcset` and picture
 sources), inline SVG, video/source, canvas, iframes, animation containers and
-figure/figcaption groups.
+figure/figcaption groups. Run the read-only inventory on the saved static or
+rendered markup; it parses without executing scripts:
+
+```bash
+python3 '<skill>/scripts/body_checks.py' source '<saved markup file>' --base-url '<capture URL>'
+```
+
+It prints the heading outline, coarse counts and one JSON row per figure-like
+element: its tag, best image URL resolved against the capture URL, alt text,
+figcaption, nearest preceding heading and any Lottie `.json`/`.lottie` source.
+Rows sharing a `figure` number belong to one `<figure>`; rows tagged `in` sit
+inside a `nav` or `aside`, or the page-level `header` or `footer`, and are
+often chrome. Read the neighboring prose in the markup.
 
 For Lottie, record a real `.json`/`.lottie` source exposed by `<lottie-player>`,
 `<dotlottie-player>`, animation attributes or nearby source markup. Do not execute

@@ -20,7 +20,7 @@ context:
 python3 '<skill>/scripts/body_checks.py' sweep '<path to the completed scratch .md>'
 ```
 
-It prints numbered items 1–15 (with 12b), each with its expectation. It skips
+It prints numbered items 1–16 (with 12b), each with its expectation. It skips
 the leading YAML block and fenced code, and reports an unclosed fence, whose
 lines it scans as prose. It does not parse inline code: ignore literal inline
 code when judging a match. Never edit source code to satisfy a prose detector.
@@ -52,10 +52,12 @@ Read the results as follows:
 Compare the ordered heading outline and coarse counts of lists, quotes, links,
 images, tables and code blocks. Use the fetched source when available; when its
 fetch failed, compare against the original capture and report the live-source
-limit. The note-side outline and counts come from:
+limit. The note-side outline and counts come from `outline`; the source-side
+outline and counts come from `source` on the saved markup:
 
 ```bash
 python3 '<skill>/scripts/body_checks.py' outline '<path to the completed scratch .md>'
+python3 '<skill>/scripts/body_checks.py' source '<saved markup file>' --base-url '<capture URL>'
 ```
 
 Counts are tripwires, not assertions. Exclude the note's generated callout and
@@ -113,6 +115,7 @@ suggested detector; do not edit an installed plugin during clipping processing.
   keeping scope, confidence, terms and numbers; opinions attributed and facts
   stated directly; no contextless “It/This/They”, meta-framing or links;
   entry-worthy bold only; a bullet count that fits the article's length.
+  Sweep item 16 lists the bullet count and the long or linked bullets to judge.
 - [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
   auto-generated backlink panels and run-on navigation are gone; curated
   further-reading links and intentional source content remain. Hidden
@@ -129,7 +132,8 @@ suggested detector; do not edit an installed plugin during clipping processing.
 - [ ] Equations use Obsidian delimiters. Genuine formulas flattened to
   typographic text were restored only with source evidence; ordinals, prices,
   dates, chemical names and prose notation were not forced into math mode.
-- [ ] Literal currency dollars are escaped and math delimiters balanced.
+- [ ] Literal currency dollars in the Summary and body are escaped (never in
+  YAML values), and math delimiters are balanced.
   Source comparison also catches **dropped** symbols or denominators, such as
   `0.03/1K tokens`, `33K tokens/` or a bare amount before an inflation note.
   Restore only what the clipping lost, not an author's original odd wording.

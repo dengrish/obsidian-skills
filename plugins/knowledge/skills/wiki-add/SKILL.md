@@ -164,10 +164,12 @@ Link under [conventions §9](../../shared/CONVENTIONS.md#wiki-add--inside-new-re
 and the builder's relevance and display rules: only to existing entries,
 including ones this run already published; a requested entry published later
 stays plain text. Never backfill existing notes or create prerequisite topics:
-a prerequisite with no entry is glossed in one clause on first use, and one
-that three or more entries, this one included, use without a resolving link,
-counted as the builder's [load-bearing rule](../wiki-build/SKILL.md#2-extract-entities)
-says, is a missing-entry candidate for closeout.
+a prerequisite with no entry is glossed in one clause on first use. It is a
+missing-entry candidate for closeout when it deserves its own entry under the
+builder's [atomicity test](../wiki-build/references/writing.md#body-structure),
+or when three or more entries, this one included, use it without a resolving
+link, counted as the builder's [load-bearing rule](../wiki-build/SKILL.md#2-extract-entities)
+says.
 
 Review each draft under the builder's [Quality Checklist](../wiki-build/SKILL.md#quality-checklist)
 and [step 7](../wiki-build/SKILL.md#7-review-and-report) up to publication,
