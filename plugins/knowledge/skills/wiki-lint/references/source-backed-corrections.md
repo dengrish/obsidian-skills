@@ -2,9 +2,10 @@
 
 Read this before Task 1b's first repair, and when the user asks to correct,
 simplify or deepen existing entries. A correction rests on the sources each
-entry already cites; the request need not name them. The corrected entry may
-also add accurate background that makes it easier to understand, under the
-builder's
+entry already cites; the request need not name them. A
+[user issue](../SKILL.md#user-issues) is such a request for its entry alone. The
+corrected entry may also add accurate background that makes it easier to
+understand, under the builder's
 [prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles);
 background needs no citation. Task 1b covers every matching entry in the
 run's scope, and a request covering a class of defects or the whole Wiki
@@ -86,13 +87,13 @@ it is wrong, and every card and attachment byte-for-byte and in place.
 ## Correct and publish
 
 Apply the current builder rules for fields, prose, equations, media, links, and
-flashcards. Fix only a concrete defect a builder rule names, and leave
-conforming prose as it is. Correct the erroneous claim, remove the unnecessary
-caveat or add the missing explanation, preserving essential assumptions and
-the ordinary mechanism. Never remove an accurate claim merely because the
-cited source does not state it. In each entry, change only the surfaces needed
-to keep it coherent: for example its description, opener, equation, or primary
-card. Then apply the builder's
+flashcards. Fix only a concrete defect a builder rule or a user issue names,
+and leave conforming prose as it is. Correct the erroneous claim, remove the
+unnecessary caveat or add the missing explanation, preserving essential
+assumptions and the ordinary mechanism. Never remove an accurate claim merely
+because the cited source does not state it. In each entry, change only the
+surfaces needed to keep it coherent: for example its description, opener,
+equation, or primary card. Then apply the builder's
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread)
 and principle 4's paragraph-flow test to the whole note, and to each linked
 neighbor that states the same relationship. Merge a claim now stated twice.
@@ -109,7 +110,8 @@ other statement, a corrected error, or an equation removed under the
 with its notation-only prose; a sentence giving the reason for a constant or
 factor in a display that stays is none of these.
 Preserve unrelated prose, existing source membership, `created:`,
-`parents:`, user-owned fields, and protected card attachments.
+`parents:`, user-owned fields, and protected card attachments; `issues:`
+changes only under [User issues](../SKILL.md#user-issues).
 
 **Hedges.** Keep a limit only when the plain claim is false for the ordinary
 case, and then name its condition instead of a hedge word

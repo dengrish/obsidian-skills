@@ -60,7 +60,8 @@ vault's contents. Use the ordinary entry schema, one matching tag,
 unless the user asks to remove it. Like every entry, a root cites at least
 one source: the page or document it is derived from.
 New roots use today's date for `created:` and `updated:` and set
-`read: false`; the date freeze of Tasks 1, 2 and 3 covers existing notes only.
+`read: false` and `issues: ""`; the date freeze of Tasks 1, 2 and 3 covers
+existing notes only.
 Stage a new root under its own filename and lint it with
 `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`;
 resolve every finding before publication.
@@ -83,7 +84,10 @@ Task 3 run.** Read the entries and compare siblings and candidate parents;
 scanner silence and an unchanged membership list are not evidence that the
 organization makes sense. The prior MOC is context, not the default answer.
 Fix existing conceptual defects even when no entries were added. Keep an
-already coherent structure stable rather than reorganizing for variety.
+already coherent structure stable rather than reorganizing for variety. A
+[user issue](../SKILL.md#user-issues) about an entry's placement, such as
+"wrong parent", is evidence for this review: re-derive that placement under
+the rules below, and report the result or its blocker.
 
 - Put the discipline's Wiki root at the single top-level bullet, and nowhere
   else in the tree.

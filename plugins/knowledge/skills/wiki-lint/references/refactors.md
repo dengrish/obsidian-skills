@@ -73,14 +73,26 @@ it is limited to a concept the wiki already relies on.
   A newly created split note gets today's `created:` and `updated:` dates and
   `read: false`. A retained original keeps `created:` and follows the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
-  `updated:` and `read:`.
+  `updated:` and `read:`. Each unresolved
+  [user issue](../SKILL.md#user-issues) moves verbatim to the result that now
+  holds the content it concerns. A new note that receives none gets
+  `issues: ""`; the retained original keeps the issues left with it, becomes
+  `issues: ""` once all have moved, and keeps a blank spelling it already
+  had.
 - A merge chooses one collision-free surviving identity from the evidence and
   requested scope. Preserve that entry's `created:` and user-owned appearance
   fields, integrate nonduplicate claims, union only valid source contributions
   and same-entity aliases, and apply the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
-  `updated:` and `read:`. Report conflicting user-owned metadata from an entry
-  that may be removed rather than silently selecting a value.
+  `updated:` and `read:`. Carry every merged entry's unresolved
+  [user issue](../SKILL.md#user-issues) text into the survivor's `issues:`
+  verbatim. When several entries hold text, write a block list with one item
+  per original list item or string, unless every value is a string: join
+  their texts with a space into one double-quoted string, escaping `\` and
+  `"`, so the property stays Text. When none holds text, the survivor keeps
+  its blank spelling, or gets `issues: ""` when the key is missing. Report
+  conflicting user-owned metadata from an entry that may be removed rather
+  than silently selecting a value.
 - A consolidation keeps the full treatment of an explanation, argument,
   worked example or property with its justification duplicated across
   entries in its owner: the most specific entry whose subject it is about. A
@@ -193,12 +205,14 @@ retitle also activates this protocol.
    when they find a distinct entity. Refuse an occupied or ambiguous
    portable-equivalent destination; never pick one owner by directory order.
 2. Rebuild the entry coherently under the new canonical title. Preserve its
-   `created:`, sources, review state, scheduling metadata, appearance/publish
-   properties and substantive content. A retitle alone advances `updated:`
-   and never resets `read:`. Keep the old slug as an alias only when it is
-   still a valid same-entity name. A bare cross-domain old slug never stays,
-   since the bare term is never an alias, and a proven wrong or misleading
-   name is not retained merely to make old links resolve.
+   `created:`, sources, review state, `issues:` value, scheduling metadata,
+   appearance/publish properties and substantive content. A retitle alone
+   advances `updated:` and never resets `read:`; an issue it resolves is
+   then cleared, and `read:` reset, under
+   [User issues](../SKILL.md#user-issues). Keep the old slug as an alias only
+   when it is still a valid same-entity name. A bare cross-domain old slug
+   never stays, since the bare term is never an alias, and a proven wrong or
+   misleading name is not retained merely to make old links resolve.
 3. Inventory the references to the old filename and its aliases under
    [step 3 above](#establish-evidence-and-complete-scope), whose write scope
    applies: inbound links in `Wiki/`, `MOCs/`, `parents:` and other vault
@@ -232,7 +246,8 @@ names a different entity, publishing
 retains the alias until it can be repaired. Delete the alias only after
 verifying that no ambiguous owner, inbound alias-target link or such
 mislabelled link remains. The removal advances the owner's `updated:` and
-keeps its `read:`; an otherwise unchanged entry whose only change is a
+keeps its `read:`, unless it resolves a [user issue](../SKILL.md#user-issues);
+an otherwise unchanged entry whose only change is a
 rewritten link keeps its dates and `read:` under the
 [shared date rule](../../../shared/CONVENTIONS.md#2a-wiki-entry--wikimd).
 
@@ -269,8 +284,8 @@ extracts no other topic from the evidence.
 3. Draft it under wiki-build's entry rules: its
    [writing guide](../../wiki-build/references/writing.md) and
    [Quality Checklist](../../wiki-build/SKILL.md#quality-checklist), one
-   discipline tag, one `??` definition card, `parents: []`, `read: false`, and
-   today's `created:` and `updated:`. Run wiki-build's
+   discipline tag, one `??` definition card, `parents: []`, `read: false`,
+   `issues: ""`, and today's `created:` and `updated:`. Run wiki-build's
    [overlap/ownership audit](../../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
    on the draft against the entries it links and the entries using the term.
    Stage it under its slug and resolve every

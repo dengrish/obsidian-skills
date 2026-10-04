@@ -14,9 +14,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               the file could not be decoded (it is linted
                               with replacement characters), read, or linted
   1   1-valid-yaml            frontmatter fenced by ---, parses (a key's colon
-                              is followed by a space), no dupe keys
+                              is followed by a space), no dupe keys; the
+                              issues: value's lines are left to item 2
   2   2-field-order           schema order; mandatory keys present
-                              (parents: present, `[]` when empty; read: last)
+                              (parents: present, `[]` when empty; read:
+                              then issues: last)
   2   2-obsidian-key          an Obsidian-owned appearance/publish key; info,
                               report only, preserved on merge
   2   2-provenance            a legacy skill-provenance footer that does not
@@ -26,9 +28,19 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               title/description/aliases; sources/tags/parents
                               items double-quoted;
                               type/created/updated/read never quoted;
-                              double quotes, never single
+                              double quotes, never single; issues: is user
+                              text, outside the policy
   2   2-read-state            read: holds a boolean answer; a null or unknown
                               value is report-only, never inferred as false
+  2   2-issues-missing        issues: is present; new and merged entries
+                              carry `issues: ""` after read:
+  2   2-issues-malformed      issues: is a mapping, a nested list, a list
+                              item that is a collection, a duplicate key,
+                              or a value the line parser cannot read;
+                              warning, report only, preserved
+  2   2-user-issues           issues: holds the user's issue text (a string or
+                              a list of strings); info, preserved
+                              byte-for-byte for wiki-lint
   3   3-dates                 created/updated are YYYY-MM-DD; created <= updated
   4   4-sources               sources: is a list of PDF wikilinks with positive
                               page anchors, unanchored markdown wikilinks or
@@ -242,9 +254,9 @@ state.  Its quoting is covered by ``2-quoting`` and its presence by
 ``2-field-order``.
 
 ``read: true`` is likewise NOT flagged: the value is the user's, and this
-script checks that the key is present (``2-field-order``), sits last in
-the schema (``2-field-order``), carries a boolean answer (``2-read-state``),
-and is unquoted (``2-quoting``) -- a quoted
+script checks that the key is present (``2-field-order``), sits just
+before ``issues:`` in the schema (``2-field-order``), carries a boolean
+answer (``2-read-state``), and is unquoted (``2-quoting``) -- a quoted
 ``"false"`` is a string, which Obsidian's checkbox renders as permanently
 checked.  Whether a merge should have RESET the field is not mechanisable --
 no script can see whether a body gained substance -- and a missing, null, or
@@ -253,6 +265,12 @@ user-owned state, never repaired:
 writing ``read: false``
 into an entry the user had already marked read destroys the state the field
 exists to hold.
+
+``issues:`` is the user's issue inbox (CONVENTIONS.md section 2d): a
+blank value (``""``, a bare key, ``null``, ``~``, ``''`` or ``[]``) is
+conforming, and no spelling is rewritten into another.  Issue text is the
+user's request to wiki-lint, so a builder preserves it byte-for-byte and
+never acts on, edits or clears it.
 
 A legacy ``importance:`` key (no longer in the schema; new entries omit it)
 is treated like a populated ``parents:`` -- NO finding at any severity: it is
@@ -418,8 +436,10 @@ from entry_checks import (  # noqa: E402
     sr_marker_findings,
     unenumerated_bold_findings,
 )
+from yaml_scalars import strip_comment  # noqa: E402
 from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
+    _KEY_RE,
     extract_wikilinks,
     fold_name,
     iter_markdown_files,
@@ -431,7 +451,7 @@ from vault_index import (  # noqa: E402
 __all__ = ["lint_text", "lint_file", "lint_path", "TAG_ENUM", "TYPE_ENUM"]
 
 MANDATORY_KEYS = ["title", "type", "sources", "created", "updated",
-                  "description", "tags", "parents", "read"]
+                  "description", "tags", "parents", "read", "issues"]
 OPTIONAL_KEYS = ["aliases"]
 
 # Obsidian's own appearance/publish properties are outside the wiki-entry
@@ -555,6 +575,11 @@ def _check_field_order(fm, findings):
                     "state and include it in the run report; do not invent false",
                     {"report_only": True}))
                 continue
+            if key == "issues":
+                findings.append(_f(
+                    "2-issues-missing", "error",
+                    'new and merged entries carry `issues: ""` after read:'))
+                continue
             findings.append(_f(
                 "2-field-order", "error",
                 "mandatory key %r is missing (the key is never omitted, even "
@@ -643,8 +668,15 @@ def _check_quoting(fm, findings):
         field = fm.get(key)
         if field is None:
             continue
-        for raw, line in zip(field.raw_items, field.item_lines):
+        for raw, value, line in zip(
+                field.raw_items, field.values, field.item_lines):
             style = _style_of(raw)
+            # A web source's plain URL stays a YAML string, and Obsidian's
+            # Properties editor strips its quotes on save (CONVENTIONS §2a).
+            if (key == "sources" and isinstance(value, str)
+                    and re.match(r"https?://", value)
+                    and _plain_string_allowed(value, style)):
+                continue
             if style != "double":
                 findings.append(_f(
                     "2-quoting", "error",
@@ -690,6 +722,120 @@ def _check_read(fm, findings):
         "read: has no recognizable boolean answer -- report it to the user; "
         "do not replace it with false or infer a review state",
         {"line": field.line, "raw": raw, "report_only": True}))
+
+
+_YAML_NULLS = ("null", "Null", "NULL", "~")
+_ISSUES_ITEM_RE = re.compile(r"^(?P<indent>\s*)-(?:\s|$)")
+
+
+def _issues_collection(raw):
+    """Whether one raw ``issues:`` value or item is itself a collection.
+
+    A flow ``[...]`` or ``{...}``, a nested ``- item`` or a plain ``key: value``
+    is a sequence or mapping to YAML, not a string; quoted text never is.
+    """
+    text = strip_comment(raw or "").strip()
+    return bool(text) and (
+        text[0] in "[{" or bool(re.match(r"-(?:[ \t]|$)", text))
+        or (text[0] not in "\"'" and bool(re.search(r":(?:[ \t]|$)", text))))
+
+
+def _issues_value(fm, lines):
+    """Classify ``issues:`` as ``(state, form, texts)``.
+
+    ``state`` is ``missing``, ``blank``, ``user`` or ``malformed``; ``form``
+    is ``string`` or ``list`` for user text, else None.  Every blank spelling
+    (``""``, a bare key, ``null``, ``~``, ``''``, ``[]``) is ``blank``.  A
+    value this line parser cannot read is ``malformed``, as in scan_vault.
+    """
+    field = fm.get("issues")
+    if field is None:
+        return "missing", None, []
+    spans = _issues_spans(fm, lines)
+    if len(spans) != 1:
+        return "malformed", None, []        # a duplicate issues: key
+    indents = []
+    for line in lines[spans[0][0] + 1:spans[0][1]]:
+        if not line.strip() or line.lstrip().startswith("#"):
+            continue
+        item = _ISSUES_ITEM_RE.match(line)
+        if not item:
+            # A block mapping, a block scalar's body, a wrapped scalar or
+            # stray text: never guess the user's text from it.
+            return "malformed", None, []
+        indents.append(len(item.group("indent")))
+    if len(set(indents)) > 1 or (indents and field.kind != "block_list"):
+        return "malformed", None, []        # a nested list, or a value then items
+    if field.kind == "blank":
+        return "blank", None, []
+    if field.kind == "scalar" and field.raw_value.startswith("{"):
+        return "malformed", None, []        # a flow mapping
+    if field.kind == "flow_list" and field.raw_value[1:-1].strip() \
+            and not field.raw_items:
+        return "malformed", None, []        # an unreadable flow list
+    if field.is_list and any(_issues_collection(raw) for raw in field.raw_items):
+        return "malformed", None, []
+    texts = []
+    for raw, value in zip(field.raw_items, field.values):
+        if value is None:
+            if strip_comment(raw).strip() not in _YAML_NULLS:
+                return "malformed", None, []    # unreadable: report, never guess
+            continue
+        if value.strip():
+            texts.append(value)
+    if not texts:
+        return "blank", None, []
+    return "user", "list" if field.is_list else "string", texts
+
+
+def _issues_spans(fm, lines):
+    """``(key, end)`` 0-based line spans owned by each ``issues:`` key.
+
+    A span runs from the key line to the line before the next column-0 key
+    or the closing fence, as in scan_vault's ``issues_spans``.
+    """
+    close = fm.body_start_line - 2          # the closing fence, 0-based
+    keys = [i for i in range(1, close) if _KEY_RE.match(lines[i])]
+    return [(i, (keys[k + 1:] or [close])[0]) for k, i in enumerate(keys)
+            if _KEY_RE.match(lines[i]).group("key") == "issues"]
+
+
+def _drop_issues_errors(fm, lines):
+    """Leave the ``issues:`` value's lines to item 2, as scan_vault does.
+
+    ``2-issues-malformed`` or ``2-user-issues`` is the only finding on them:
+    their parser errors are neither ``1-valid-yaml`` findings, which a
+    builder would repair by re-quoting the user's text, nor an unreadable
+    line that voids a discipline root.
+    """
+    if not fm.found:
+        return
+    owned = {str(i + 1) for start, end in _issues_spans(fm, lines)
+             for i in range(start, end)}
+
+    def on_issues(error):
+        hit = re.match(r"line (\d+): ", error)
+        return bool(hit) and hit.group(1) in owned
+    fm.errors[:] = [error for error in fm.errors if not on_issues(error)]
+
+
+def _check_issues(fm, lines, findings):
+    """The user's issue inbox: report its text, never judge or quote it."""
+    state, form, texts = _issues_value(fm, lines)
+    field = fm.get("issues")
+    if state == "malformed":
+        findings.append(_f(
+            "2-issues-malformed", "warning",
+            "issues: is a mapping, a nested list, a list item that is a "
+            "collection, a duplicate key, or a value the line parser cannot "
+            "read -- REPORT ONLY; preserve the user's text exactly",
+            {"line": field.line, "report_only": True}))
+    elif state == "user":
+        findings.append(_f(
+            "2-user-issues", "info",
+            "the user's issues stay for wiki-lint; preserve them byte-for-byte",
+            {"line": field.line, "form": form, "issues": texts,
+             "report_only": True}))
 
 
 def _check_sources(fm, findings):
@@ -2288,6 +2434,8 @@ def lint_text(text, filename):
         findings.append(_f("2-provenance", "error",
                            "invalid skill provenance: %s" % exc))
     fm = parse_frontmatter(text)
+    lines = text.split("\n")
+    _drop_issues_errors(fm, lines)
     if not _check_structure(fm, findings):
         return result
 
@@ -2303,6 +2451,7 @@ def lint_text(text, filename):
     _check_type(fm, findings)
     _check_quoting(fm, findings)
     _check_read(fm, findings)
+    _check_issues(fm, lines, findings)
     _check_dates(fm, findings)
     _check_sources(fm, findings)
     _check_source_duplicates(fm, findings)
@@ -2851,6 +3000,7 @@ def _st_good():
         '  - "#statistics"\n'
         'parents: []\n'
         'read: false\n'
+        'issues: ""\n'
         '---\n'
         'A **ROC curve** plots the trade-off between two error rates as a '
         'decision threshold moves.\n'
@@ -2883,6 +3033,7 @@ def _st_precision():
         '  - "#statistics"\n'
         'parents: []\n'
         'read: false\n'
+        'issues: ""\n'
         '---\n'
         '**Precision** is the share of predicted positives that are correct.\n'
         '\n**Related:**\n\n---\n\n## Flashcards\n\n'
@@ -2905,6 +3056,7 @@ def _st_decision_threshold():
         '  - "#statistics"\n'
         'parents: []\n'
         'read: false\n'
+        'issues: ""\n'
         '---\n'
         'A **decision threshold** is the score cutoff that separates predicted '
         'classes.\n'
@@ -2929,6 +3081,7 @@ def _st_label():
         '  - "#statistics"\n'
         'parents: []\n'
         'read: false\n'
+        'issues: ""\n'
         '---\n'
         'A **label** is the answer a supervised model learns to predict. The '
         'word *target* is a near-synonym.\n'
@@ -3266,9 +3419,12 @@ def run_self_test():
                   "[[https://example.org/roc]]"):
         check("a wrapped or non-http address is not a URL source: %s" % value,
               items(mutate("[[Doe_X_2025.pdf#page=2]]", value)), ["4-sources"])
-    check("an unquoted URL item is a quoting fault, not a source-form fault",
+    check("an unquoted URL source is conforming after an Obsidian Properties edit",
           items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"',
-                       "  - https://example.org/a")), ["2-quoting"])
+                       "  - https://example.org/a")), [])
+    check("an unquoted vault-link source is still a quoting fault",
+          "2-quoting" in items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"',
+                                      "  - Doe_X_2025.pdf")), True)
     check("a source scalar is not a sources list",
           items(mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"',
                        'sources: "[[Doe_X_2025.pdf#page=2]]"')), ["4-sources"])
@@ -3282,6 +3438,70 @@ def run_self_test():
         check("known read answer may be re-spelled: %s" % raw,
               [(f["item"], f["evidence"].get("report_only")) for f in result["findings"]],
               [("2-read-state", False)])
+
+    # -- item 2: the user's issue inbox (CONVENTIONS.md section 2d) --------
+    check("every blank issues: spelling is conforming and left as written",
+          [items(mutate('issues: ""', "issues:" + raw))
+           for raw in ("", " ''", " null", " ~", " []")], [[]] * 5)
+    check("a missing issues: key is an error naming the canonical blank",
+          [(f["item"], f["severity"], f["message"])
+           for f in lint_text(mutate('issues: ""\n', ""),
+                              "roc-curve.md")["findings"]],
+          [("2-issues-missing", "error",
+            'new and merged entries carry `issues: ""` after read:')])
+    check("issues: is the last schema key",
+          items(mutate('read: false\nissues: ""\n',
+                       'issues: ""\nread: false\n')), ["2-field-order"])
+    check("the user's issue text is reported for wiki-lint, never quoted "
+          "or judged",
+          [[(f["item"], f["severity"], f["evidence"]["form"],
+             f["evidence"]["issues"], f["evidence"]["report_only"])
+            for f in lint_text(mutate('issues: ""', "issues:" + raw),
+                               "roc-curve.md")["findings"]]
+           for raw in (" The card is vague.", ' "Add an example."',
+                       '\n  - "The card is vague."\n  - Add an example.')],
+          [[("2-user-issues", "info", "string", ["The card is vague."], True)],
+           [("2-user-issues", "info", "string", ["Add an example."], True)],
+           [("2-user-issues", "info", "list",
+             ["The card is vague.", "Add an example."], True)]])
+    check("a mapping, a nested list or a collection item is a report-only "
+          "warning",
+          [[(f["item"], f["severity"], f["evidence"]["report_only"])
+            for f in lint_text(mutate('issues: ""', "issues:" + raw),
+                               "roc-curve.md")["findings"]
+            if f["item"].startswith("2-")]
+           for raw in (" {card: vague}", "\n  card: vague",
+                       "\n  -\n    - vague", "\n  - [vague]",
+                       "\n  - card: vague")],
+          [[("2-issues-malformed", "warning", True)]] * 5)
+    check("an issues: value the line parser cannot read is malformed, "
+          "never guessed",
+          [[f["item"] for f in lint_text(mutate('issues: ""', "issues:" + raw),
+                                         "roc-curve.md")["findings"]
+            if f["item"].startswith("2-")]
+           for raw in (" |\n  x", ' "a\n  b"', "\n  Fix it", " x\n  - y",
+                       " [a]\n  - y", " [a,, b]", " Note: x",
+                       "\n  - Fix it\n    and more")],
+          [["2-issues-malformed"]] * 8)
+    check("a null list item is skipped, not read as an issue",
+          [f["evidence"]["issues"]
+           for f in lint_text(mutate('issues: ""',
+                                     'issues:\n  -\n  - "Fix card"'),
+                              "roc-curve.md")["findings"]
+           if f["item"] == "2-user-issues"], [["Fix card"]])
+    check("the user's issues: lines carry only their item-2 finding; a "
+          "title parse error stays",
+          [[f["item"] for f in lint_text(
+              mutate('issues: ""', "issues:" + raw, base),
+              "roc-curve.md")["findings"]
+            if f["item"].startswith(("1-", "2-issues", "2-user"))]
+           for raw, base in ((" |\n  x", None), ("\n- Fix card", None),
+                             (' ""\nissues: x', None),
+                             (" The card is vague.\nAlso the opener.", None),
+                             (' ""', mutate('title: "ROC curve"',
+                                            'title: "ROC curve')))],
+          [["2-issues-malformed"], ["2-user-issues"], ["2-issues-malformed"],
+           ["2-issues-malformed"], ["1-valid-yaml"]])
 
     # -- item 1: valid YAML ------------------------------------------------
     check("no frontmatter at all", items("just prose\n"), ["1-valid-yaml"])
@@ -4263,6 +4483,7 @@ def run_self_test():
         '  - "#statistics"\n'
         'parents: []\n'
         'read: false\n'
+        'issues: ""\n'
         '---\n'
         '**Statistics** is the study of collecting, analyzing and '
         'interpreting data.\n'
@@ -4290,6 +4511,9 @@ def run_self_test():
           "19-flashcards" in items(
               stats_root.replace("read: false\n", "read: false\nstray prose\n"),
               "statistics.md"), True)
+    check("the user's issues: lines never void the root, as in the scanner",
+          items(stats_root.replace('issues: ""', 'issues: |\n  Fix the opener.'),
+                "statistics.md"), ["2-issues-malformed"])
     check("a root with an empty Flashcards section has no card-count finding",
           items(stats_root + "\n---\n\n## Flashcards\n", "statistics.md"),
           [])
@@ -4355,8 +4579,8 @@ def run_self_test():
 
     # -- item 9: structure plus semantic body review -----------------------
     check("the body starts immediately after frontmatter",
-          items(mutate("read: false\n---\nA **ROC curve**",
-                       "read: false\n---\n\nA **ROC curve**")),
+          items(mutate('issues: ""\n---\nA **ROC curve**',
+                       'issues: ""\n---\n\nA **ROC curve**')),
           ["9-body-structure"])
     opener_sentence = ("A **ROC curve** plots the trade-off between two error "
                        "rates as a decision threshold moves.\n\n")

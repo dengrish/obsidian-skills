@@ -791,7 +791,8 @@ def _st_entry(title, description, card, aliases=(), body="", related=""):
         'sources:', '  - "[[Doe_X_2025.pdf#page=2]]"',
         'created: 2026-01-01', 'updated: 2026-01-02',
         'description: "%s"' % description,
-        'tags:', '  - "#statistics"', 'parents: []', 'read: false', '---',
+        'tags:', '  - "#statistics"', 'parents: []', 'read: false',
+        'issues: ""', '---',
         opener + "." + body, '', '**Related:**' + related, '', '---', '',
         '## Flashcards', '', card, '??', title, '']
     return "\n".join(lines)

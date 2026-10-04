@@ -147,9 +147,9 @@ they verifiably state. It uses the symbols of the builder's
 and outside the table the symbols they state; a sibling that departs from the
 table is never a model to copy and becomes a note-content proposal for
 closeout. Draft complete bytes privately under the
-canonical title's reported slug, with today's creation/update dates and
-`read: false`. When the collision decision settles that slug, snapshot
-`Wiki/<slug>.md` with the builder's [step-3 command](../wiki-build/SKILL.md#3-resolve-against-existing-entries),
+canonical title's reported slug, with today's creation/update dates,
+`read: false` and then `issues: ""`. When the collision decision settles
+that slug, snapshot `Wiki/<slug>.md` with the builder's [step-3 command](../wiki-build/SKILL.md#3-resolve-against-existing-entries),
 which must record it absent (otherwise redo the collision decision), and list
 the draft in the builder's [manifest format](../wiki-build/SKILL.md#scope-and-files).
 Give each request fresh files, such as `<scratch>/snapshots-<n>.json` and

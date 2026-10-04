@@ -105,6 +105,10 @@ On creation write `parents: []`, never bare `parents:` (YAML null). Wiki-lint la
 
 Write bare `read: false` on creation; the user checks it after reading. Apply [CONVENTIONS §2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) to its type and ownership: missing, null or unknown existing state stays unchanged and is reported, never inferred. A known value resets only under the [unread-body-content test](merge.md#the-read-reset), independently of `updated:`. A recognizable misspelled boolean can be normalized without changing its meaning.
 
+### issues
+
+Write `issues: ""` directly after `read:` on creation. The field is the user's issue inbox under [CONVENTIONS §2d](../../../shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox): the user describes problems there, and wiki-lint fixes them. Its value is user text, outside the quoting policy below; a merge follows [merge rule 9](merge.md#frontmatter-and-related-footer), and a builder never acts on, edits or clears a non-blank value.
+
 ### Quoting policy
 
 Apply [CONVENTIONS §2](../../../shared/CONVENTIONS.md#2-frontmatter-schemas): double-quote newly written title, description and alias strings and every source, tag and parent item; keep type, dates and booleans bare. Preserve unchanged safe plain values rather than requoting them. Escape literal quotes and YAML backslashes, including the [mathematical-title case](special-titles.md#base-term-and-mathematical-plain-forms).
@@ -300,6 +304,7 @@ tags:
   - "#machine-learning"
 parents: []
 read: false
+issues: ""
 ---
 **LambdaRank** is a [[learning-to-rank|learning to rank]] method that sidesteps the non-differentiability of ranking metrics by defining gradients directly, scaled by the change in the target metric from swapping a pair of items.
 

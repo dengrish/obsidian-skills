@@ -4,7 +4,8 @@
 Parses every `Wiki/**/*.md` entry once (recursively, like wiki-build's
 vault_index.py) and emits a single JSON object: the vault inventory, the
 deterministic QC violations ("problems"), and the worklists the executing agent must
-judge — collision candidates (item-5 probes), rename candidates, backfill
+judge — the user's flagged issues (`user_issues`, the run's first worklist),
+collision candidates (item-5 probes), rename candidates, backfill
 candidates and hub footer items (Task 2), and card rivals (item 19) — plus the
 Task 3 hierarchy diagnostic. Outside `Wiki/` it reads the MOCs, for the
 advisory `spaced_repetition` report the Spaced Repetition plugin's settings
@@ -652,6 +653,154 @@ def has_block_items(fm_raw, key):
     return False
 
 
+#: A ``|`` or ``>`` block-scalar header with its optional indicators.
+_ISSUES_BLOCK = re.compile(r"[|>](?:[1-9][+-]?|[+-][1-9]?)?")
+#: An indented ``key:`` line, which starts a mapping under ``issues:``.
+_ISSUES_KEY_LINE = re.compile(r"^\s+[^\s#\"'][^:]*:(?:\s|$)")
+#: Malformed ``issues:`` shapes that are not YAML at all.
+ISSUES_NOT_YAML = ("an unreadable value", "an unreadable flow list",
+                   "a value followed by list items")
+
+
+class _IssuesShape(ValueError):
+    """A malformed ``issues:`` value; ``str(exc)`` names its shape."""
+
+
+def issues_spans(fm_raw):
+    """``(start, end)`` frontmatter line spans owned by each ``issues:`` key.
+
+    A span runs from the key line to the line before the next key, so it
+    holds every continuation, list item, comment or stray line the value
+    could own.  These lines are the user's text: the scanner keeps them out of
+    the generic item-1 checks and reports a bad value only as
+    `item2/issues-malformed`.
+    """
+    lines = fm_raw.split("\n")
+    keys = [i for i, line in enumerate(lines) if FM_KEY.match(line)]
+    return [(i, (keys[k + 1:] or [len(lines)])[0])
+            for k, i in enumerate(keys)
+            if FM_KEY.match(lines[i]).group(1) == "issues"]
+
+
+def _issues_text(raw, more):
+    """One string written on one line as ``raw``; ``more`` holds the lines under it.
+
+    Obsidian's Text property is one line (CONVENTIONS.md §2d): a ``|`` or
+    ``>`` block scalar, a value that starts on the line after its key or
+    dash, and a string continued on another line are malformed, as in
+    wiki-build's draft linter.  Returns the value (``None`` for null);
+    raises ValueError for a collection or text that is not one-line YAML.
+    """
+    rest = [line for line in more
+            if line.strip() and not line.lstrip().startswith("#")]
+    if any(not line[:1].isspace() for line in rest):
+        raise ValueError("unindented text under issues:")
+    if _ISSUES_BLOCK.fullmatch(raw):
+        raise _IssuesShape("a block scalar")
+    if rest:
+        raise _IssuesShape("a string continued on another line" if raw
+                           else "a value on the line after its key")
+    if raw[:1] in ("[", "{"):
+        raise ValueError("a collection")
+    return parse_scalar(raw)[0]
+
+
+def _issues_list(more):
+    """The values of a block list under ``issues:``, one per item."""
+    entries, dash = [], None
+    for line in more:
+        indent = len(line) - len(line.lstrip())
+        if line.strip() and (dash is None or indent <= dash):
+            if line.lstrip().startswith("#"):
+                continue
+            match = FM_ITEM.match(line)
+            if not match or dash not in (None, indent):
+                raise _IssuesShape("an unreadable value")
+            dash = indent
+            entries.append((strip_comment(match.group(1) or "").strip(), []))
+        elif entries:
+            entries[-1][1].append(line)
+    values = []
+    for raw, lines in entries:
+        rest = [line for line in lines
+                if line.strip() and not line.lstrip().startswith("#")]
+        if not raw and rest and FM_ITEM.match(rest[0]):
+            raise _IssuesShape("a nested list")
+        try:
+            values.append(_issues_text(raw, lines))
+        except ValueError:
+            raise _IssuesShape("a list item that is not one string") from None
+    return values
+
+
+def issues_value(fm_raw):
+    """Classify the user's `issues:` inbox (CONVENTIONS.md §2d).
+
+    Returns ``(state, form, items, detail)``.  ``state`` is ``missing``,
+    ``blank`` (bare, null, ``~``, a blank quoted string, ``[]``, or a list
+    whose items are all blank or null), ``issues`` or ``malformed``.  For
+    ``issues``, ``form`` is ``string`` (one plain or quoted line) or ``list``
+    (block or one-line flow form) and ``items`` holds the decoded texts: the
+    whole string, or one per non-blank list item.  A block scalar and a value
+    continued on another line are ``malformed``, as in wiki-build's draft
+    linter.  For ``malformed``,
+    ``detail`` names the shape; ``ISSUES_NOT_YAML`` lists those that are not
+    YAML at all.  Nothing here rewrites a value.
+    """
+    spans = issues_spans(fm_raw)
+    if not spans:
+        return "missing", None, [], ""
+    if len(spans) > 1:
+        return "malformed", None, [], "a duplicate issues: key"
+    lines = fm_raw.split("\n")
+    start, end = spans[0]
+    raw = strip_comment(FM_KEY.match(lines[start]).group(2)).strip()
+    more = lines[start + 1:end]
+
+    def _body():
+        return [line for line in more
+                if line.strip() and not line.lstrip().startswith("#")]
+    body, form = _body(), "list"
+    try:
+        if not raw and body and FM_ITEM.match(body[0]):
+            values = _issues_list(more)
+        elif not raw and body and _ISSUES_KEY_LINE.match(body[0]):
+            raise _IssuesShape("a mapping")
+        elif _ISSUES_BLOCK.fullmatch(raw):
+            raise _IssuesShape("a block scalar")
+        elif raw.startswith("{"):
+            raise _IssuesShape("a mapping")
+        elif raw and any(FM_ITEM.match(line) for line in body):
+            raise _IssuesShape("a value followed by list items")
+        else:
+            if raw.startswith("["):
+                if body:
+                    raise _IssuesShape("a flow list continued on another line")
+                try:
+                    if not raw.endswith("]"):
+                        raise ValueError("an unclosed flow list")
+                    texts = split_flow(raw[1:-1])
+                except ValueError:
+                    raise _IssuesShape("an unreadable flow list") from None
+                try:
+                    values = [parse_scalar(text)[0] for text in texts]
+                except ValueError:
+                    raise _IssuesShape(
+                        "a list item that is not one string") from None
+            else:
+                form, values = "string", [_issues_text(raw, more)]
+    except _IssuesShape as exc:
+        return "malformed", None, [], str(exc)
+    except ValueError:
+        return "malformed", None, [], (
+            "a value followed by list items"
+            if any(FM_ITEM.match(line) for line in body)
+            else "an unreadable value")
+    items = [value for value in values
+             if isinstance(value, str) and value.strip()]
+    return ("issues", form, items, "") if items else ("blank", None, [], "")
+
+
 def parse_fm(fm, bad=None):
     """Frontmatter -> {key: str | [str]}.
 
@@ -784,7 +933,7 @@ def regions(body):
 # nothing flags it. It stays in CANON so a legacy entry carrying it in its historical slot is not
 # reported as an "unexpected frontmatter key" or as out of schema order; it is deliberately absent
 # from the required-key checks and from the never-quoted list below.
-CANON = ["title","type","aliases","sources","created","updated","description","tags","importance","parents","read"]
+CANON = ["title","type","aliases","sources","created","updated","description","tags","importance","parents","read","issues"]
 
 #: The keys that must be PRESENT on every entry — CANON minus
 #: the one optional key (`aliases`) and the retired one (`importance`).  This
@@ -882,6 +1031,18 @@ def _record_is_discipline_root(slug_value, record):
 #: stacked-merge scar) is still a plain `item2`.
 OBSIDIAN_KEYS = {"cssclasses", "cssclass", "publish", "permalink", "cover",
                  "image", "banner", "icon"}
+
+
+def _plain_item_allowed(key, value):
+    """List items that may stay plain: aliases, and a web source's URL.
+
+    Obsidian's Properties editor strips the quotes from both on every save,
+    while a vault link under sources, a tag or a parent keeps them (they are
+    load-bearing there), so re-quoting the URL would churn on every review.
+    """
+    return key == "aliases" or (
+        key == "sources" and isinstance(value, str)
+        and re.match(r"https?://", value) is not None)
 
 
 def plain_string_allowed(value, style):
@@ -2326,11 +2487,20 @@ def scan(wiki, images=None, vault=None, settled=None):
         for _message in _frontmatter_boundary_bad:
             problems.append((sl, "item1", _message))
         _fm_bad = []
-        fm = parse_fm(fm_raw, _fm_bad)
+        # The issues: lines are the user's text: item2/issues-malformed is
+        # their only finding, so they never become fixable item-1 rows or an
+        # alias-inventory gap.
+        _issues_owned = {i for _start, _end in issues_spans(fm_raw)
+                         for i in range(_start, _end)}
+        fm = parse_fm("\n".join("" if i in _issues_owned else line
+                                for i, line in enumerate(fm_raw.split("\n"))),
+                      _fm_bad)
         for _ln in _fm_bad:
             problems.append((sl,"item1",
                              f"unparseable frontmatter line: {_ln.strip()[:60]!r}"))
         for _line_no, _line in enumerate(fm_raw.split("\n"), 2):
+            if _line_no - 2 in _issues_owned:
+                continue
             _list_match = re.match(r"^([ \t]*)-", _line)
             if _list_match and _list_match.group(1) != "  ":
                 problems.append((
@@ -2406,6 +2576,7 @@ def scan(wiki, images=None, vault=None, settled=None):
         parents_spelling = raw_scalar(fm_raw, "parents")
         parents_is_list = isinstance(fm.get("parents"), list)
         parents_all = list(fm.get("parents", [])) if parents_is_list else []
+        issues_state = issues_value(fm_raw)
         record = dict(slug=sl, title=title, aliases=aliases,
                       aliases_complete=aliases_complete,
                       aliases_all=aliases_all,
@@ -2423,6 +2594,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                       parents_present=parents_present,
                       parents_is_list=parents_is_list,
                       parents_spelling=parents_spelling,
+                      issues_state=issues_state,
                       key_order=key_order, fm_raw=fm_raw,
                       flash_off=flash_off, flash_head=flash_head,
                       has_flashcards=(flash_off != -1),
@@ -2788,6 +2960,7 @@ def scan(wiki, images=None, vault=None, settled=None):
     _footer_owners = defaultdict(set)   # slug -> entries its Related footer links
     _footer_links = {}                  # slug -> wikilinks in its Related footer
     _primary_cues = {}                  # slug -> line 1 of its primary card
+    user_issues = []                    # entries whose issues: is non-blank
 
     def _unique_slug(slug_value):
         return slug_value in entries and fold_name(slug_value) not in ambiguous_files
@@ -2834,7 +3007,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                                  f'the lint run still completes'))
                 continue
             problems.append((sl,"item2",f'unexpected frontmatter key "{k}" — preserve this user metadata; do not delete or repurpose it from a schema mismatch alone'))
-        if len(e["key_order"]) != len(set(e["key_order"])):
+        # A duplicate issues: key is the report-only issues-malformed below.
+        _other_keys = [k for k in e["key_order"] if k != "issues"]
+        if len(_other_keys) != len(set(_other_keys)):
             problems.append((sl,"item2","duplicate frontmatter key (stacked-body artifact?)"))
         # Every MANDATORY key must be PRESENT, whatever its value — a missing
         # KEY and a missing VALUE are two findings and both are real (item 7
@@ -2845,10 +3020,10 @@ def scan(wiki, images=None, vault=None, settled=None):
         # whole contribution to the surface and display-label maps — so the
         # entry came back from a whole-vault QC pass with nothing at all
         # against it, while a single-file lint_entry run on it reported two.
-        # `tags` and `read` keep their own messages below; a missing `read:`
-        # is report-only.
+        # `tags`, `read` and `issues` keep their own messages below; a
+        # missing `read:` is report-only.
         for _k in MANDATORY_KEYS:
-            if _k in e["key_order"] or _k in ("tags", "read", "title"):
+            if _k in e["key_order"] or _k in ("tags", "read", "title", "issues"):
                 continue
             problems.append((sl,"item2",f"missing {_k}: key"))
         # A `title:` KEY with no scalar value (bare, null, or a list) is the
@@ -2921,6 +3096,31 @@ def scan(wiki, images=None, vault=None, settled=None):
                              'string in a checkbox property as permanently checked; `yes`/`no` '
                              'and `0`/`1` are the same field written in the wrong spelling. '
                              'Fix the spelling, keep the value' % _read_raw))
+        # issues: — the user's issue inbox (CONVENTIONS.md §2d).  A missing
+        # key is a format repair; a malformed value is the user's own text,
+        # so it is reported and never rewritten.  Every blank spelling
+        # conforms, and a non-blank value is a `user_issues` worklist row.
+        _issues_state, _issues_form, _issues_items, _issues_detail = \
+            e["issues_state"]
+        if _issues_state == "missing":
+            problems.append((sl,"item2/issues-missing",
+                             "missing issues: key — the user's issue inbox. Insert "
+                             '`issues: ""` directly after read:, keeping dates and read:'))
+        elif _issues_state == "malformed":
+            problems.append((sl,"item2/issues-malformed",
+                             "issues: holds %s, not a string or a list of strings — "
+                             "REPORT ONLY, DO NOT FIX. It is the user's own text: preserve "
+                             "it byte-for-byte and report it so the user can rewrite it%s"
+                             % (_issues_detail,
+                                ". Obsidian cannot read this note's properties until "
+                                "the user rewrites it"
+                                if _issues_detail in ISSUES_NOT_YAML else "")))
+        elif _issues_state == "issues":
+            _user_issue = {"slug": sl, "form": _issues_form,
+                           "issues": list(_issues_items)}
+            if fold_name(sl) in ambiguous_files:
+                _user_issue["path"] = e["path_key"]
+            user_issues.append(_user_issue)
         # parents: — a bare key is YAML null, not an empty list.  The vault pins
         # the property as `multitext` (.obsidian/types.json), so null renders as
         # an empty TEXT field: the declared type and the value on disk disagree.
@@ -3054,8 +3254,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                             except ValueError:
                                 _iv_value = None
                             if (_iv_style != "double"
-                                    and not (k == "aliases" and plain_string_allowed(
-                                        _iv_value, _iv_style))):
+                                    and not (_plain_item_allowed(k, _iv_value)
+                                             and plain_string_allowed(
+                                                 _iv_value, _iv_style))):
                                 problems.append((sl,"item2",f'{k} item not double-quoted: {iv[:30]}'))
                     else:
                         cur = k
@@ -3072,8 +3273,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                     except ValueError:
                         _iv_value = None
                     if (iv and _iv_style != "double"
-                            and not (cur == "aliases" and plain_string_allowed(
-                                _iv_value, _iv_style))):
+                            and not (_plain_item_allowed(cur, _iv_value)
+                                     and plain_string_allowed(
+                                         _iv_value, _iv_style))):
                         problems.append((sl,"item2",f'{cur} item not double-quoted: {iv[:30]}'))
         # ---- item 3: dates ----
         for f in ("created","updated"):
@@ -5297,6 +5499,10 @@ def scan(wiki, images=None, vault=None, settled=None):
         "problems": [_public_problem(row) for row in sorted(
             problems, key=lambda row: (row[0], row[1], row[3], row[2]))],
         "problem_tally": tally_out,
+        # Step 0's user-issue worklist: each entry whose issues: is non-blank,
+        # its form ("string" or "list") and its decoded issue texts.
+        "user_issues": sorted(user_issues,
+                              key=lambda row: (row["slug"], row.get("path", ""))),
         "collision_candidates": [{"a": a, "b": b, "probe": p, "detail": d}
                                  for a,b,p,d in sorted(collisions2)],
         "rename_candidates": [{"slug": s, "new_slug": n, "inbound_links": c, "target_exists": x}
@@ -5391,7 +5597,7 @@ def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
     text += _block("tags", tags)
     text += extra_keys
     text += _block("parents", parents)
-    text += "read: false\n"
+    text += 'read: false\nissues: ""\n'
     body = prose
     # A clean entry fixture carries the required terminal footer even
     # when it has no related links. Pass ``related=False`` only when a test
@@ -8315,11 +8521,11 @@ def run_self_test():
         _st_write(v, "four-dash.md",
                   _st_entry("Four dash", "**Four dash** is a worked example.",
                             card=False)
-                  .replace("read: false\n---\n", "read: false\n----\n", 1))
+                  .replace('issues: ""\n---\n', 'issues: ""\n----\n', 1))
         _st_write(v, "fence-text.md",
                   _st_entry("Fence text", "**Fence text** is a worked example.",
                             card=False)
-                  .replace("read: false\n---\n", "read: false\n--- closed\n", 1))
+                  .replace('issues: ""\n---\n', 'issues: ""\n--- closed\n', 1))
         # (b) a fenced listing SHOWING section markers is not the section: the
         #     Related line and Flashcards heading inside the fence are samples,
         #     and the real prose past the fence is still scanned (the dangling
@@ -8545,9 +8751,8 @@ def run_self_test():
                    _st_msg(res, "web-reject-%d" % i, "item4").endswith(
                        "are invalid: " + source)),
                   (["item4"], True))
-        check("an unquoted URL item is an item2 quoting finding, not item4",
-              (_st_keys(res, "web-bare"), _st_msg(res, "web-bare", "item2")),
-              (["item2"], "sources item not double-quoted: https://example.org/a"))
+        check("an unquoted URL source is conforming: Obsidian strips its quotes",
+              _st_keys(res, "web-bare"), [])
         check("unknown review states route report-only, never read-type",
               [sorted(k for k in _st_keys(res, "unknown-%d" % i) if k.startswith("item2/read"))
                for i in range(4)], [["item2/read-unknown"]] * 4)
@@ -8800,6 +9005,185 @@ def run_self_test():
               "share or its denominator",
               [(p["entries"], p["pct_of_entries"]) for p in res["problem_tally"]
                if p["item"] == "item1"], [(1, 0.0)])
+
+        # issues: — the user's issue inbox.  Every blank spelling conforms;
+        # a string or a list of strings is a user_issues row; anything else is
+        # report-only; a missing key is a format repair.
+        v = os.path.join(tmp, "v18c-issues")
+        _issue_values = {
+            "issues-canonical": 'issues: ""\n',
+            "issues-bare": "issues:\n",
+            "issues-null": "issues: null\n",
+            "issues-tilde": "issues: ~\n",
+            "issues-single": "issues: ''\n",
+            "issues-flow": "issues: []\n",
+            "issues-string": 'issues: "The opener repeats the title: rewrite it."\n',
+            "issues-plain": "issues: Explain variance more simply\n",
+            "issues-list": 'issues:\n  - "Add an example."\n  - Wrong parent\n',
+            "issues-mapping": "issues:\n  note: fix it\n",
+            "issues-flow-mapping": "issues: {note: fix it}\n",
+            "issues-nested": "issues:\n  -\n    - Wrong parent\n",
+            "issues-collection": "issues:\n  - [Add an example, Wrong parent]\n",
+            "issues-missing": "",
+        }
+        for _name, _value in _issue_values.items():
+            _st_write(v, _name + ".md", _st_entry(
+                _name.replace("-", " ").capitalize(),
+                "**%s** is a worked example." % _name.replace("-", " ").capitalize())
+                .replace('issues: ""\n', _value))
+        _st_write(v, "sub-a/zeta-issue.md", _st_entry(
+            "Zeta issue", "**Zeta issue** is a worked example.")
+            .replace('issues: ""\n', 'issues: "Wrong parent"\n'))
+        _st_write(v, "sub-b/alpha-issue.md", _st_entry(
+            "Alpha issue", "**Alpha issue** is a worked example.")
+            .replace('issues: ""\n', 'issues: "Add an example"\n'))
+        _st_write(v, "issues-first.md", _st_entry(
+            "Issues first", "**Issues first** is a worked example.")
+            .replace('read: false\nissues: ""\n', 'issues: ""\nread: false\n'))
+        res = scan(v)
+        _blank_issue_slugs = ("issues-canonical", "issues-bare", "issues-null",
+                              "issues-tilde", "issues-single", "issues-flow")
+        check("every blank issues: spelling is a clean entry",
+              [_st_keys(res, slug_) for slug_ in _blank_issue_slugs],
+              [[]] * len(_blank_issue_slugs))
+        check("a string or list issues: value is user text, never an item2 "
+              "quoting finding",
+              [_st_keys(res, slug_) for slug_ in
+               ("issues-string", "issues-plain", "issues-list")],
+              [[], [], []])
+        check("user_issues lists each non-blank entry's form and decoded "
+              "issues, sorted by slug",
+              res["user_issues"],
+              [{"slug": "alpha-issue", "form": "string",
+                "issues": ["Add an example"]},
+               {"slug": "issues-list", "form": "list",
+                "issues": ["Add an example.", "Wrong parent"]},
+               {"slug": "issues-plain", "form": "string",
+                "issues": ["Explain variance more simply"]},
+               {"slug": "issues-string", "form": "string",
+                "issues": ["The opener repeats the title: rewrite it."]},
+               {"slug": "zeta-issue", "form": "string",
+                "issues": ["Wrong parent"]}])
+        _malformed_issue_slugs = ("issues-mapping", "issues-flow-mapping",
+                                  "issues-nested", "issues-collection")
+        check("a mapping, a nested list or a collection item in issues: is "
+              "report-only issues-malformed, its only finding, and never a "
+              "user_issues row",
+              [(_st_keys(res, slug_),
+                "REPORT ONLY" in _st_msg(res, slug_, "item2/issues-malformed"),
+                slug_ in [row["slug"] for row in res["user_issues"]])
+               for slug_ in _malformed_issue_slugs],
+              [(["item2/issues-malformed"], True, False)]
+              * len(_malformed_issue_slugs))
+        check("issues-malformed names the shape it found",
+              [_st_msg(res, slug_, "item2/issues-malformed").split(",")[0]
+               for slug_ in _malformed_issue_slugs],
+              ["issues: holds a mapping",
+               "issues: holds a mapping", "issues: holds a nested list",
+               "issues: holds a list item that is not one string"])
+        check("a missing issues: key is the fixable issues-missing, not a "
+              "generic missing-key finding",
+              (_st_keys(res, "issues-missing"),
+               _st_msg(res, "issues-missing", "item2/issues-missing")),
+              (["item2/issues-missing"],
+               "missing issues: key — the user's issue inbox. Insert "
+               '`issues: ""` directly after read:, keeping dates and read:'))
+        check("issues: before read: is out of schema order",
+              (_st_keys(res, "issues-first"),
+               "fields out of schema order" in _st_msg(res, "issues-first", "item2")),
+              (["item2"], True))
+        # The Text property is one line (CONVENTIONS.md §2d), as wiki-build's
+        # draft linter reads it: a block scalar or a value on several lines is
+        # report-only, and text that is not YAML stays the user's, with no
+        # fixable item-1 row and no alias-inventory gap that would stall link
+        # work vault-wide.
+        v = os.path.join(tmp, "v18c-issues-yaml")
+        _issue_values = {
+            "wrapped-quoted": 'issues: "A long issue that\n  wraps."\n',
+            "wrapped-plain": "issues: A long issue that\n  wraps.\n",
+            "folded-block": "issues: >-\n  A long issue that\n  wraps.\n",
+            "literal-block": ("issues: |-\n  - Opener repeats the title.\n"
+                              "  - Wrong parent.\n"),
+            "next-line": "issues:\n  Wrong parent\n",
+            "wrapped-item": "issues:\n  - Wrong parent,\n    not Variance\n",
+            "wrapped-flow": "issues: [Wrong parent,\n  Add an example]\n",
+            "flow-list": "issues: [Wrong parent, \"Add an example\"]\n",
+            "blank-items": "issues:\n  - \"\"\n  -\n  - ' '\n",
+            "colon-value": "issues: Wrong parent: should be Variance\n",
+            "unclosed-quote": 'issues: "Wrong parent\n',
+            "item-after-value": 'issues: ""\n- Wrong parent\n',
+            "duplicate-key": 'issues: ""\nissues: "Wrong parent"\n',
+        }
+        for _name, _value in _issue_values.items():
+            _st_write(v, _name + ".md", _st_entry(
+                _name.replace("-", " ").capitalize(),
+                "**%s** is a worked example." % _name.replace("-", " ").capitalize())
+                .replace('issues: ""\n', _value, 1))
+        _st_write(v, "linker.md", _st_entry(
+            "Linker", "**Linker** is a worked example of [[Nowhere at all]]."))
+        res = scan(v)
+        check("a one-line flow list is user text, and a list of blank items "
+              "is blank",
+              ([_st_keys(res, slug_) for slug_ in ("flow-list", "blank-items")],
+               res["user_issues"]),
+              ([[], []],
+               [{"slug": "flow-list", "form": "list",
+                 "issues": ["Wrong parent", "Add an example"]}]))
+        check("a wrapped string, a block scalar, a value on the next line, a "
+              "wrapped list item or flow list is only the report-only "
+              "issues-malformed, which names its shape",
+              [(_st_keys(res, slug_),
+                _st_msg(res, slug_, "item2/issues-malformed").split(",")[0],
+                _st_msg(res, slug_, "item2/issues-malformed").endswith(
+                    "the user rewrites it"))
+               for slug_ in ("wrapped-quoted", "wrapped-plain", "folded-block",
+                             "literal-block", "next-line", "wrapped-item",
+                             "wrapped-flow")],
+              [(["item2/issues-malformed"],
+                "issues: holds a string continued on another line", False),
+               (["item2/issues-malformed"],
+                "issues: holds a string continued on another line", False),
+               (["item2/issues-malformed"], "issues: holds a block scalar",
+                False),
+               (["item2/issues-malformed"], "issues: holds a block scalar",
+                False),
+               (["item2/issues-malformed"],
+                "issues: holds a value on the line after its key", False),
+               (["item2/issues-malformed"],
+                "issues: holds a list item that is not one string", False),
+               (["item2/issues-malformed"],
+                "issues: holds a flow list continued on another line", False)])
+        check("issues: text that is not YAML, or a duplicate issues: key, is "
+              "only the report-only issues-malformed",
+              [(_st_keys(res, slug_),
+                _st_msg(res, slug_, "item2/issues-malformed").split(",")[0],
+                _st_msg(res, slug_, "item2/issues-malformed").endswith(
+                    ". Obsidian cannot read this note's properties until the "
+                    "user rewrites it"))
+               for slug_ in ("colon-value", "unclosed-quote",
+                             "item-after-value", "duplicate-key")],
+              [(["item2/issues-malformed"], "issues: holds an unreadable value",
+                True),
+               (["item2/issues-malformed"], "issues: holds an unreadable value",
+                True),
+               (["item2/issues-malformed"],
+                "issues: holds a value followed by list items", True),
+               (["item2/issues-malformed"],
+                "issues: holds a duplicate issues: key", False)])
+        check("a malformed issues: value never switches off another entry's "
+              "link findings",
+              "item10/dangling" in _st_keys(res, "linker"), True)
+        v = os.path.join(tmp, "v18c-issues-twins")
+        for _folder in ("one", "two"):
+            _st_write(v, _folder + "/twin.md", _st_entry(
+                "Twin", "**Twin** is a worked example.")
+                .replace('issues: ""\n', 'issues: "Fix %s"\n' % _folder))
+        check("a user_issues row for a shared basename carries its path",
+              scan(v)["user_issues"],
+              [{"slug": "twin", "form": "string", "issues": ["Fix one"],
+                "path": "one/twin.md"},
+               {"slug": "twin", "form": "string", "issues": ["Fix two"],
+                "path": "two/twin.md"}])
 
         # Frontmatter, date, description, title and opener checks that no
         # other case pins, each in an otherwise schema-clean entry.
