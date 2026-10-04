@@ -44,7 +44,7 @@ class SourceCoverageTests(unittest.TestCase):
             *("  - " + json.dumps(source, ensure_ascii=False) for source in sources),
             "created: 2026-09-23", "updated: 2026-09-23",
             "description: A fixture verifies source identity.", "tags:",
-            '  - "#engineering"', "parents: []", "read: false", "---",
+            '  - "#engineering"', "parents: []", "read: false", 'issues: ""', "---",
             "**" + title + "** verifies a source.", "",
         ]), encoding="utf-8")
         return path

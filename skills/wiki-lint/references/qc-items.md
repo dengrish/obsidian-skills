@@ -35,10 +35,12 @@ ownership.
 | --- | --- |
 | Ordinary `itemN` | Apply the determinate, source-independent correction allowed by item N below. Hand a finding that needs the entry's sources, accurate background or a coordinated cross-entry change to Task 1b; report only what Task 1b cannot settle, such as ambiguous ownership. |
 | `item0` | Report the unreadable path and error; there is no parsed entry to repair. Its unknown aliases suppress dependent link actions until readability is restored and the vault is rescanned; direct-filename checks remain usable. |
-| `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. |
+| `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. The lines of an `issues:` value are never an item-1 repair ([item 2](#2-field-order-and-quoting)). |
 | `item2/read-type` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
 | `item2/type-enum` | Write the exact enum spelling only when the body makes the intended type unambiguous; otherwise preserve and report. |
 | `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Report only: [item 2](#2-field-order-and-quoting). |
+| `item2/issues-missing` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
+| `item2/issues-malformed` | Report only and preserve: [item 2](#2-field-order-and-quoting). |
 | `item2/parents-null` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
 | `item2/parents-form` | Preserve usable targets while normalizing representation and unambiguous target spelling. A parent that resolves to a MOC is report-only here and never respelled; Task 3 replaces it (`moc-parent`). Re-derive invalid relationships only in Task 3's authorized closure. |
 | `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
@@ -96,8 +98,8 @@ unambiguously establishes.
 ### 2. Field order and quoting
 
 Apply the canonical [fields and quoting](../../wiki-build/references/writing.md#1-frontmatter-fields).
-Schema order is `title`, `type`, `aliases`, `sources`, `created`, `updated`, `description`, `tags`, `parents`, `read`.
-Only `aliases` is optional; the other nine keys are required. Recover a
+Schema order is `title`, `type`, `aliases`, `sources`, `created`, `updated`, `description`, `tags`, `parents`, `read`, `issues`.
+Only `aliases` is optional; the other ten keys are required. Recover a
 missing or valueless title only from one unambiguous canonical name evidenced
 by the entry, because title-dependent checks otherwise cannot run.
 
@@ -112,7 +114,19 @@ Linter-specific routing:
 - A missing, null, or unrecognizable `read:` has no recoverable answer: report
   it and do not write one. A quoted boolean, YAML `yes`/`no`, or `0`/`1`
   carries a recognizable answer, so normalize only its representation to the
-  equivalent bare boolean.
+  equivalent bare boolean. A [resolved user issue](../SKILL.md#user-issues)
+  is the one exception: it sets `read: false`, inserting a missing key
+  directly before `issues:`.
+- For `item2/issues-missing`, insert `issues: ""` directly after `read:`, or,
+  when `read:` is absent, after the last schema key that precedes it. This is
+  a format repair: dates and `read:` stay unchanged. Every blank spelling
+  [§2d](../../../shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox)
+  lists conforms and stays as written. A non-blank value is the user's text,
+  kept byte-for-byte and handled under [User issues](../SKILL.md#user-issues);
+  a malformed one (`item2/issues-malformed`) is reported and never rewritten.
+  Task 1 never quotes, re-indents, joins or otherwise repairs a line of an
+  `issues:` value; the scanner reports a bad one only as
+  `item2/issues-malformed`.
 - Obsidian-owned appearance and publish properties are valid user state:
   report and preserve them. Preserve a populated legacy `importance:` without
   treating it as required or unexpected.
@@ -228,6 +242,9 @@ best supported specific discipline, or `"#misc"` alone if none fits. Never combi
 misc with specific tags. Missing, malformed, mixed, or uncertain metadata
 requires its own evidence-based resolution, not blind replacement with misc.
 When retagging, keep the old group as prior-group evidence for Task 3's closure.
+A [user issue](../SKILL.md#user-issues) about an entry's tag or placement is
+evidence for this check and for Task 3's placement review, which resolve it
+under these rules or report its blocker.
 
 ### 9. Body structure, coherence, flow, and scope
 

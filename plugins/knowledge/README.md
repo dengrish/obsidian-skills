@@ -19,8 +19,9 @@ content from the sources each entry already cites or accurate background,
 settles conflicting claims against standard references read online,
 consolidates duplicated explanations, retitles ambiguous titles and creates
 missing entries the wiki needs, then maintains links, parents and MOCs. It
-also works through the open items in `Reviews/wiki-notes-suggestions.md`.
-Splits, merges and deletions need an explicit request.
+also resolves the issues you flag in entries and works through the open items
+in `Reviews/wiki-notes-suggestions.md`. Splits, merges and deletions need an
+explicit request.
 
 ## Setup
 
@@ -42,6 +43,21 @@ records outside its intake and repair scope. Open and fixed suggestions are
 kept in `Reviews/<skill>-suggestions.md` under the [shared protocol](shared/SUGGESTIONS.md).
 wiki-lint also keeps its settled link decisions, private run state rather
 than a suggestion log, in `Reviews/.wiki-lint-settled.json`.
+
+## Flagging issues in a note
+
+Every Wiki entry has an `issues` property after `read`, blank as `issues: ""`;
+the next wiki-lint run adds it to older entries. When you notice a problem
+while reviewing a note, describe it there on one line; several issues may
+share the line. The next wiki-lint run treats each issue as your request for
+that note: it fixes the issue, or checks it and explains in the report why it
+does not hold, then removes the resolved issues and unchecks `read` so you
+review the note again. An issue it cannot act on, such as one needing a split,
+merge or deletion or a source the entry does not cite, stays in the field, and
+the report says why. In Obsidian, set the `issues` property's type to Text, or
+to List if you prefer one issue per item. The
+[field's rules](shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox) own
+the details.
 
 ## Reviewing flashcards
 

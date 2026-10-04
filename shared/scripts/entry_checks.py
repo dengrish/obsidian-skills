@@ -402,11 +402,12 @@ def acronym_expansion_missing(title, opener):
 # ---------------------------------------------------------------------------
 
 # `importance` is a legacy key, so a legacy entry's stacked-merge scar can
-# still be an `importance:` line stranded in the body. `read:` is the schema's
-# last key, so a partial scar plausibly leaves exactly a `read: false` line.
+# still be an `importance:` line stranded in the body. `read:` and `issues:`
+# end the schema, so a partial scar plausibly leaves exactly a `read: false`
+# or `issues: ""` line.
 _SCHEMA_KEY_LINE_RE = re.compile(
     r"(?m)^(title|type|aliases|sources|created|updated|description|tags|"
-    r"importance|parents|read):")
+    r"importance|parents|read|issues):")
 _DISPLAY_MATH_BLOCK_RE = re.compile(
     r"(?ms)^ {0,3}\$\$[ \t]*(?:\n.*?\n|.*?) {0,3}\$\$[ \t]*$")
 _DIGIT_LINE_RE = re.compile(r"(?m)^[^\S\n]*[0-9]+[^\S\n]*$")
@@ -1621,9 +1622,10 @@ def run_self_test(verbose=False):
     # item 13
     check("schema keys, stray rules and digit lines are scars",
           [checks(merge_scar_findings(prose)) for prose in (
-              "Opener.\n\nread: false", "Opener.\n\n---\n\nMore.",
-              "Opener.\n\n3\n\nMore.")],
-          [["frontmatter-key"], ["stray-rule"], ["digit-line"]])
+              "Opener.\n\nread: false", 'Opener.\n\nissues: ""',
+              "Opener.\n\n---\n\nMore.", "Opener.\n\n3\n\nMore.")],
+          [["frontmatter-key"], ["frontmatter-key"], ["stray-rule"],
+           ["digit-line"]])
     check("scar evidence lines are one-based within the prose",
           [finding["line"] for finding in merge_scar_findings(
               "Opener.\n\ntags: x\n\n---\n\n$$\nx\n$$\n\n7")],

@@ -4317,6 +4317,13 @@ def check_yaml_examples(rep, conv):
                             "quotes are load-bearing -- an unquoted "
                             "`- #machine-learning` is a YAML comment and the "
                             "value is silently lost." % (k, item), f)
+            if name == "wiki-entry":
+                f = by.get("issues")
+                if f and not f[2] and f[1] in (
+                        "", "''", "~", "null", "Null", "NULL", "[]"):
+                    bad("blank `%s` in a wiki-entry example is not the "
+                        "canonical `issues: \"\"` -- §2d: every writer "
+                        "writes it" % ("issues: " + f[1]).strip(), f)
             if name == "source-note":
                 f = by.get("author")
                 if f and f[1] and f[1] != "[]":
@@ -6094,10 +6101,10 @@ SELFTEST_MIN_CASES = {
     "skills/wiki-build/scripts/find_collisions.py": 79,
     # 2026-09-30: lowered after the discipline-root empty-sources exemption
     # and its cases were removed (roots now cite a source like every entry).
-    "skills/wiki-build/scripts/lint_entry.py": 451,
+    "skills/wiki-build/scripts/lint_entry.py": 461,
     "skills/wiki-build/scripts/review_tree.py": 40,
-    "skills/wiki-build/scripts/vault_index.py": 88,
-    "skills/wiki-lint/scripts/scan_vault.py": 652,
+    "skills/wiki-build/scripts/vault_index.py": 90,
+    "skills/wiki-lint/scripts/scan_vault.py": 664,
 }
 
 
@@ -7181,6 +7188,61 @@ def check_equation_policy(rep, conv):
                   "homes" % (n, len(pins)), rel(CONVENTIONS))
 
 
+def check_user_issues_policy(rep, conv):
+    """The `issues:` inbox policy holds wherever it is restated.
+
+    CONVENTIONS §2d owns it; wiki-lint's SKILL.md, backlogs.md and qc-items.md
+    restate the parts they act on. Each pin is one rule a drift would invert:
+    only a resolved issue resets `read:`, a blocked issue stays in the field
+    and out of the logs, blanking the field alone keeps `updated:`, and a
+    report-only run writes nothing.
+    """
+    check = "user-issues-policy"
+    lint_dir = os.path.join(SKILLS_DIR, "wiki-lint")
+    skill = os.path.join(lint_dir, "SKILL.md")
+    backlogs = os.path.join(lint_dir, "references", "backlogs.md")
+    qc_items = os.path.join(lint_dir, "references", "qc-items.md")
+    pins = (
+        (CONVENTIONS, "At least one resolved issue sets `read: false`",
+         "no longer limits the `read:` reset to a resolved user issue"),
+        (CONVENTIONS, "A blocked issue stays verbatim in the field, is never "
+         "moved to a log", "no longer keeps a blocked issue in the field and "
+         "out of the logs"),
+        (CONVENTIONS, "`updated:` advances only when the entry's content "
+         "changed", "no longer keeps `updated:` when only `issues:` changes"),
+        (CONVENTIONS, "A report-only run blanks and resets nothing",
+         "no longer keeps a report-only run from writing `issues:` or `read:`"),
+        (skill, "it resets no `read:`",
+         "no longer keeps a blocked issue from resetting `read:`"),
+        (skill, "never for blanking `issues:` or resetting `read:` alone",
+         "no longer keeps `updated:` when only `issues:` and `read:` change"),
+        (skill, "A report-only run blanks and resets nothing",
+         "no longer keeps a report-only run from writing `issues:` or `read:`"),
+        (backlogs, "A [user issue](../SKILL.md#user-issues) is never logged",
+         "no longer keeps user issues out of the note-content log"),
+        (qc_items, 'insert `issues: ""` directly after `read:`',
+         "no longer inserts a missing key as the canonical blank after "
+         "`read:`"),
+    )
+    held = 0
+    for path, marker, why in pins:
+        try:
+            text = conv if path == CONVENTIONS else read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a user-issues home: %s" % exc,
+                     rel(path))
+            continue
+        if _phrase_re(marker).search(text):
+            held += 1
+        else:
+            rep.fail(check, "%s %s (missing %r)"
+                     % (os.path.basename(path), why, marker), rel(path))
+    rep.saw(check, "user-issues policy pins held", held)
+    if held == len(pins):
+        rep.ok(check, "%d user-issues policy statements held at their homes"
+               % held, rel(CONVENTIONS))
+
+
 def check_moc_placement(rep, conv):
     """§3's MOC location and naming, restated only in agreeing forms.
 
@@ -8182,6 +8244,7 @@ CHECKS = [
     check_bootstrap,
     check_manifest_validity,
     check_equation_policy,
+    check_user_issues_policy,
     check_moc_placement,
     check_link_rules,
     check_cross_domain_corpus,

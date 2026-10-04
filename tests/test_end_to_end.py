@@ -1541,6 +1541,7 @@ tags:
   - "#{discipline}"
 parents: []
 read: false
+issues: ""
 ---
 **{title}** organizes a field of knowledge.
 
@@ -1590,6 +1591,7 @@ tags:
 parents:
   - "[[biology]]"
 read: false
+issues: ""
 ---
 A **control sample** provides a baseline for comparing an experimental treatment with an otherwise matched condition. The treatment is withheld while the preparation and measurement procedure remain the same. A difference between the treated and untreated groups can then be interpreted within the limits of that comparison.
 
@@ -1664,6 +1666,7 @@ tags:
   - "#mathematics"
 parents: []
 read: false
+issues: ""
 ---
 {prose}
 
@@ -1820,6 +1823,160 @@ read: false
         self.assertEqual((fresh / "Wiki/geometric-mean.md").read_bytes(),
                          fresh_draft.read_bytes())
 
+    def test_user_issues_reach_wiki_lint_and_the_builder_preserves_them(self):
+        # `issues:` is the user's issue inbox (CONVENTIONS §2d). The scanner
+        # lists a non-blank value, scalar or list, as a wiki-lint worklist
+        # row, and the builder's linter only asks to preserve it. Every blank
+        # spelling Obsidian may write conforms, a missing key is a Task 1
+        # format repair, and any other shape is report-only.
+        wiki = self.vault / "Wiki"
+        canonical = 'read: false\nissues: ""\n'
+        malformed = ({"item2/issues-malformed"}, {"2-issues-malformed": "warning"})
+        cases = {
+            # slug: (title, frontmatter that replaces `canonical`,
+            #        scanner item-2 keys, builder 2-* findings)
+            "arithmetic-mean": ("Arithmetic mean", canonical, set(), {}),
+            "geometric-mean": (
+                "Geometric mean",
+                "read: false\nissues: The card is vague. Add a worked example.\n",
+                set(), {"2-user-issues": "info"}),
+            "harmonic-mean": (
+                "Harmonic mean",
+                'read: true\nissues:\n  - "Explain rates more simply."\n'
+                "  - Wrong parent\n",
+                set(), {"2-user-issues": "info"}),
+            # An empty list item is dropped; the rest is the user's text.
+            "midhinge": ("Midhinge", "read: false\nissues:\n  -\n  - Fix the card\n",
+                         set(), {"2-user-issues": "info"}),
+            "quadratic-mean": (
+                "Quadratic mean", "read: false\n",
+                {"item2/issues-missing"}, {"2-issues-missing": "error"}),
+            # With read: absent too, each key is reported on its own.
+            "midrange": ("Midrange", "",
+                         {"item2/issues-missing", "item2/read-missing"},
+                         {"2-issues-missing": "error", "2-read-state": "info"}),
+            "weighted-mean": ("Weighted mean", "read: false\nissues:\n", set(), {}),
+            "truncated-mean": ("Truncated mean", "read: false\nissues: null\n",
+                               set(), {}),
+            "trimmed-mean": ("Trimmed mean", "read: false\nissues: ~\n", set(), {}),
+            "power-mean": ("Power mean", "read: false\nissues: ''\n", set(), {}),
+            "logarithmic-mean": ("Logarithmic mean", "read: false\nissues: []\n",
+                                 set(), {}),
+            "interquartile-mean": (
+                "Interquartile mean", "read: false\nissues:\n  card: too long\n",
+                *malformed),
+            "trimean": ("Trimean", "read: false\nissues: {note: fix it}\n",
+                        *malformed),
+            "generalized-mean": (
+                "Generalized mean", "read: false\nissues:\n  - [one, two]\n",
+                *malformed),
+            "winsorized-mean": (
+                "Winsorized mean", "read: false\nissues:\n  -\n    - Wrong parent\n",
+                *malformed),
+            # Text the validators cannot read as one line is malformed too.
+            "contraharmonic-mean": (
+                "Contraharmonic mean",
+                "read: false\nissues: Fix this: the card is vague\n", *malformed),
+            "heronian-mean": (
+                "Heronian mean",
+                'read: false\nissues: "The card is vague.\n  Add an example."\n',
+                *malformed),
+            "lehmer-mean": (
+                "Lehmer mean", "read: false\nissues: |\n  The card is vague.\n",
+                *malformed),
+            "weighted-median": (
+                "Weighted median", 'issues: ""\nread: false\n',
+                {"item2"}, {"2-field-order": "error"}),
+        }
+        for slug, (title, frontmatter, _scan, _lint) in cases.items():
+            prose = f"The **{title.lower()}** is a synthetic average of a collection."
+            if slug == "arithmetic-mean":
+                prose += " Unlike the [[Nonexistent average]], it weighs all values."
+            text = self.averages_entry(
+                title, "2026-09-05", prose,
+                "A synthetic average that exercises one spelling of the issues "
+                "field.")
+            self.assertIn(canonical, text)
+            (wiki / f"{slug}.md").write_text(
+                text.replace(canonical, frontmatter), encoding="utf-8")
+        before = {path.name: path.read_bytes() for path in wiki.iterdir()}
+
+        scan = json.loads(self.run_script(
+            "skills/wiki-lint/scripts/scan_vault.py", wiki,
+            "--images", self.images).stdout)
+        # One row per entry with issues, sorted by slug; a scalar is one issue.
+        self.assertEqual(scan["user_issues"], [
+            {"slug": "geometric-mean", "form": "string",
+             "issues": ["The card is vague. Add a worked example."]},
+            {"slug": "harmonic-mean", "form": "list",
+             "issues": ["Explain rates more simply.", "Wrong parent"]},
+            {"slug": "midhinge", "form": "list", "issues": ["Fix the card"]},
+        ])
+        # A malformed value is only an item-2 report: it leaves the alias
+        # inventory complete, so vault-wide inferences such as a dangling
+        # link still run.
+        self.assertIn(("arithmetic-mean", "item10/dangling"),
+                      {(row["slug"], row["item"]) for row in scan["problems"]})
+        lint = self.vault / "issues-lint.json"
+        self.run_script("skills/wiki-build/scripts/lint_entry.py", wiki,
+                        "-o", lint)
+        built = {Path(row["file"]).stem: row["findings"] for row in
+                 json.loads(lint.read_text(encoding="utf-8"))["entries"]}
+        for slug, (_title, _frontmatter, scan_keys, lint_keys) in cases.items():
+            with self.subTest(slug=slug):
+                rows = [row for row in scan["problems"] if row["slug"] == slug
+                        and row["item"].split("/")[0] == "item2"]
+                self.assertEqual({row["item"] for row in rows}, scan_keys, rows)
+                # The issues key is never named by the generic missing-key loop.
+                self.assertFalse(any(row["message"] == "missing issues: key"
+                                     for row in rows), rows)
+                if scan_keys == {"item2"}:
+                    self.assertIn("fields out of schema order", rows[0]["message"])
+                findings = [row for row in built[slug]
+                            if row["item"].startswith("2-")]
+                self.assertEqual({row["item"]: row["severity"] for row in findings},
+                                 lint_keys, findings)
+                # The user's text is never a fixable YAML error to repair.
+                self.assertFalse([row for row in scan["problems"]
+                                  if row["slug"] == slug and row["item"] == "item1"])
+                self.assertFalse([row for row in built[slug]
+                                  if row["item"].startswith("1-")])
+        self.assertIn('`issues: ""` directly after read:', next(
+            row["message"] for row in scan["problems"]
+            if row["item"] == "item2/issues-missing"))
+
+        # wiki-build step 7: a merge into an entry with user issues keeps the
+        # value byte-for-byte, and the review's only item-2 finding on the
+        # draft is the inherited, report-only reminder to preserve it.
+        run = Path(self.scratch.name) / "issues-run"
+        run.mkdir()
+        draft = run / "geometric-mean.md"
+        existing = (wiki / "geometric-mean.md").read_text(encoding="utf-8")
+        merged = existing.replace(
+            "updated: 2026-09-05", "updated: 2026-09-06").replace(
+            "of a collection.", "of a collection of positive numbers.")
+        self.assertIn("\nissues: The card is vague. Add a worked example.\n---\n",
+                      merged)
+        draft.write_text(merged, encoding="utf-8")
+        manifest = run / "manifest.json"
+        manifest.write_text(json.dumps([
+            {"path": "Wiki/geometric-mean.md", "draft": str(draft)},
+        ]), encoding="utf-8")
+        review = json.loads(self.run_script(
+            "skills/wiki-build/scripts/review_tree.py", "--vault", self.vault,
+            "--wiki", wiki, "--manifest", manifest, "--out", run / "review").stdout)
+        self.assertEqual(
+            [(row["item"], row.get("inherited", False),
+              (row["evidence"] or {}).get("report_only"))
+             for row in review["on_staged"]
+             if row["file"] == "Wiki/geometric-mean.md"
+             and row["item"].startswith("2-")],
+            [("2-user-issues", True, True)])
+        # The validators and the review only read: the user's text stays
+        # byte-for-byte.
+        self.assertEqual({path.name: path.read_bytes() for path in wiki.iterdir()},
+                         before)
+
     def test_root_without_card_and_parents_link_down(self):
         # A discipline root needs no Flashcards section, and the scanner lists
         # a parent whose prose and footer leave a child unlinked for Task 3.
@@ -1846,6 +2003,7 @@ tags:
 parents:
   - "[[{parent}]]"
 read: false
+issues: ""
 ---
 {opener}
 
@@ -1915,6 +2073,7 @@ description: "A reference label identifies a record independently of its positio
 tags:
 parents: []
 read: false
+issues: ""
 ---
 A **reference label** identifies a record independently of its position. The label remains attached to the record when the surrounding collection is reordered. This lets a reference continue to identify the same record after its position changes.
 
@@ -2049,6 +2208,7 @@ tags:
   - "#mathematics"
 parents: []
 read: true
+issues: ""
 ---
 The **geometric mean** of positive inputs is the root of their product.
 
@@ -2115,6 +2275,7 @@ tags:
   - "#mathematics"
 parents: []
 read: false
+issues: ""
 ---
 The **arithmetic mean** of a collection is its sum divided by its size.
 For $n$ observations $x_i$:
@@ -2270,6 +2431,7 @@ description: "{description or title + ' is a synthetic alignment fixture.'}"
 {tags_block}
 parents: []
 read: false
+issues: ""
 ---
 {body}{footer}
 
@@ -2638,9 +2800,11 @@ A compact definition used only to exercise the shared contract.
         self.assertNotIn("4-duplicate-source", lint_items["web-file-beside-note"])
         self.assertNotIn("item4/source-identity",
                          scan_items.get("web-file-beside-note", set()))
-        self.assertIn("2-quoting", lint_items["unquoted-web-source"])
+        # Obsidian's Properties editor strips the quotes from a URL source;
+        # both validators accept the lossless plain spelling (CONVENTIONS §2a).
+        self.assertNotIn("2-quoting", lint_items["unquoted-web-source"])
         self.assertNotIn("4-sources", lint_items["unquoted-web-source"])
-        self.assertIn("item2", scan_items.get("unquoted-web-source", set()))
+        self.assertNotIn("item2", scan_items.get("unquoted-web-source", set()))
         self.assertNotIn("item4", scan_items.get("unquoted-web-source", set()))
         # Local QC remains available with malformed alias metadata, but
         # cross-entry alias ownership is provisional. Repair those fixture
@@ -2741,6 +2905,7 @@ tags:
   - "#statistics"
 parents: []
 read: false
+issues: ""
 ---
 **Synthetic deviation** measures the spread of a quantity $X$. Its value $\\sigma$ is the square root of the variance $\\operatorname{Var}(X)$.
 

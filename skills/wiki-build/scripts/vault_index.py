@@ -181,9 +181,11 @@ __all__ = [
 # nothing strips or flags it.  Keeping it here -- in its historical slot --
 # is what makes lint_entry's field-order and unknown-key checks tolerate a
 # legacy entry silently.  Do not remove it while such entries exist.
+# `issues` is the user's issue inbox (CONVENTIONS section 2d): a string or a
+# list of strings, so neither the scalar nor the list shape check applies.
 SCHEMA_ORDER = [
     "title", "type", "aliases", "sources", "created", "updated",
-    "description", "tags", "importance", "parents", "read",
+    "description", "tags", "importance", "parents", "read", "issues",
 ]
 
 LIST_FIELDS = {"aliases", "sources", "tags", "parents"}
@@ -368,6 +370,12 @@ def parse_frontmatter(text):
             else:
                 fm.errors.append("line %d: unparseable frontmatter line %r"
                                  % (lineno, raw_line))
+            # A line no key owns under `issues:` continues its value (a block
+            # scalar, a wrapped scalar, a mapping or stray text): it is the
+            # user's text and cannot hide the title or aliases, as in
+            # scan_vault's `issues_spans`.
+            if current is not None and current.key == "issues":
+                fm.non_identity_errors += len(fm.errors) - before
             continue
 
         key = key_m.group("key")
@@ -605,9 +613,10 @@ def index_entry(path, text=None, root=None):
     record["description"] = fm.scalar("description")
     # Inspect the scalar subset of the canonical schema without restating a
     # second, easily drifted field list. ``importance`` is a tolerated legacy
-    # scalar that this index preserves but does not validate or consume.
+    # scalar that this index preserves but does not validate or consume, and
+    # ``issues`` is user text that lint_entry validates.
     for key in SCHEMA_ORDER:
-        if key in LIST_FIELDS or key == "importance":
+        if key in LIST_FIELDS or key in ("importance", "issues"):
             continue
         field = fm.get(key)
         if field and field.is_list:
@@ -895,7 +904,7 @@ def _st_entry_text(title, aliases_flow=False, extra="", body=None):
               "tags:", '  - "#statistics"']
     if extra:
         lines.append(extra)
-    lines += ["parents: []", "read: false", "---"]
+    lines += ["parents: []", "read: false", 'issues: ""', "---"]
     if body is None:
         body = ("**%s** links [[other]] and [[third|a label]] and embeds "
                 "![[figure.png]].\n\n**Related:** [[other|Other]]\n\n---\n\n"
@@ -1117,6 +1126,21 @@ def run_self_test():
                      if "expected a scalar" in error),
               ["title: expected a scalar, not a list",
                "type: expected a scalar, not a list"])
+        check("the user's issues may be a string or a list",
+              [index_entry(os.path.join(wiki, "shape.md"),
+                           '---\ntitle: "Shape"\nissues:' + value
+                           + '\n---\nBody\n', root=wiki)["errors"]
+               for value in (' ""', ' "Fix the card."',
+                             '\n  - "Fix the card."\n  - Add an example.')],
+              [[], [], []])
+        check("an unreadable issues: value cannot hide title ownership",
+              [index_entry(os.path.join(wiki, "shape.md"),
+                           '---\ntitle: "Shape"\nissues:' + value
+                           + '\n---\nBody\n', root=wiki)["identity_complete"]
+               for value in (' |\n  The card is wrong.', '\n  card: vague',
+                             '\n  Fix the card', ' "The card\n  is wrong"',
+                             ' The card is vague.\nAlso the opener.')],
+              [True] * 5)
         check("scalars are unquoted",
               (anchor["title"], anchor["type"], anchor["created"]),
               ("Anchor", "Concept", "2026-01-01"))

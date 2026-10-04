@@ -26,7 +26,7 @@ Choose by the requested result, not just the input's file type.
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → new requested entries citing vault sources or web pages by URL, plus any newly filed PDFs |
-| Audit and repair existing wiki entries, or refactor them on request | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources, open note suggestions or an exact producer mapping → content repairs, retitles, missing entries, links, parents and MOCs |
+| Audit and repair existing wiki entries, or refactor them on request | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources, issues you flag in entries, open note suggestions or an exact producer mapping → content repairs, retitles, missing entries, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
 
@@ -52,7 +52,7 @@ Inbox/*.md → clipping-clean → Articles/ cleaned clipping
 
 add-to-wiki.md or named topics → wiki-add → missing requested entries in Wiki/ (web pages cited by URL)
 
-Existing Wiki/ + open note suggestions → wiki-lint → entry repairs, missing entries, links, parents and MOCs
+Existing Wiki/ + flagged issues + open note suggestions → wiki-lint → entry repairs, missing entries, links, parents and MOCs
 
 Investments/x-accounts.md + rss-feeds.md → feed-collect → X notes + RSS articles
   → stock-research
@@ -108,6 +108,19 @@ whose teaching lives only in a chapter not yet built waits for that chapter's
 wiki-build. Splits, merges, deletions and producer-mapped repairs still need
 an explicit request. Enriching an existing entry with new-source evidence
 still belongs to wiki-build.
+
+**Flag issues for the next lint.** Every Wiki entry has an `issues` property
+after `read`, blank as `issues: ""`; the next wiki-lint run adds it to older
+entries. When you notice a problem while reviewing a note, describe it there
+on one line; several issues may share the line. The next wiki-lint run treats
+each issue as your request for that note: it fixes the issue, or checks it and
+explains in the report why it does not hold, then removes the resolved issues
+and unchecks `read` so you review the note again. An issue it cannot act on,
+such as one needing a split, merge or deletion or a source the entry does not
+cite, stays in the field, and the report says why. In Obsidian, set the
+`issues` property's type to Text, or to List if you prefer one issue per item.
+The [field's rules](shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox)
+own the details.
 
 [wiki-add](skills/wiki-add/SKILL.md) is the create-only research route for
 topics queued in `add-to-wiki.md` or a backlog the user selects, or named

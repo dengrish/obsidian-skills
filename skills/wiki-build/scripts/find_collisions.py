@@ -691,7 +691,8 @@ def _st_entry_text(title, aliases=()):
     lines.append('  - "[[Doe_X_2025.pdf#page=2]]"')
     lines += ["created: 2026-01-01", "updated: 2026-01-02",
               'description: "A worked example used by the self-test."',
-              "tags:", '  - "#statistics"', "parents: []", "read: false", "---",
+              "tags:", '  - "#statistics"', "parents: []", "read: false",
+              'issues: ""', "---",
               "**%s** is a worked example." % title, ""]
     return "\n".join(lines)
 

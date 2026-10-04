@@ -6,7 +6,7 @@
 
 ## Task 2 — Link hygiene
 
-Two directions: **backfill** links that could not exist when an earlier entry was written, and **prune** duplicate or weak links. Task 2 judges whether a link is added, kept, or removed. Task 1 may separately correct the spelling of an existing, unambiguous link or footer without changing its destination or meaning.
+Two directions: **backfill** links that could not exist when an earlier entry was written, and **prune** duplicate or weak links. Task 2 judges whether a link is added, kept, or removed, including for a [user issue](../SKILL.md#user-issues) about a link, which it judges under the same bar. Task 1 may separately correct the spelling of an existing, unambiguous link or footer without changing its destination or meaning.
 
 Existing MOC navigation links are outside this entity-link mechanism. Preserve
 qualified `[[MOCs/<discipline>-moc]]` / `[[MOCs/misc-moc]]` links and recognized legacy MOC links; inspect
