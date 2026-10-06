@@ -26,7 +26,7 @@ Choose by the requested result, not just the input's file type.
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
 | Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → new requested entries citing vault sources or web pages by URL, plus any newly filed PDFs |
-| Audit and repair existing wiki entries, or refactor them on request | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources, issues you flag in entries, open note suggestions or an exact producer mapping → content repairs, retitles, missing entries, links, parents and MOCs |
+| Audit, repair and refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources, issues you flag in entries and open note suggestions → content repairs, merges, splits, retitles, missing entries, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
 
@@ -77,10 +77,18 @@ to have something to cite. Its
 
 **Organize PDFs before deriving filenames and links from them.** Later renames
 must carry the dependent notes, figures, references and sidecars together,
-using pdf-organize's reviewed plan and any required authorization. The
+using pdf-organize's reviewed plan. The
 [source-filename contract](shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
 defines that boundary. A summary is not required before building wiki entries,
 and wiki-lint can run independently of any source-processing task.
+
+**Renames repair their links automatically.** When a skill renames a vault
+file (pdf-organize renaming or filing a PDF, clipping-clean reprocessing a
+clipping under a new slug, wiki-lint retitling an entry), it rewrites every
+link to that file in the same run, as Obsidian does. The request that leads
+to the rename authorizes the repair; no skill asks again or hands it to
+another skill. A reference it cannot rewrite safely keeps the old file in
+place, and the run reports it.
 
 wiki-build adds source-supported content only to the entries in its current
 run. wiki-lint owns retrospective work across the existing wiki. Their
@@ -95,8 +103,10 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
    accurate background. It corrects and simplifies claims, deepens thin
    explanations, settles conflicting claims (reading standard references
    online, never citing them), consolidates an explanation duplicated across
-   entries into its owner, aligns notation, retitles ambiguous bare titles and
-   creates the missing entries the wiki's own entries need.
+   entries into its owner, aligns notation, merges duplicate entries that name
+   one entity, splits an entry that defines several subjects, retitles
+   ambiguous bare titles and creates the missing entries the wiki's own
+   entries need. Each new or merged entry is marked unread.
 3. **Task 2** adds and prunes links, including links to the new entries.
 4. **Task 3** rebuilds `parents:` and the MOCs.
 
@@ -105,9 +115,10 @@ The run also works through the open items in
 moves it to Fixed, leaving open only what it cannot complete, with the reason.
 A request for a narrower task or a set of entries limits the run. A thin entry
 whose teaching lives only in a chapter not yet built waits for that chapter's
-wiki-build. Splits, merges, deletions and producer-mapped repairs still need
-an explicit request. Enriching an existing entry with new-source evidence
-still belongs to wiki-build.
+wiki-build. A split or merge that is a close call is reported with both
+options instead of applied, and deleting an entry still needs an explicit
+request. Enriching an existing entry with new-source evidence still belongs
+to wiki-build.
 
 **Flag issues for the next lint.** Every Wiki entry has an `issues` property
 after `read`, blank as `issues: ""`; the next wiki-lint run adds it to older
@@ -116,8 +127,8 @@ on one line; several issues may share the line. The next wiki-lint run treats
 each issue as your request for that note: it fixes the issue, or checks it and
 explains in the report why it does not hold, then removes the resolved issues
 and unchecks `read` so you review the note again. An issue it cannot act on,
-such as one needing a split, merge or deletion or a source the entry does not
-cite, stays in the field, and the report says why. In Obsidian, set the
+such as one needing a deletion or a source the entry does not cite, stays in
+the field, and the report says why. In Obsidian, set the
 `issues` property's type to Text, or to List if you prefer one issue per item.
 The [field's rules](shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox)
 own the details.
@@ -356,8 +367,10 @@ workflow's authorized scope may conditionally remove an obsolete path only
 after its replacement and dependent references are safely published and
 verified; a later occupant always survives.
 Content the user explicitly names for deletion, such as a wiki-lint deletion
-refactor or a named card removal, is removed only through that protocol, after
-its inbound references are resolved.
+refactor, is removed only through that protocol, after its inbound references
+are resolved. Every wiki-lint card check (Task 1) and every wiki-build merge
+keeps an entry's one definition card and removes any other card once no link
+targets its block ID, quoting it in the run report.
 pdf-organize may rename or move PDFs in its authorized scope but never
 overwrite another file. Unrelated folders and legacy notes remain untouched.
 The full path/ownership table is in

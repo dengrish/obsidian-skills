@@ -211,7 +211,7 @@ from entry_checks import (  # noqa: E402
     BOLD_PAREN_RE,
     COMMON_NOUNS,
     CROSS_DOMAIN_PHRASES,
-    LEGACY_EXTRA_PREFIX,
+    EXTRA_CARD_PREFIX,
     PAREN_LEADIN_RE,
     SHARED_MUTATIONS,
     SHARED_QUIET,
@@ -233,13 +233,13 @@ from entry_checks import (  # noqa: E402
     flashcard_primary_answer,
     flashcard_set_faults,
     is_discipline_root,
+    kept_card_label,
     label_drops_head,
     label_shares_surface,
     merge_scar_findings,
     organism_common_name_bound as _organism_common_name_bound,
     organism_common_name_surfaces as _organism_common_name_surfaces,
     plural_surface,
-    primary_card_label,
     primary_line3_faults,
     pure_math_opener_markup,
     source_meta_findings,
@@ -2121,7 +2121,7 @@ def spaced_repetition_report(vault_root, discipline_counts):
     writes, never follows a symlinked settings file, never raises.
     """
     report = {"settings": "absent", "uncovered_tags": {},
-              "separator_findings": [], "schedules_outside_notes": None}
+              "separator_findings": []}
     path = os.path.join(vault_root, *SR_SETTINGS_PARTS)
     if not os.path.lexists(path):
         return report
@@ -2194,12 +2194,6 @@ def spaced_repetition_report(vault_root, discipline_counts):
             "cloze card; keep cloze conversion off"
             % (pattern, " (%s)" % known[0] if known else "",
                known[2] if known else "matching text"))
-    schedule = data.get("scheduleData")
-    card_schedules = (schedule.get("cardSchedules")
-                      if isinstance(schedule, dict) else None)
-    report["schedules_outside_notes"] = not (
-        settings.get("dataStore") == "NOTES"
-        and isinstance(card_schedules, dict) and not card_schedules)
     return report
 
 
@@ -3710,8 +3704,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                                  f'(Obsidian renders this as plain text, silently) — REPORT '
                                  f'ONLY, DO NOT DELETE THE EMBED OR ITS CAPTION. There are two '
                                  f'repairs and neither is the linter\'s: the figure was never '
-                                 f'extracted (run figure-extract on the source), or an '
-                                 f'approved source rename renamed it with the source '
+                                 f'extracted (run figure-extract on the source), or a '
+                                 f'source rename renamed it with the source '
                                  f'(CONVENTIONS §1a), in which case the embed is rewritten to '
                                  f'the new stem. Deleting the embed throws away the one record '
                                  f'of which figure belongs here'))
@@ -3871,12 +3865,12 @@ def scan(wiki, images=None, vault=None, settled=None):
             # split the section (after the heading) into card blocks on blank-line boundaries
             after_head = e["fcsec"].split("\n",1)[1] if "\n" in e["fcsec"] else ""
             # Inline, next-line, and callout scheduling state plus block IDs
-            # belong to the review plugin/user. None is another card whose
-            # removal may be proposed. Mask it only in this read-only check.
+            # belong to the review plugin/user. None is another card to
+            # remove. Mask it only in this read-only check.
             cards = parse_flashcard_blocks(after_head)
             if not cards and not _root_entry:
                 problems.append((sl,"item19","## Flashcards section has no card"))
-            for _message, _report_only in flashcard_set_faults(
+            for _message in flashcard_set_faults(
                     sum(1 for cl in cards if len(cl) >= 3)):
                 problems.append((sl, "item19", "## Flashcards holds " + _message))
             alias_forms = list(e["aliases"])
@@ -3884,15 +3878,17 @@ def scan(wiki, images=None, vault=None, settled=None):
                 title, e["aliases"], opener, e["type"])
             _line3_faults = []
             _definition_cues = []
-            # The answer contract identifies the primary card; with 2+
-            # complete cards, every other card is a legacy extra whose
-            # per-card problems are report-only (lint_entry marks the same).
+            # With 2+ complete cards, the kept card is the primary card the
+            # answer contract identifies, else the first card, which the run
+            # rewrites into the definition card. Every other complete card is
+            # an extra card to remove, and its per-card problems say that its
+            # removal is the only repair (lint_entry marks the same).
             _complete_rows = [
                 (f"card {ci}" if len(cards) > 1 else "flashcard", cl[2],
                  flashcard_line3_fault(cl[2], title, e["aliases"], opener,
                                        e["type"]))
                 for ci, cl in enumerate(cards, 1) if len(cl) >= 3]
-            _primary_tag = (primary_card_label(
+            _primary_tag = (kept_card_label(
                 _complete_rows, _expected_term, _expected_counterpart)
                 if len(_complete_rows) > 1 and title else None)
             for ci, cl in enumerate(cards, 1):
@@ -3901,10 +3897,16 @@ def scan(wiki, images=None, vault=None, settled=None):
                     problems.append((sl,"item19",f'{tag} malformed — needs 3 contiguous lines (cue / separator / answer), found {len(cl)} (a blank line between lines 1–3 breaks the card)'))
                     continue
                 _extra = _primary_tag is not None and tag != _primary_tag
-                _lead = LEGACY_EXTRA_PREFIX % ci if _extra else ""
+                _lead = EXTRA_CARD_PREFIX % ci if _extra else ""
                 if len(cl) > 3:
+                    # Removing an extra card never takes the content after its
+                    # line 3 that is not a recognized attachment.
                     problems.append((
                         sl, "item19",
+                        f'{_lead}{tag} has {len(cl)} visible lines — removing '
+                        'it removes lines 1–3 and their recognized attachments '
+                        'only; the content after line 3 stays and is reported'
+                        if _extra else
                         f'{_lead}{tag} has {len(cl)} visible lines — only the '
                         'first three may be card content; recognized Spaced '
                         'Repetition state may be attached to line 3, follow it '
@@ -3922,9 +3924,11 @@ def scan(wiki, images=None, vault=None, settled=None):
                         + "; ".join(f'{candidate["kind"]} '
                                     f'"{candidate["phrase"][:60]}"'
                                     for candidate in _card_boilerplate)
-                        + " — shorten the math to its compact equivalent "
-                        "only when the tested claim is unchanged; keep the "
-                        "cue, answer line and every attachment (flashcards.md)"))
+                        + ("" if _extra else
+                           " — shorten the math to its compact equivalent "
+                           "only when the tested claim is unchanged; keep the "
+                           "cue, answer line and every attachment "
+                           "(flashcards.md)")))
                 if re.search(r"ℓ(?:[0-9₀-₉])", line1):
                     problems.append((
                         sl, "item12/equation-typography",
@@ -3938,8 +3942,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                 if line2 not in CARD_SEPARATORS:
                     problems.append((
                         sl, "item19",
-                        f'{_lead}{tag} line 2 is "{line2[:20]}" — a legacy '
-                        "extra keeps its separator" if _extra else
+                        f'{_lead}{tag} line 2 is "{line2[:20]}"' if _extra else
                         f'{tag} line 2 is "{line2[:20]}", must be exactly ?? '
                         "(or !! if the user disabled the card)"))
                 _sentence_faults = flashcard_line1_faults(line1)
@@ -3957,7 +3960,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                         sl, "item19", f"{_lead}{tag} line {_line_no} {_fault}"))
                 # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
                 # expansion); add the entry's aliases only when this card's term is the entry title (the primary
-                # card). A legacy extra card legitimately names the primary entity, so don't test it against the title.
+                # card). An extra card may name the primary entity, so don't test it against the title.
                 mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
                 term_main = (mt.group(1) if mt else line3).strip()
                 paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
@@ -4020,11 +4023,11 @@ def scan(wiki, images=None, vault=None, settled=None):
                         sl, "item19/hedge-candidate",
                         f'{_lead}{tag} line 1 hedges with '
                         + ", ".join(f'"{word}"' for word in _hedges)
-                        + " — state the ordinary case plainly when the card's "
-                        "bar allows; a candidate is never an order"))
-            # The line-3 term contract binds the primary card only. A legacy
-            # extra card keeps its own answer: rewriting it would repoint that
-            # card's review schedule. lint_entry makes the same choice.
+                        + " — state the ordinary case plainly when the note "
+                        "establishes it; a candidate is never an order"))
+            # The line-3 term contract binds the primary card only: an extra
+            # card is removed, never repointed to the entry's answer.
+            # lint_entry makes the same choice.
             _report_line3, _no_primary = primary_line3_faults(
                 len(_line3_faults), _line3_faults, _expected_term,
                 _expected_counterpart)
@@ -4613,7 +4616,7 @@ def scan(wiki, images=None, vault=None, settled=None):
 
     problems.current_path = ""
 
-    # ---- item 5: collision probes across entries (REPORT as candidates; merge is the user's call) ----
+    # ---- item 5: collision probes across entries (candidates for Task 1b's merge check; a match never merges) ----
     collisions = []
     ident_owners = {}                     # exact identifier (slug or alias) -> its owners, in scan order
     for sl,e in entries.items():
@@ -6359,18 +6362,31 @@ def run_self_test():
               _st_keys(res, "blank-tags"), ["item8"])
         check("the tag census counts the enum tags",
               res["discipline_tags"].get("statistics"), 3)
-        check("a second flashcard is reported without authorizing deletion",
-              ("report-only" in _st_msg(res, "twocards", "item19")
-               and "preserve every card" in _st_msg(
-                   res, "twocards", "item19")), True)
-        check("an extra card keeps its own line-3 answer without a term finding",
-              "line 3 is" in _st_msg(res, "twocards", "item19"), False)
+        _twocards = _st_msg(res, "twocards", "item19")
+        check("a second flashcard is a fixable finding: remove it and quote "
+              "it in the report",
+              ("holds 2 cards: " in _twocards,
+               "remove every other card" in _twocards,
+               "verbatim, attachments included, in the report" in _twocards),
+              (True, True, True))
+        check("a second flashcard is never report-only or preserved",
+              [word in _twocards for word in ("report-only", "legacy",
+                                              "preserve every card")],
+              [False] * 3)
+        check("an extra card draws no line-3 term finding: it is removed, "
+              "never repointed",
+              "line 3 is" in _twocards, False)
         _no_primary = _st_msg(res, "no-primary-card", "item19").split(" | ")
         check("several cards with no primary answer get one finding, not one per card",
               ([msg for msg in _no_primary if " line 3 is" in msg],
                sum("no card carries the primary answer" in msg
                    for msg in _no_primary)),
               ([], 1))
+        check("with no definition card, the first card is rewritten into it "
+              "and the rest removed",
+              sum(msg.endswith("rewrite the first card into the definition "
+                               "card, keeping its attachments, and remove "
+                               "every other card") for msg in _no_primary), 1)
         check("a near-miss primary card gets its own line-3 fault; the extra card none",
               [msg[:msg.index(" line 3")] for msg in
                _st_msg(res, "near-primary-card", "item19").split(" | ")
@@ -6394,7 +6410,7 @@ def run_self_test():
                   res, "ordinary-line4-comment", "item19"), True)
         check("whitespace-only padding after the heading parses like a blank line",
               "item19" in _st_keys(res, "space-padded-card"), False)
-        check("a legacy secondary card may name the primary without an answer leak",
+        check("an extra card may name the primary without an answer leak",
               "leaks the answer" in _st_msg(res, "twocards", "item19"), False)
         check("flashcard line 1 must be one sentence",
               "roughly 2 sentences" in _st_msg(
@@ -10832,14 +10848,14 @@ def run_self_test():
 
         # ------------------------------------------------------------------
         # Item 19 card set: one `??` definition card per entry; a further card
-        # is a report-only legacy extra; brevity candidates.
+        # is an extra card to remove; brevity candidates.
         # ------------------------------------------------------------------
         def _with_cards(title, extra, **kwargs):
             return (_st_entry(title, "**%s** is a worked example." % title,
                               **kwargs).rstrip("\n") + "\n\n" + extra)
         _why = "Why does the example matter?\n?\nIt keeps each claim separate.\n"
         v = os.path.join(tmp, "v-card-set")
-        _st_write(v, "legacy-question.md", _with_cards("Legacy question", _why))
+        _st_write(v, "extra-question.md", _with_cards("Extra question", _why))
         _st_write(v, "three-cards.md", _with_cards(
             "Three cards", _why + "\n"
             + "A second claim, stated once.\n??\nSecond term\n"))
@@ -10887,74 +10903,103 @@ def run_self_test():
             "Code card marker", "**Code card marker** is a worked example.")
             .replace("The idea this entry is about, stated once.",
                      "The idea `a::b` this entry is about, stated once."))
+        _st_write(v, "two-q.md", _st_entry(
+            "Two q", "**Two q** is a worked example.").replace(
+                "The idea this entry is about, stated once.\n??\nTwo q\n",
+                _why + "\nWhy is the example short?\n?\nIt states one claim.\n"))
+        _st_write(v, "extra-stray.md", _with_cards(
+            "Extra stray", "Another notion, stated briefly.\n??\nSecond idea\n"
+            "A stray user line.\n"))
         res = scan(v)
         check("a separator on card line 1 or 3 splits the card: an item19 "
-              "problem naming the line, report-only on a legacy extra",
+              "problem naming the line, asking for an extra card's removal",
               [sorted(p["message"].split(" holds ")[0] for p in res["problems"]
                       if p["slug"] == slug_ and p["item"] == "item19"
                       and " holds `:" in p["message"])
                for slug_ in ("card-line-marker", "extra-card-marker",
                              "code-card-marker")],
               [["flashcard line 1"],
-               [LEGACY_EXTRA_PREFIX % 2 + "card 2 line 1",
-                LEGACY_EXTRA_PREFIX % 2 + "card 2 line 3"], []])
+               [EXTRA_CARD_PREFIX % 2 + "card 2 line 1",
+                EXTRA_CARD_PREFIX % 2 + "card 2 line 3"], []])
         check("a card-line separator names the math remedy on line 1",
               "\\mathbin{:}\\mathbin{:}" in _st_msg(
                   res, "card-line-marker", "item19"), True)
-        _legacy = _st_msg(res, "legacy-question", "item19")
-        check("a legacy question card is a report-only extra whose own line 1 "
+        _extra_q = _st_msg(res, "extra-question", "item19")
+        check("a question card is an extra card to remove whose own line 1 "
               "and line 2 are reported",
-              ("holds 2 cards" in _legacy,
-               "report-only legacy extra" in _legacy,
-               "card 2 line 1 does not end with a period" in _legacy,
-               'card 2 line 2 is "?"' in _legacy, "card 1 " in _legacy),
+              ("holds 2 cards" in _extra_q,
+               "remove every other card" in _extra_q,
+               "card 2 line 1 does not end with a period" in _extra_q,
+               'card 2 line 2 is "?"' in _extra_q, "card 1 " in _extra_q),
               (True, True, True, True, False))
-        _legacy_rows = [p["message"] for p in res["problems"]
-                        if p["slug"] == "legacy-question"
-                        and "card 2" in p["message"]]
-        check("per-card problems on a legacy extra carry the report-only "
-              "prefix, and its line 2 keeps its separator",
-              ([m.startswith(LEGACY_EXTRA_PREFIX % 2) for m in _legacy_rows],
-               any("keeps its separator" in m for m in _legacy_rows),
-               any("must be exactly" in m for m in _legacy_rows)),
-              ([True, True], True, False))
+        _extra_q_rows = [p["message"] for p in res["problems"]
+                         if p["slug"] == "extra-question"
+                         and "card 2" in p["message"]]
+        check("per-card problems on an extra card carry the removal prefix, "
+              "and none asks for a new line 2",
+              ([m.startswith(EXTRA_CARD_PREFIX % 2) for m in _extra_q_rows],
+               any("must be exactly" in m for m in _extra_q_rows)),
+              ([True, True], False))
         _pair = [p["message"] for p in res["problems"]
                  if p["slug"] == "simplified-pair" and "line 2" in p["message"]]
-        check("a primary simplified to ? beside a legacy ? card: only the "
+        check("a primary simplified to ? beside an extra ? card: only the "
               "primary's line 2 must be ?? again",
-              sorted((m.startswith("legacy extra card 2 "),
+              sorted((m.startswith("extra card 2 (remove this extra card; "),
                       "must be exactly ??" in m) for m in _pair),
               [(False, True), (True, False)])
-        check("a question card placed first is the legacy extra; the "
+        check("a question card placed first is the extra card; the "
               "definition card after it is the primary one",
               sorted(p["message"].split(":")[0] for p in res["problems"]
                      if p["slug"] == "question-first"
                      and p["item"] == "item19"
                      and "holds 2 cards" not in p["message"]),
-              ["legacy extra card 1 (report-only; never repair)"] * 2)
+              ["extra card 1 (remove this extra card; it needs no other "
+               "repair)"] * 2)
         _extra_rows = [(p["item"], p["message"].startswith(
-                            LEGACY_EXTRA_PREFIX % 2),
-                        "remove only the markup" in p["message"])
+                            EXTRA_CARD_PREFIX % 2),
+                        "remove only the markup" in p["message"]
+                        or "keep the cue" in p["message"])
                        for p in res["problems"]
                        if p["slug"] == "extra-faults" and "card 2" in p["message"]]
         check("markup, leak, typography, boilerplate, brevity and hedge "
-              "problems on a legacy extra are report-only, and none orders a "
-              "repair",
+              "problems on an extra card ask for its removal, and none orders "
+              "another repair",
               sorted(set(_extra_rows)),
               [("item12/boilerplate-candidate", True, False),
                ("item12/equation-typography", True, False),
                ("item19", True, False),
                ("item19/brevity-candidate", True, False),
                ("item19/hedge-candidate", True, False)])
+        _two_q = [p["message"] for p in res["problems"] if p["slug"] == "two-q"]
+        check("with no definition card, every card after the first is an "
+              "extra card to remove; the first keeps its ordinary problems",
+              ([m.startswith(EXTRA_CARD_PREFIX % 2)
+                for m in _two_q if "card 2" in m],
+               any("must be exactly" in m for m in _two_q if "card 2" in m),
+               ["must be exactly ??" in m for m in _two_q
+                if m.startswith("card 1 line 2")],
+               sum(m.startswith('no card carries the primary answer "Two q"')
+                   for m in _two_q)),
+              ([True, True], False, [True], 1))
+        check("an extra card's content after line 3 stays: its removal takes "
+              "lines 1–3 and their recognized attachments only",
+              [(m.startswith(EXTRA_CARD_PREFIX % 2), m.endswith(
+                  "and their recognized attachments only; the content after "
+                  "line 3 stays and is reported"))
+               for m in (p["message"] for p in res["problems"]
+                         if p["slug"] == "extra-stray")
+               if "visible lines" in m],
+              [(True, True)])
         check("the extra's line-3 markup and leak are both reported",
               [any(word in p["message"] for p in res["problems"]
                    if p["slug"] == "extra-faults")
                for word in ("line 3 (term) has bold", "leaks the answer")],
               [True, True])
         _three = _st_msg(res, "three-cards", "item19")
-        check("every further card joins one report-only count",
-              ("holds 3 cards" in _three, "preserve every card" in _three),
-              (True, True))
+        check("every further card joins one card-set problem",
+              ("holds 3 cards" in _three, "remove every other card" in _three,
+               _three.count("holds 3 cards")),
+              (True, True, 1))
         _simplified = _st_msg(res, "simplified-primary", "item19")
         check("a card simplified to ? needs its ?? back, and nothing else",
               ('line 2 is "?"' in _simplified,
@@ -10989,7 +11034,7 @@ def run_self_test():
                 "Why does it matter?\n?\n" + _answer))
         before = {p: open(p, "rb").read() for p in iter_entry_files(v)}
         res = scan(v)
-        check("recognized attachments on a legacy extra card are not card "
+        check("recognized attachments on an extra card are not card "
               "content",
               [("holds 2 cards" in _st_msg(res, name, "item19"),
                 any(word in _st_msg(res, name, "item19")
@@ -11031,17 +11076,13 @@ def run_self_test():
                 "multilineReversedCardSeparator": "??",
                 "multilineCardEndMarker": "", "dataStore": "NOTES"},
                 "scheduleData": {"cardSchedules": {}}}
-            for key, value in changes.items():
-                if key == "scheduleData":
-                    data[key] = value
-                else:
-                    data["settings"][key] = value
+            data["settings"].update(changes)
             return data
         _counts = {"physics": 1, "statistics": 2}
         _absent = spaced_repetition_report(os.path.join(tmp, "no-vault"), _counts)
         check("absent plugin settings are reported as absent",
-              (_absent["settings"], _absent["schedules_outside_notes"]),
-              ("absent", None))
+              _absent, {"settings": "absent", "uncovered_tags": {},
+                        "separator_findings": []})
         _root, _ = _sr_vault("sr-malformed", raw="{not json")
         check("malformed plugin settings are unreadable",
               spaced_repetition_report(_root, _counts)["settings"], "unreadable")
@@ -11063,13 +11104,11 @@ def run_self_test():
         _before_stat = os.stat(_real_path)
         _before_bytes = open(_real_path, "rb").read()
         _read = spaced_repetition_report(_real_root, _counts)
-        check("readable settings report uncovered tags and fresh schedules",
+        check("readable settings report uncovered tags and no findings",
               (_read["settings"], _read["uncovered_tags"],
-               _read["separator_findings"], _read["schedules_outside_notes"],
-               sorted(_read)),
-              ("read", {"physics": 1}, [], False,
-               ["schedules_outside_notes", "separator_findings", "settings",
-                "uncovered_tags"]))
+               _read["separator_findings"], sorted(_read)),
+              ("read", {"physics": 1}, [],
+               ["separator_findings", "settings", "uncovered_tags"]))
         check("reading the settings never changes the file",
               (open(_real_path, "rb").read(), os.stat(_real_path).st_mtime_ns),
               (_before_bytes, _before_stat.st_mtime_ns))
@@ -11080,10 +11119,6 @@ def run_self_test():
                     multilineReversedCardSeparator="::")),
                 ("basic-separator", _sr_settings(multilineCardSeparator="::")),
                 ("end-marker", _sr_settings(multilineCardEndMarker="+++")),
-                ("schedules", _sr_settings(scheduleData={
-                    "cardSchedules": {"x": [1]}})),
-                ("no-schedule", {"settings": _sr_settings()["settings"]}),
-                ("json-store", _sr_settings(dataStore="PLUGIN")),
                 ("cloze-bold", _sr_settings(
                     clozePatterns=["**[123;;]answer[;;hint]**"],
                     convertBoldTextToClozes=True)),
@@ -11128,10 +11163,6 @@ def run_self_test():
                 _variants["single-line"]["separator_findings"]],
                _variants["single-line-defaults"]["separator_findings"]),
               (["singleLineCardSeparator"], []))
-        check("schedules outside notes unless NOTES stores none elsewhere",
-              [_variants[name]["schedules_outside_notes"]
-               for name in ("schedules", "no-schedule", "json-store")],
-              [True, True, True])
 
         # ------------------------------------------------------------------
         # Discipline roots need no card; parents link down to their children.
@@ -11244,17 +11275,18 @@ def run_self_test():
         check("children of a hub parent are each other's card rivals",
               (_rivals.get("trees"), _rivals.get("linear-model"),
                "machine-learning" in _rivals), (["linear-model"], ["trees"], False))
-        _legacy_first = (_st_entry(
+        _question_first = (_st_entry(
             "Linear model", "**Linear model** is a worked example.",
             tags=('"#machine-learning"',), parents=('"[[models]]"',))
             .replace("## Flashcards\n\n", "## Flashcards\n\nWhy does the "
                      "model fit?\n?\nBecause of thresholds.\n\n", 1)
             .replace("\n??\nLinear model\n", "\n??\nlinear model\n", 1))
-        _res_legacy = scan(_org_vault(
-            "v-org-legacy", extra=(("linear-model.md", _legacy_first),)))
-        check("card_rivals takes the primary card's cue, not a legacy extra "
+        _res_question_first = scan(_org_vault(
+            "v-org-question-first",
+            extra=(("linear-model.md", _question_first),)))
+        check("card_rivals takes the primary card's cue, not an extra card "
               "placed before it",
-              [row["cue"] for row in _res_legacy["card_rivals"]
+              [row["cue"] for row in _res_question_first["card_rivals"]
                if row["slug"] == "linear-model"],
               ["The idea this entry is about, stated once."])
         check("scan output keys follow the documented order",

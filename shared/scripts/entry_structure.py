@@ -151,6 +151,10 @@ def _escaped_at(text, offset):
 
 
 _MASK_FENCE_LINE_RE = re.compile(r"^(\s*)(`{3,}|~{3,})(.*)$")
+# A fence opened on a list item's own marker line, as in "- ```".
+_MASK_ITEM_FENCE_RE = re.compile(
+    r"^(\s*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)+)(`{3,}|~{3,})(.*)$")
+_MASK_LEADING_SPACE_RE = re.compile(r"^[ \t]*")
 _MASK_INDENTED_RE = re.compile(r"^(?: {4}|\t)")
 _MASK_LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
 _MASK_BACKTICKS_RE = re.compile(r"`+")
@@ -198,7 +202,11 @@ def _mask_body_comments(text, mask_code, mask_unclosed_comments):
             if chars[pos] not in "\r\n":
                 chars[pos] = " "
 
-    index, fence, fence_indent = 0, None, 0
+    # A fence opened on a list marker line belongs to that item: it ends at
+    # its closer at any indentation, or where a less indented line ends the
+    # item. Missing that opener would read its indented closer as a new fence
+    # hiding the rest of the body.
+    index, fence, fence_indent, fence_item = 0, None, 0, 0
     previous_nonblank = ""
     previous_blank = True
     indented_code = False
@@ -209,12 +217,16 @@ def _mask_body_comments(text, mask_code, mask_unclosed_comments):
             end = length if end < 0 else end
             line = text[index:end]
             match = _MASK_FENCE_LINE_RE.match(line)
+            if (fence and fence_item and line.strip() and len(
+                    _MASK_LEADING_SPACE_RE.match(line)[0].expandtabs(4))
+                    < fence_item):
+                fence, fence_item = None, 0
             if fence:
                 if (match and match[2][0] == fence[0]
                         and len(match[2]) >= len(fence)
                         and not match[3].strip()
                         and len(match[1].expandtabs(4)) <= fence_indent):
-                    fence = None
+                    fence, fence_item = None, 0
                     previous_blank = True  # a closed fence ends its block
                 if mask_code:
                     blank(index, end)
@@ -222,10 +234,21 @@ def _mask_body_comments(text, mask_code, mask_unclosed_comments):
                 continue
             if match and not (match[2][0] == "`" and "`" in match[3]):
                 fence, fence_indent = match[2], max(3, len(match[1].expandtabs(4)))
+                fence_item = 0
                 if mask_code:
                     blank(index, end)
                 index = end + 1
                 previous_blank = False
+                continue
+            item = None if match else _MASK_ITEM_FENCE_RE.match(line)
+            if item and not (item[2][0] == "`" and "`" in item[3]):
+                fence, fence_indent = item[2], length
+                fence_item = len(item[1].expandtabs(4))
+                if mask_code:
+                    blank(index + item.start(2), end)
+                index = end + 1
+                previous_blank = False
+                previous_nonblank = line
                 continue
             indented = bool(_MASK_INDENTED_RE.match(line))
             in_list = bool(
@@ -1087,8 +1110,8 @@ def parse_flashcard_blocks(text):
     """Return visible flashcard blocks split on whitespace-only blank lines.
 
     It never reads line 2, so a card parses alike whatever its separator,
-    including a legacy extra card. Recognized Spaced Repetition state and
-    trailing block IDs attached to a complete card are omitted by
+    such as an extra question card's `?`. Recognized Spaced Repetition
+    state and trailing block IDs attached to a complete card are omitted by
     ``strip_flashcard_review_metadata``. Ordinary visible content
     stays in its block so callers can report it as malformed rather than
     silently treating it as review state.
@@ -2045,7 +2068,7 @@ def run_self_test(verbose=False):
          [["26 words outside math (about 20 is the target)"], [],
           ["a ', where' symbol glossary"], [],
           ["a second clause after a semicolon"], [], []]),
-        ("every attachment form on a legacy question card parses as on a "
+        ("every attachment form on an extra question card parses as on a "
          "definition card",
          [parse_flashcard_blocks("Why?\n?\nBecause." + attachment)
           for attachment in (
@@ -2056,7 +2079,7 @@ def run_self_test(verbose=False):
               " ^why-card",
               " <!--SR:!2026-09-20,3,250--> ^why-card")],
          [[["Why?", "?", "Because."]]] * 6),
-        ("a definition card and a legacy extra card keep their own "
+        ("a definition card and an extra card keep their own "
          "attachments",
          [parse_flashcard_blocks(value) for value in (
              "Definition.\n??\nTerm\n\n"
@@ -2114,6 +2137,16 @@ def run_self_test(verbose=False):
             helper_cases.append((
                 "a comment delimiter inside code cannot hide later prose: " + repr(code),
                 mask_body_comments(source), source))
+    for source in ("- ```\n  [[sample]]\n  ```\n[[visible]]\n",
+                   "1. ~~~md\n   [[sample]]\n\nAfter [[visible]].\n",
+                   "- Top\n- ```\n      [[sample]]\n      ```\n- [[visible]]\n"):
+        masked = mask_body_comments(source, mask_code=True)
+        helper_cases.append((
+            "a fence on a list marker line hides only its item's code: "
+            + repr(source),
+            ("[[sample]]" in masked, "[[visible]]" in masked,
+             masked[:2] == source[:2], len(masked)),
+            (False, True, True, len(source))))
     source = "An unmatched ` tick.\n\n[[visible]]\n\nAnother ` tick."
     helper_cases.append((
         "unmatched inline ticks cannot hide later paragraphs",

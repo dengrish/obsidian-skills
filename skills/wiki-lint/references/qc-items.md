@@ -11,9 +11,10 @@ They do not require the user or another human to inspect every
 note or approve an ordinary correction. Task 1 repairs what the note and vault
 establish. A semantic finding they do not settle goes to
 [Task 1b](../SKILL.md#task-1b--content-repair), which repairs it in the same
-run from the entry's cited sources or accurate background. Only a split, merge
-or deletion, a conflict no evidence settles, or a user-owned state decision
-stays a report, and it does not block the current run.
+run from the entry's cited sources or accurate background, merges and splits
+included. Only a deletion, a split or merge that is a close call or that a
+refactor blocker stops, a conflict no evidence settles, or a user-owned state
+decision stays a report, and it does not block the current run.
 
 Related procedures:
 
@@ -68,13 +69,13 @@ ownership.
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item18/partial-label` | Task 1 repair; a label naming another entity goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item18/cross-domain-alias` | The alias is a bare cross-domain term, which is never an alias. Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
-| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Content after a card's line 3 that is not a recognized attachment is report-only. |
-| `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars) and shorten it only when the card's bar allows; the candidate alone is never an order. |
-| `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#card-freshness-and-the-rewrite-bars): when the card's bar allows, drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
+| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Remove each extra card under the [card set](flashcards.md#card-set) rule; a finding on an extra card, its line-1 `item12` findings included, needs no repair beyond that removal. Content after a card's line 3 that is not a recognized attachment is report-only. |
+| `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#improving-the-card) and shorten it when the shorter cue is clearer and still rules out its rivals; the candidate alone is never an order. |
+| `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
-| `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. An occupied destination stays a duplicate/disambiguation proposal with its collision warning. |
-| `collision_candidates` | Report; routine lint never merges existing entries. |
+| `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. An occupied destination is never retitled into: a same-entity occupant goes to Task 1b's [merge check](#5-filename-collision-and-disambiguation), and any other stays a disambiguation report with its collision warning. |
+| `collision_candidates` | Task 1b's [merge check](#5-filename-collision-and-disambiguation): merge the pair through the [refactor protocol](refactors.md) only when it is one entity under alternate names; a probe match alone never activates a merge. |
 | `hierarchy_diagnostic` (every field) | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. Actions are in [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion). |
 | Semantic-invalid alias | Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias) when the canonical owner is unambiguous; ambiguous ownership is reported. |
 
@@ -166,15 +167,25 @@ Apply the canonical [naming rules](../../wiki-build/references/writing.md#3-wiki
 Task 1 never renames. A title/filename mismatch goes to Task 1b, which
 retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry)
 when the canonical name is determinate and its slug is free.
-If the slug is occupied, preserve both files and report their paths
-as an unresolved duplicate/disambiguation proposal; the lint run still completes.
-Report collision-probe matches as candidates; do not merge them. Whole-vault
-maintenance uses slug equality, micro-sign normalization, singular/plural,
-hyphen-collapse, word-order, and light stem morphology. When several probes
-flag the same pair, report only the most specific probe label; no probe chooses
-an entry owner. The linter deliberately omits the noisy create-time
-token-superset probe. While reading, also report semantic synonym duplicates
-that shape probes cannot find.
+If the slug is occupied, preserve both files: a same-entity occupant goes to
+the merge check below, and any other is reported with both paths as an
+unresolved disambiguation; the lint run still completes.
+Whole-vault maintenance uses slug equality, micro-sign normalization,
+singular/plural, hyphen-collapse, word-order, and light stem morphology. When
+several probes flag the same pair, report only the most specific probe label;
+no probe chooses an entry owner. The linter deliberately omits the noisy
+create-time token-superset probe. While reading, also note semantic synonym
+duplicates that shape probes cannot find.
+
+**Merge check.** Collision-probe matches and synonym duplicates are Task 1b's
+merge candidates. Task 1b merges two or more entries through the
+[refactor protocol](refactors.md) only when their definitions, cited sources
+and accurate background verify one entity under alternate names
+([step 2](refactors.md#establish-evidence-and-complete-scope)). Related
+concepts, overlapping wording or a probe match alone never activate a merge.
+An identity that is a genuinely close call, or that the evidence does not
+settle, is not merged: report both options under *Notes for the user*, never
+in a log.
 
 A bare cross-domain title is retitled the same way. The scanner flags a slug
 that is a word or phrase of the builder's corpus (`tree-of-life`); the semantic
@@ -183,8 +194,9 @@ pass tests every other bare title against the
 whose test (a) also fires when the bare encyclopedia landing is another sense
 (Tree of life lands on the mythological motif). When that rule makes the
 qualified title determinate and its slug is free, Task 1b retitles the entry;
-the old bare slug never stays as an alias. An occupied slug or an
-indeterminate qualifier stays a report. Report an unsluggable title with a
+the old bare slug never stays as an alias. A slug the same entity occupies
+goes to the merge check above; one another entity occupies, or an
+indeterminate qualifier, stays a report. Report an unsluggable title with a
 representable alternative.
 
 ### 6. Type and API surface
@@ -236,8 +248,9 @@ canonical home unambiguous; otherwise report the competing candidates. Reduce
 a legacy multi-tag list to one of its tags using the entry's main treatment
 and the calibration's governing test and defaults, reporting a close call with
 its two-option framing. Leave multiple tags only when the entry's identity is
-unresolved (for example, it conflates two concepts that need a split), and
-report that blocker. For a genuinely blank key or empty list, inspect the note and assign its
+unresolved (for example, it conflates two concepts); Task 1b's
+[split](#9-body-structure-coherence-flow-and-scope) then tags each result, and
+a split it does not apply leaves that blocker reported. For a genuinely blank key or empty list, inspect the note and assign its
 best supported specific discipline, or `"#misc"` alone if none fits. Never combine
 misc with specific tags. Missing, malformed, mixed, or uncertain metadata
 requires its own evidence-based resolution, not blind replacement with misc.
@@ -281,7 +294,20 @@ example. Task 1b likewise frames an entry in its
 general concept's display never borrows one application's parameter notation,
 and the entry names and links its nearest contrast when the subject has one. A
 neighbor conflict may also expose a wrong link, a duplicated explanation
-(consolidated below), or a split candidate, which stays a proposal.
+(consolidated below), or an atomicity failure (split below).
+
+**Atomicity review.** An entry that independently defines several durable
+subjects fails the builder's
+[atomicity test](../../wiki-build/references/writing.md#body-structure).
+Task 1b splits it through the [refactor protocol](refactors.md) when each
+split-off subject passes the substance test with support in the entry's cited
+sources or accurate background
+([step 2](refactors.md#establish-evidence-and-complete-scope)). A long note,
+several headings or several sources alone never activate a split; inherent
+mechanisms, stages, conditions and limitations stay with their subject. A
+boundary that is a genuinely close call, or that the evidence does not
+settle, is not split: report both options under *Notes for the user*, never
+in a log.
 
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
@@ -450,13 +476,13 @@ whose numbers a caption matches exactly; a caption drops a hedge principle 3
 excludes even when the source's own caption carries it. An ambiguous placement
 is reported.
 
-Never delete a missing embed or caption: repair belongs to extraction or an
-approved source rename. Preserve a composite and lowercase-suffixed panel until
-source-backed review decides whether the entry needs the default composite or
-the panel-specific view. Figure selection, source fidelity, table values, and
-retained rows or columns remain source-dependent: Task 1b checks them against
-the cited source when a repair depends on them. An unused image file is not
-itself a missing-content finding.
+Never delete a missing embed or caption: repair belongs to extraction or
+pdf-organize's source rename. Preserve a composite and lowercase-suffixed panel
+until source-backed review decides whether the entry needs the default
+composite or the panel-specific view. Figure selection, source fidelity,
+table values, and retained rows or columns remain source-dependent: Task 1b
+checks them against the cited source when a repair depends on them. An unused
+image file is not itself a missing-content finding.
 
 **Equation coverage and usefulness.** The scanner emits a conservative
 `item12/equation-coverage-candidate`; inspect it autonomously rather than treating
@@ -637,17 +663,17 @@ a section. Repair a missing or empty section by writing the card from the
 entry's already-established main claim, with `??` and the canonical primary
 answer, and itemize the addition. Routine lint never adds a second card.
 
-Inspect the primary card semantically: leaks and reconstructions, a primary
-answer that omits a qualifying opener binding, and any line-1 math, even when
-the scanner is silent. Preserve every existing separator, apart from the one
+Inspect the definition card semantically: leaks and reconstructions, a
+primary answer that omits a qualifying opener binding, and any line-1 math,
+even when the scanner is silent. [Improve](flashcards.md#improving-the-card)
+its line 1, up to a complete rewrite, whenever the result is clearer, more
+precise, more concise or a fairer definition; a card that already meets the
+guide stays byte-for-byte. Keep its separator, apart from the one
 [`??` restoration](../../wiki-build/references/flashcards-and-emphasis.md#line-2-the-separator),
 and every recognized scheduling or block-ID attachment byte-for-byte and in
-place. Routine lint applies the
-[rewrite bars](flashcards.md#card-freshness-and-the-rewrite-bars), the low
-bar included for a card the scan proves fresh; a
-[legacy extra](flashcards.md#card-set) stays report-only. When a Task 1b
-repair changes the claim the primary card tests, the card follows in the same
-edit under those bars.
+place. Remove every [other card](flashcards.md#card-set) and quote it
+verbatim, attachments included, in the report. When a Task 1b repair changes
+the claim the definition card tests, the card follows in the same edit.
 
 ## Coding content in non-Software entries (item 6)
 
@@ -670,9 +696,10 @@ A title that is itself an API identifier, such as `SGDClassifier` or
 `cross_val_predict`, is a wrong title. When the underlying entity's conceptual
 title is determinate and its slug is free, Task 1b retitles the entry through
 the [entry-retitle protocol](refactors.md#retitle-an-entry) and strips the
-remaining API detail as for a conceptual entry above. An indeterminate entity,
-or an occupied slug, which makes it a duplicate/disambiguation proposal, is
-reported with the file and inbound references left intact.
+remaining API detail as for a conceptual entry above. A slug occupied by the
+same entity goes to the [merge check](#5-filename-collision-and-disambiguation);
+an indeterminate entity, or a slug another entity occupies, is reported with
+the file and inbound references left intact.
 
 When the distinction is unclear, preserve and report. Do not gut an entry or
 flip its type merely to silence a mechanical finding.

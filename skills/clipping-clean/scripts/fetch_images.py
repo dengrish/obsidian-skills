@@ -31,6 +31,11 @@ CLI
         --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
         --old-slug Old_Slug_2025 --new-slug New_Slug_2026 \\
         --new-owner-note '<vault>/Articles/New_Slug_2026.md'
+    python3 fetch_images.py rename --phase repair [--dry-run] \\
+        --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \\
+        --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
+        --old-slug Old_Slug_2025 --new-slug New_Slug_2026 \\
+        --new-owner-note '<vault>/Articles/New_Slug_2026.md'
     python3 fetch_images.py rename --phase finalize [--dry-run] \\
         --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \\
         --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
@@ -51,14 +56,21 @@ final write is left to the rendering step, because a script that does its own
 `urlopen` and its own `os.replace` into Sources/Images has none of this.
 
 `rename` requires an explicit phase. A clipping reprocess uses `prepare` to
-publish verified new-name copies while retaining the old names, then `finalize`
-only after the reported dependencies have been rewritten and an unchanged
-re-probe passes. Both phases require the old and new published owner notes.
+publish verified new-name copies while retaining the old names, `repair` to
+point every other note's references at the new names, then `finalize` only
+after an unchanged re-probe passes. Every phase requires the old and new
+published owner notes. `repair` rewrites, in each other vault note, only the
+parsed links, embeds, Markdown and HTML targets that resolve to the old note
+or a mapped old image; it keeps each path form, label, anchor, size and alt
+text, edits no owner note, no dated `Investments/` research record and no
+other text, and reports every note it cannot rewrite unambiguously as a
+remaining blocker.
 A same-note re-stem passes one renamed `Articles/<new_slug>.md` as both owner
 notes for images a rename left under the old stem. It applies only while no
 `Articles/<old_slug>.md` exists. Prepare requires every old-stem image to be
-that note's exact rendered embed; finalize requires the republished note to
-embed the mapped new names instead, and `dependencies --new-slug` re-probes.
+that note's exact rendered embed; repair rewrites other notes' old image
+references only; finalize requires the republished note to embed the mapped
+new names instead, and `dependencies --new-slug` re-probes.
 
 `rename`'s required `--sources` is the vault's `Sources/PDFs`: a `<old_slug>.pdf`
 found anywhere beneath (the folder is recursive — book chapters live in
@@ -104,9 +116,10 @@ Guards, because this is the only script in the skill that writes into the vault:
   `rename` inventories every other Markdown note for inbound old-note links and
   old-image references before and during the operation. `prepare` reports those
   dependencies while keeping both names resolvable; an incomplete scan still
-  blocks it. `finalize` refuses any dependency or
-  incomplete scan with exact blocker paths. `dependencies` repeats that
-  complete check before the old Articles path is retired.
+  blocks it. `repair` snapshots each dependent before reading it and replaces
+  it only while it still matches that snapshot. `finalize` refuses any
+  dependency or incomplete scan with exact blocker paths. `dependencies`
+  repeats that complete check before the old Articles path is retired.
 * **Only `http`, `https` and `data:`** — generic URL clients also speak `file:`
   and `ftp:`, and clipped markdown legitimately carries `file://` image links.
   Each HTTP(S) hop is resolved once, every answer is checked, and the actual
@@ -143,6 +156,8 @@ Importable
     slug_occupancy(vault, slug) -> dict                # `preflight`
     prepare_slug_rename(attachments, old_slug, new_slug, *, sources=...,
                         owner_note=..., new_owner_note=..., dry_run=False) -> dict
+    repair_slug_rename(attachments, old_slug, new_slug, *, sources=...,
+                       owner_note=..., new_owner_note=..., dry_run=False) -> dict
     finalize_slug_rename(attachments, old_slug, new_slug, *, sources=...,
                          owner_note=..., new_owner_note=..., dry_run=False) -> dict
     dependency_status(attachments, owner_note, old_slug, new_slug=None) -> dict
@@ -1125,55 +1140,142 @@ def _rendered_embed_basenames(body):
 
 _MARKDOWN_LINK_TARGET = re.compile(
     r"!?\[[^\]\r\n]*\]\(\s*(?:<(?P<angle>[^>\r\n]+)>|(?P<plain>[^)\s\r\n]+))")
+# A definition may sit in a blockquote, callout or list item, or indented
+# under one.
 _MARKDOWN_REFERENCE_TARGET = re.compile(
-    r"^[ \t]{0,3}\[[^\]\r\n]+\]:[ \t]*(?:<(?P<angle>[^>\r\n]+)>|(?P<plain>\S+))",
+    r"^[ \t]*(?:(?:>[ \t]?)+[ \t]*|(?:[-*+]|\d{1,9}[.)])[ \t]+)*"
+    r"\[[^\]\r\n]+\]:[ \t]*(?:<(?P<angle>[^>\r\n]+)>|(?P<plain>\S+))",
     re.MULTILINE)
 _HTML_REFERENCE_TARGET = re.compile(
     r"\b(?:src|href)[ \t]*=[ \t]*(?:\"([^\"\r\n]+)\"|'([^'\r\n]+)')",
     re.IGNORECASE)
+#: An open tag from its ``<`` up to a src/href value's opening quote, on one
+#: line. Repair rewrites an HTML-pattern target only behind this prefix.
+_HTML_ATTRIBUTE_PREFIX = re.compile(
+    r"<[A-Za-z][\w:-]*(?:[ \t]+[^\s\"'<>=/`]+(?:[ \t]*=[ \t]*"
+    r"(?:\"[^\"]*\"|'[^']*'|[^\s\"'<>=`]+))?)*[ \t]+(?:src|href)[ \t]*=[ \t]*"
+    r"[\"']", re.IGNORECASE)
 
 
-def _visible_markdown(text):
-    """Mask literal/comment regions while retaining rendered link syntax."""
+#: List-marker indentation the dependency view flattens (see below).
+_LIST_MARKER_INDENT = re.compile(r"(?m)^[ \t]+(?=(?:[-*+]|\d{1,9}[.)])[ \t]+)")
+_WIKILINK_TARGET = re.compile(r"(?<!\\)!?\[\[([^\]\r\n]+)\]\]")
+#: A fence opened after blockquote, callout or list-item markers. The shared
+#: lexer sees only unprefixed fences; the strict repair view masks these too.
+_CONTAINER_FENCE = re.compile(
+    r"((?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])[ \t]))+)[ \t]*(`{3,}|~{3,})(.*)$")
+#: A display-math delimiter: ``$$`` alone on its line. Obsidian renders the
+#: lines between two of them as math, never as links.
+_MATH_DELIMITER = re.compile(r"[ \t]*\$\$[ \t]*$")
+#: The same delimiter after blockquote, callout or list-item markers.
+_CONTAINER_MATH = re.compile(
+    r"((?:[ \t]*(?:>|(?:[-*+]|\d{1,9}[.)])[ \t]))+)[ \t]*\$\$[ \t]*$")
+
+
+def _visible_markdown(text, origin=None, strict=False):
+    """Mask literal/comment regions while retaining rendered link syntax.
+
+    A list passed as ``origin`` receives each view character's offset in
+    ``text``, so `rename --phase repair` can map a parsed target back to the
+    exact span it rewrites.
+
+    Both views mask a closed ``$$`` display-math block, as they mask a
+    fenced code block. The default view fails closed for retirement: an
+    unclosed comment, literal block or math delimiter stays visible, as does
+    a fence or math block behind container markers. ``strict`` is repair's
+    view instead: it masks each of those to its furthest possible end, so
+    text that may render as code, math or a comment is never rewritten.
+    """
     split = split_frontmatter(text)
     prefix = text[:len(text) - len(split[1])] if split is not None else ""
     body = text if split is None else split[1]
     # A partial/existing MOC can begin with an indented list item. For this
     # retirement inventory, indentation is never proof that such links are
     # inert code; flatten only list-marker indentation in this read-only view.
-    body = re.sub(r"(?m)^[ \t]+(?=(?:[-*+]|\d{1,9}[.)])[ \t]+)", "", body)
+    if origin is None:
+        body = _LIST_MARKER_INDENT.sub("", body)
+    else:
+        origin.extend(range(len(prefix)))
+        kept, positions, cursor = [], [], 0
+        for match in _LIST_MARKER_INDENT.finditer(body):
+            kept.append(body[cursor:match.start()])
+            positions.extend(range(len(prefix) + cursor,
+                                   len(prefix) + match.start()))
+            cursor = match.end()
+        kept.append(body[cursor:])
+        positions.extend(range(len(prefix) + cursor, len(text)))
+        body = "".join(kept)
     # YAML strings do not open Markdown comments. Keep their raw references
     # visible, and use the shared code-aware lexer only for the body. An
     # unresolved comment is not evidence that an old dependency disappeared.
     visible = _mask_html_literal_blocks(mask_body_comments(
-        body, mask_code=True, mask_unclosed_comments=False), mask_unclosed=False)
+        body, mask_code=True, mask_unclosed_comments=strict),
+        mask_unclosed=strict)
     lines = visible.splitlines(keepends=True)
+    # The default view masks only a math block that a later delimiter closes.
+    last_math = max((index for index, line in enumerate(lines)
+                     if _MATH_DELIMITER.match(line.rstrip("\r\n"))),
+                    default=-1)
     out = []
-    fence = None
-    for line in lines:
+    fence = boxed = None
+    end = 0
+    for index, line in enumerate(lines):
+        start, end = end, end + len(line)
         stripped = line.rstrip("\r\n")
-        if fence is not None:
-            close = re.match(r" {0,3}(%s{%d,})[ \t]*$" %
-                             (re.escape(fence[0]), fence[1]), stripped)
+        if (boxed is not None and boxed[2]
+                and not re.match(r"[ \t]*>", stripped)):
+            boxed = None  # a quoted fence ends with its blockquote
+        if boxed is not None:
+            # Only a closer at the opener's quote depth ends the fence.
+            close = re.match(r"[ \t]*((?:>[ \t]*)*)(%s{%d,})[ \t]*$" %
+                             (re.escape(boxed[0]), boxed[1]), stripped)
+            if close and close.group(1).count(">") == boxed[2]:
+                boxed = None
+            masked = True
+        elif fence is not None:
+            close = (_MATH_DELIMITER.match(stripped) if fence[0] == "$" else
+                     re.match(r" {0,3}(%s{%d,})[ \t]*$" %
+                              (re.escape(fence[0]), fence[1]), stripped))
             if close:
                 fence = None
-            out.append("\n" if line.endswith(("\n", "\r")) else "")
-            continue
-        opened = re.match(r" {0,3}(`{3,}|~{3,})", stripped)
-        if opened:
-            marker = opened.group(1)
-            fence = (marker[0], len(marker))
-            out.append("\n" if line.endswith(("\n", "\r")) else "")
+            masked = True
+        else:
+            opened = re.match(r" {0,3}(`{3,}|~{3,})", stripped)
+            math = (not opened and _MATH_DELIMITER.match(stripped)
+                    and (strict or index < last_math))
+            boxed_open = strict and not opened and not math and (
+                _CONTAINER_FENCE.match(stripped)
+                or _CONTAINER_MATH.match(stripped))
+            if opened:
+                marker = opened.group(1)
+                fence = (marker[0], len(marker))
+            elif math:
+                fence = ("$", 2)
+            elif boxed_open and boxed_open.re is _CONTAINER_MATH:
+                boxed = ("$", 2, boxed_open.group(1).count(">"))
+            elif boxed_open and not (boxed_open.group(2)[0] == "`"
+                                     and "`" in boxed_open.group(3)):
+                marker = boxed_open.group(2)
+                boxed = (marker[0], len(marker),
+                         boxed_open.group(1).count(">"))
+            masked = fence is not None or boxed is not None
+        if masked:
+            newline = line.endswith(("\n", "\r"))
+            out.append("\n" if newline else "")
+            if origin is not None and newline:
+                origin.append(positions[end - 1])
             continue
         # Do not treat indentation as proof of a code block here. Obsidian's
         # MOCs use nested list indentation of four or more spaces; dependency
         # retirement must fail closed and see links in those list items.
         out.append(line)
+        if origin is not None:
+            origin.extend(positions[start:end])
     return prefix + "".join(out)
 
 
-def _local_target_basename(target, *, wikilink=False):
-    """Return the basename of a local Markdown target, never a remote URL."""
+def _local_target_path(target, *, wikilink=False):
+    """Return a local Markdown target's decoded path, never a remote URL."""
     target = str(target).strip()
     if wikilink:
         # An escaped pipe is still the display separator in an Obsidian table.
@@ -1189,8 +1291,70 @@ def _local_target_basename(target, *, wikilink=False):
         target = urllib.parse.unquote(target)
     except (UnicodeError, ValueError):
         return None
-    target = target.replace("\\", "/").rstrip("/")
-    return target.rsplit("/", 1)[-1].strip() or None
+    return target.replace("\\", "/").rstrip("/") or None
+
+
+def _local_target_basename(target, *, wikilink=False):
+    """Return the basename of a local Markdown target, never a remote URL."""
+    path = _local_target_path(target, wikilink=wikilink)
+    return path and (path.rsplit("/", 1)[-1].strip() or None)
+
+
+def _dependency_targets(text, spans=False, strict=False):
+    """Yield ``(target, wikilink, span, kind)`` for each rendered link target.
+
+    ``target`` is the text the masked view parses. With ``spans``, ``span``
+    is its exact ``(start, end)`` in ``text``, or None when masking or list
+    flattening changed a character inside it; otherwise it is None.
+    ``kind`` names the pattern that matched: ``wikilink``, ``markdown``,
+    ``definition`` (a reference-style link definition) or ``html``. ``strict`` parses `_visible_markdown`'s strict view.
+    """
+    origin = [] if spans else None
+    visible = _visible_markdown(text, origin, strict=strict)
+
+    def located(match, group):
+        if origin is None:
+            return None
+        start, end = match.span(group)
+        first, last = origin[start], origin[end - 1] + 1
+        if last - first != end - start or text[first:last] != visible[start:end]:
+            return None
+        return first, last
+
+    for match in _WIKILINK_TARGET.finditer(visible):
+        yield match.group(1), True, located(match, 1), "wikilink"
+    for pattern in (_MARKDOWN_LINK_TARGET, _MARKDOWN_REFERENCE_TARGET):
+        for match in pattern.finditer(visible):
+            group = "angle" if match.group("angle") else "plain"
+            yield (match.group(group), False, located(match, group),
+                   "markdown" if pattern is _MARKDOWN_LINK_TARGET
+                   else "definition")
+    for match in _HTML_REFERENCE_TARGET.finditer(visible):
+        group = 1 if match.group(1) else 2
+        yield match.group(group), False, located(match, group), "html"
+
+
+def _dependency_classifier(image_names, old_slug, include_note=True):
+    """Return the old image or note name a parsed target names, or None."""
+    images = {_manifest_name_key(name): name for name in image_names}
+    note_key = _manifest_name_key(old_slug)
+
+    def classify(target, wikilink=False):
+        base = _local_target_basename(target, wikilink=wikilink)
+        if not base:
+            return None
+        image = images.get(_manifest_name_key(base))
+        if image is not None:
+            return image
+        stem, extension = os.path.splitext(base)
+        if include_note and (
+                (_manifest_name_key(base) == note_key and not extension)
+                or (extension.casefold() == ".md"
+                    and _manifest_name_key(stem) == note_key)):
+            return old_slug + ".md"
+        return None
+
+    return classify
 
 
 def _markdown_dependency_names(text, image_names, old_slug, include_note=True):
@@ -1199,32 +1363,10 @@ def _markdown_dependency_names(text, image_names, old_slug, include_note=True):
     A same-note re-stem has no old note to retire, so it passes
     ``include_note=False`` and only old image names are dependencies.
     """
-    visible = _visible_markdown(text)
-    images = {_manifest_name_key(name): name for name in image_names}
-    note_key = _manifest_name_key(old_slug)
-    found = set()
-
-    def inspect(target, wikilink=False):
-        base = _local_target_basename(target, wikilink=wikilink)
-        if not base:
-            return
-        image = images.get(_manifest_name_key(base))
-        if image is not None:
-            found.add(image)
-        stem, extension = os.path.splitext(base)
-        if include_note and (
-                (_manifest_name_key(base) == note_key and not extension)
-                or (extension.casefold() == ".md"
-                    and _manifest_name_key(stem) == note_key)):
-            found.add(old_slug + ".md")
-
-    for match in re.finditer(r"(?<!\\)!?\[\[([^\]\r\n]+)\]\]", visible):
-        inspect(match.group(1), wikilink=True)
-    for pattern in (_MARKDOWN_LINK_TARGET, _MARKDOWN_REFERENCE_TARGET):
-        for match in pattern.finditer(visible):
-            inspect(match.group("angle") or match.group("plain"))
-    for match in _HTML_REFERENCE_TARGET.finditer(visible):
-        inspect(match.group(1) or match.group(2))
+    classify = _dependency_classifier(image_names, old_slug, include_note)
+    found = {classify(target, wikilink)
+             for target, wikilink, _span, _kind in _dependency_targets(text)}
+    found.discard(None)
     return sorted(found, key=lambda item: (_manifest_name_key(item), item))
 
 
@@ -1262,6 +1404,13 @@ def _stable_markdown_text(path):
 
 def _vault_markdown_files(vault):
     """Yield every visible vault Markdown file, following folder links without cycles."""
+    for path in _vault_files(vault):
+        if os.path.basename(path).casefold().endswith(".md"):
+            yield path
+
+
+def _vault_files(vault):
+    """Yield every visible vault file, following folder links without cycles."""
     def failed(exc):
         raise ValueError("cannot scan vault directory %r: %s" %
                          (getattr(exc, "filename", None) or vault, exc)) from exc
@@ -1281,8 +1430,7 @@ def _vault_markdown_files(vault):
         dirs[:] = [name for name in dirs if not name.startswith(".")
                    and name.casefold() != "node_modules"]
         for name in files:
-            if name.casefold().endswith(".md"):
-                yield os.path.join(root, name)
+            yield os.path.join(root, name)
 
 
 def _same_logical_note(path, owner_path):
@@ -1379,10 +1527,13 @@ def _dependency_error(blockers):
         reason = blocker.get("error") or ("references " +
                  ", ".join(blocker.get("references", ())))
         details.append("%s (%s)" % (blocker["path"], reason))
+    # Repair rewrites references; it cannot make an unreadable note readable.
+    advice = ("make each named path readable, then re-run"
+              if blockers and all(blocker.get("error") for blocker in blockers)
+              else "rewrite them with `rename --phase repair` and re-probe")
     return ("external Markdown dependencies block this changed-slug rename; "
-            "rewrite them through a separately authorized complete dependency "
-            "operation, or retain the old note and image paths: " +
-            "; ".join(details))
+            + advice + ", or retain the old note and image paths: "
+            + "; ".join(details))
 
 
 def _attachment_vault_roots(attachments):
@@ -2893,10 +3044,11 @@ def dependency_status(attachments, owner_note, old_slug, new_slug=None):
 
 
 def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
-                      owner_note=None, require_vault=False, restem=None):
+                      owner_note=None, require_vault=False, restem=None,
+                      complete=True):
     """Plan the complete owned image mapping without changing any files.
 
-    Both supported handoff phases use this inventory. A current byte-identical
+    Every handoff phase uses this inventory. A current byte-identical
     destination can be a previously prepared copy; other occupied slots fail
     the whole plan. Every selected basename needs exact clipping ownership,
     while PDF stems, manifests, supplementary labels and missing embeds block
@@ -2906,6 +3058,9 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
     ``restem`` ("prepare" or "finalize") plans a same-note re-stem: the owner
     is Articles/<new_slug>.md, which embeds each old name before its embeds
     are republished and each mapped new name afterwards.
+
+    ``complete=False`` (the repair phase) skips the incomplete-scan refusal;
+    repair reports each unreadable note as a remaining blocker instead.
     """
     validate_slug(old_slug, "--old-slug")
     validate_slug(new_slug, "--new-slug")
@@ -3026,11 +3181,11 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
                      os.path.join(attachments, new_slug + tail), entry))
 
     # A changed stem retires both attachment names and, after publication, the
-    # old Articles path. Other vault notes can depend on either. Clipping
-    # cleaning does not have authority to rewrite unrelated Markdown, so
-    # preparation must retain both names while dependencies remain. Refuse
-    # an incomplete inventory here; finalization separately requires no old
-    # dependencies and repeats that complete check around retirement.
+    # old Articles path. Other vault notes can depend on either. The repair
+    # phase rewrites them only after preparation, so preparation must retain
+    # both names while dependencies remain. Refuse an incomplete inventory
+    # here; finalization separately requires no old dependencies and repeats
+    # that complete check around retirement.
     dependency_images = sorted({
         os.path.basename(src) for src, _dst, _entry in plan
     } | {
@@ -3042,7 +3197,8 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
     # correctly treats them as one namespace for collision/ownership checks.
     changed_slug = old_slug != new_slug
     dependency_blockers = (_vault_dependency_blockers(
-        owner, old_slug, dependency_images) if changed_slug else [])
+        owner, old_slug, dependency_images)
+        if changed_slug and complete else [])
     dependency_errors = [row for row in dependency_blockers if row.get("error")]
     if dependency_errors:
         error = _dependency_error(dependency_blockers)
@@ -3070,13 +3226,13 @@ def _plan_slug_rename(attachments, old_slug, new_slug, *, sources,
 
 
 def _handoff_plan(attachments, sources, owner_note, new_owner_note,
-                  old_slug, new_slug):
+                  old_slug, new_slug, complete=True):
     """Validate one two-owner image mapping without changing either set."""
     if old_slug == new_slug:
         raise ValueError("a two-phase handoff requires two distinct slug spellings")
     results = _plan_slug_rename(
         attachments, old_slug, new_slug, sources=sources,
-        owner_note=owner_note, require_vault=True)
+        owner_note=owner_note, require_vault=True, complete=complete)
     failed = [row for row in results if not row.get("ok")]
     if failed:
         raise ValueError("image handoff preflight failed: " + "; ".join(
@@ -3124,7 +3280,7 @@ def _handoff_plan(attachments, sources, owner_note, new_owner_note,
 
     dependency = dependency_status(attachments, owner_note, old_slug)
     incomplete = [row for row in dependency["blockers"] if row.get("error")]
-    if incomplete:
+    if incomplete and complete:
         raise ValueError(_dependency_error(incomplete))
     _validate_clipping_owner(old_owner)
     _validate_clipping_owner(new_owner)
@@ -3210,7 +3366,8 @@ def _probe_error(report):
     return "; ".join(errors)
 
 
-def _restem_plan(attachments, sources, owner_note, old_slug, new_slug, phase):
+def _restem_plan(attachments, sources, owner_note, old_slug, new_slug, phase,
+                 complete=True):
     """Validate a same-note re-stem's image mapping without changing files.
 
     Prepare requires every old-stem file to be an exact rendered embed of the
@@ -3228,7 +3385,8 @@ def _restem_plan(attachments, sources, owner_note, old_slug, new_slug, phase):
                              (owner["path"], ", ".join(stale)))
     results = _plan_slug_rename(
         attachments, old_slug, new_slug, sources=sources,
-        owner_note=owner_note, require_vault=True, restem=phase)
+        owner_note=owner_note, require_vault=True, restem=phase,
+        complete=complete)
     failed = [row for row in results if not row.get("ok")]
     if failed:
         raise ValueError("image re-stem preflight failed: " + "; ".join(
@@ -3257,7 +3415,7 @@ def _restem_plan(attachments, sources, owner_note, old_slug, new_slug, phase):
         attachments, owner_note, old_slug, new_slug,
         [item["from"] for item in mapping])
     incomplete = [row for row in dependency["blockers"] if row.get("error")]
-    if incomplete:
+    if incomplete and complete:
         raise ValueError(_dependency_error(incomplete))
     _validate_clipping_owner(owner)
     return owner, mapping, dependency
@@ -3269,17 +3427,28 @@ def _rename_plan(attachments, sources, owner_note, new_owner_note,
 
     Returns the owners to revalidate, the mapping, the dependency report, a
     probe that repeats that report for the same old names, and whether this
-    is a re-stem.
+    is a re-stem. The repair phase keeps an incomplete scan in the report.
     """
+    complete = phase != "repair"
     if _same_note_restem(owner_note, new_owner_note, old_slug, new_slug):
+        if not complete:
+            # Repair may run before or after the note republishes its own
+            # embeds under the new stem; plan for the state the note shows.
+            embeds = _restem_owner(attachments, owner_note, old_slug,
+                                   new_slug)["embeds"]
+            phase = ("prepare" if any(
+                _embedded_figure_tail(name, old_slug) is not None
+                for name in embeds) else "finalize")
         owner, mapping, dependency = _restem_plan(
-            attachments, sources, owner_note, old_slug, new_slug, phase)
+            attachments, sources, owner_note, old_slug, new_slug, phase,
+            complete=complete)
         names = [item["from"] for item in mapping]
         return ((owner,), mapping, dependency,
                 lambda: _restem_dependency_status(
                     attachments, owner_note, old_slug, new_slug, names), True)
     old_owner, new_owner, mapping, dependency = _handoff_plan(
-        attachments, sources, owner_note, new_owner_note, old_slug, new_slug)
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug,
+        complete=complete)
     return ((old_owner, new_owner), mapping, dependency,
             lambda: dependency_status(attachments, owner_note, old_slug), False)
 
@@ -3385,6 +3554,382 @@ def prepare_slug_rename(attachments, old_slug, new_slug, *, sources,
             "new_slug": new_slug, "mapping": mapping,
             "dependency": dependency, "results": rows,
             "prepared": sum(row["action"] == "copied" for row in rows)}
+
+
+#: Characters a repaired reference may introduce unescaped in every wikilink,
+#: Markdown, HTML and YAML form it can sit in; clipping slugs use only these.
+_PLAIN_REFERENCE_NAME = re.compile(r"[\w.-]+")
+
+
+def _reference_folder_resolves(path, note_dir, vault, folder):
+    """Whether a target path's folder part is ``folder``.
+
+    Obsidian writes a folder part vault-absolute, vault-relative or relative
+    to the linking note. Any other folder part may name another file.
+    """
+    directory = path.rpartition("/")[0]
+    candidates = [os.path.join(vault, directory.lstrip("/"))]
+    if not path.startswith("/"):
+        candidates.append(os.path.join(note_dir, directory))
+    for candidate in candidates:
+        try:
+            if os.path.samefile(os.path.normpath(candidate), folder):
+                return True
+        except OSError:
+            continue
+    return False
+
+
+#: Blockquote, callout and list-item markers that open a Markdown line.
+_CONTAINER_MARKERS = re.compile(
+    r"[ \t]*(?:(?:>[ \t]?)+[ \t]*|(?:[-*+]|\d{1,9}[.)])[ \t]+)*")
+#: A line after which a link reference definition starts a new block.
+_DEFINITION_MAY_FOLLOW = re.compile(
+    r"\[[^\]\r\n]+\]:|#{1,6}(?:[ \t]|$)|(?:-{3,}|\*{3,}|_{3,}|`{3,}|~{3,})"
+    r"[ \t]*$")
+
+
+def _context_problem(text, span, kind, frontmatter_end):
+    """Why a parsed target's surroundings may not render it as a link, or None.
+
+    The dependency scanner over-reports to fail closed; repair rewrites only
+    what certainly renders: an HTML-pattern value inside an open tag, a
+    definition that cannot continue a paragraph, nothing in a YAML comment.
+    """
+    line_start = text.rfind("\n", 0, span[0]) + 1
+    before = text[line_start:span[0]]
+    if span[0] < frontmatter_end and re.search(r"(?:^|[ \t])#", before):
+        return "may be inside a YAML comment"
+    if kind == "html":
+        tag = before.rfind("<")
+        if tag < 0 or not _HTML_ATTRIBUTE_PREFIX.fullmatch(before[tag:]):
+            return "not inside an HTML tag"
+    if kind == "definition" and line_start:
+        markers = _CONTAINER_MARKERS.match(before).group(0)
+        previous = text[text.rfind("\n", 0, line_start - 1) + 1:
+                        line_start - 1].rstrip("\r")
+        rest = previous[_CONTAINER_MARKERS.match(previous).end():]
+        # A new list item starts a block; any other line after paragraph
+        # text continues that paragraph as plain prose.
+        if (not re.search(r"[-*+0-9]", markers) and rest.strip()
+                and not _DEFINITION_MAY_FOLLOW.match(rest)):
+            return "may continue a paragraph"
+    return None
+
+
+def _reference_repairs(text, note_path, classify, renames, vault, unique_note,
+                       unique_image):
+    """Plan the in-place rewrite of one note's references to renamed files.
+
+    ``classify`` is the dependency parser's (`_dependency_classifier`), and
+    ``renames`` maps each name it returns to ``(new_name, folder, is_note)``.
+    Only the basename inside a parsed target is replaced, so the path form,
+    label, ``#heading`` or ``^block`` anchor, ``|size``, alt text and a note
+    link's own ``.md`` spelling keep their bytes. ``unique_note()`` and
+    ``unique_image()`` say whether a bare old note or image name, and its new
+    name, can each mean only the renamed file. A target is rewritten only
+    where the strict view also shows it, so code and comments are never
+    edited. Returns ``(edits, problems)``: ``edits`` maps each ``(start,
+    end)`` span in ``text`` to ``(new, line, before, after)``, and
+    ``problems`` names every reference that cannot be rewritten
+    unambiguously.
+    """
+    split = split_frontmatter(text)
+    frontmatter_end = len(text) - len(split[1]) if split is not None else 0
+    strict_spans = {span for _t, _w, span, _k in _dependency_targets(
+        text, spans=True, strict=True) if span}
+    edits, problems = {}, []
+    for target, wikilink, span, kind in _dependency_targets(text, spans=True):
+        name = classify(target, wikilink)
+        if name is None:
+            continue
+        if span is None:
+            problems.append("%r (masked text inside the target)" % target.strip())
+            continue
+        line = text.count("\n", 0, span[0]) + 1
+        raw = text[span[0]:span[1]]
+        context = ("inside code, math or a comment"
+                   if span not in strict_spans
+                   else _context_problem(text, span, kind, frontmatter_end))
+        if context:
+            problems.append("line %d %r (%s)" % (line, raw, context))
+            continue
+        head = (re.split(r"(?<!\\)\||\\\|", raw, maxsplit=1)[0].split("#", 1)[0]
+                if wikilink else raw.split("#", 1)[0].split("?", 1)[0])
+        core = head.strip()
+        lead = len(head) - len(head.lstrip())
+        start = lead + max(core.rfind("/"), core.rfind("\\")) + 1
+        end = lead + len(core)
+        base = raw[start:end]
+        path = _local_target_path(target, wikilink=wikilink)
+        new_name, folder, is_note = renames[name]
+        new = new_name + (os.path.splitext(base)[1] if is_note else "")
+        if base != path.rpartition("/")[2].strip():
+            reason = "an encoded or irregular spelling"
+        elif not _PLAIN_REFERENCE_NAME.fullmatch(new):
+            reason = "%s would need escaping here" % new
+        elif "/" in path:
+            reason = (None if _reference_folder_resolves(
+                path, os.path.dirname(note_path), vault, folder)
+                else "its folder is not %s" % folder)
+        else:
+            reason = (None if (unique_note() if is_note else unique_image())
+                      else "another vault file has this name or the new name")
+        if reason:
+            problems.append("line %d %r (%s)" % (line, raw, reason))
+            continue
+        edits[(span[0] + start, span[0] + end)] = (
+            new, line, raw, raw[:start] + new + raw[end:])
+    reached = 0
+    for start, end in sorted(edits):
+        if start < reached:
+            problems.append("overlapping references on line %d"
+                            % edits[(start, end)][1])
+        reached = max(reached, end)
+    return edits, problems
+
+
+#: A dated stock-research or market-research record, the investments
+#: plugin's immutable history (its ``market_notes.DAILY`` names).
+_DATED_RESEARCH_RECORD = re.compile(
+    r"\d{4}-\d{2}-\d{2}(?:-\d{6})?-(?:stock|market)-research\.md",
+    re.IGNORECASE)
+
+
+def _dated_research_record(path, vault):
+    """Whether ``path`` is a dated research record under ``Investments/``.
+
+    A linked-folder alias of the vault's ``Investments/`` counts as well, and
+    an unreadable vault root fails closed.
+    """
+    if not _DATED_RESEARCH_RECORD.fullmatch(
+            unicodedata.normalize("NFC", os.path.basename(path))):
+        return False
+    real_vault, real_note = os.path.realpath(vault), os.path.realpath(path)
+    for base, note in ((vault, path), (real_vault, real_note)):
+        top = os.path.relpath(note, base).split(os.sep)[0]
+        if _manifest_name_key(top) == "investments":
+            return True
+    try:
+        roots = [os.path.realpath(os.path.join(vault, name))
+                 for name in os.listdir(vault)
+                 if _manifest_name_key(name) == "investments"]
+    except OSError:
+        return True
+    return any(os.path.commonpath((real_note, root)) == root
+               for root in roots)
+
+
+def _note_stage_parent(vault, path):
+    """A parent on the note's filesystem for its private stage, or None."""
+    directory = os.path.realpath(os.path.dirname(path))
+    device = os.stat(directory).st_dev
+    for parent in (vault, os.path.dirname(directory)):
+        if os.stat(parent).st_dev == device:
+            return parent
+    return None
+
+
+def _publish_repaired_note(path, data, expected, vault):
+    """Replace a note with ``data`` only while it is the ``expected`` version.
+
+    Returns ``(None, [])`` after a verified publication, or the refusal and
+    every retained private stage or recovery path. The shared
+    ``replace_expected`` preserves a newer occupant and restores or names the
+    displaced predecessor on any failure.
+    """
+    try:
+        stage_parent = _note_stage_parent(vault, path)
+        if stage_parent is None:
+            return ("LinkUnavailable: no parent on the note's filesystem can "
+                    "hold its private stage"), []
+        stage = tempfile.mkdtemp(prefix=".clipping-link-repair-",
+                                 dir=stage_parent)
+    except OSError as exc:
+        return "cannot create its private stage: %s" % exc, []
+    try:
+        staged = os.path.join(stage, "note")
+        with open(staged, "xb") as fh:
+            fh.write(data)
+            fh.flush()
+            set_private_mode(fh, expected[2])
+            os.fsync(fh.fileno())
+        if _stable_regular_snapshot(staged)[1] != hashlib.sha256(data).hexdigest():
+            raise OSError(errno.EIO, "the staged repair does not hold the "
+                          "planned bytes", staged)
+        replace_expected(staged, path, expected, _stable_regular_snapshot,
+                         stage, stage_parent=stage_parent,
+                         recovery_prefix=".clipping-link-repair-recovery-")
+    except (OSError, UnicodeError, ValueError) as exc:
+        keep = (exc.keep_stage if isinstance(exc, PublicationConflict)
+                else True)
+        if not keep:
+            shutil.rmtree(stage, ignore_errors=True)
+        return str(exc), [item for item in (
+            getattr(exc, "recovery_path", None), stage if keep else None)
+            if item]
+    shutil.rmtree(stage, ignore_errors=True)
+    return None, []
+
+
+def repair_slug_rename(attachments, old_slug, new_slug, *, sources,
+                       owner_note, new_owner_note, dry_run=False):
+    """Point other notes' old-name references at the prepared new names.
+
+    Runs after prepare, while every old and new name resolves, over the
+    dependency inventory `dependencies` reports; owner notes and dated
+    `Investments/` research records are not edited. Each note is
+    snapshotted before it is read and replaced only while it still matches.
+    A note that cannot be read, holds an ambiguous reference or changes
+    before publication stays unchanged and is a blocker.
+    """
+    owners, mapping, dependency, _probe, restem = _rename_plan(
+        attachments, sources, owner_note, new_owner_note, old_slug, new_slug,
+        "repair")
+    new_images = []
+    for item in mapping:
+        old_path = os.path.join(attachments, item["from"])
+        new_path = os.path.join(attachments, item["to"])
+        try:
+            prepared = (_stable_regular_snapshot(old_path)[1:]
+                        == _stable_regular_snapshot(new_path)[1:])
+        except (OSError, UnicodeError, ValueError):
+            prepared = False
+        if not prepared:
+            raise ValueError("%s is not the byte-identical prepared copy of %s; "
+                             "run prepare first" % (item["to"], item["from"]))
+        new_images.append(new_path)
+    vault = owners[0]["vault"]
+    image_names = [item["from"] for item in mapping]
+    renames = {item["from"]: (item["to"], attachments, False)
+               for item in mapping}
+    if not restem:
+        renames[old_slug + ".md"] = (
+            new_slug, os.path.dirname(owners[0]["path"]), True)
+    classify = _dependency_classifier(image_names, old_slug,
+                                      include_note=not restem)
+    note_unique, image_unique = [], []
+
+    def unique_note():
+        """Whether the old and the new note name each name one vault note."""
+        if not note_unique:
+            counts = {_manifest_name_key(slug + ".md"): 0
+                      for slug in (old_slug, new_slug)}
+            try:
+                for path in _vault_markdown_files(vault):
+                    key = _manifest_name_key(os.path.basename(path))
+                    if key in counts:
+                        counts[key] += 1
+                note_unique.append(all(count == 1 for count in counts.values()))
+            except (OSError, ValueError):
+                note_unique.append(False)
+        return note_unique[0]
+
+    def unique_image():
+        """Whether no vault file outside the attachments shares a mapped name."""
+        if not image_unique:
+            keys = {_manifest_name_key(item[side])
+                    for item in mapping for side in ("from", "to")}
+            try:
+                image_unique.append(not any(
+                    _manifest_name_key(os.path.basename(path)) in keys
+                    and not os.path.samefile(os.path.dirname(path), attachments)
+                    for path in _vault_files(vault)))
+            except (OSError, ValueError):
+                image_unique.append(False)
+        return image_unique[0]
+
+    def repair(path, copy):
+        """Return ``(status, edits, reason, recovery)`` for one note.
+
+        Status ``halt`` means an owner note or prepared image changed, so no
+        later note may be published either.
+        """
+        try:
+            if not restem and _same_logical_note(path, owners[1]["path"]):
+                return ("blocked", {}, "the new owner note references old "
+                        "names; republish it", [])
+            if not _inside_existing_directory(path, vault, require_all=True):
+                return ("blocked", {}, "it resolves outside the vault's real "
+                        "path", [])
+            if _dated_research_record(path, vault):
+                return ("blocked", {}, "a dated Investments/ research record "
+                        "is immutable; the old names stay in place", [])
+            expected = _stable_regular_snapshot(path, copy_to=copy,
+                                                copy_mode=0o600)
+            with open(copy, "rb") as fh:
+                raw = fh.read()
+            bom = b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b""
+            text = raw[len(bom):].decode("utf-8")
+        except (OSError, UnicodeError, ValueError) as exc:
+            return "blocked", {}, "cannot snapshot and read it: %s" % exc, []
+        edits, problems = _reference_repairs(text, path, classify, renames,
+                                             vault, unique_note, unique_image)
+        if problems:
+            return ("blocked", {}, "ambiguous references, all left unchanged: "
+                    + "; ".join(problems), [])
+        repaired = text
+        for (start, end), edit in sorted(edits.items(), reverse=True):
+            repaired = repaired[:start] + edit[0] + repaired[end:]
+        left = _markdown_dependency_names(repaired, image_names, old_slug,
+                                          include_note=not restem)
+        if left:
+            return ("blocked", {}, "references to %s could not be located for "
+                    "rewriting" % ", ".join(left), [])
+        if not edits:
+            return "unchanged", {}, None, []
+        if dry_run:
+            return "would-rewrite", edits, None, []
+        try:
+            for owner in owners:
+                _validate_clipping_owner(owner)
+            for image in new_images:
+                if os.path.islink(image) or not os.path.isfile(image):
+                    raise ValueError("prepared image %s disappeared" % image)
+        except (OSError, UnicodeError, ValueError) as exc:
+            return ("halt", {}, "not rewritten: the handoff changed during "
+                    "the repair (%s); re-run it" % exc, [])
+        try:
+            current = _stable_regular_snapshot(path)
+        except (OSError, UnicodeError, ValueError):
+            current = None
+        if current != expected:
+            return ("blocked", {}, "it changed after its snapshot and was "
+                    "preserved", [])
+        error, recovery = _publish_repaired_note(
+            path, bom + repaired.encode("utf-8"), expected, vault)
+        if error:
+            return "blocked", {}, "not rewritten: %s" % error, recovery
+        return "rewritten", edits, None, []
+
+    rows, halted = [], None
+    with tempfile.TemporaryDirectory(prefix="clipping_repair.") as scratch:
+        for index, blocker in enumerate(dependency["blockers"], 1):
+            row = {"path": blocker["path"], "status": "blocked",
+                   "references": []}
+            rows.append(row)
+            reason = blocker.get("error") or halted
+            if reason is None:
+                status, edits, reason, recovery = repair(
+                    blocker["path"], os.path.join(scratch, "%d.md" % index))
+                if status == "halt":
+                    status, halted = "blocked", reason
+                row["status"] = status
+                row["references"] = [
+                    {"line": line, "from": before, "to": after}
+                    for _new, line, before, after in (
+                        edits[span] for span in sorted(edits))]
+                if recovery:
+                    row["recovery"] = recovery
+            if reason:
+                row["reason"] = reason
+                row["dependencies"] = blocker.get("references", [])
+    blocked = sum(row["status"] == "blocked" for row in rows)
+    return {"ok": not blocked, "phase": "repair", "restem": restem,
+            "old_slug": old_slug, "new_slug": new_slug, "mapping": mapping,
+            "results": rows,
+            "rewritten": sum(row["status"] == "rewritten" for row in rows),
+            "blocked": blocked}
 
 
 def _restore_retired_images(retired, stage_parent):
@@ -6125,6 +6670,392 @@ continues here`
                current_bytes(restem_new)),
               (True, [_PNG, _PNG], [_PNG, _PNG]))
 
+        # rename --phase repair rewrites, between prepare and finalize, only
+        # the parsed targets that name the old note or a mapped old image.
+        def write_note(vault, relative, data):
+            path = os.path.join(vault, *relative.split("/"))
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            return touch(path, data if isinstance(data, bytes)
+                         else data.encode("utf-8"))
+
+        def note_bytes(paths):
+            return {path: open(path, "rb").read() for path in paths}
+
+        def statuses(report):
+            return {os.path.basename(row["path"]): row["status"]
+                    for row in report["results"]}
+
+        old, new = "Old_Test_2025", "New_Test_2026"
+        repair_templates = {
+            "Wiki/alias.md": (
+                '---\ntitle: Entry\ncreated: 2026-01-01\nupdated: 2026-02-02\n'
+                'read: true\nsources:\n  - "[[{s}]]"\n---\n'
+                'See [[{s}#Methods|the clipping]].\n'),
+            "Wiki/embed.md": "![[{s}_fig_1.png|300]]\n",
+            "Wiki/markdown.md": ('[note](../Articles/{s}.md#intro) and '
+                                 '![chart](Sources/Images/{s}_fig_1.png "Chart")\n'),
+            "Wiki/reference.md": "See [the note][ref].\n\n[ref]: {s}.md\n",
+            "Investments/html.md": ('<img src="Sources/Images/{s}_fig_1.png" '
+                                    'width="200">\n'),
+            "Wiki/code.md": ("`[[{o}]]` and\n```\n![[{o}_fig_1.png]]\n```\n"
+                             "then [[{s}]]\n"),
+            "Wiki/math.md": "$$\n[[{o}]]\n$$\nthen [[{s}]]\n",
+            "Wiki/prefix.md": ("[[{o}_Notes]] ![[{o}_fig_10.png]] [[{o}0]] {o} "
+                               "prose https://example.com/{o}_fig_1.png "
+                               "and [[{s}]]\n"),
+            "MOCs/moc.md": "- Top\n    - [[{s}|label]]\n",
+            "Reviews/log.md": ("﻿- [ ] x\r\n  - [[Articles/{s}|the note]]; "
+                               "`Articles/{o}.md`\r\n"),
+        }
+        repair_vault, repair_args, repair_old, repair_new = handoff_case(
+            "repair", ("_fig_1.png",))
+        repaired_paths = {}
+        for relative, template in repair_templates.items():
+            repaired_paths[relative] = write_note(
+                repair_vault, relative, template.format(s=old, o=old))
+        os.chmod(repaired_paths["Wiki/alias.md"], 0o640)
+        elsewhere = write_note(repair_vault, "Wiki/elsewhere.md",
+                               "[[Elsewhere/%s]] and [[%s]]\n" % (old, old))
+        everything = list(repaired_paths.values()) + [elsewhere]
+        before = note_bytes(everything)
+        refused = failure(lambda: repair_slug_rename(**repair_args))
+        check("repair refuses until prepare has published the new names",
+              ("run prepare first" in refused, note_bytes(everything) == before,
+               current_bytes(repair_new)), (True, True, [None]))
+        prepare_slug_rename(**repair_args)
+        # Prepare refuses an incomplete scan; a note can still turn
+        # unreadable before repair runs.
+        unreadable = write_note(repair_vault, "Wiki/bad.md",
+                                b"[[Old_Test_2025]] \xff\n")
+        everything.append(unreadable)
+        before = note_bytes(everything)
+        planned = repair_slug_rename(**repair_args, dry_run=True)
+        check("repair --dry-run plans every dependent and writes nothing",
+              (planned["ok"], statuses(planned), note_bytes(everything) == before),
+              (False, dict({os.path.basename(path): "would-rewrite"
+                            for path in repaired_paths.values()},
+                           **{"elsewhere.md": "blocked", "bad.md": "blocked"}),
+               True))
+        cli_stdout = io.StringIO()
+        with patch.object(sys, "stdout", cli_stdout):
+            cli_code = main([
+                "rename", "--phase", "repair", "--dry-run",
+                "--attachments", repair_args["attachments"],
+                "--sources", repair_args["sources"],
+                "--owner-note", repair_args["owner_note"],
+                "--new-owner-note", repair_args["new_owner_note"],
+                "--old-slug", old, "--new-slug", new])
+        cli_report = json.loads(cli_stdout.getvalue())
+        check("the repair CLI reports the same plan and exits 1 while blockers remain",
+              (cli_code, cli_report["mode"], cli_report["phase"],
+               cli_report["results"] == planned["results"],
+               note_bytes(everything) == before), (1, "rename", "repair", True, True))
+        repaired = repair_slug_rename(**repair_args)
+
+        def repaired_as_expected(relative):
+            template = repair_templates[relative]
+            return (open(repaired_paths[relative], "rb").read()
+                    == template.format(s=new, o=old).encode("utf-8"))
+
+        check("repair keeps a wikilink's alias and heading, the YAML sources "
+              "form, every date and read:, and the file mode",
+              (repaired_as_expected("Wiki/alias.md"),
+               stat.S_IMODE(os.stat(repaired_paths["Wiki/alias.md"]).st_mode)),
+              (True, 0o640))
+        check("repair keeps an embed's size",
+              repaired_as_expected("Wiki/embed.md"), True)
+        check("repair keeps a Markdown link's relative path and anchor and an "
+              "image's folder and title",
+              repaired_as_expected("Wiki/markdown.md"), True)
+        check("repair rewrites a reference-style link definition",
+              repaired_as_expected("Wiki/reference.md"), True)
+        check("repair rewrites an HTML img src and keeps its attributes",
+              repaired_as_expected("Investments/html.md"), True)
+        check("repair leaves a code span and a fence untouched",
+              repaired_as_expected("Wiki/code.md"), True)
+        check("repair leaves a display-math block untouched",
+              repaired_as_expected("Wiki/math.md"), True)
+        check("repair leaves names that only share a prefix, prose and URLs",
+              repaired_as_expected("Wiki/prefix.md"), True)
+        check("repair keeps nested MOC indentation, a BOM and CRLF line endings",
+              (repaired_as_expected("MOCs/moc.md"),
+               repaired_as_expected("Reviews/log.md")), (True, True))
+        check("an ambiguous folder or unreadable note stays unchanged and blocked",
+              (repaired["ok"], repaired["rewritten"], repaired["blocked"],
+               statuses(repaired)["elsewhere.md"], statuses(repaired)["bad.md"],
+               open(elsewhere, "rb").read(), open(unreadable, "rb").read(),
+               current_bytes(repair_old)),
+              (False, 10, 2, "blocked", "blocked",
+               ("[[Elsewhere/%s]] and [[%s]]\n" % (old, old)).encode("utf-8"),
+               b"[[Old_Test_2025]] \xff\n", [_PNG]))
+        touch(elsewhere, ("[[Articles/%s]] and [[%s]]\n" % (old, old)).encode())
+        touch(unreadable, b"[[Old_Test_2025]]\n")
+        rerun = repair_slug_rename(**repair_args)
+        check("a rerun rewrites the resolved blockers and only them",
+              (rerun["ok"], statuses(rerun), open(elsewhere, "rb").read(),
+               open(unreadable, "rb").read()),
+              (True, {"elsewhere.md": "rewritten", "bad.md": "rewritten"},
+               ("[[Articles/%s]] and [[%s]]\n" % (new, new)).encode("utf-8"),
+               b"[[New_Test_2026]]\n"))
+        settled = note_bytes(everything)
+        again = repair_slug_rename(**repair_args)
+        check("repair is idempotent: a second run finds nothing to rewrite",
+              (again["ok"], again["results"], note_bytes(everything) == settled),
+              (True, [], True))
+        check("after repair the re-probe is clean and finalize retires the old copy",
+              (dependency_status(repair_args["attachments"],
+                                 repair_args["owner_note"], old)["ok"],
+               finalize_slug_rename(**repair_args)["retired"],
+               current_bytes(repair_old), current_bytes(repair_new)),
+              (True, 1, [None], [_PNG]))
+
+        late_vault, late_args, _late_old, _late_new = handoff_case(
+            "repair-late", ("_fig_1.png",))
+        late_note = write_note(late_vault, "Wiki/late.md", "[[%s]]\n" % old)
+        prepare_slug_rename(**late_args)
+
+        def edit_before_replacement(staged, target, *args, **kwargs):
+            with open(target, "ab") as fh:
+                fh.write(b"a later edit\n")
+            return real_replace(staged, target, *args, **kwargs)
+
+        real_replace = replace_expected
+        with patch.dict(globals(), replace_expected=edit_before_replacement):
+            late = repair_slug_rename(**late_args)
+        check("a note changed after its snapshot is preserved and reported",
+              (late["ok"], statuses(late), open(late_note, "rb").read(),
+               "changed after planning" in late["results"][0].get("reason", ""),
+               [name for name in os.listdir(late_vault)
+                if name.startswith(".clipping-link-repair")]),
+              (False, {"late.md": "blocked"},
+               ("[[%s]]\na later edit\n" % old).encode("utf-8"), True, []))
+        check("a rerun repairs the changed note and keeps the later edit",
+              (repair_slug_rename(**late_args)["ok"], open(late_note, "rb").read()),
+              (True, ("[[%s]]\na later edit\n" % new).encode("utf-8")))
+
+        bare_vault, bare_args, _bare_old, _bare_new = handoff_case(
+            "repair-bare", ("_fig_1.png",))
+        write_note(bare_vault, "Wiki/%s.md" % old, "An unrelated namesake.\n")
+        ambiguous = {
+            "bare.md": ("[[%s]] and [[Articles/%s]]\n" % (old, old),
+                        "another vault file has this name or the new name"),
+            "masked.md": ("[[Articles/%s|a %%%%c%%%% label]]\n" % old,
+                          "masked text inside the target"),
+            "encoded.md": ("[[Articles/Old%5FTest%5F2025]]\n",
+                           "an encoded or irregular spelling"),
+        }
+        for name, (text, _reason) in ambiguous.items():
+            write_note(bare_vault, "Wiki/" + name, text)
+        prepare_slug_rename(**bare_args)
+        bare = repair_slug_rename(**bare_args)
+        check("a bare name shared by another note, masked text inside a target "
+              "or an encoded name blocks the whole note unchanged",
+              [(os.path.basename(row["path"]), row["status"],
+                ambiguous[os.path.basename(row["path"])][1]
+                in row.get("reason", ""),
+                open(row["path"], encoding="utf-8").read()
+                == ambiguous[os.path.basename(row["path"])][0])
+               for row in bare["results"]],
+              [(name, "blocked", True, True) for name in sorted(ambiguous)])
+
+        # A bare name is rewritten only while neither the old nor the new
+        # name has a namesake that Obsidian could resolve it to instead.
+        namesakes = {"new-note": ("Wiki/%s.md" % new, "Wiki/user.md",
+                                  "[[%s]] and [x](%s.md)\n" % (old, old)),
+                     "new-image": ("Other/%s_fig_1.png" % new, "Wiki/user.md",
+                                   "![[%s_fig_1.png]]\n" % old),
+                     "old-image": ("Other/%s_fig_1.png" % old, "Wiki/user.md",
+                                   "![[%s_fig_1.png]]\n" % old)}
+        namesake_results = {}
+        for label, (other, relative, text) in namesakes.items():
+            case_vault, case_args, _o, _n = handoff_case(
+                "repair-" + label, ("_fig_1.png",))
+            write_note(case_vault, other, b"x\n" if other.endswith(".md")
+                       else _PNG)
+            user = write_note(case_vault, relative, text)
+            qualified = write_note(
+                case_vault, "Wiki/qualified.md",
+                "[[Articles/%s]] ![](Sources/Images/%s_fig_1.png)\n" % (old, old))
+            prepare_slug_rename(**case_args)
+            report = repair_slug_rename(**case_args)
+            namesake_results[label] = (
+                statuses(report)["user.md"],
+                "another vault file has this name or the new name" in
+                "".join(row.get("reason", "") for row in report["results"]
+                        if row["path"].endswith("user.md")),
+                open(user, encoding="utf-8").read() == text,
+                open(qualified, encoding="utf-8").read())
+        check("a namesake of the new note or of an old or new image blocks a "
+              "bare reference unchanged; a folder-qualified one is rewritten",
+              namesake_results,
+              {label: ("blocked", True, True,
+                       "[[Articles/%s]] ![](Sources/Images/%s_fig_1.png)\n"
+                       % (new, new)) for label in namesakes})
+
+        # A dated stock- or market-research record is the investments
+        # plugin's immutable history, also through a linked-folder alias;
+        # other Investments/ notes and dated-looking names elsewhere are
+        # repaired.
+        dated_vault, dated_args, dated_old, dated_new = handoff_case(
+            "repair-dated", ("_fig_1.png",))
+        dated_text = ("---\nstock_research: 2\n---\nSee [[%s]] and "
+                      "![[%s_fig_1.png]]\n" % (old, old))
+        dated_notes = {
+            "2026-09-01-stock-research.md": write_note(
+                dated_vault, "Investments/2026-09-01-stock-research.md",
+                dated_text),
+            "2026-09-02-143000-market-research.md": write_note(
+                dated_vault,
+                "Investments/Research/2026-09-02-143000-market-research.md",
+                dated_text),
+        }
+        dated_free = {
+            "Research notes.md": write_note(
+                dated_vault, "Investments/Research notes.md",
+                "![[%s_fig_1.png]]\n" % old),
+            "2026-09-04-stock-research.md": write_note(
+                dated_vault, "Wiki/2026-09-04-stock-research.md",
+                "[[%s]]\n" % old),
+        }
+        prepare_slug_rename(**dated_args)
+        dated_before = note_bytes(dated_notes.values())
+        dated_plan = repair_slug_rename(**dated_args, dry_run=True)
+        dated_report = repair_slug_rename(**dated_args)
+        check("repair never edits a dated Investments/ research record, even "
+              "through a folder alias, and still repairs other notes",
+              (statuses(dated_plan), statuses(dated_report),
+               all("dated Investments/ research record is immutable"
+                   in row.get("reason", "") for row in dated_report["results"]
+                   if row["status"] == "blocked"),
+               note_bytes(dated_notes.values()) == dated_before,
+               {name: open(path, encoding="utf-8").read()
+                for name, path in dated_free.items()}),
+              (dict({name: "blocked" for name in dated_notes},
+                    **{name: "would-rewrite" for name in dated_free}),
+               dict({name: "blocked" for name in dated_notes},
+                    **{name: "rewritten" for name in dated_free}),
+               True, True,
+               {"Research notes.md": "![[%s_fig_1.png]]\n" % new,
+                "2026-09-04-stock-research.md": "[[%s]]\n" % new}))
+        check("a dated record's old reference keeps the re-probe failing and "
+              "finalize refusing, with both versions in place",
+              (dependency_status(dated_args["attachments"],
+                                 dated_args["owner_note"], old)["ok"],
+               "dependencies block" in failure(
+                   lambda: finalize_slug_rename(**dated_args)),
+               current_bytes(dated_old), current_bytes(dated_new)),
+              (False, True, [_PNG], [_PNG]))
+        alias_vault, alias_args, _o, _n = handoff_case(
+            "repair-dated-alias", ("_fig_1.png",))
+        alias_record = write_note(alias_vault,
+                                  "Data/2026-09-03-stock-research.md",
+                                  dated_text)
+        os.symlink("Data", os.path.join(alias_vault, "Investments"),
+                   target_is_directory=True)
+        prepare_slug_rename(**alias_args)
+        check("a dated record reached through an Investments/ folder alias "
+              "stays unchanged and blocked",
+              (statuses(repair_slug_rename(**alias_args)),
+               open(alias_record, encoding="utf-8").read()),
+              ({"2026-09-03-stock-research.md": "blocked"}, dated_text))
+
+        # Repair parses a strict view: code behind container markers, an
+        # unclosed comment, HTML-like prose and YAML comments are not
+        # rewritten, though the fail-closed scanner reports them.
+        context_vault, context_args, _o, _n = handoff_case(
+            "repair-context", ("_fig_1.png",))
+        context_blocked = {
+            "callout-fence.md": ("> [!note]\n> ~~~md\n> ![[{o}_fig_1.png]]\n"
+                                 "> ~~~\n", "inside code, math or a comment"),
+            "list-quote-fence.md": ("- > ```\n  > ![[{o}_fig_1.png]]\n  > ```\n",
+                                    "inside code, math or a comment"),
+            "callout-math.md": ("> [!note]\n> $$\n> [[{o}]]\n> $$\n",
+                                "inside code, math or a comment"),
+            "unclosed-math.md": ("$$\n[[{o}]]\n",
+                                 "inside code, math or a comment"),
+            "unclosed-percent.md": ("text %% open\n[[{o}]]\n",
+                                    "inside code, math or a comment"),
+            "unclosed-html.md": ("text <!-- open\n[[{o}]]\n",
+                                 "inside code, math or a comment"),
+            "prose-src.md": ('To embed, write src="{o}_fig_1.png" in the tag.\n',
+                             "not inside an HTML tag"),
+            "yaml-comment.md": ("---\n# comment [[{o}]]\ntitle: x\n---\nBody\n",
+                                "may be inside a YAML comment"),
+            "continued.md": ("Some text\n[e]: {o}.md\n",
+                             "may continue a paragraph"),
+        }
+        context_live = {
+            "quote-closed.md": ("> ```\n> code\n>> ```\n> ```\n"
+                                "> ![[{s}_fig_1.png]]\n"),
+            "quote-ended.md": "> ```\n> code\n\nafter [[{s}]]\n",
+            "nested-definitions.md": ("- [c]: {s}.md\n> [d]: {s}.md\n\n"
+                                      "- a\n\n    [f]: {s}.md\n"),
+        }
+        context_paths = {}
+        for name, (template, _reason) in context_blocked.items():
+            context_paths[name] = write_note(context_vault, "Wiki/" + name,
+                                             template.format(o=old))
+        for name, template in context_live.items():
+            context_paths[name] = write_note(
+                context_vault, "Wiki/" + name, template.format(s=old, o=old))
+        probe_report = dependency_status(context_args["attachments"],
+                                         context_args["owner_note"], old)
+        check("the scanner reports definitions inside list items and quotes",
+              sorted(os.path.basename(row["path"])
+                     for row in probe_report["blockers"]),
+              sorted(list(context_blocked) + list(context_live)))
+        check("a fence closed inside a list item hides nothing after it",
+              [_markdown_dependency_names(
+                  "- ```\n  code\n  ```\n" + link, [], old)
+               for link in ("[[%s]]\n" % old, "- [[%s]]\n" % old)],
+              [[old + ".md"], [old + ".md"]])
+        prepare_slug_rename(**context_args)
+        context = repair_slug_rename(**context_args)
+        reasons = {os.path.basename(row["path"]): row.get("reason", "")
+                   for row in context["results"]}
+        check("code or math behind container markers, unclosed math or "
+              "comments, an attribute in prose, a YAML comment and a "
+              "paragraph's text block their notes unchanged",
+              {name: (statuses(context)[name], reason in reasons[name],
+                      open(context_paths[name], encoding="utf-8").read()
+                      == template.format(o=old))
+               for name, (template, reason) in context_blocked.items()},
+              {name: ("blocked", True, True) for name in context_blocked})
+        check("links after a closed or ended quoted fence and definitions in "
+              "containers are rewritten",
+              {name: open(context_paths[name], encoding="utf-8").read()
+               for name in context_live},
+              {name: template.format(s=new, o=old)
+               for name, template in context_live.items()})
+        check("repair advice is offered only for blockers repair can rewrite",
+              ("rename --phase repair" in _dependency_error(
+                  [{"path": "a.md", "error": "cannot read"}]),
+               "make each named path readable" in _dependency_error(
+                  [{"path": "a.md", "error": "cannot read"}]),
+               "rename --phase repair" in _dependency_error(
+                  [{"path": "a.md", "error": "cannot read"},
+                   {"path": "b.md", "references": [old + ".md"]}])),
+              (False, True, True))
+
+        restem_vault, restem_args, restem_old, restem_new = restem_case(
+            "repair-restem")
+        restem_note = write_note(
+            restem_vault, "Wiki/entry.md",
+            "[[Old_Stem_2025]] and ![[Old_Stem_2025_fig_1.png|200]]\n")
+        prepare_slug_rename(**restem_args)
+        restem_repair = repair_slug_rename(**restem_args)
+        check("re-stem repair rewrites other notes' old image references only",
+              (restem_repair["ok"], restem_repair["restem"],
+               statuses(restem_repair), open(restem_note, "rb").read()),
+              (True, True, {"entry.md": "rewritten"},
+               b"[[Old_Stem_2025]] and ![[New_Stem_2026_fig_1.png|200]]\n"))
+        republish(restem_args)
+        check("re-stem repair after republication is clean and finalize retires",
+              (repair_slug_rename(**restem_args)["results"],
+               finalize_slug_rename(**restem_args)["retired"],
+               current_bytes(restem_old), current_bytes(restem_new)),
+              ([], 2, [None, None], [_PNG, _PNG]))
+
         nfd_old = unicodedata.normalize("NFD", "Müller_Dependency_2025")
         nfd_vault, nfd_images, nfd_pdfs, nfd_owner, nfd_names = \
             canonical_rename_fixture("normalization", nfd_old)
@@ -6852,7 +7783,8 @@ def main(argv=None):
                         "exactly names the attachment")
 
     r = sub.add_parser(
-        "rename", help="prepare or finalize an attachment handoff after a slug change")
+        "rename", help="prepare, repair or finalize an attachment handoff "
+        "after a slug change")
     r.add_argument("--attachments", required=True)
     r.add_argument("--sources", required=True,
                    help="the vault's Sources/PDFs folder; "
@@ -6868,14 +7800,15 @@ def main(argv=None):
     r.add_argument("--new-owner-note", required=True,
                    help="published Articles/<new-slug>.md with the same web "
                         "origin and exact mapped new embeds; required for "
-                        "prepare/finalize. In a same-note re-stem it is the "
+                        "every phase. In a same-note re-stem it is the "
                         "--owner-note path, which embeds the old names at "
                         "prepare and the mapped new names only at finalize")
-    r.add_argument("--phase", choices=("prepare", "finalize"),
+    r.add_argument("--phase", choices=("prepare", "repair", "finalize"),
                    required=True,
                    help="required: prepare publishes new-name copies while "
-                        "retaining old names; finalize retires exact old copies "
-                        "after dependencies are clear")
+                        "retaining old names; repair points other notes' "
+                        "references at the new names; finalize retires exact "
+                        "old copies after dependencies are clear")
     r.add_argument("--dry-run", action="store_true")
 
     q = sub.add_parser(
@@ -7006,6 +7939,14 @@ def main(argv=None):
     try:
         if args.phase == "prepare":
             report = prepare_slug_rename(
+                args.attachments, args.old_slug, args.new_slug,
+                sources=args.sources, owner_note=args.owner_note,
+                new_owner_note=args.new_owner_note, dry_run=args.dry_run)
+            print(json.dumps(dict(report, mode="rename"), indent=2,
+                             ensure_ascii=False))
+            return 0 if report["ok"] else 1
+        if args.phase == "repair":
+            report = repair_slug_rename(
                 args.attachments, args.old_slug, args.new_slug,
                 sources=args.sources, owner_note=args.owner_note,
                 new_owner_note=args.new_owner_note, dry_run=args.dry_run)

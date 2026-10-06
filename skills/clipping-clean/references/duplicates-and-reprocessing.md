@@ -176,10 +176,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
    exact old bytes to the new names, rolls back copies it cannot complete, and
    retains every old name. Its JSON supplies the exact one-to-one mapping and
    complete dependency report by checking every Markdown note outside the owner.
-   Keep that report unchanged for the next step. Its top-level `ok: true` means
-   only that the new-name copies exist; remaining dependents are listed in
-   `dependency.blockers` (with `dependency.ok: false`), each a `path` and its
-   `references`.
+   Its top-level `ok: true` means only that the new-name copies exist; remaining
+   dependents are listed in `dependency.blockers` (with `dependency.ok: false`),
+   each a `path` and its `references`. Step 6 repairs them.
    A refusal is not permission to copy by hand; retain the old note and images,
    conditionally withdraw only the exact new note if safe, and report every
    named recovery path.
@@ -188,26 +187,57 @@ never moved, deleted or rewritten, including after a successful reprocess.
    and the new figure numbers. They are separate from the old-image mapping.
    Resolve a refused placement with the documented placeholder and retain its
    scratch file. Once any new image has been published, keep its owner note
-   public even if the later dependency handoff remains blocked.
-6. Do not finalize while prepare's `dependency.blockers` is nonempty. If every
-   blocker is a Wiki entry, a recognized MOC (including one in `MOCs/`) or a
-   suggestion log (`Reviews/*-suggestions.md`), and the dependency rewrite is
-   authorized, repair them. If the user's request did not already authorize
-   rewriting those files, ask once, naming the blocker paths; the prepare
-   report alone is not authorization. Repair each log first: record it with
-   `publish_files.py snapshot --replace` before reading it, rewrite only each parsed link
-   or embed that resolves to the old note or to an exact mapped old image,
-   pointing it at the mapped name, and publish the draft against that record
-   as in [publication](../SKILL.md#6-publish-safely). Keep labels, anchors,
-   code and every issue claim unchanged. Then pass any Wiki or MOC blockers to
-   `wiki-lint`'s
-   [producer-mapped dependency repair](../../wiki-lint/references/external-artifact-repair.md)
-   with the unchanged prepare JSON, the absolute old and new note paths, and
-   the step-7 `dependencies` command exactly as it will be re-run. The old and
-   new images both resolve while this runs. Other Markdown (including
-   `Investments/` records), unreadable files, an incomplete scan or an
-   unauthorized rewrite remain blockers; leave both versions in place and
-   report the pending handoff.
+   public even if link repair later leaves a blocker.
+6. Repair every link to the old note and its mapped images, as Obsidian does
+   on a rename. The reprocess request authorizes this; do not ask again or hand
+   it to another skill. Run repair first with `--dry-run`, review the plan,
+   then run the identical command without `--dry-run`. It takes prepare's
+   exact arguments:
+
+   ```bash
+   python3 '<skill>/scripts/fetch_images.py' rename --phase repair [--dry-run] \
+       --attachments '<vault>/Sources/Images' \
+       --sources '<vault>/Sources/PDFs' \
+       --owner-note '<vault>/Articles/<old_slug>.md' \
+       --new-owner-note '<vault>/Articles/<new_slug>.md' \
+       --old-slug '<old_slug>' --new-slug '<new_slug>'
+   ```
+
+   Repair refuses to run until prepare has published the new names. It
+   recomputes prepare's dependency inventory over every visible Markdown note
+   outside the old owner, never editing either owner, including Wiki entries,
+   MOCs, `Reviews/` logs and notes under `Articles/` and `Investments/`. A
+   dated `Investments/*-stock-research.md` or `*-market-research.md` record
+   is immutable; repair reports it `blocked`. In each other dependent note it
+   rewrites only the parsed wikilinks, embeds, Markdown inline and
+   reference-style links, and HTML `src`/`href` values that resolve to the
+   old note or to an exact mapped old image, pointing each at its mapped new
+   name. Each keeps its path form, display label, `#heading` or `^block`
+   anchor, `|size` and alt text; code, math, prose and URLs are never
+   touched. It snapshots each note before reading it and publishes the
+   rewrite against that snapshot through the shared safe-write API. Nothing
+   else changes: a Wiki entry keeps `created:`, `updated:` and `read:`
+   byte-for-byte. Its JSON has one row per note: the `path`, a `status`
+   (`rewritten`, which the dry-run shows as `would-rewrite`; `unchanged`; or
+   `blocked`) and `references`, each `{line, from, to}` holding the raw old
+   and new target text. A `blocked` row adds its `reason`, the old names
+   found (`dependencies`) and any retained `recovery` path. The command exits
+   1 while any row is blocked. In the dry-run, check that every pair maps an
+   old name to its mapped new one.
+
+   A `blocked` note is left unchanged and stays a blocker: it is unreadable,
+   changed after its snapshot, failed to publish, or holds an ambiguous
+   reference. A reference is ambiguous when it may sit in code, math, a
+   comment or plain text, when its spelling is encoded or its folder is not
+   the renamed file's, or when it is a bare name and another vault file has
+   the old or the new name. Repair rewrites none of that note's references;
+   such references are left for the user. Leave both versions in place and
+   resolving, report the remaining blockers, and never finalize while any
+   remain. Never hand-patch a note around a helper refusal. A `blocked` row
+   for the new note means the draft still names the old note or an old
+   image: correct the draft, record the new note with `snapshot --replace`,
+   republish it as the same-name rewrite in step 4, then rerun repair.
+   Rerunning the identical command is safe; it rewrites only what is left.
 7. After the repair, run the same complete Markdown dependency re-probe:
 
    ```bash
@@ -218,8 +248,8 @@ never moved, deleted or rewritten, including after a successful reprocess.
 
    An `ok: true` result means no other scanned note links the old note or
    references one of its old image names. Anything else leaves both versions
-   resolving and returns to step 6; a new dependency is a blocker, not
-   permission for an incidental rewrite.
+   resolving. A dependent that appeared after the repair gets one more step-6
+   run and re-probe; whatever still remains is a reported blocker.
 8. With an `ok: true` re-probe, run finalize first with `--dry-run`, review the
    plan, then run it live using the identical paths and slugs from prepare:
 
@@ -255,20 +285,24 @@ never moved, deleted or rewritten, including after a successful reprocess.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
 Read back the published note and verify its embeds. Report note and attachment
-renames and the dependency re-probe result; do not modify unrelated notes or
+renames, each note the live repair marked `rewritten` with its old → new
+references, every remaining blocker with its reason and any `recovery` path,
+and the dependency re-probe result; do not modify unrelated notes or
 claim a failed rename completed.
 
 ### Finish a pending changed-slug handoff
 
-When the user asks to finish or resume a pending handoff left by step 6
-(naming either note of the same-URL pair), confirm that both notes share the
-web origin, the old note embeds the old-slug images and the new note embeds
-their mapped names. Record the old note with `publish_files.py snapshot
---replace` in this run's snapshot file before reading it for this check; step 9
-removes it against that record. Rerun
-`rename --phase prepare --dry-run` with the original paths and slugs, review
-it, then run the identical live command. Copies prepared earlier are verified
-as `already-prepared`, and it returns the current mapping and dependency
-report. Continue at step 6, then steps 7–9. Do not re-clean the raw or redraft
-either note. A plain reprocess request for either note reports the pending
-handoff and asks whether to finish it first.
+A same-URL pair stays pending when repair left a blocker, or when an older
+version of this skill stopped before repairing links. A resume, a request to
+finish it, or a reprocess request naming either note finishes it without a
+separate question. Confirm that both notes share the web origin, the old note
+embeds the old-slug images and the new note embeds their mapped names. Record
+the old note with `publish_files.py snapshot --replace` in this run's snapshot
+file before reading it for this check; step 9 removes it against that record.
+Rerun `rename --phase prepare --dry-run` with the original paths and slugs,
+review it, then run the identical live command. Copies prepared earlier are
+verified as `already-prepared`, and it returns the current mapping and
+dependency report. Continue with steps 6–9: repair, the re-probe, finalize and
+old-note removal. Do not re-clean the raw or redraft either note. A reprocess
+request reprocesses the new note only after the handoff finishes; remaining
+blockers stop it.

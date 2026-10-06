@@ -1,6 +1,6 @@
 # Writing an entry — flashcards, bold and italic
 
-> Scope: the card format and card set (§4) and bold and italic (§5). Rewrite bars for existing cards belong to wiki-lint's [flashcard maintenance](../../wiki-lint/references/flashcards.md).
+> Scope: the card format and card set (§4) and bold and italic (§5). Improving an existing card belongs to wiki-lint's [flashcard maintenance](../../wiki-lint/references/flashcards.md#improving-the-card).
 
 ---
 
@@ -41,9 +41,9 @@ Line 1 is the definition a learner recalls from the term and the cue that leads 
 Line 2 is exactly one of two values, alone on its line:
 
 - `??`: the plugin's reversed card, reviewed from cue to answer and from answer to cue, with one schedule per side. Never simplify a card's `??` to `?`, which the plugin reviews in one direction only; that halves the card and strands its second schedule.
-- `!!` on a card the user has disabled. Only the user writes `!!` or restores `??`, and every workflow preserves it.
+- `!!` on a card the user has disabled. Only the user writes `!!` or restores `??`, and every workflow preserves it on the kept card; an extra card is removed whatever its separator ([card set](#card-set)).
 
-wiki-build writes `??` and never writes `!!`. When the primary card carries any other line 2, such as `?`, restoring its `??` is the one change to a separator a workflow makes; a legacy extra card keeps its separator (see [card set](#card-set)).
+wiki-build writes `??` and never writes `!!`. When the primary card carries any other line 2, such as `?`, restoring its `??` is the one change to a separator a workflow makes.
 
 ### Line 3: the answer
 
@@ -55,7 +55,7 @@ Append one counterpart in parentheses only when the opener binds it directly to 
 
 Every entry has exactly one card: the reversed `??` definition card, testing the entity's main claim (the scope of the body's opening sentence). A [discipline root](../../wiki-lint/references/hierarchy.md#establish-discipline-roots) needs none, and an existing root card stays.
 
-A second card never belongs to an entry: a second source-supported entity earns its own entry, and a further claim about this one belongs in the body. The **primary card** is the entry's only card or, when it holds several, the one whose line 3 meets the [answer contract](#line-3-the-answer) (else its one near miss), wherever it sits. Any other card an entry already holds, such as a second definition card or a question card from an earlier card set, is a **legacy extra**. Every workflow preserves it byte-for-byte, attachments included, and reports it, and the linters mark its findings report-only; only an authorized refactor, or a request to delete it by name or to delete every legacy extra in a scope, removes it ([flashcard maintenance](../../wiki-lint/references/flashcards.md#card-set)).
+A second card never belongs to an entry, and no workflow adds one: a second source-supported entity earns its own entry, and a further claim about this one belongs in the body. The **primary card** is the entry's only card or, when it holds several, the first whose line 3 meets the [answer contract](#line-3-the-answer) (else its one near miss), wherever it sits; with several cards and neither, it is the first card. Every wiki-lint card check (Task 1) and every wiki-build merge keeps the primary card, rewriting it into the definition card when it is not one and keeping its attachments, and removes every other card, such as a second definition card or a question card from an earlier card set, once no link targets its [block ID](#scheduling-attachments). [Flashcard maintenance](../../wiki-lint/references/flashcards.md#card-set) owns the run report, the missing-entry candidate and the dates.
 
 ### Line-1 equation coverage
 
@@ -77,7 +77,7 @@ wiki-build writes only the three content lines. After review, the plugin may att
 - starting on the line directly after line 3: one or more whole-line `<!--SR:…-->` blocks, each ending at a line-final `-->`;
 - starting there: the exact callout `> [!sr|card-metadata]`, whose quoted body holds the `<!--SR:…-->` schedule.
 
-A card may also carry a trailing Obsidian block ID such as `^roc-card`, an inbound-link anchor: after a same-line or callout schedule, or after the answer when the schedule follows separately. **Every recognized schedule and block ID is user-owned: preserve its bytes and position verbatim, and never move it between cards.** A blank line ends the attachment position, so an SR-looking block after it stays visible; like any other content after line 3 it is malformed, preserved byte-for-byte and reported, never deleted, moved or reattached. The plugin may store schedules outside the note, so absence of attachments alone proves nothing about a card's history. The shared parser `entry_structure.py` hides attachments only from its read-only lint view and never rewrites them.
+A card may also carry a trailing Obsidian block ID such as `^roc-card`, an inbound-link anchor: after a same-line or callout schedule, or after the answer when the schedule follows separately. **Every recognized schedule and block ID is user-owned: preserve its bytes and position verbatim, and never move it between cards.** Only an extra card's removal under the [card set](#card-set) takes its attachments with it. When another note links or embeds that card's block ID (`#^<id>`), wiki-lint rewrites each such reference to the entry itself in the same run, keeping its display label, and keeps the card where its [rewrite scope](../../wiki-lint/references/flashcards.md#card-set) cannot reach a reference; a wiki-build merge, which rewrites no other note's links, keeps that card and reports it for wiki-lint. A blank line ends the attachment position, so an SR-looking block after it stays visible; like any other content after line 3 it is malformed, preserved byte-for-byte and reported, never deleted, moved or reattached. The shared parser `entry_structure.py` hides attachments only from its read-only lint view and never rewrites them.
 
 ---
 

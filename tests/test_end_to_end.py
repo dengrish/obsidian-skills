@@ -1298,7 +1298,7 @@ raise SystemExit(main(fixture['args'], client))
                         "--to", "Doe_Study_2025.pdf", "--dest", self.pdfs, "--apply")
         self.assertTrue((self.pdfs / "Doe_Study_2025.pdf").is_file())
         # The URL still owns this clipping; only its separate legacy PDF
-        # reference follows the authorized rename, never the clipping path.
+        # reference follows the rename, never the clipping path.
         self.assertEqual(
             clipping.read_text(encoding="utf-8"),
             "---\n\"sources\": # capture\n- 'https://example.org/O''Reilly/download.pdf'\n"
@@ -1430,14 +1430,18 @@ raise SystemExit(main(fixture['args'], client))
             "--owner-note", note, "--old-slug", old, expected=1).stdout)
         self.assertFalse(dependency["ok"])
         self.assertEqual(dependency["blockers"], expected_blockers)
-        # An external dependency rewrite is a separate authorized operation;
-        # once the fixture supplies it, the old copies may be retired.
-        external.write_text(
-            external.read_text(encoding="utf-8").replace(old, new),
-            encoding="utf-8")
-        moc_dependency.write_text(
+        # The reprocess request authorizes the repair phase, which rewrites
+        # every dependent; the old copies may then be retired.
+        self.run_script(fetch, *rename, "--phase", "repair")
+        self.assertEqual(
+            external.read_text(encoding="utf-8"),
+            'The HTML opener is `<!--`.\n\n'
+            f'[[{new}|the clipping]]\n![[Sources/Images/{new}_fig_1.png]]\n'
+            '\nThe closer is `-->`.\n')
+        self.assertEqual(
+            moc_dependency.read_text(encoding="utf-8"),
             f'# Supporting sources\n[[{new}|the clipping]]\n'
-            f'![[Sources/Images/{new}_fig_1.png]]\n', encoding="utf-8")
+            f'![[Sources/Images/{new}_fig_1.png]]\n')
         dependency = json.loads(self.run_script(
             fetch, "dependencies", "--attachments", self.images,
             "--owner-note", note, "--old-slug", old).stdout)
@@ -1459,6 +1463,211 @@ raise SystemExit(main(fixture['args'], client))
         current = verdict()
         self.assertEqual(current["status"], "duplicate")
         self.assertEqual(current["matches"], [str(self.notes / (new + ".md"))])
+
+    def test_clipping_changed_slug_repairs_every_dependent_before_retirement(self):
+        fetch = "skills/clipping-clean/scripts/fetch_images.py"
+        old, new = "Smith_Cell_Signals_2026", "Smith_Cell_Receptors_2026"
+        old_image, new_image = old + "_fig_1.png", new + "_fig_1.png"
+        note = self.notes / (old + ".md")
+        metadata = {"title": "Cell signals", "format": "Article",
+                    "sources": ["https://example.org/study"], "read": True}
+        body = ('---\n' + yaml.safe_dump(metadata, sort_keys=False) + '---\n'
+                + f'![[{old_image}]]\n*The cells exchange signals.*\n')
+        note.write_text(body, encoding="utf-8")
+        rendered = Path(self.scratch.name) / "browser render.png"
+        Image.new("RGB", (64, 48), (20, 100, 180)).save(rendered)
+        self.run_script(fetch, "place", "--attachments", self.images,
+                        "--slug", old, "--index", 1, "--from-file", rendered,
+                        "--owner-note", note)
+        original = digest(self.images / old_image)
+        snapshots = Path(self.scratch.name) / "clipping-snapshots.json"
+        self.run_script("shared/scripts/publish_files.py", "snapshot",
+                        "--vault", self.vault, "-o", snapshots,
+                        f"Articles/{old}.md")
+        new_note = self.notes / (new + ".md")
+        new_note.write_text(body.replace(old, new), encoding="utf-8")
+
+        # Real dependents in every scanned area. Labels, anchors, sizes, a
+        # code span and a name that only shares the old prefix must survive.
+        wiki = self.vault / "Wiki/cell-signaling.md"
+        wiki_text = '''---
+title: "Cell signaling"
+type: Concept
+sources:
+  - "[[{slug}]]"
+created: 2026-08-30
+updated: 2026-09-02
+description: "Cell signaling transmits information between cells through chemical messages."
+tags:
+  - "#biology"
+parents: []
+read: true
+issues: ""
+---
+**Cell signaling** transmits information between cells through chemical messages, as in [[{slug}#Receptors bind ligands|the clipping]].
+
+**Related:**
+'''
+        wiki.write_text(wiki_text.format(slug=old), encoding="utf-8")
+        moc = self.vault / "MOCs/biology-moc.md"
+        moc.parent.mkdir()
+        moc_text = ('- [[Articles/{slug}|Cell signals]]\n'
+                    f'- [[{old}_Supplement]]\n')
+        moc.write_text(moc_text.format(slug=old), encoding="utf-8")
+        investment = self.vault / "Investments/Research notes.md"
+        investment.parent.mkdir()
+        investment_text = ('Receptor platforms matter for the thesis.\n\n'
+                           '![[{image}|300]]\n')
+        investment.write_text(investment_text.format(image=old_image),
+                              encoding="utf-8")
+        log = self.vault / "Reviews/clipping-clean-suggestions.md"
+        log.parent.mkdir()
+        log_text = (
+            '## Open\n\n### [caption-lost] Caption lost on reprocess\n\n'
+            '- **Issue:** The first caption was dropped.\n'
+            '- **Evidence:** [Cell signals](../Articles/{slug}.md) lost the '
+            f'caption below `![[{old_image}]]`.\n'
+            '- **Reported by:** clipping-clean\n\n## Fixed\n\n'
+            'No fixed suggestions.\n')
+        log.write_text(log_text.format(slug=old), encoding="utf-8")
+        other = self.notes / "Other_Clipping_2026.md"
+        other_text = '---\ntitle: "Other"\n---\nRelated: [[{slug}]]\n'
+        other.write_text(other_text.format(slug=old), encoding="utf-8")
+        dependents = {wiki: wiki_text.format(slug=new),
+                      moc: moc_text.format(slug=new),
+                      investment: investment_text.format(image=new_image),
+                      log: log_text.format(slug=new),
+                      other: other_text.format(slug=new)}
+        rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
+                  "--owner-note", note, "--new-owner-note", new_note,
+                  "--old-slug", old, "--new-slug", new]
+
+        prepared = json.loads(self.run_script(
+            fetch, *rename, "--phase", "prepare").stdout)
+        self.assertEqual(prepared["mapping"], [{"from": old_image, "to": new_image}])
+        self.assertEqual(
+            {Path(row["path"]).resolve(): row["references"]
+             for row in prepared["dependency"]["blockers"]},
+            {wiki.resolve(): [old + ".md"], moc.resolve(): [old + ".md"],
+             investment.resolve(): [old_image], log.resolve(): [old + ".md"],
+             other.resolve(): [old + ".md"]})
+        self.assertEqual(digest(self.images / new_image), original)
+
+        def vault_state():
+            return {path: (path.read_bytes() if path.is_file() else None)
+                    for path in self.vault.rglob("*")}
+
+        state = vault_state()
+        planned = json.loads(self.run_script(
+            fetch, *rename, "--phase", "repair", "--dry-run").stdout)
+        self.assertEqual(vault_state(), state)
+        self.assertEqual(
+            {Path(row["path"]).resolve(): (row["status"], len(row["references"]))
+             for row in planned["results"]},
+            {wiki.resolve(): ("would-rewrite", 2), moc.resolve(): ("would-rewrite", 1),
+             investment.resolve(): ("would-rewrite", 1),
+             log.resolve(): ("would-rewrite", 1),
+             other.resolve(): ("would-rewrite", 1)})
+        for row in planned["results"]:
+            for reference in row["references"]:
+                self.assertEqual(reference["to"],
+                                 reference["from"].replace(old, new))
+
+        repaired = json.loads(self.run_script(
+            fetch, *rename, "--phase", "repair").stdout)
+        self.assertTrue(repaired["ok"])
+        self.assertEqual({Path(row["path"]).resolve(): row["status"]
+                          for row in repaired["results"]},
+                         {path.resolve(): "rewritten" for path in dependents})
+        self.assertEqual({path: path.read_text(encoding="utf-8")
+                          for path in dependents}, dependents)
+        self.assertFalse(list(self.vault.rglob(".clipping-link-repair*")))
+        self.assertEqual(new_note.read_text(encoding="utf-8"),
+                         body.replace(old, new))
+        self.assertEqual(digest(self.images / old_image), original)
+        entry = yaml.safe_load(wiki.read_text(encoding="utf-8").split("---", 2)[1])
+        self.assertEqual((str(entry["created"]), str(entry["updated"]), entry["read"]),
+                         ("2026-08-30", "2026-09-02", True))
+        self.assertEqual(entry["sources"], [f"[[{new}]]"])
+        after = {path: path.read_bytes() for path in dependents}
+        again = json.loads(self.run_script(
+            fetch, *rename, "--phase", "repair").stdout)
+        self.assertFalse([row for row in again["results"]
+                          if row["status"] != "unchanged"])
+        self.assertEqual({path: path.read_bytes() for path in dependents}, after)
+
+        dependency = json.loads(self.run_script(
+            fetch, "dependencies", "--attachments", self.images,
+            "--owner-note", note, "--old-slug", old).stdout)
+        self.assertTrue(dependency["ok"])
+        finalized = json.loads(self.run_script(
+            fetch, *rename, "--phase", "finalize").stdout)
+        self.assertEqual(finalized["results"][0]["action"], "retired")
+        removed = json.loads(self.run_script(
+            "shared/scripts/publish_files.py", "remove", "--vault", self.vault,
+            "--snapshots", snapshots, f"Articles/{old}.md").stdout)
+        self.assertEqual(removed["results"][0]["action"], "removed")
+        self.assertFalse(note.exists())
+        self.assertFalse((self.images / old_image).exists())
+        self.assertEqual(digest(self.images / new_image), original)
+        self.assertTrue(new_note.is_file())
+
+    def test_clipping_changed_slug_never_edits_a_dated_research_record(self):
+        fetch = "skills/clipping-clean/scripts/fetch_images.py"
+        old, new = "Smith_Cell_Signals_2026", "Smith_Cell_Receptors_2026"
+        old_image, new_image = old + "_fig_1.png", new + "_fig_1.png"
+        note = self.notes / (old + ".md")
+        metadata = {"title": "Cell signals", "format": "Article",
+                    "sources": ["https://example.org/study"], "read": True}
+        body = ('---\n' + yaml.safe_dump(metadata, sort_keys=False) + '---\n'
+                + f'![[{old_image}]]\n*The cells exchange signals.*\n')
+        note.write_text(body, encoding="utf-8")
+        rendered = Path(self.scratch.name) / "browser render.png"
+        Image.new("RGB", (64, 48), (20, 100, 180)).save(rendered)
+        self.run_script(fetch, "place", "--attachments", self.images,
+                        "--slug", old, "--index", 1, "--from-file", rendered,
+                        "--owner-note", note)
+        original = digest(self.images / old_image)
+        new_note = self.notes / (new + ".md")
+        new_note.write_text(body.replace(old, new), encoding="utf-8")
+
+        # Dated stock-research records are the investments plugin's
+        # immutable history; any other Investments/ note is repaired.
+        record = self.vault / "Investments/2026-09-01-stock-research.md"
+        record.parent.mkdir()
+        record_bytes = ('---\nstock_research: 2\n---\nReceptor platforms, as in '
+                        f'[[{old}]].\n\n![[{old_image}|300]]\n').encode("utf-8")
+        record.write_bytes(record_bytes)
+        notes = self.vault / "Investments/Research notes.md"
+        notes.write_text(f"See [[{old}]].\n", encoding="utf-8")
+        rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
+                  "--owner-note", note, "--new-owner-note", new_note,
+                  "--old-slug", old, "--new-slug", new]
+        self.run_script(fetch, *rename, "--phase", "prepare")
+
+        repaired = json.loads(self.run_script(
+            fetch, *rename, "--phase", "repair", expected=1).stdout)
+        rows = {Path(row["path"]).resolve(): row for row in repaired["results"]}
+        self.assertFalse(repaired["ok"])
+        self.assertEqual(
+            {path: row["status"] for path, row in rows.items()},
+            {record.resolve(): "blocked", notes.resolve(): "rewritten"})
+        self.assertIn("dated Investments/ research record is immutable",
+                      rows[record.resolve()]["reason"])
+        self.assertEqual(record.read_bytes(), record_bytes)
+        self.assertEqual(notes.read_text(encoding="utf-8"), f"See [[{new}]].\n")
+
+        dependency = json.loads(self.run_script(
+            fetch, "dependencies", "--attachments", self.images,
+            "--owner-note", note, "--old-slug", old, expected=1).stdout)
+        self.assertFalse(dependency["ok"])
+        self.assertEqual([Path(row["path"]).resolve()
+                          for row in dependency["blockers"]], [record.resolve()])
+        self.run_script(fetch, *rename, "--phase", "finalize", expected=1)
+        self.assertEqual(record.read_bytes(), record_bytes)
+        self.assertTrue(note.is_file())
+        self.assertEqual(digest(self.images / old_image), original)
+        self.assertEqual(digest(self.images / new_image), original)
 
     def test_fresh_vault_bootstrap_supports_both_article_producers(self):
         fresh = Path(self.scratch.name) / "fresh vault"
@@ -2619,13 +2828,21 @@ A compact definition used only to exercise the shared contract.
             "[[shared-target]] and [[SHARED-TARGET.md|Shared target]] remain "
             "ambiguous because a root file has the same basename.")
         # The card set: one `??` definition card per entry. A further card is
-        # a report-only legacy extra; a card simplified to `?` needs its `??`.
+        # an extra card that the run removes; a card simplified to `?` needs
+        # its `??`.
         write_entry(
-            "legacy-extra-cards", "Legacy extra cards",
-            "**Legacy extra cards** is a deliberately malformed fixture.",
+            "extra-cards", "Extra cards",
+            "**Extra cards** is a deliberately malformed fixture.",
             extra_cards=(
                 "Another claim about the fixture, stated once.\n??\nOther term\n\n"
                 "Why does the fixture exist?\n?\nTo carry a legacy question card."))
+        # With no definition card, the run rewrites the first card into it and
+        # removes the rest; it never asks to keep every card.
+        write_entry(
+            "no-definition-card", "No definition card",
+            "**No definition card** is a deliberately malformed fixture.",
+            card="Other term",
+            extra_cards="Why does the fixture exist?\n?\nTo carry a legacy question card.")
         write_entry(
             "simplified-primary", "Simplified primary",
             "**Simplified primary** is a deliberately malformed fixture.")
@@ -2635,7 +2852,8 @@ A compact definition used only to exercise the shared contract.
                 "\n??\n", "\n?\n", 1),
             encoding="utf-8")
         card_set_faults = {
-            "legacy-extra-cards": "holds 3 cards",
+            "extra-cards": "holds 3 cards",
+            "no-definition-card": "rewrite the first card into the definition card",
             "simplified-primary": "must be exactly",
         }
         # An online page is cited by its full http(s) URL (CONVENTIONS
@@ -2721,16 +2939,52 @@ A compact definition used only to exercise the shared contract.
             self.assertTrue(any(
                 finding["item"] == "19-flashcards" and fragment in finding["message"]
                 for finding in lint_findings[slug]), (slug, lint_findings[slug]))
-        # A legacy extra card's own findings are report-only and never ask
-        # for its separator to change; the scanner below agrees.
-        extra_findings = [finding for finding in lint_findings["legacy-extra-cards"]
+        # An extra card is a fixable error on a builder draft: the run keeps
+        # the one definition card and removes the rest. An extra card's own
+        # findings ask only for its removal, never for its separator to
+        # change; the scanner below agrees.
+        set_findings = [finding for finding in lint_findings["extra-cards"]
+                        if finding["item"] == "19-flashcards"
+                        and "holds 3 cards" in finding["message"]]
+        self.assertEqual(len(set_findings), 1, lint_findings["extra-cards"])
+        self.assertEqual(set_findings[0]["severity"], "error", set_findings)
+        self.assertFalse(set_findings[0]["evidence"].get("report_only"),
+                         set_findings)
+        self.assertIn("keep it, remove every other card and quote each "
+                      "removed card verbatim, attachments included, in the "
+                      "report", set_findings[0]["message"], set_findings)
+        extra_findings = [finding for finding in lint_findings["extra-cards"]
                           if (finding.get("evidence") or {}).get("card") == 3]
-        self.assertTrue(extra_findings, lint_findings["legacy-extra-cards"])
+        self.assertTrue(extra_findings, lint_findings["extra-cards"])
         for finding in extra_findings:
-            self.assertTrue(finding["evidence"].get("report_only"), finding)
-            self.assertTrue(finding["message"].startswith(
-                "legacy extra card 3 (report-only; never repair): "), finding)
+            self.assertFalse(finding["evidence"].get("report_only"), finding)
+            self.assertIn("extra card 3", finding["message"], finding)
+            self.assertIn("remove this extra card", finding["message"], finding)
             self.assertNotIn("must be exactly", finding["message"])
+        self.assertFalse([finding for finding in lint_findings["extra-cards"]
+                          if (finding.get("evidence") or {}).get("card") == 1],
+                         lint_findings["extra-cards"])
+        for slug in ("extra-cards", "no-definition-card"):
+            for finding in lint_findings[slug]:
+                for retired in ("report-only", "never repair",
+                                "preserve every"):
+                    self.assertNotIn(retired, finding["message"], finding)
+        no_definition = [finding for finding in lint_findings["no-definition-card"]
+                         if "no card carries the primary answer" in finding["message"]]
+        self.assertEqual(len(no_definition), 1, lint_findings["no-definition-card"])
+        self.assertEqual(no_definition[0]["severity"], "error", no_definition)
+        self.assertIn('"No definition card"', no_definition[0]["message"])
+        self.assertIn("remove every other card", no_definition[0]["message"])
+        # The card the run removes asks only for its removal, never for its
+        # own `?` separator to become `??`.
+        doomed = [finding for finding in lint_findings["no-definition-card"]
+                  if (finding.get("evidence") or {}).get("card") == 2]
+        self.assertTrue(doomed, lint_findings["no-definition-card"])
+        for finding in doomed:
+            self.assertTrue(finding["evidence"].get("extra_card"), finding)
+            self.assertIn("extra card 2", finding["message"], finding)
+            self.assertIn("remove this extra card", finding["message"], finding)
+            self.assertNotIn("must be exactly", finding["message"], finding)
 
         scan = json.loads(self.run_script(
             "skills/wiki-lint/scripts/scan_vault.py", wiki, "--indent", "0").stdout)
@@ -2771,12 +3025,42 @@ A compact definition used only to exercise the shared contract.
                 problem["slug"] == slug and problem["item"] == "item19"
                 and fragment in problem["message"]
                 for problem in scan["problems"]), slug)
-        extra_problems = [problem["message"] for problem in scan["problems"]
-                          if problem["slug"] == "legacy-extra-cards"
-                          and "card 3" in problem["message"]]
-        self.assertTrue(extra_problems)
+        extra_messages = [problem["message"] for problem in scan["problems"]
+                          if problem["slug"] == "extra-cards"]
+        extra_problems = [message for message in extra_messages
+                          if "card 3" in message]
+        self.assertTrue(extra_problems, extra_messages)
+        self.assertTrue(any(
+            problem["slug"] == "extra-cards"
+            and "holds 3 cards" in problem["message"]
+            and "keep it, remove every other card and quote each removed "
+            "card verbatim, attachments included, in the report"
+            in problem["message"]
+            for problem in scan["problems"]), extra_messages)
         for message in extra_problems:
-            self.assertIn("legacy extra card 3 (report-only; never repair)", message)
+            self.assertIn("extra card 3", message)
+            self.assertIn("remove this extra card", message)
+            self.assertNotIn("must be exactly", message)
+        self.assertFalse([message for message in extra_messages
+                          if "card 1" in message], extra_messages)
+        for problem in scan["problems"]:
+            if problem["slug"] in ("extra-cards", "no-definition-card"):
+                for retired in ("report-only", "never repair",
+                                "preserve every"):
+                    self.assertNotIn(retired, problem["message"], problem)
+        self.assertTrue(any(
+            problem["slug"] == "no-definition-card"
+            and 'no card carries the primary answer "No definition card"'
+            in problem["message"]
+            and "remove every other card" in problem["message"]
+            for problem in scan["problems"]), scan_items.get("no-definition-card"))
+        doomed = [problem["message"] for problem in scan["problems"]
+                  if problem["slug"] == "no-definition-card"
+                  and "card 2" in problem["message"]]
+        self.assertTrue(doomed, scan_items.get("no-definition-card"))
+        for message in doomed:
+            self.assertTrue(message.startswith(
+                "extra card 2 (remove this extra card"), message)
             self.assertNotIn("must be exactly", message)
         for slug in ("related-anchored", "related-wrong-label"):
             self.assertIn("item11", scan_items.get(slug, set()), scan_items.get(slug))

@@ -6035,7 +6035,7 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/atomic_move.py": 32,
     "shared/scripts/check_parsers.py": 22,
     "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 104,
+    "shared/scripts/entry_checks.py": 107,
     # 2026-10-02: the cases for the removed prose-calculation cues
     # (averaged probability, majority vote, regression average) went with
     # them; the new cue and denominator cases still raise the floor net.
@@ -6046,17 +6046,17 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
     "shared/scripts/organism_names.py": 34,
-    "shared/scripts/entry_structure.py": 172,
+    "shared/scripts/entry_structure.py": 175,
     "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
     "shared/scripts/publish_files.py": 30,
     "shared/scripts/plurals.py": 265,
-    "shared/scripts/slugify.py": 80,  # device-name restrictions removed
+    "shared/scripts/slugify.py": 81,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 72,
     "shared/scripts/yaml_scalars.py": 16,
     "skills/clipping-clean/scripts/body_checks.py": 79,
     "skills/clipping-clean/scripts/dedup_index.py": 180,
-    "skills/clipping-clean/scripts/fetch_images.py": 593,
+    "skills/clipping-clean/scripts/fetch_images.py": 623,
     "skills/clipping-clean/scripts/lottie_to_gif.py": 42,
     "skills/clipping-clean/scripts/slug.py": 157,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
@@ -6066,27 +6066,27 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_notes.py": 113,
     "skills/stock-research/scripts/stock_acquire.py": 2,
     "skills/stock-research/scripts/stock_history.py": 1,
-    "skills/stock-research/scripts/stock_cohorts.py": 6,
+    "skills/stock-research/scripts/stock_cohorts.py": 7,
     "skills/stock-research/scripts/stock_feed.py": 6,
     "skills/stock-research/scripts/stock_coverage.py": 8,
     "skills/stock-research/scripts/stock_dossiers.py": 3,
-    "skills/stock-research/scripts/market_acquire.py": 4,
-    "skills/stock-research/scripts/market_capture.py": 19,
+    "skills/stock-research/scripts/market_acquire.py": 6,
+    "skills/stock-research/scripts/market_capture.py": 22,
     "skills/stock-research/scripts/market_capitalization.py": 19,
     "skills/stock-research/scripts/market_price_capture.py": 5,
     "skills/stock-research/scripts/market_evidence.py": 4,
-    "skills/stock-research/scripts/market_universe.py": 39,
-    "skills/stock-research/scripts/market_credentials.py": 13,
+    "skills/stock-research/scripts/market_universe.py": 40,
+    "skills/stock-research/scripts/market_credentials.py": 15,
     "skills/stock-research/scripts/market_data.py": 21,
     "skills/stock-research/scripts/market_comparison.py": 6,
-    "skills/stock-research/scripts/market_estimate_history.py": 31,
+    "skills/stock-research/scripts/market_estimate_history.py": 35,
     "skills/stock-research/scripts/market_estimates.py": 12,
     "skills/stock-research/scripts/market_filings.py": 28,
     "skills/stock-research/scripts/market_fred.py": 10,
-    "skills/stock-research/scripts/market_http.py": 26,
+    "skills/stock-research/scripts/market_http.py": 29,
     "skills/stock-research/scripts/market_news.py": 37,
     "skills/stock-research/scripts/market_ownership.py": 30,
-    "skills/stock-research/scripts/market_prices.py": 28,
+    "skills/stock-research/scripts/market_prices.py": 34,
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
     "skills/paper-summarize/scripts/note_lint.py": 276,
@@ -6096,15 +6096,15 @@ SELFTEST_MIN_CASES = {
     "skills/figure-extract/scripts/batch_extract.py": 439,
     "skills/figure-extract/scripts/extract_figures.py": 223,
     "skills/figure-extract/scripts/render_page.py": 68,
-    "skills/pdf-organize/scripts/organize.py": 415,
+    "skills/pdf-organize/scripts/organize.py": 419,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 79,
     # 2026-09-30: lowered after the discipline-root empty-sources exemption
     # and its cases were removed (roots now cite a source like every entry).
-    "skills/wiki-build/scripts/lint_entry.py": 461,
+    "skills/wiki-build/scripts/lint_entry.py": 465,
     "skills/wiki-build/scripts/review_tree.py": 40,
     "skills/wiki-build/scripts/vault_index.py": 90,
-    "skills/wiki-lint/scripts/scan_vault.py": 664,
+    "skills/wiki-lint/scripts/scan_vault.py": 667,
 }
 
 
@@ -7448,13 +7448,16 @@ def check_autonomous_wiki_lint(rep, conv):
 
     Each pinned file states the autonomy where a reader could otherwise infer
     a gate.  Since knowledge 1.17.0 that includes content repair: an ordinary
-    run's Task 1b corrects, consolidates and retitles on its own, and only
-    splits, merges and deletions wait for an explicit request, so the pins
+    run's Task 1b corrects, consolidates and retitles on its own, so the pins
     also hold that contract and the proposal-only wording it retired ("generic
-    lint only proposes", ...) joins the retired tokens.  The retired gate
-    phrasing must not return, in two scopes.
+    lint only proposes", ...) joins the retired tokens.  Since 1.20.0 Task 1b
+    also splits and merges once refactors.md step 2's proof holds, and only a
+    deletion waits for an explicit request; the explicit-only refactor wording
+    ("Splits, merges and deletions run only on request", ...) is retired too.
+    The retired gate phrasing must not return, in two scopes.
     wiki-lint's own retired tokens (`item3/user-action`, `read-reviewed`, ...)
-    mean nothing outside it, so they are swept over every canonical source.
+    mean nothing outside it, so they are swept over every canonical source
+    and the root README.
     The generic gate phrases ("require human judgment", "so the user can
     review", ...) are ordinary English: pdf-organize once offered a read-only
     plan "so the user can review" it, and an investments disclaimer may
@@ -7477,17 +7480,35 @@ def check_autonomous_wiki_lint(rep, conv):
          None, "not a required review queue"),
         (os.path.join(SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py"),
          None, "no user or other human review is required"),
-        # The 1.17.0 content-repair contract: Task 1b repairs unasked, and
-        # only splits, merges and deletions need an explicit request.
+        # The content-repair contract (1.17.0, widened in 1.20.0): Task 1b
+        # repairs, splits and merges unasked, and only a deletion needs an
+        # explicit request.
         (os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"), None,
-         "Only splits, merges and deletions need an explicit request"),
+         "Only a deletion needs an explicit request"),
+        # 1.20.0: a close call is reported, never logged as a recurring
+        # judged item; a merge survivor is unread; and a merge's file
+        # removal is not the deletion that still needs a request.
+        (os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"), None,
+         "with both options and is never logged"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "SKILL.md"), None,
+         "A merge's survivor keeps its `created:` and gets today's "
+         "`updated:` and `read: false`"),
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "refactors.md"),
+         None, "removal of the merged-away file is part of the merge, not a "
+         "deletion"),
         (os.path.join(SHARED_DIR, "CONVENTIONS.md"), None,
-         "never applies them unasked"),
+         "merges and splits entries once its refactor proof holds"),
+        (os.path.join(SHARED_DIR, "CONVENTIONS.md"), None,
+         "deletes an entry only on an explicit request"),
+        (os.path.join(SHARED_DIR, "CONVENTIONS.md"), None,
+         "A merge's surviving entry is the exception"),
         (os.path.join(SKILLS_DIR, "wiki-lint", "references", "refactors.md"),
          None, "Task 1b runs this protocol when all of these hold"),
     ]
     # Retired wiki-lint vocabulary: no other skill has a reason to use it.
-    # The last three are the proposal-only gate 1.17.0 retired.
+    # Then the proposal-only gate 1.17.0 retired, and the explicit-only
+    # split and merge gate 1.20.0 retired ("splits, merges and deletions
+    # need ..." also covers the old "Only splits, ..." Task 1b sentence).
     retired_tokens = (
         "semantic selection remains manual",
         "read-reviewed",
@@ -7496,6 +7517,32 @@ def check_autonomous_wiki_lint(rep, conv):
         "generic lint only proposes",
         "Generic maintenance requests do not activate this mode",
         "propose a source-backed correction",
+        "Splits, merges and deletions run only on request",
+        "Splits, merges and deletions run only on an explicit request",
+        "splits, merges and deletions need an explicit request",
+        "proposes splits, duplicate-entry merges and deletions",
+        "applying a merge needs an explicit request",
+        "merge is the user's call",
+        "needs a split, merge or deletion",
+        "needing a split, merge or deletion",
+        "merging duplicate entries, deleting an entry",
+        "Splits, merges and deletions also use that protocol",
+        "for merge proposals",
+        "proposed splits, merges and deletions",
+        "reported as merge proposals",
+        "split, merge or deletion that needs an explicit request",
+        "split, duplicate-entry merge or deletion, which needs an explicit "
+        "request",
+        "explicitly authorizes a split, merge or deletion",
+        "split, merge or deletion uses that protocol only on an explicit "
+        "request",
+        "splits an entry only on request",
+        "Splits, merges, deletions and producer-mapped repairs still need",
+        "routine lint never merges",
+        "Review only — never merged",
+        "duplicate/disambiguation proposal",
+        "split candidate, which stays a proposal",
+        "without a separate refactor request",
     )
     # Ordinary English that implied a gate only in wiki-lint's contract.
     gate_phrases = (
@@ -7521,7 +7568,9 @@ def check_autonomous_wiki_lint(rep, conv):
     tokens = [_phrase_re(phrase, re.I) for phrase in retired_tokens]
     gates = [_phrase_re(phrase, re.I) for phrase in gate_phrases]
     swept = in_scope = 0
-    for path, text in canonical_rule_sources():
+    readme = os.path.join(ROOT, "README.md")
+    for path, text in list(canonical_rule_sources()) + [(readme,
+                                                         read(readme))]:
         swept += 1
         for rx in tokens:
             for m in rx.finditer(text):
@@ -7926,14 +7975,41 @@ CARD_SET_STALE_PHRASES = (
 )
 
 
+#: Phrasing of the retired card-freshness rewrite bars (a high bar for a card
+#: with review history, a low bar for a known-fresh one) and of the retired
+#: report-only legacy extra, which only a request could remove.  A card is now
+#: freely improvable and every extra card is removed.  Case-insensitive.
+CARD_REWRITE_STALE_PHRASES = (
+    "card freshness",
+    "card-freshness-and-the-rewrite-bars",
+    "rewrite bar",
+    "rewrite bars",
+    "known fresh",
+    "known-fresh",
+    "high bar",
+    "high-bar",
+    "low bar",
+    "low-bar",
+    "either bar",
+    "card's bar",
+    "legacy extra",
+    "legacy extras",
+    "never repair or reword",
+    "report-only; never repair",
+)
+
+
 def check_card_set_contract(rep, _conv):
     """The card set, its separator and attachment rules, and deck setup.
 
-    flashcards-and-emphasis.md owns the card grammar, wiki-lint's
-    flashcards.md owns when a card may be rewritten and how a legacy extra is
-    kept, the knowledge README tells the user how to set up review, and
-    entry_structure.py enforces the two separators.  The retired
-    understanding-card set must not come back in any canonical source.
+    flashcards-and-emphasis.md owns the card grammar and the one-card set,
+    wiki-lint's flashcards.md owns how the definition card is improved and
+    how every extra card is removed, merge.md removes extras on a merge,
+    CONVENTIONS records the removal's dates, the knowledge README tells the
+    user how to set up review, and entry_structure.py enforces the two
+    separators.
+    Neither the retired understanding-card set nor the retired rewrite bars
+    and report-only legacy extras may come back in any canonical source.
     """
     check = "card-set-contract"
     fe_path = os.path.join(SKILLS_DIR, "wiki-build", "references",
@@ -7949,25 +8025,36 @@ def check_card_set_contract(rep, _conv):
          "the card and strands its second schedule"),
         (fe_path, "never move it between cards",
          "no longer forbids moving a schedule or block ID between cards"),
-        (fe_path, "absence of attachments alone proves nothing",
-         "no longer states that a card without visible attachments may still "
-         "carry review state"),
         (fe_path, "### Line-1 equation coverage",
          "lost the `### Line-1 equation coverage` heading that owns card "
          "math"),
         (fe_path, "**Line 1 is verbal by default.**",
          "no longer states that card line 1 is verbal by default"),
-        (wl_path, "`spaced_repetition.schedules_outside_notes` is `false`",
-         "no longer ties scan-proven card freshness to "
-         "`spaced_repetition.schedules_outside_notes` being `false`"),
+        (fe_path, "removes every other card",
+         "no longer removes every card but the definition card in every "
+         "wiki-lint run and wiki-build merge"),
+        (wl_path, "## Improving the card",
+         "lost the `## Improving the card` section that other guides link"),
+        (wl_path, "never reword for variety",
+         "no longer keeps a card that already meets the guide byte-for-byte, "
+         "so a rerun on unchanged evidence could reword it"),
         (wl_path, "never move an attachment between cards",
          "no longer forbids moving an attachment between cards"),
-        (wl_path, "Routine lint never adds a second card",
-         "no longer forbids routine lint from adding a second card"),
-        (wl_path, "Never repair or reword a legacy extra",
-         "no longer keeps a legacy extra card report-only"),
-        (wl_path, "A removal advances `updated:` and preserves `read:`",
-         "no longer states the date rule for a requested card removal"),
+        (wl_path, "one definition card",
+         "no longer limits an entry to one definition card"),
+        (wl_path, "removes every other card",
+         "no longer removes every card but the definition card"),
+        (wl_path, "Never add a second card",
+         "no longer forbids adding a second card"),
+        (wl_path, "A removal advances `updated:` and keeps `read:`",
+         "no longer states the date rule for removing an extra card"),
+        (os.path.join(SKILLS_DIR, "wiki-build", "references", "merge.md"),
+         "remove every card other than the primary card",
+         "no longer removes an entry's extra cards on every merge"),
+        (CONVENTIONS, "Removing an extra card, part of every wiki-lint run "
+         "and wiki-build merge",
+         "no longer states, as the date rule of record, that every wiki-lint "
+         "run and wiki-build merge removes an extra card"),
         (os.path.join(SKILLS_DIR, "wiki-lint", "references", "refactors.md"),
          "a merge keeps only the survivor's",
          "no longer keeps a single card when two entries merge"),
@@ -8007,27 +8094,38 @@ def check_card_set_contract(rep, _conv):
                      "-- the enforced separators no longer match the "
                      "documented card" % (separators,), rel(structure_path))
 
-    stale = [(phrase, _phrase_re(phrase, re.I))
-             for phrase in CARD_SET_STALE_PHRASES]
+    retired = (
+        (CARD_SET_STALE_PHRASES, "the retired understanding-card set",
+         "every entry has exactly one `??` definition card"),
+        (CARD_REWRITE_STALE_PHRASES,
+         "the retired rewrite bars or report-only legacy extras",
+         "a card is improved whenever the result is clearer and every extra "
+         "card is removed"),
+    )
+    stale = [(phrase, _phrase_re(phrase, re.I), what, rule)
+             for phrases, what, rule in retired for phrase in phrases]
+    # The root README also states the card-removal rule, so it is scanned
+    # beside the canonical sources.
+    readme = os.path.join(ROOT, "README.md")
     scanned = 0
-    for path, text in canonical_rule_sources():
+    for path, text in list(canonical_rule_sources()) + [(readme,
+                                                         read(readme))]:
         scanned += 1
-        for phrase, rx in stale:
+        for _phrase, rx, what, rule in stale:
             for m in rx.finditer(text):
                 rep.fail(check,
-                         "%s restates the retired understanding-card set "
-                         "(%r) -- every entry has exactly one `??` "
-                         "definition card"
-                         % (rel(path), " ".join(m.group(0).split())),
+                         "%s restates %s (%r) -- %s"
+                         % (rel(path), what, " ".join(m.group(0).split()),
+                            rule),
                          at(path, m.start(), text))
     rep.saw(check, "card-set pins held", held)
-    rep.saw(check, "canonical sources scanned for understanding-card "
+    rep.saw(check, "canonical sources scanned for retired card-set "
             "phrasing", scanned)
     if held == len(pins) + 1 and not any(
             status == "FAIL" and name == check
             for name, status, _where, _message in rep.results):
         rep.ok(check, "%d card-set statements held at their owners; no "
-               "canonical source restates the understanding-card set" % held,
+               "canonical source restates a retired card rule" % held,
                rel(fe_path))
 
 

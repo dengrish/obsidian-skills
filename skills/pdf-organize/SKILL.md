@@ -127,14 +127,14 @@ python3 '<skill>/scripts/organize.py' check '<current PDF path>' --vault '<vault
 ```
 
 A `REFERENCED` report exits 1 and lists the citing paths; it is not a failed
-scan. A scan error never establishes that the source is unreferenced.
+scan, and the rename plan below decides whether any citing note blocks. A scan
+error never establishes that the source is unreferenced.
 
 The check reports references, including extensionless note links, to the
 PDF and its candidate [family](references/rename-repair.md#establish-the-owned-family).
-**References require the user's authorization before applying the rename.**
-Existing authorization remains valid; do not ask again. When approval is
-still needed, ask with the finished read-only plan below. An unreferenced PDF
-needs no extra permission.
+**The request that leads to a rename or filing move, including the rename a
+split requires, authorizes the helper's verified reference repair.** Review
+the read-only plan below; when nothing blocks it, apply it without asking.
 
 ```bash
 python3 '<skill>/scripts/organize.py' rename '<vault>/Inbox/<original>.pdf' \
@@ -173,16 +173,14 @@ edition, bytes):
   helper's remedy.
 
 Never delete or move either copy yourself. Other blockers need their actual
-cause resolved. If the file is referenced and approval is absent, present the
-plan and citing paths and leave that file unchanged.
+cause resolved.
 
 ### 4. Apply, then verify the whole family
 
-Once the plan is clear and any required authorization is established, repeat
-the same `rename` command with `--apply`. Do not use a bare `mv`, a global
-search-and-replace, or a separate loop over old names. Only the source PDF is
-filed in a new location; its figures, note, and chapter folder stay where
-they are.
+Once the plan has no blockers, repeat the same `rename` command with
+`--apply`. Do not use a bare `mv`, a global search-and-replace, or a separate
+loop over old names. Only the source PDF is filed in a new location; its
+figures, note, and chapter folder stay where they are.
 
 The CLI rechecks the plan and verifies references to **every obsolete name**,
 including figures and notes. If verification fails, **report and stop that
@@ -193,8 +191,8 @@ error names until reconciled.
 
 In batches, handle each file independently with its own `check` and
 `rename` plan, never reusing names or collision decisions from the start of
-the batch. Record referenced files awaiting approval, failed or refused
-plans and splits (nonzero exit), and unreadable/encrypted PDFs, then continue.
+the batch. Record failed or refused plans and splits (nonzero exit) and
+unreadable/encrypted PDFs, then continue.
 
 ### 5. Test for a book and split only when justified
 
@@ -222,10 +220,10 @@ that could not be read. When the year changed, include the planned old and new
 `published` values for each owned summary note, and say that a new dated value
 is `01-01` padding. A date already in the new year is the document's own and
 stays unchanged. Separate already-canonical files, already-split books,
-skipped feed-owned attachments, duplicate basenames, pending authorization,
-and failures. List Markdown captures and other non-PDF files in their own
-groups, so an inbox-wide request does not falsely read as empty. Do not delete
-originals, figures, or raw captures as cleanup.
+skipped feed-owned attachments, duplicate basenames, and failures. List
+Markdown captures and other non-PDF files in their own groups, so an
+inbox-wide request does not falsely read as empty. Do not delete originals,
+figures, or raw captures as cleanup.
 
 At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
 `Reviews/pdf-organize-suggestions.md` and to the logs of producers whose

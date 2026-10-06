@@ -16,10 +16,10 @@ If the slug is unchanged, leave their files alone. If it changes, update only
 the draft embeds by replacing the old slug and preserving each figure tail and
 extension. Do not alter live images until both owner notes are safely public.
 Follow the complete
-[two-phase replacement procedure](duplicates-and-reprocessing.md#publish-an-approved-replacement)
-for prepare, any authorized dependency repair, the unchanged re-probe, and
-finalize. Keep old images until those checks pass; never use bare `cp`/`mv`,
-omit either owner guard, or bypass prepare/finalize.
+[replacement procedure](duplicates-and-reprocessing.md#publish-an-approved-replacement)
+for prepare, the automatic link repair, the unchanged re-probe, and finalize.
+Keep old images until those checks pass; never use bare `cp`/`mv`, omit either
+owner guard, or bypass prepare/repair/finalize.
 
 Prepare's inventory checks the note in both directions: an old-slug image
 embed with no exact attachment, including legacy loose `_figN` spellings,
@@ -33,7 +33,7 @@ earlier in document order.
 
 A note renamed outside this workflow can keep embedding images under its old
 stem; `dedup_index.py` lists it under `stem_mismatch`. On request, re-stem
-them with the same prepare and finalize commands, passing
+them with the same prepare, repair and finalize commands, passing
 `'<vault>/Articles/<new_slug>.md'` as both `--owner-note` and
 `--new-owner-note`. This applies only while no `Articles/<old_slug>.md` exists
 and every `<old_slug>_fig*` file is an exact rendered embed of the renamed
@@ -41,12 +41,16 @@ note. Prepare copies each image to its new-stem name and lists the note's own
 old references under `dependency.owner_references`. Then record the note with
 `publish_files.py snapshot`, replace only the old stem in each listed
 reference, and publish it against that record with `publish_files.py publish`.
-Resolve other `dependency.blockers` as in
-[steps 6–7](duplicates-and-reprocessing.md#publish-an-approved-replacement),
-passing the renamed note as both owners and re-probing with
-`dependencies --new-slug '<new_slug>'` and that note as `--owner-note`.
-Finalize refuses while the note still references an old name, and retires the
-old copies only after a clean re-probe.
+Repair the other notes' `dependency.blockers` automatically as in
+[steps 6–7](duplicates-and-reprocessing.md#publish-an-approved-replacement):
+run repair (a dry-run, then live) with the renamed note as both owners; it
+rewrites only old-image references, since there is no old note to relink. It
+accepts the renamed note before or after its own embeds are republished, but
+refuses one left half republished.
+Re-probe with `dependencies --new-slug '<new_slug>'` and that note as
+`--owner-note`. A note that repair reports `blocked` stays a blocker; keep both
+image sets and report it. Finalize refuses while the note still references an
+old name, and retires the old copies only after a clean re-probe.
 
 ## Download and publish
 
