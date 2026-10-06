@@ -81,8 +81,9 @@ Report `unindexable` notes and existing URL `collisions`; do not repair, merge
 or delete them as part of the scan. Also report `stem_mismatch` notes, whose
 figure embeds still carry an old stem; re-stem one only on request, following
 [image handling](references/images.md#existing-embeds-on-a-reprocess). A
-same-URL pair left by a pending changed-slug handoff is reported as such;
-finish it only on request ([procedure](references/duplicates-and-reprocessing.md#finish-a-pending-changed-slug-handoff)).
+same-URL pair left by a pending changed-slug handoff is reported as such; a
+resume, a request to finish it or a reprocess of either note finishes it
+([procedure](references/duplicates-and-reprocessing.md#finish-a-pending-changed-slug-handoff)).
 `non_url_sources` normally identifies healthy PDF reading notes, not missing
 clipping metadata. A URL incorrectly wrapped in `[[…]]` is an anomaly to report.
 
@@ -260,9 +261,12 @@ foreign figures.
 
 **For an authorized rewrite or changed slug**, read and execute
 [the complete replacement procedure](references/duplicates-and-reprocessing.md#publish-an-approved-replacement).
-Retain the unchanged original until publication succeeds, and keep both
-resolving versions while handoff blockers remain. Do not apply the new-note
-sequence below to a reprocess.
+A changed slug repairs every link to the old note and its images in the same
+run, as Obsidian does on a rename; the reprocess request authorizes that
+repair, so never ask separately or hand it to another skill. Retain the
+unchanged original until publication succeeds, and keep both resolving
+versions while any note the repair could not rewrite remains a blocker. Do not
+apply the new-note sequence below to a reprocess.
 
 **For a new note**, publish the reviewed scratch draft against the step-2
 record with the shared `publish_files.py`. It creates the note exclusively, so
@@ -299,7 +303,8 @@ retained scratch file.
 
 Read back the published note and verify its final embeds before reporting
 completion. Report refused phases and retained recovery paths; a changed-slug
-reprocess is complete only after image finalization and old-note cleanup.
+reprocess is complete only after link repair, image finalization and old-note
+cleanup.
 
 ## 7. Report
 
@@ -315,10 +320,10 @@ skips to a count and filenames. Report:
   name any removed hidden AI-directed passage.
 - Duplicate escapes or ownership collisions, with URLs/paths; research extracts
   left unchanged; unindexable and `stem_mismatch` notes.
-- Approved reprocessing: regenerated fields, preserved metadata conflicts, old → new filenames, any unresolved inbound links and any pending changed-slug handoff.
+- Approved reprocessing: regenerated fields, preserved metadata conflicts, old → new filenames, each note the live repair rewrote with its old → new links, any remaining link-repair blockers with their `recovery` paths and any pending changed-slug handoff.
 
-The polished clipping may later be a source for `wiki-build`; this run writes
-no wiki entries.
+The polished clipping may later be a source for `wiki-build`; this run creates
+no wiki entries, and a changed slug edits existing ones only to repair links.
 
 At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
 `Reviews/clipping-clean-suggestions.md` and to the logs of producers whose

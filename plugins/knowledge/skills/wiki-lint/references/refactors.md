@@ -1,15 +1,19 @@
 # Source-backed refactors of existing entries
 
 Read this before Task 1b consolidates a duplicated explanation, moves a
-misplaced passage to its owner, retitles an entry, removes a semantic-invalid
-alias or creates a missing entry, and when the current request explicitly
-authorizes a split, merge or deletion. An ordinary run performs the first
-five once its evidence identifies the duplicate and its owner, the wrong
-title, the invalid alias or the missing concept. Splits, merges and deletions
-run only on an explicit request: an ordinary run proposes them, and a long
-note, duplicate wording, or scanner similarity never activates one. This
-skill's definition of an ordinary run, or authorization already present in
-the request, is sufficient. This protocol requires no separate human review.
+misplaced passage to its owner, merges or splits entries, retitles an entry,
+removes a semantic-invalid alias or creates a missing entry, and when the
+current request explicitly authorizes a deletion. An ordinary run performs
+all of these but deletion once its evidence identifies the duplicate and its
+owner, the wrong title, the invalid alias or the missing concept, or proves
+[step 2](#establish-evidence-and-complete-scope)'s boundary for a merge or
+split. Task 1b's [merge and split rules](../SKILL.md#task-1b--content-repair)
+name what never activates one and send a close call, unapplied, to *Notes
+for the user*, never to the note-content log. A deletion runs only on an
+explicit request, and an ordinary run proposes it; a merge's removal of the
+merged-away file is part of the merge, not a deletion. This skill's
+definition of an ordinary run, or authorization already present in the
+request, is sufficient. This protocol requires no separate human review.
 A pure retitle or semantic-invalid alias removal keeps its own protocol below
 ([retitle](#retitle-an-entry), [alias removal](#remove-a-semantic-invalid-alias));
 never disguise either as a split or merge to avoid its
@@ -24,9 +28,9 @@ existing content across entries.
 This is maintenance of existing knowledge, not a second extraction route.
 `wiki-build` still owns turning a new source into new candidates. A refactor
 may create a split note only for a subject already substantively present in the
-affected entry and supported by its durable source. Task 1b's
-[missing-entry rule](#create-a-missing-entry) is the only other creation, and
-it is limited to a concept the wiki already relies on.
+affected entry and supported by its cited sources or accurate background.
+Task 1b's [missing-entry rule](#create-a-missing-entry) is the only other
+creation, and it is limited to a concept the wiki already relies on.
 
 ## Establish evidence and complete scope
 
@@ -37,10 +41,13 @@ it is limited to a concept the wiki already relies on.
    source blocks only a movement that depends on it, such as a disputed or
    source-specific claim; accurate, well-established content may move to its
    owner without it. Never fill a gap with uncertain recollection.
-2. Prove the proposed boundary. A split needs two or more independently
-   definable subjects, each with source-supported substance. A merge needs one
-   entity under alternate names, not merely related concepts. Inherent
-   mechanisms, stages, conditions, and limitations remain with their subject.
+2. Prove the proposed boundary against the entries' definitions, cited
+   sources and accurate background. A split needs two or more independently
+   definable subjects, each with source-supported substance that passes the
+   builder's [substance test](../../wiki-build/SKILL.md#2-extract-entities).
+   A merge needs one entity under alternate names, not merely related
+   concepts. Inherent mechanisms, stages, conditions, and limitations remain
+   with their subject.
 3. Inventory every live reference to a slug or alias that may disappear across
    all vault Markdown, including body/Related links, `parents:`, MOCs, note
    transclusions, and relative Markdown links. Resolve each destination from
@@ -70,21 +77,27 @@ it is limited to a concept the wiki already relies on.
 - A split moves each verified claim, equation, exhibit, and citation to its
   canonical owner. Leave enough concise relationship prose and wikilinks for
   orientation, without duplicating the full explanation across the results.
-  A newly created split note gets today's `created:` and `updated:` dates and
-  `read: false`. A retained original keeps `created:` and follows the builder's
+  Every note a split creates gets today's `created:` and `updated:` dates and
+  `read: false`. An ordinary run's split keeps the original entry as the owner
+  of one subject; retiring the original outright is a deletion and runs only
+  on an explicit request. A retained original keeps `created:` and follows
+  the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
-  `updated:` and `read:`. Each unresolved
+  `updated:` and `read:`: a pure trim keeps `read:`, and a rewritten
+  explanation resets it. Each unresolved
   [user issue](../SKILL.md#user-issues) moves verbatim to the result that now
   holds the content it concerns. A new note that receives none gets
   `issues: ""`; the retained original keeps the issues left with it, becomes
   `issues: ""` once all have moved, and keeps a blank spelling it already
   had.
 - A merge chooses one collision-free surviving identity from the evidence and
-  requested scope. Preserve that entry's `created:` and user-owned appearance
-  fields, integrate nonduplicate claims, union only valid source contributions
-  and same-entity aliases, and apply the builder's
-  [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
-  `updated:` and `read:`. Carry every merged entry's unresolved
+  the run's scope. Preserve that entry's `created:` and user-owned appearance
+  fields, integrate nonduplicate claims, and union only valid source
+  contributions and same-entity aliases. The survivor gets today's
+  `updated:` and `read: false`, whatever its prior `read:`, in place of the builder's
+  [body-change rule](../../wiki-build/references/merge.md#the-read-reset),
+  because it holds combined content the user has not read in that form.
+  Carry every merged entry's unresolved
   [user issue](../SKILL.md#user-issues) text into the survivor's `issues:`
   verbatim. When several entries hold text, write a block list with one item
   per original list item or string, unless every value is a string: join
@@ -122,13 +135,11 @@ it is limited to a concept the wiki already relies on.
 - Preserve the retained primary flashcard's recognized scheduling attachments
   and block ID byte-for-byte. Of the merged entries' primary cards, a merge
   keeps only the survivor's: a retired entry's primary card tests the same
-  entity, so the merge authorization removes it. Do not discard a legacy
-  extra merely to enforce the card-set rule; preserve it unless the
-  authorized refactor inventory assigns its tested claim to a retained or new
-  entry, or the request explicitly names that card for deletion. Quote every
-  moved or removed card with all attachments in the report. Preserve existing
-  exhibits unless source evidence and the requested refactor establish their
-  new owner.
+  entity, so the merge removes it. Remove every other card
+  under the [card set](flashcards.md#card-set) rule, naming any distinct
+  entity it tested as a missing-entry candidate. Quote every moved or removed
+  card with all attachments in the report. Preserve existing exhibits unless
+  source evidence and the refactor establish their new owner.
 
 ## Publish in dependency order
 
@@ -154,13 +165,15 @@ target:
 4. Only then conditionally remove an obsolete entry. Every substantive claim,
    equation, exhibit, card (including its scheduling attachments and block ID),
    citation, and user-owned metadata value must either survive in an identified
-   destination or be named explicitly by the authorized request as content to
-   delete. A merged-away primary card counts as accounted for once it is
+   destination or, on an explicit request, be named by that request as content
+   to delete. A merged-away primary card counts as accounted for once it is
    quoted in the report, because the survivor's primary card tests the same
-   entity. An inbound link or embed that targets that card's block ID cannot
-   keep its anchor, so it is an unresolved inbound reference that retains the
-   old entry. Missing or unverified source support is a reason to retain the
-   content, never evidence that it is disposable. If a later edit or an
+   entity; so does an extra card removed under the
+   [card set](flashcards.md#card-set) rule. An inbound link or embed that
+   targets a merged-away primary card's block ID cannot keep its anchor, so it
+   is an unresolved inbound reference that retains the old entry. Missing or
+   unverified source support is a reason to retain the content, never
+   evidence that it is disposable. If a later edit or an
    unresolved inbound reference appears, retain the file and report the mixed
    state; never force cleanup to make the refactor look done. A rollback
    restores only files whose published bytes are still unchanged.

@@ -18,9 +18,9 @@ unrelated notes or images. Resolve each blocker at its cause, then re-plan:
 - **Investment records.** Records in vault-root `Investments/` stay
   unchanged, including when reached through a linked-folder alias. If one has
   a live dependency that the rename would change, the helper blocks the
-  entire rename: keep the source's current name and location. General
-  authorization to repair source references does not make these historical
-  records editable. Unrelated records and literal examples do not block.
+  entire rename: keep the source's current name and location. The rename's
+  reference repair never makes these historical records editable. Unrelated
+  records and literal examples do not block.
 - **Source note.** An `Articles/` note follows only when its first `sources:`
   item identifies this PDF; legacy `source:` counts only when `sources:` is
   absent. A bare `"[[Name.pdf]]"` origin identifies it by its vault-unique
@@ -54,9 +54,10 @@ unrelated notes or images. Resolve each blocker at its cause, then re-plan:
   case and Unicode variants, and symlinked directories. Code, escaped
   wikilinks, and closed HTML/Obsidian comments are literal evidence, and their
   bytes are preserved; an unclosed comment opener does not hide a dependency.
-  This applies vault-wide, including `Reviews/` logs: an authorized rename
-  repairs their navigation links without changing issue claims. Never replace
-  it with whole-body substring matching.
+  This applies vault-wide, including `Reviews/` logs: a rename rewrites each
+  whole old filename outside that literal evidence, so links and filename
+  mentions follow the file, and leaves all other issue text unchanged. Never
+  replace it with whole-body substring matching.
 
 The canonical contracts are
 [source identity (§1a)](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first),
@@ -67,8 +68,10 @@ Read the relevant section when a plan involves that kind of derived file.
 ## Review the plan before writing
 
 The CLI's `check` lists citing paths and names. `rename` without `--apply`
-prints the moves and the sections below. Apply only under the
-[organizer workflow's authorization rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan).
+prints the moves and the sections below. The request that leads to the
+rename or filing move authorizes the repair under the
+[organizer workflow](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan);
+apply once nothing below blocks it.
 
 - **BLOCKED — nothing was written.** Resolve every blocker: occupied
   destinations anywhere in the vault, target-stem figures or `Articles/` notes

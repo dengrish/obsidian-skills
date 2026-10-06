@@ -1298,11 +1298,12 @@ def references(vault, names, dirs=None, directory_names=()):
     return hits
 
 
-#: A folder-qualified reference to one specific basename, in either syntax the
-#: vault uses.  The folder segment is the middle group and is what gets
-#: dropped.  Two patterns rather than one because the two syntaxes end
-#: differently, and a form matched by the *rewrite* but missed here is left
-#: pointing at the folder the file just left.
+#: A folder-qualified reference to one specific basename, in every syntax the
+#: rewrite renames: wikilinks, inline and reference-style Markdown links, and
+#: HTML src/href.  The folder segment is the middle group and is what gets
+#: dropped.  One pattern per syntax because each ends differently, and a form
+#: matched by the *rewrite* but missed here is left pointing at the folder the
+#: file just left, under a new name the old-name re-probe cannot see.
 #:
 #: The wikilink terminator set includes a backslash: inside a markdown table
 #: Obsidian escapes the display pipe (`[[Dir/Name\|label]]`), so a lookahead of
@@ -1322,11 +1323,22 @@ def _debase_res(name):
             re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)?#]|[ \t]+[\"'(])"
                        % (uri_guard, esc), re.I),
             re.compile(r"(\]\(<)(%s[^<>\r\n]*/)(%s)(?=[>#])"
-                       % (uri_guard, esc), re.I))
+                       % (uri_guard, esc), re.I),
+            # Reference-style definitions, bare and angle-bracketed; a
+            # footnote (`[^1]:`) is prose, not a destination.
+            re.compile(r"(^[ ]{0,3}\[(?!\^)[^\]\n]+\]:[ \t]*)(%s[^<>\s]*/)(%s)"
+                       r"(?=[#?\s]|$)" % (uri_guard, esc), re.I | re.M),
+            re.compile(r"(^[ ]{0,3}\[(?!\^)[^\]\n]+\]:[ \t]*<)(%s[^<>\r\n]*/)(%s)"
+                       r"(?=[>#])" % (uri_guard, esc), re.I | re.M),
+            # HTML src/href, quoted (folders may hold spaces) and unquoted.
+            re.compile(r"(\b(?:src|href)[ \t]*=[ \t]*[\"'])(%s[^\"'<>\r\n]*/)(%s)"
+                       r"(?=[\"'#?])" % (uri_guard, esc), re.I),
+            re.compile(r"(\b(?:src|href)[ \t]*=[ \t]*)(%s[^\"'<>\s]*/)(%s)"
+                       r"(?=[#?>\s])" % (uri_guard, esc), re.I))
 
 
 def debase_links(text, names, dirs=None, note_dir=""):
-    """Drop the folder from every qualified wikilink naming one of `names`.
+    """Drop the folder from every qualified link naming one of `names`.
 
     Called before rewriting basenames when a rename moves a file to another
     folder. With `dirs`, only a qualification resolving to that original file
@@ -3510,11 +3522,12 @@ def _cmd_check(args):
         print("Reference check incomplete: %s" % exc, file=sys.stderr)
         return 1
     if not refs:
-        print("\nNo referencing-note authorization is needed. Review the "
-              "rename plan: collisions, ownership, or write guards can still "
-              "block it.")
+        print("\nNo references to repair. Review the rename plan: "
+              "collisions, ownership, or write guards can still block it.")
         return 0
-    print("\nREFERENCED — apply only with authorization to repair these references:")
+    print("\nREFERENCED — the rename plan repairs these references unless "
+          "it reports a blocker for a citing note (for example, a protected "
+          "Investments/ record or an unwritable note):")
     for md in sorted(refs):
         print("  %s\n    cites: %s" % (md, ", ".join(refs[md])))
     return 1
@@ -5511,6 +5524,25 @@ def _selftest():
           debase_links(_uri_new, {"Doe_Study_2025.pdf"}),
           ("[cdn](//cdn.example.org/files/Doe_Study_2025.pdf) "
            "[local](Doe_Study_2025.pdf)"))
+    check("filing debases reference definitions and HTML src/href",
+          debase_links('[r]: ../Inbox/a.pdf\n'
+                       '[s]: <../My Inbox/a.pdf> "t"\n'
+                       '<img src="../Inbox/a.pdf" width="300">\n'
+                       "<embed src='../My Inbox/a.pdf#page=2'>\n"
+                       '<a href=../Inbox/a.pdf>x</a>\n'
+                       '[^1]: ../Inbox/a.pdf is misfiled\n'
+                       '[x]: ../Inbox/xa.pdf\n'
+                       '<img src="https://example.org/Inbox/a.pdf">\n'
+                       '`[r]: ../Inbox/a.pdf`\n', {"a.pdf"}),
+          ('[r]: a.pdf\n'
+           '[s]: <a.pdf> "t"\n'
+           '<img src="a.pdf" width="300">\n'
+           "<embed src='a.pdf#page=2'>\n"
+           '<a href=a.pdf>x</a>\n'
+           '[^1]: ../Inbox/a.pdf is misfiled\n'
+           '[x]: ../Inbox/xa.pdf\n'
+           '<img src="https://example.org/Inbox/a.pdf">\n'
+           '`[r]: ../Inbox/a.pdf`\n'))
     with _tf.TemporaryDirectory(prefix="org-external-uri-test-") as _v:
         _put(_v, "Wiki/only-remote.md",
              "//cdn.example.org/files/download.pdf mailto:download.pdf\n")
@@ -5820,6 +5852,38 @@ def _selftest():
                Path(_record).read_text(encoding="utf-8")),
               (0, _unrelated + "[valid](../Sources/PDFs/" + _new + ")\n"
                "[[PDFs/" + _new + "]]\n", _unrelated))
+
+    # Citing notes are no authorization gate: the rename or filing request
+    # authorizes the helper's verified repair, so check lists them as repairs
+    # the rename plan makes unless it blocks.
+    with _tf.TemporaryDirectory(prefix="org-check-wording-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf", b"original PDF bytes")
+        _code, _stdout, _ = _run_cli(["check", _pdf, "--vault", _v])
+        check("check reports an unreferenced PDF as nothing to repair",
+              (_code, "No references to repair." in _stdout,
+               "authoriz" in _stdout), (0, True, False))
+        _put(_v, "Wiki/topic.md", "[[download.pdf]]\n")
+        _code, _stdout, _ = _run_cli(["check", _pdf, "--vault", _v])
+        check("check lists citing notes as repairs, not an authorization gate",
+              (_code, "REFERENCED — the rename plan repairs these "
+               "references unless" in _stdout,
+               "cites: download.pdf" in _stdout,
+               "authoriz" in _stdout), (1, True, True, False))
+
+    # An unattended filing move must leave no reference-style or HTML link at
+    # the old folder: the old-name re-probe cannot see one under the new name.
+    with _tf.TemporaryDirectory(prefix="org-filing-ref-html-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf", b"original PDF bytes")
+        _note = _put(_v, "Wiki/topic.md",
+                     '[r]: ../Inbox/download.pdf\n'
+                     '<img src="../Inbox/download.pdf">\n')
+        _code, _, _ = _run_cli([
+            "rename", _pdf, "--vault", _v, "--to", "Doe_Example_2025.pdf",
+            "--dest", os.path.join(_v, "Sources/PDFs"), "--apply"])
+        check("filing repairs reference definitions and HTML src",
+              (_code, Path(_note).read_text(encoding="utf-8")),
+              (0, '[r]: Doe_Example_2025.pdf\n'
+                  '<img src="Doe_Example_2025.pdf">\n'))
 
     # Filing can keep a canonical basename or change it. In either case,
     # strip only qualifications that resolved to the selected old source.

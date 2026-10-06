@@ -15,10 +15,11 @@ that gap waits for a wiki-build request naming it whole, as under *Deepening*
 below. Standard references read under *Conflicts* or to verify background are
 data, never cited, and are not such a source; a new source the user supplies is a new
 contribution and belongs to `wiki-build`. A retitle uses the
-[entry-retitle protocol](refactors.md#retitle-an-entry), and a consolidation
-or a passage moved to its owner uses [source-backed refactors](refactors.md),
-both within the same Task 1b; a split, merge or deletion uses that protocol
-only on an explicit request.
+[entry-retitle protocol](refactors.md#retitle-an-entry), and a consolidation,
+a passage moved to its owner, a merge or a split uses
+[source-backed refactors](refactors.md), all within the same Task 1b once
+the refactor's proof holds; only a deletion needs an explicit request, and
+then uses that protocol.
 
 **Deepening.** Task 1b's depth repairs, and a request to deepen, expand or
 enrich an entry, apply the builder's creation-time teaching rules to it: the
@@ -35,7 +36,8 @@ source fills it in, even when another entry already cites it: a citation does
 not show the source was built as a whole, and the fill-in leaves entries
 citing it untouched. Never route a named-entity build from it, which would mark the
 source covered so folder runs skip its other topics. Keep every existing claim unless
-it is wrong, and every card and attachment byte-for-byte and in place.
+it is wrong, and the definition card with its attachments byte-for-byte and
+in place.
 
 ## Establish the evidence and scope
 
@@ -81,8 +83,8 @@ it is wrong, and every card and attachment byte-for-byte and in place.
    [missing-entry rule](refactors.md#create-a-missing-entry). No repair newly
    cites a source to fill a gap only that source teaches; a consolidation
    carries a moved claim's existing citation into its owner's `sources:`. A
-   request naming entries reaches only the neighbors a consolidation or
-   retitle must touch; report any other affected entry.
+   request naming entries reaches only the neighbors a consolidation, split,
+   merge or retitle must touch; report any other affected entry.
 
 ## Correct and publish
 

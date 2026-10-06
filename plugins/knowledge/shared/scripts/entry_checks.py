@@ -60,7 +60,7 @@ __all__ = [
     "BOLD_PAREN_RE",
     "COMMON_NOUNS",
     "CROSS_DOMAIN_PHRASES",
-    "LEGACY_EXTRA_PREFIX",
+    "EXTRA_CARD_PREFIX",
     "PAREN_LEADIN_RE",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
@@ -83,6 +83,7 @@ __all__ = [
     "flashcard_primary_answer",
     "flashcard_set_faults",
     "is_discipline_root",
+    "kept_card_label",
     "label_drops_head",
     "label_shares_surface",
     "line3_parts",
@@ -932,23 +933,24 @@ def flashcard_set_faults(card_count):
 
     ``card_count`` counts the cards with at least three visible lines; a
     malformed block keeps its own finding. An entry has one ``??`` definition
-    card, so every further card is a legacy extra. Returns ``(message,
-    report_only)`` pairs shared by lint_entry and the scanner, so the two
-    tools agree. Position is not checked: the primary card is identified by
-    its answer (``primary_line3_faults``), never by its place.
+    card, so every further card is an extra card to remove: a fixable
+    finding. Returns the messages lint_entry and the scanner share, so the
+    two tools agree. Position is not checked: the primary card is identified
+    by its answer (``primary_card_label``), never by its place.
     """
     if card_count <= 1:
         return []
-    return [(
-        "%d cards: an entry has one `??` definition card, so each further "
-        "card is a report-only legacy extra; preserve every card and "
-        "attachment unless an explicitly authorized refactor, or a request "
-        "naming the card for deletion, accounts for it" % card_count, True)]
+    return [
+        "%d cards: an entry has one `??` definition card; keep it, remove "
+        "every other card and quote each removed card verbatim, attachments "
+        "included, in the report" % card_count]
 
 
-#: Message prefix for a per-card finding on a legacy extra card. Both tools
-#: use it, and lint_entry also marks the finding ``report_only``.
-LEGACY_EXTRA_PREFIX = "legacy extra card %d (report-only; never repair): "
+#: Message prefix for a per-card finding on an extra card, which the card's
+#: removal resolves; content after its line 3 that is not a recognized
+#: attachment stays and keeps its own finding. Both tools use it.
+EXTRA_CARD_PREFIX = ("extra card %d (remove this extra card; it needs no "
+                     "other repair): ")
 
 
 def _near_primary(rows, term, counterpart):
@@ -965,9 +967,11 @@ def primary_card_label(rows, term, counterpart):
     ``rows`` have ``primary_line3_faults``' shape. One row is the primary
     card. Otherwise the primary card is the first row that meets the answer
     contract, else the one near miss ``primary_line3_faults`` reports. With
-    no such card the result is None and no card counts as a legacy extra:
-    the no-primary finding asks for the primary card first. Every other
-    complete card is a legacy extra, whose per-card findings are report-only.
+    no such card the result is None: the no-primary finding asks to rewrite
+    the first card into the definition card and remove the rest, so
+    ``kept_card_label`` keeps the first card and every complete card after
+    it is an extra. Every complete card but the kept one is an extra card to
+    remove, and its per-card findings carry ``EXTRA_CARD_PREFIX``.
     """
     if len(rows) == 1:
         return rows[0][0]
@@ -978,15 +982,24 @@ def primary_card_label(rows, term, counterpart):
     return near[0][0] if len(near) == 1 else None
 
 
+def kept_card_label(rows, term, counterpart):
+    """Item 19: the card a run keeps: the primary card, else, when the entry
+    has a primary answer, the first card, which the run rewrites into the
+    definition card."""
+    label = primary_card_label(rows, term, counterpart)
+    return rows[0][0] if label is None and term and rows else label
+
+
 def primary_line3_faults(card_count, rows, term, counterpart):
     """Item 19: the line-3 faults to report, plus any missing-primary message.
 
     ``rows`` are ``(card_label, line3, fault_or_None)`` for each card with a
     line 3; ``term`` and ``counterpart`` are the entry's primary answer. With
     one card every fault is reported. With several cards, a passing card is
-    the primary one and legacy extras keep their own answers; otherwise the
-    one card whose line-3 term normalizes to the primary answer is reported,
-    or the message asks for a primary card.
+    the primary one and the extra cards, which are removed, draw no line-3
+    fault; otherwise the one card whose line-3 term normalizes to the primary
+    answer is reported, or the message asks to rewrite the first card into
+    the definition card and remove the rest.
     """
     faults = [row for row in rows if row[2]]
     if card_count <= 1 or not faults:
@@ -999,9 +1012,9 @@ def primary_line3_faults(card_count, rows, term, counterpart):
     if not term:
         return [], None
     answer = term + (" (%s)" % counterpart if counterpart else "")
-    return [], ('no card carries the primary answer "%s"; preserve every '
-                "existing card and attachment and add or identify the primary "
-                "card (extra cards keep their own answers)" % answer)
+    return [], ('no card carries the primary answer "%s"; rewrite the first '
+                "card into the definition card, keeping its attachments, and "
+                "remove every other card" % answer)
 
 
 #: The opener's direct parenthetical after the bold title, past any leading
@@ -1869,7 +1882,8 @@ def run_self_test(verbose=False):
     check("with several failing cards, the one near miss is reported",
           primary_line3_faults(2, near, "Bias-variance trade-off", None),
           (near[:1], None))
-    check("a passing primary card leaves the extra cards alone",
+    check("a passing primary card: the extra cards, which are removed, "
+          "draw no line-3 fault",
           primary_line3_faults(
               2, [("card 1", "Bias-variance trade-off", None),
                   ("card 2", "Overfitting", "fault")],
@@ -1882,6 +1896,13 @@ def run_self_test(verbose=False):
           (missing[0], missing[1].startswith(
               'no card carries the primary answer "Recall (TPR)"; ')),
           ([], True))
+    check("with no definition card, rewrite the first card into it, keeping "
+          "its attachments, and remove the rest",
+          (missing[1].endswith(
+              "; rewrite the first card into the definition card, keeping its "
+              "attachments, and remove every other card"),
+           "preserve" in missing[1], "keep their own" in missing[1]),
+          (True, False, False))
     check("with no primary term, nothing is asked",
           primary_line3_faults(2, near, "", None), ([], None))
     check("the primary card: the only card, else the first passing one, "
@@ -1899,9 +1920,22 @@ def run_self_test(verbose=False):
                [("card 1", "Bias–variance trade-off", "fault"),
                 ("card 2", "Bias-variance trade-off (BVT)", "fault")])],
           ["flashcard", None, "card 2", "card 2", None, None])
-    check("a legacy extra's prefix names the card and forbids repair",
-          LEGACY_EXTRA_PREFIX % 2,
-          "legacy extra card 2 (report-only; never repair): ")
+    no_primary = [("card 1", "Underfitting", "fault"),
+                  ("card 2", "Overfitting", "fault")]
+    check("the kept card: the primary card, else the first card when the "
+          "entry has a primary answer, else none",
+          [kept_card_label(rows, term, None) for rows, term in (
+              ([("card 1", "Why?", "fault"),
+                ("card 2", "Bias-variance trade-off", None)],
+               "Bias-variance trade-off"),
+              (no_primary, "Bias-variance trade-off"),
+              (no_primary, ""), ([], "Bias-variance trade-off"))],
+          ["card 2", "card 1", None, None])
+    check("an extra card's prefix names the card and asks for its removal "
+          "alone",
+          EXTRA_CARD_PREFIX % 2,
+          "extra card 2 (remove this extra card; it needs no other "
+          "repair): ")
     marked = sr_marker_findings(
         "The analogy $a : b :: c : d$ holds.\n"
         "A reversed pair::: here.\n"
@@ -1987,16 +2021,20 @@ def run_self_test(verbose=False):
     check("one card, or none, is a complete card set",
           [flashcard_set_faults(count) for count in (0, 1)], [[], []])
     extra = flashcard_set_faults(2)
-    check("a second card is a report-only legacy extra",
-          (len(extra), extra[0][1], extra[0][0].startswith("2 cards: "),
-           "report-only legacy extra" in extra[0][0],
-           "preserve every card" in extra[0][0],
-           "a request naming the card for deletion" in extra[0][0]),
-          (1, True, True, True, True, True))
+    check("a second card is a fixable extra: remove it and quote it in the "
+          "report",
+          (len(extra), extra[0].startswith("2 cards: "),
+           "remove every other card" in extra[0],
+           "verbatim, attachments included, in the report" in extra[0]),
+          (1, True, True, True))
+    check("an extra card is never report-only or preserved",
+          [word in extra[0] for word in ("report-only", "legacy",
+                                         "preserve", "never repair")],
+          [False] * 4)
     check("every further card counts, in one finding",
-          [(len(faults), faults[0][0].split(":")[0], faults[0][1])
+          [(len(faults), faults[0].split(":")[0])
            for faults in (flashcard_set_faults(3),)],
-          [(1, "3 cards", True)])
+          [(1, "3 cards")])
     disciplines = ("mathematics", "misc", "statistics")
     check("a discipline root is <discipline>.md tagged only #<discipline>",
           [is_discipline_root(slug, tags, disciplines) for slug, tags in (

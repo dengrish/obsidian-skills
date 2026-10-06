@@ -147,8 +147,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   19  19-flashcards          `## Flashcards` present on every entry except a
                               discipline root (`<discipline>.md` whose sole
                               tag names it), preceded by a `---` separator,
-                              holding one card (further cards are report-only
-                              legacy extras); line 1 one capitalized,
+                              holding one card (each further card is an
+                              error: remove it); line 1 one capitalized,
                               period-ended sentence with inline LaTeX as its
                               only markup; line 2 exactly `??` (or the user's
                               `!!`); the primary card's line 3 the canonical
@@ -157,12 +157,19 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               no `::` or `:::` on line 1 or 3 outside a
                               backtick span, which the plugin reads as a
                               card of its own.
-                              Once the answer contract identifies the primary
-                              card, every per-card finding on another card
-                              (item 19's and card line 1's item 12) is
-                              `report_only` and prefixed "legacy extra card
-                              N (report-only; never repair)"; its line 2
-                              keeps its separator
+                              With two or more complete cards, the kept card
+                              is the primary card the answer contract
+                              identifies, else, when the entry has a primary
+                              answer, the first card, which the run rewrites
+                              into the definition card. Every
+                              per-card finding on another card (item 19's
+                              and card line 1's item 12) carries
+                              `extra_card: true` and the prefix "extra card
+                              N (remove this extra card; it needs no other
+                              repair)": its removal resolves them all,
+                              except that content after its line 3 that is
+                              not a recognized attachment stays and is
+                              reported
       19-brevity-candidate   advisory: a cue over 25 words outside math, a
                               `, where` glossary or a semicolon clause
       19-hedge-candidate     advisory: a frequency hedge (usually,
@@ -401,7 +408,7 @@ from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
     BOLD_OUTER_RE as _BOLD_OUTER_RE,
     BOLD_PAREN_RE,
-    LEGACY_EXTRA_PREFIX,
+    EXTRA_CARD_PREFIX,
     PAREN_LEADIN_RE,
     SHARED_MUTATIONS,
     SHARED_QUIET,
@@ -422,12 +429,12 @@ from entry_checks import (  # noqa: E402
     flashcard_primary_answer,
     flashcard_set_faults,
     is_discipline_root,
+    kept_card_label,
     label_drops_head,
     label_shares_surface,
     line3_parts,
     merge_scar_findings,
     organism_common_name_bound,
-    primary_card_label,
     primary_line3_faults,
     pure_math_opener_markup,
     source_meta_findings,
@@ -1492,12 +1499,13 @@ def _check_equation_coverage_candidates(fm, sections, findings,
         "possible well-definedness boilerplate: a condition the formula "
         "already presupposes (a nonempty set, a count guard, a sign range "
         "on a named strength or rate, probabilities summing to one) or, "
-        "on card line 1, index bounds that run over every term. Remove "
-        "it unless the definition needs the range")
+        "on card line 1, index bounds that run over every term")
+    remedy = ". Remove it unless the definition needs the range"
     if boilerplate:
         findings.append(_f(
-            "12-boilerplate-candidate", "warning", message,
+            "12-boilerplate-candidate", "warning", message + remedy,
             {"matches": boilerplate, "agent_review": True}))
+    # An extra card's removal is its only repair, so its row drops the remedy.
     for card_no, matches in sorted(extra_matches.items()):
         findings.append(_card_f(
             "12-boilerplate-candidate", "warning", message,
@@ -2083,13 +2091,15 @@ def _is_root_entry(fm, filename):
     return is_discipline_root(stem, tags, TAG_ENUM)
 
 
-def _legacy_extra_cards(fm, sections):
-    """Card numbers of the legacy extras: every complete card but the primary.
+def _extra_cards(fm, sections):
+    """Card numbers of the extra cards: every complete card but the kept one.
 
-    The shared ``primary_card_label`` identifies the primary card by the
-    answer contract, as the scanner does. With fewer than two complete
-    cards, no title, or no identifiable primary card, no card is an extra
-    and per-card findings stay ordinary (the no-primary finding asks first).
+    The shared ``kept_card_label`` keeps the primary card the answer
+    contract identifies, as the scanner does. With no primary card, every
+    complete card after the first is an extra: the no-primary finding asks
+    to rewrite the first card into the definition card and remove the rest.
+    With fewer than two complete cards, no title or no primary answer, no
+    card is an extra and per-card findings stay ordinary.
     """
     if sections["flashcards_index"] is None or not fm.scalar("title"):
         return frozenset()
@@ -2100,17 +2110,18 @@ def _legacy_extra_cards(fm, sections):
             if len(card) >= 3]
     if len(rows) < 2:
         return frozenset()
-    primary = primary_card_label(rows, *_flashcard_primary_answer(fm, sections))
+    primary = kept_card_label(rows, *_flashcard_primary_answer(fm, sections))
     if primary is None:
         return frozenset()
     return frozenset(row[0] for row in rows if row[0] != primary)
 
 
 def _card_f(item, severity, message, evidence, card_no, extras):
-    """A per-card finding; on a legacy extra it is report-only and says so."""
+    """A per-card finding; on an extra card it says the card's removal is
+    the only repair, and its evidence carries ``extra_card``."""
     if card_no in extras:
-        message = LEGACY_EXTRA_PREFIX % card_no + message
-        evidence = dict(evidence, report_only=True)
+        message = EXTRA_CARD_PREFIX % card_no + message
+        evidence = dict(evidence, extra_card=True)
     return _f(item, severity, message, evidence)
 
 
@@ -2124,10 +2135,11 @@ def _check_flashcards_present(fm, sections, findings, filename,
     reader cannot see by looking at the entry (nothing is wrong; something is
     missing).  Checked here: the section is present, preceded by a `---`
     separator of its own, and holds one well-formed `??` card; a further card
-    is a report-only legacy extra.  A discipline root needs no card, so it
-    skips the missing-section, no-card and no-primary findings; any card it
-    keeps is checked as usual.  Per-card findings on a legacy extra
-    (``extras``) are report-only too: a legacy extra keeps its separator.
+    is an error, since builders never write one and a merge removes a
+    pre-existing one.  A discipline root needs no card, so it skips the
+    missing-section, no-card and no-primary findings; any card it keeps is
+    checked as usual.  Per-card findings on an extra card (``extras``) ask
+    for nothing beyond its removal.
     """
     root = _is_root_entry(fm, filename)
     if sections["flashcards_index"] is None:
@@ -2183,10 +2195,10 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # The card count comes from the complete cards only; a malformed block
     # keeps its own finding below. The scanner shares this helper.
     complete = sum(1 for card in cards if len(card) >= 3)
-    for message, report_only in flashcard_set_faults(complete):
+    for message in flashcard_set_faults(complete):
         findings.append(_f("19-flashcards", "error",
                            "the `## Flashcards` section holds " + message,
-                           {"cards": complete, "report_only": report_only}))
+                           {"cards": complete}))
 
     # Item 19's remaining mechanical clauses (scan_vault checks them too; the
     # two tools must agree). Line 1 is one period-ended sentence. Line 2 is
@@ -2214,14 +2226,20 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 {"card": card_no, "lines": len(card)}))
             continue
         if len(card) > 3:
+            # Removing an extra card never takes the content after its line
+            # 3 that is not a recognized attachment (flashcards.md).
             findings.append(_card_f(
                 "19-flashcards", "error",
-                "flashcard %d has %d visible lines -- only the first three "
-                "may be card content; recognized Spaced Repetition state may "
-                "be attached to line 3, follow it as `<!--SR:` metadata, or "
-                "use the exact `sr|card-metadata` callout, so other content "
-                "after the answer is "
-                "malformed" % (card_no, len(card)),
+                ("flashcard %d has %d visible lines -- removing it removes "
+                 "lines 1-3 and their recognized attachments only; the "
+                 "content after line 3 stays and is reported"
+                 if card_no in extras else
+                 "flashcard %d has %d visible lines -- only the first three "
+                 "may be card content; recognized Spaced Repetition state may "
+                 "be attached to line 3, follow it as `<!--SR:` metadata, or "
+                 "use the exact `sr|card-metadata` callout, so other content "
+                 "after the answer is "
+                 "malformed") % (card_no, len(card)),
                 {"card": card_no, "lines": len(card)}, card_no, extras))
         # Preserve indentation for the shared block-Markdown check; sentence
         # checks normalize their own surrounding whitespace.
@@ -2246,8 +2264,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
         if line2 not in CARD_SEPARATORS:
             findings.append(_card_f(
                 "19-flashcards", "error",
-                ("flashcard %d line 2 is %r -- a legacy extra keeps its "
-                 "separator" if card_no in extras else
+                ("flashcard %d line 2 is %r" if card_no in extras else
                  "flashcard %d line 2 is %r -- it must be exactly `??` (or "
                  "the user's `!!`, preserved verbatim, never converted)")
                 % (card_no, line2[:20]),
@@ -2275,8 +2292,8 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 "19-brevity-candidate", "warning", brevity_message,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
     hedge_message = ("card line 1 hedges its definition with a frequency word; "
-                     "state the ordinary case plainly when the card's bar "
-                     "allows")
+                     "state the ordinary case plainly when the note "
+                     "establishes it")
     primary_hedges = [row for row in hedges if row["card"] not in extras]
     if primary_hedges:
         findings.append(_f(
@@ -2288,9 +2305,9 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 "19-hedge-candidate", "warning", hedge_message,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
 
-    # A preserved legacy extra keeps its own answer: with several cards,
-    # only the primary card is held to the line-3 contract (the scanner makes
-    # the same choice through entry_checks).
+    # With several cards, only the primary card is held to the line-3
+    # contract: an extra card is removed, never repointed to the entry's
+    # answer (the scanner makes the same choice through entry_checks).
     term, counterpart = _flashcard_primary_answer(fm, sections)
     faults, no_primary = primary_line3_faults(
         len(line3_checks), line3_checks, term, counterpart)
@@ -2445,7 +2462,7 @@ def lint_text(text, filename):
     result["description_chars"] = len(desc) if desc else 0
 
     sections = split_sections(fm.body)
-    extras = _legacy_extra_cards(fm, sections)
+    extras = _extra_cards(fm, sections)
 
     _check_field_order(fm, findings)
     _check_type(fm, findings)
@@ -3246,14 +3263,15 @@ def run_self_test():
             "Why do pairs near the top of a LambdaRank ranking get larger "
             "updates?\n?\nSwapping top positions changes NDCG the most.\n",
             complete_example.group(1), flags=re.DOTALL)
-        check("a legacy question card after the documented card is a "
-              "report-only extra whose own findings name it",
-              [(f["item"], f["evidence"].get("report_only"),
+        check("a question card after the documented card is an extra card "
+              "to remove, whose own findings name it",
+              [(f["item"], f["severity"], f["evidence"].get("extra_card"),
                 f["evidence"].get("card"))
                for f in lint_text(two_card_example,
                                   "lambdarank.md")["findings"]],
-              [("19-flashcards", True, None), ("19-flashcards", True, 2),
-               ("19-flashcards", True, 2)])
+              [("19-flashcards", "error", None, None),
+               ("19-flashcards", "error", True, 2),
+               ("19-flashcards", "error", True, 2)])
     commented = good.replace('title: "ROC curve"', 'title: "ROC curve" # user annotation')
     commented = commented.replace('"auroc"', '"aur\\u006fc" # an escaped alias')
     commented = commented.replace('sources:\n', 'sources: # reference\n# provenance annotation\n')
@@ -3343,17 +3361,17 @@ def run_self_test():
                           '>  <!--SR:!2026-09-20,30,250--> ^why-card\n')):
         before_bytes = studied.encode('utf-8')
         legacy = lint_text(studied, 'roc-curve.md')['findings']
-        check("protected %s state on a legacy extra card is not card "
+        check("protected %s state on an extra card is not card "
               "content" % storage_form,
               ([f['evidence'].get('cards') for f in legacy
                 if f['evidence'].get('cards')],
                any('visible lines' in f['message']
                    or 'malformed' in f['message'] for f in legacy)),
               ([2], False))
-        check("checking %s state on a legacy extra card preserves every "
+        check("checking %s state on an extra card preserves every "
               "source byte" % storage_form,
               studied.encode('utf-8'), before_bytes)
-    check("a blank detaches next-line state from a legacy extra card too",
+    check("a blank detaches next-line state from an extra card too",
           any(f['evidence'].get('card') == 3 and 'malformed' in f['message']
               for f in lint_text(
                   review_why + '\n<!--SR:detached-after-blank-->\n',
@@ -4023,11 +4041,19 @@ def run_self_test():
     second_card = mutate(
         "??\nROC curve\n",
         "??\nROC curve\n\nAnother notion, stated briefly.\n??\nSecond idea\n")
-    check("a ## Flashcards section with a SECOND card",
+    check("a ## Flashcards section with a SECOND card is a fixable error, "
+          "never report-only",
           (items(second_card),
-           [(f["evidence"]["cards"], f["evidence"].get("report_only"))
+           [(f["severity"], f["evidence"]["cards"],
+             f["evidence"].get("report_only"))
             for f in lint_text(second_card, "roc-curve.md")["findings"]]),
-          (["19-flashcards"], [(2, True)]))
+          (["19-flashcards"], [("error", 2, None)]))
+    check("a second card is not clean: a builder draft must remove it",
+          lint_text(second_card, "roc-curve.md")["findings"][0][
+              "message"].startswith(
+              "the `## Flashcards` section holds 2 cards: an entry has one "
+              "`??` definition card; keep it, remove every other card"),
+          True)
     check("a ## Flashcards heading with no --- separator above it",
           items(mutate("\n---\n\n## Flashcards", "\n## Flashcards")),
           ["19-flashcards"])
@@ -4294,24 +4320,33 @@ def run_self_test():
         "??\nROC curve\n",
         "??\nROC curve\n\nA ROC curve can illustrate this separate notion.\n"
         "??\nSecond idea\n")
-    check("a legacy secondary card may name the primary while its own answer "
+    check("an extra card may name the primary while its own answer "
           "remains leak-free",
           items(secondary_names_primary), ["19-flashcards"])
 
     def card_findings(text):
-        """Item-19 findings other than the report-only extra-card count."""
+        """Item-19 findings other than the extra-card count."""
         return [f for f in lint_text(text, "roc-curve.md")["findings"]
                 if f["item"] == "19-flashcards"
-                and not (f.get("evidence") or {}).get("report_only")]
+                and "cards" not in (f.get("evidence") or {})]
 
     extra_card = "\n\nAnother idea stated.\n??\nGamma\n"
-    check("an extra card keeps its own line-3 answer beside the primary card",
+    check("an extra card beside the primary card draws no line-3 fault: it "
+          "is removed, never repointed",
           card_findings(mutate("??\nROC curve\n", "??\nROC curve\n" + extra_card)),
           [])
     check("with no primary card, one finding asks for it without naming an "
           "extra card's answer as wrong",
           [f["message"].startswith("no card carries the primary answer "
                                    '"ROC curve"')
+           for f in card_findings(mutate("??\nROC curve\n",
+                                         "??\nAlpha\n" + extra_card))],
+          [True])
+    check("with no definition card, the first card is rewritten into it and "
+          "the rest removed",
+          [f["message"].endswith(
+              "rewrite the first card into the definition card, keeping its "
+              "attachments, and remove every other card")
            for f in card_findings(mutate("??\nROC curve\n",
                                          "??\nAlpha\n" + extra_card))],
           [True])
@@ -4340,7 +4375,7 @@ def run_self_test():
                 .replace("\nROC curve\n", "\nVariance\n"),
                 "variance.md"), [])
 
-    # -- item 19: one card; a further card is a legacy extra ----------------
+    # -- item 19: one card; a further card is an extra card to remove -------
     why = ("Why does raising the decision threshold lower recall?\n?\n"
            "Fewer instances are predicted positive, so more actual positives "
            "are missed.\n")
@@ -4349,37 +4384,39 @@ def run_self_test():
         return mutate("??\nROC curve\n",
                       "??\nROC curve\n" + "".join("\n" + c for c in extra))
 
-    check("a legacy question card is a report-only extra whose own line-1 "
-          "and line-2 findings name it",
-          [(f["item"], f["evidence"].get("report_only"),
-            f["evidence"].get("card"))
+    check("a question card is an extra card to remove whose own line-1 and "
+          "line-2 findings name it; none is report-only",
+          [(f["item"], f["evidence"].get("extra_card"),
+            f["evidence"].get("report_only"), f["evidence"].get("card"))
            for f in lint_text(with_cards(why), "roc-curve.md")["findings"]],
-          [("19-flashcards", True, None), ("19-flashcards", True, 2),
-           ("19-flashcards", True, 2)])
-    legacy_messages = [f["message"] for f in lint_text(
+          [("19-flashcards", None, None, None),
+           ("19-flashcards", True, None, 2),
+           ("19-flashcards", True, None, 2)])
+    extra_messages = [f["message"] for f in lint_text(
         with_cards(why), "roc-curve.md")["findings"]
         if f["evidence"].get("card") == 2]
-    check("a legacy extra's findings carry the report-only prefix, and its "
-          "line 2 keeps its separator",
-          ([m.startswith("legacy extra card 2 (report-only; never repair): ")
-            for m in legacy_messages],
-           any("keeps its separator" in m for m in legacy_messages),
-           any("must be exactly" in m for m in legacy_messages)),
-          ([True, True], True, False))
+    check("an extra card's findings ask for its removal alone, and never "
+          "for a new line 2",
+          ([m.startswith(
+              "extra card 2 (remove this extra card; it needs no other repair): ")
+            for m in extra_messages],
+           any("must be exactly" in m for m in extra_messages),
+           any("line 2 is '?'" in m for m in extra_messages)),
+          ([True, True], False, True))
     simplified_pair = with_cards(why).replace(
         "??\nROC curve\n", "?\nROC curve\n", 1)
-    check("a primary card simplified to ? beside a legacy ? card: only the "
+    check("a primary card simplified to ? beside an extra ? card: only the "
           "primary's line 2 needs its ?? back",
-          [(f["evidence"].get("card"), f["evidence"].get("report_only"),
+          [(f["evidence"].get("card"), f["evidence"].get("extra_card"),
             "must be exactly `??`" in f["message"])
            for f in lint_text(simplified_pair, "roc-curve.md")["findings"]
            if "line 2" in f["message"]],
           [(1, None, True), (2, True, False)])
     question_first = mutate(
         "## Flashcards\n\n", "## Flashcards\n\n" + why + "\n")
-    check("a question card placed first is the legacy extra; the definition "
+    check("a question card placed first is the extra card; the definition "
           "card after it is the primary one",
-          [(f["evidence"].get("card"), f["evidence"].get("report_only"))
+          [(f["evidence"].get("card"), f["evidence"].get("extra_card"))
            for f in lint_text(question_first, "roc-curve.md")["findings"]
            if f["evidence"].get("card")],
           [(1, True), (1, True)])
@@ -4388,33 +4425,67 @@ def run_self_test():
         "\\ge 1$ instances, a second idea reading; stated at length across "
         "many more ordinary words than any card cue should ever need to "
         "carry here.\n??\nSecond idea\n")
-    check("a legacy extra with markup on line 3 draws no repair order",
+    check("an extra card with markup on line 3 draws no repair order beyond "
+          "its removal",
           [f["item"] for f in lint_text(with_cards(
               "Another notion, stated briefly.\n?\nThe **$k$** term\n"),
               "roc-curve.md")["findings"]
-           if not f["evidence"].get("report_only")], [])
-    check("line-1 leak, typography, boilerplate and brevity findings on a "
-          "legacy extra are report-only",
-          sorted((f["item"], f["evidence"].get("report_only"),
-                  f["message"].startswith("legacy extra card 2 "))
+           if "cards" not in f["evidence"]
+           and not f["evidence"].get("extra_card")], [])
+    check("line-1 leak, typography, boilerplate and brevity findings on an "
+          "extra card ask for its removal, and none orders another repair",
+          sorted((f["item"], f["evidence"].get("extra_card"),
+                  f["message"].startswith(
+                      "extra card 2 (remove this extra card; "),
+                  "Remove it unless" in f["message"])
                  for f in lint_text(extra_faults, "roc-curve.md")["findings"]
                  if f["item"] != "19-flashcards"),
-          [("12-boilerplate-candidate", True, True),
-           ("12-equation-typography", True, True),
-           ("19-brevity-candidate", True, True),
-           ("19-flashcard-leak", True, True)])
-    check("every further card joins the one report-only count",
-          [(f["evidence"].get("cards"), f["evidence"].get("report_only"))
+          [("12-boilerplate-candidate", True, True, False),
+           ("12-equation-typography", True, True, False),
+           ("19-brevity-candidate", True, True, False),
+           ("19-flashcard-leak", True, True, False)])
+    check("every further card joins the one card-set error",
+          [(f["severity"], f["evidence"].get("cards"),
+            f["evidence"].get("report_only"))
            for f in lint_text(with_cards(
                "Another notion, stated briefly.\n??\nSecond idea\n",
                "A third notion, stated briefly.\n??\nThird idea\n"),
                "roc-curve.md")["findings"]],
-          [(3, True)])
-    check("a user-disabled question card is still a legacy extra",
-          [(f["evidence"].get("report_only"), f["evidence"].get("card"))
+          [("error", 3, None)])
+    check("a user-disabled question card is still an extra card to remove",
+          [(f["evidence"].get("cards"), f["evidence"].get("extra_card"),
+            f["evidence"].get("card"))
            for f in lint_text(with_cards(why.replace("\n?\n", "\n!!\n")),
                               "roc-curve.md")["findings"]],
-          [(True, None), (True, 2)])
+          [(2, None, None), (None, True, 2)])
+    two_questions = lint_text(mutate(
+        "The plot tracing the trade-off between two error rates as a "
+        "decision threshold moves.\n??\nROC curve\n",
+        why + "\nWhy does lowering it raise recall?\n?\n"
+        "More instances are predicted positive.\n"), "roc-curve.md")[
+            "findings"]
+    check("with no definition card, every card after the first is an extra "
+          "card to remove; the first keeps its ordinary findings",
+          ([f["message"].startswith(EXTRA_CARD_PREFIX % 2)
+            for f in two_questions if f["evidence"].get("card") == 2],
+           any("must be exactly" in f["message"] for f in two_questions
+               if f["evidence"].get("card") == 2),
+           ["must be exactly `??`" in f["message"] for f in two_questions
+            if f["evidence"].get("card") == 1 and "line 2" in f["message"]],
+           sum(f["message"].startswith("no card carries the primary answer")
+               for f in two_questions)),
+          ([True, True], False, [True], 1))
+    check("an extra card's content after line 3 stays: its removal takes "
+          "lines 1-3 and their recognized attachments only",
+          [(f["message"].startswith(EXTRA_CARD_PREFIX % 2),
+            f["message"].endswith(
+                "and their recognized attachments only; the content after "
+                "line 3 stays and is reported"))
+           for f in lint_text(with_cards(
+               "Another notion, stated briefly.\n??\nSecond idea\n"
+               "A stray user line.\n"), "roc-curve.md")["findings"]
+           if f["evidence"].get("lines")],
+          [(True, True)])
     card_marker = mutate(
         "The plot tracing the trade-off between two error rates as a "
         "decision threshold moves.",
@@ -4426,11 +4497,12 @@ def run_self_test():
             "\\mathbin{:}\\mathbin{:}" in f["message"])
            for f in lint_text(card_marker, "roc-curve.md")["findings"]],
           [("19-flashcards", 1, True)])
-    check("a separator on card line 3 replaces the card; on a legacy extra "
-          "it is report-only",
+    check("a separator on card line 3 replaces the card; on an extra card "
+          "the remedy is its removal",
           sorted((f["evidence"].get("card"), f["evidence"].get("card_line"),
-                  f["evidence"].get("report_only"),
-                  f["message"].startswith("legacy extra card 2 "))
+                  f["evidence"].get("extra_card"),
+                  f["message"].startswith(
+                      "extra card 2 (remove this extra card; "))
                  for f in lint_text(with_cards(
                      "Another notion, stated $x ::: y$ briefly.\n??\n"
                      "Second::idea\n"), "roc-curve.md")["findings"]
@@ -4451,16 +4523,16 @@ def run_self_test():
               "decision threshold moves.", long_cue),
               "roc-curve.md")["findings"]],
           [("19-brevity-candidate", "warning")])
-    check("a frequency hedge on the cue is an advisory hedge candidate; on a "
-          "legacy extra it is report-only",
-          ([(f["item"], f["severity"], f["evidence"].get("report_only"))
+    check("a frequency hedge on the cue is an advisory hedge candidate; on an "
+          "extra card it asks for the card's removal",
+          ([(f["item"], f["severity"], f["evidence"].get("extra_card"))
             for f in lint_text(mutate(
                 "The plot tracing the trade-off between two error rates as a "
                 "decision threshold moves.",
                 "The plot usually tracing the trade-off between two error "
                 "rates as a decision threshold moves."),
                 "roc-curve.md")["findings"]],
-           [(f["item"], f["evidence"].get("report_only"))
+           [(f["item"], f["evidence"].get("extra_card"))
             for f in lint_text(with_cards(
                 "Another notion that often holds, stated briefly.\n??\n"
                 "Second idea\n"), "roc-curve.md")["findings"]
