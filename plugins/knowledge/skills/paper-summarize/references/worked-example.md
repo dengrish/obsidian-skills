@@ -9,7 +9,9 @@ Read when the assembled output is unclear. The paper is fictional; it is not an
 external source or a completed live-vault run. [Note format](note-format.md),
 [summary standards](summary-standards.md) and [figures](figures.md) own the rules.
 This randomized trial uses empirical body mode; its section meanings are not a
-template for an argument, book, standard or notice.
+template for an argument, book, standard or notice. The
+[argument example](worked-example-argument.md) shows a book chapter in
+argument/synthesis mode.
 
 ## The input
 
@@ -103,7 +105,7 @@ The authors conclude that encapsulated transplant should be offered after a seco
 ## Participant data on request, no analysis code
 
 - **Data.** De-identified participant data available 12 months after publication, under a data-access agreement.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup>
-- **Code.** No analysis code is offered.
+- **Code.** No analysis code is offered.<sup>[[Doe_GutMicrobiome_2025.pdf#page=8|8]]</sup>
 ```
 
 ## Why these choices matter

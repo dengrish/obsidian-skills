@@ -26,7 +26,10 @@ python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
 
 Carry any non-default option intake or an earlier extraction report names
 (`--allow-unorganized`) into this and every repair command. Pass
-`--ed-prefix ED` when captions number Extended Data figures separately. Respect the extractor's refusals and read its diagnostics.
+`--ed-prefix ED` only when no `<stem>_fig*` crop exists yet and the captions
+number Extended Data figures separately; the batch applies it by itself to a
+PDF that already holds `_fig_ED<N>` crops and prints `Using --ed-prefix ED`.
+Respect the extractor's refusals and read its diagnostics.
 
 Then complete figure-extract's
 [visual review](../../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)

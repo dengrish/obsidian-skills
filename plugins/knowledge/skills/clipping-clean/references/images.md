@@ -31,26 +31,9 @@ contain both old embeds and new remote images; download only the remote
 images, starting after the highest occupied number, even if they appear
 earlier in document order.
 
-A note renamed outside this workflow can keep embedding images under its old
-stem; `dedup_index.py` lists it under `stem_mismatch`. On request, re-stem
-them with the same prepare, repair and finalize commands, passing
-`'<vault>/Articles/<new_slug>.md'` as both `--owner-note` and
-`--new-owner-note`. This applies only while no `Articles/<old_slug>.md` exists
-and every `<old_slug>_fig*` file is an exact rendered embed of the renamed
-note. Prepare copies each image to its new-stem name and lists the note's own
-old references under `dependency.owner_references`. Then record the note with
-`publish_files.py snapshot`, replace only the old stem in each listed
-reference, and publish it against that record with `publish_files.py publish`.
-Repair the other notes' `dependency.blockers` automatically as in
-[steps 6–7](duplicates-and-reprocessing.md#publish-an-approved-replacement):
-run repair (a dry-run, then live) with the renamed note as both owners; it
-rewrites only old-image references, since there is no old note to relink. It
-accepts the renamed note before or after its own embeds are republished, but
-refuses one left half republished.
-Re-probe with `dependencies --new-slug '<new_slug>'` and that note as
-`--owner-note`. A note that repair reports `blocked` stays a blocker; keep both
-image sets and report it. Finalize refuses while the note still references an
-old name, and retires the old copies only after a clean re-probe.
+A note renamed outside this workflow, which `dedup_index.py` lists under
+`stem_mismatch`, is re-stemmed only on request, by
+[the re-stem procedure](duplicates-and-reprocessing.md#re-stem-a-renamed-notes-images).
 
 ## Download and publish
 
@@ -157,3 +140,17 @@ Retain any caption as an ordinary paragraph because there is no image to
 caption. There is **no manual download/publication fallback**. Do not bypass
 ownership, host, size or occupied-slot checks to make an image appear
 successful.
+
+**Late slot conflict.** When `place` refuses an occupied slot after the note
+is public, keep the published note as owner for images already placed. Never
+withdraw the only note that proves ownership of files already placed. Replace
+the failed embed with the placeholder above:
+
+1. Re-record the note in the run's snapshot file with
+   `publish_files.py snapshot --replace` before re-reading it.
+2. In the bytes just read, replace only the failed embed with the
+   placeholder.
+3. Publish that version against the new record with `publish_files.py
+   publish`.
+
+Report the conflict and the retained scratch file.

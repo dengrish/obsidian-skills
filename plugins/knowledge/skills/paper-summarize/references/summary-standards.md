@@ -80,7 +80,7 @@ merely to complete a two-sentence pattern.
 | A crowded sentence | The claim explained in adjacent sentences |
 |---|---|
 | Faecal transplant likely reduced recurrence of *C. difficile* infection from 45% to 8% within eight weeks in previously-treated adults with at least two prior recurrences, against placebo, in a 219-patient double-blind trial. | In adults with at least two prior recurrences, the transplant cut recurrence within eight weeks from 45% on placebo to 8%. The 219-patient trial was randomised and double-blind. |
-| eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | In two test proteins, 24 measured mutants were enough to design variants that beat the natural protein. About one design in ten did so; the same pipeline without pre-training gave almost none. |
+| eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | In avGFP and TEM-1 β-lactamase, 24 measured mutants were enough to design variants that beat wild type on fluorescence or ampicillin resistance. About one design in ten did so; the same pipeline without pre-training gave almost none. |
 
 Keep a needed limit immediately beside the claim it qualifies; a modal verb
 alone does not explain a design constraint. Callout bullets, headings and
@@ -122,7 +122,7 @@ causal: the design ceiling below governs.
 
 ## The hedge ladder, and what sets its ceiling
 
-| Rung | When | The second sentence |
+| Rung | When | Adjacent qualification (example) |
 |---|---|---|
 | 1 | an adequately powered randomised experiment whose reported outcome was prespecified (registered, or in a cited protocol or analysis plan) | none needed beyond the scope: *"The trial shows that the transplant reduces recurrence."* |
 | 2 | strong quasi-experimental design, or consistent evidence across designs, with the confounders addressed | *"The design is not randomised. Other causes are possible, and the authors tested for the known ones."* |

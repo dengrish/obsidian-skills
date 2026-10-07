@@ -5,7 +5,7 @@
 - [Where they go](#where-they-go)
 - [What the caption says](#what-the-caption-says)
 - [Panels](#panels)
-- [When the figure you need is not there](#when-the-figure-you-need-is-not-there)
+- [When a needed figure is missing](#when-a-needed-figure-is-missing)
 - [Rebuilt tables](#rebuilt-tables)
 
 Read when the inventory contains figures or a contribution merits a rebuilt table.
@@ -28,13 +28,13 @@ The label selects the file but does not appear in the prose or caption. Place th
 
 ## Which ones to carry
 
-**Use only the figure embeds the explanation needs: usually zero to three, with four as a hard cap.** A note with every figure is the document again, and the reason to summarise was that the reader was not going to read the document. Zero is correct when prose fully carries the contribution or the available figures are irrelevant. **The cap counts embeds, not source figure identities** — three panels of one figure are three of your four, not one, and a note that reaches the cap that way is showing one figure and calling it a summary.
+**Use only the figure embeds the explanation needs: usually zero to three, with four as a hard cap.** A note with every figure is the document again, and the reason to summarise was that the reader was not going to read the document. Zero is correct when prose fully carries the contribution or the available figures are irrelevant. **The cap counts embeds, not source figure identities** — three panels of one figure use three of the four slots, not one, and a note that reaches the cap that way is showing one figure and calling it a summary.
 
 Take the figures that **are** the main contribution:
 
 - the main finding, argument, recommendation or notice change;
 - the comparison that makes the contribution mean something;
-- the one image a specialist would point at if asked "what did you actually see?".
+- the one image a specialist would point to as the core observation.
 
 Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schematics, maps of where the samples came from, and any figure whose content is a table. **Unless the method is itself the contribution** — for a paper whose result is a technique, the schematic *is* the finding, and it goes in the third section under the claim about what the technique does. Even a method schematic belongs in that contribution section; `note_lint.py` calls this positional slot `Results` and checks its placement.
 
@@ -82,7 +82,7 @@ The shape, exactly:
 
 **The four claim rules apply inside a caption too** ([summary standards](summary-standards.md#the-four-claim-rules-in-full)). A caption is where a hedge most often goes missing, because captions are written last and read as neutral description. "Treatment worked" under a figure is the same overstatement it would be in a sentence.
 
-**Write it from the figure, not from the source's caption.** The published caption is written for someone who has read the surrounding document; it names panels and variables and assumes that context. Read what the figure actually shows, then say that. Where the published caption defines something you need — units, what an error bar is, what n is — take that and put it in the second sentence.
+**Write it from the figure, not from the source's caption.** The published caption is written for someone who has read the surrounding document; it names panels and variables and assumes that context. Read what the figure actually shows, then say that. Where the published caption defines something the note needs — units, what an error bar is, what n is — take that and put it in the second sentence.
 
 **Say what drawn error bars or intervals are.** Standard deviation, standard error and a 95% confidence interval are three different pictures, and a reader cannot tell them apart by eye. When the figure draws them, name them; if the paper does not define them, say so.
 
@@ -100,7 +100,7 @@ The extractor writes whole figures. Existing vaults can also contain legacy pane
 **Panels do not inflate the unused-figure count.** An unplaced panel is **not** an unused figure: placing the composite discharges every panel under it, placing any panel discharges the composite, and the report's "figures available but not used" count is over composites only. A paper whose 4 figures yielded 27 files has 4 exhibits, not 27.
 
 
-## When the figure you need is not there
+## When a needed figure is missing
 
 If a needed figure is missing, or a crop this run extracted is wrong, return to
 [intake's figure preparation](../SKILL.md#prepare-the-figure-inventory) for
@@ -135,7 +135,7 @@ The shape, exactly, and it mirrors the figure shape:
 - **In the third, contribution section, under the claim it supports.** Same rule as a figure.
 - **Italic caption on the very next line**, no blank line between — again as for a figure, and for the same rendering reason.
 - **No table number**, in the caption or anywhere else.
-- **Values verbatim.** Copy the digits the source printed. Do not round, rescale, convert units, or recompute an average from the subset of rows you kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the source never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
+- **Values verbatim.** Copy the digits the source printed. Do not round, rescale, convert units, or recompute an average from the subset of rows kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the source never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
 - **Trim to what the claim needs, and say so in the caption.** A 28-row benchmark may be reduced to four group averages only if the source already prints those averages; never compute them for the note. A 12-column table may retain the three columns compared. Disclose each omission so the subset cannot look complete: *"Four reported task-group averages; individual subtask rows are omitted."* An untrimmed table needs no "as published" or completeness statement.
 - **Keep the paper's orientation** — systems in columns if that is how the paper set them, rows if not. Transposing is a silent re-presentation, and two tables under two orientations read as two notes.
 - **Four tables at most, one or two preferred.** Across both forms, aim for no
@@ -143,4 +143,4 @@ The shape, exactly, and it mirrors the figure shape:
   number is a brevity target rather than permission to exceed either form's
   separate four-item cap; use fewer whenever prose carries the result clearly.
 
-**Where a trim would change the reading, do not trim — cut the table.** If the rows you would drop are the ones that disagree with the claim, keeping only the agreeing rows is not a summary, and no caption clause repairs it. Report the comparison in prose with both directions named, or rebuild the whole thing.
+**Where a trim would change the reading, do not trim — cut the table.** If the rows a trim would drop are the ones that disagree with the claim, keeping only the agreeing rows is not a summary, and no caption clause repairs it. Report the comparison in prose with both directions named, or rebuild the whole thing.

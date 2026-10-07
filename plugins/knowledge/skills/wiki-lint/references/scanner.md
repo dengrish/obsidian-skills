@@ -9,7 +9,7 @@ The scanner is `scripts/scan_vault.py`, a read-only stdlib Python helper. Its JS
 ## CLI
 
 ```
-python3 scripts/scan_vault.py WIKI [--vault DIR] [--images DIR] [--settled FILE] [--out FILE] [--indent N] [--test]
+python3 '<skill>/scripts/scan_vault.py' WIKI [--vault DIR] [--images DIR] [--settled FILE] [--out FILE] [--indent N] [--test]
 ```
 
 - `WIKI` — the vault's **`Wiki/` folder**, not the vault root. The scanner walks entries only inside this folder. Suggestion logs and unrelated root notes are never linted or listed inside a MOC.
@@ -44,16 +44,213 @@ One JSON object with these keys.
 | `untagged_entries` | array | Repair worklist of entries with a provably blank `tags:` key or empty list. These receive `item8` and have no implied misc membership. Inspect the note and assign its one specific discipline tag, or `"#misc"` alone, before placement. Missing, scalar/null, duplicate-key, malformed, or structurally unparseable frontmatter cannot establish a genuine blank and remains separately reported; unrelated field-value QC does not itself block this worklist. |
 | `problems` | array | `{"slug", "item", "message"}`, sorted. When several physical files share one portable basename, file-specific findings add the Wiki-relative `"path"` (including `.md`) so each body can be repaired without choosing by walk order; ordinary rows retain the historical three fields. The deterministic violations. See *Item keys* below. |
 | `problem_tally` | array | per item: `{"item", "entries", "pct_of_entries", "issues"}`, ranked by entries affected. `entries` counts affected files, including unreadable `item0` files; `pct_of_entries` is the one-decimal percentage of parsed entries touched, the recurrence evidence a wiki-build proposal cites. |
-| `user_issues` | array | `{"slug", "form", "issues"}` for every entry whose `issues:` value is non-blank, sorted by slug, with the Wiki-relative `"path"` added when several files share the basename, as in `problems`. `form` is `string` (the Obsidian Text property, one plain or quoted line that may describe several issues; `issues` holds the whole decoded value as one element) or `list` (block or one-line flow form, one decoded element per non-empty item). Blank values ([§2d](../../../shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox): `""`, a bare `issues:`, `null`, `~`, `''`, `[]`, a whitespace-only string, a list whose items are all empty or null) are not listed, and a malformed value is `item2/issues-malformed` instead. The user's own requests for that entry, handled under [User issues](../SKILL.md#user-issues); edit the field from the entry's bytes, never from this decoded text. |
-| `collision_candidates` | array | `{"a", "b", "probe", "detail"}` — two slugs the item-5 probes matched. `probe` ∈ `exact`, `plural`, `hyphenation`, `word-order`, `word-order-singular`, `µ-variant`, `stem-morphology`, `base-term`; `detail` is the shared identifier for `exact`, and the two colliding identifiers joined by `~` for every other probe. `word-order-singular` sorts the tokens *after* singularising each one, which is what catches `weight-tying` against `tying-weights` — a pair a raw token sort misses on `weights` ≠ `weight`. `stem-morphology` is create-time probe (f), using the shared light-stem key, and is emitted only when an earlier, more specific probe has not already covered the pair. `base-term` pairs an entry whose slug or alias, singular or plural, equals a parenthetical title's base term with that qualified entry (`outlier` beside `outlier-statistics`), again only when an earlier probe has not covered the pair: a bare entry or alias that equals a qualified entry's base term is a duplicate or naming candidate, unlike the qualifier-versus-other-base pairs the omitted token-superset probe would flood on. Unordered pairs are de-duplicated per probe. **A candidate, never a merge decision:** Task 1b's [merge check](qc-items.md#5-filename-collision-and-disambiguation) merges a pair only when the evidence verifies one entity under alternate names. wiki-build's create-time probe (g), token-superset, is deliberately **not** mirrored in this vault-wide sweep — qualified-vs-base pairs (`feature-machine-learning` beside `machine-learning`) are exactly what the disambiguation rules produce on purpose, so a whole-vault pass would flood on legitimate pairs; its absence from this probe list is by design. |
-| `rename_candidates` | array | `{"slug", "new_slug", "inbound_links", "target_exists"}` — entries whose filename ≠ `slug(title)`. `inbound_links` is how many actual prose/Related wikilinks a rename would have to rewrite. It uses the same path-aware resolver as item 10, so path-qualified, anchored, case/normalization-variant, and explicit-`.md` spellings count against the file they open; a bare target with several same-basename owners is conservatively omitted instead of assigned by walk order. `target_exists: true` means the destination is already taken — an existing file **(whether or not it parsed as an entry: a file with no frontmatter is absent from `inventory` and still occupies its name, and a rename into it would clobber that occupant)**, another entry's alias (the renamed file would outrank that alias and capture its links), **or a second candidate in this same list proposing the same `new_slug`** — so this is a likely duplicate/disambiguation and must **not** be renamed into (applying both of a colliding pair in sequence would have the second silently overwrite the first). `new_slug` is never empty: a title that reduces to the empty slug (CJK, all-symbol) is reported as an `item5` problem instead, because renaming to it would produce a file literally called `.md`. **Task 1b retitles a free destination through the [entry-retitle protocol](refactors.md#retitle-an-entry); an occupied one is never retitled into, and a same-entity occupant goes to Task 1b's merge check.** |
-| `backfill_candidates` | array | `{"slug", "target", "surface", "bare_noun_alias", "organism_common_name", "discipline_root", "base_term", "line", "settle_key"}` — a bare-text mention of `target`'s title/alias or parenthetical base term (or its plural), or an explicitly bound Organism common-name surface, found in `slug`'s prose. `target` is the supplied safe entry destination: an ordinary unambiguous slug, or the full extensionless vault-relative path when another file shares the basename, such as `Wiki/statistics` beside a previous-layout `MOCs/statistics.md`. Preserve that target in body and Related links. Existing links, embeds, ambiguous title/alias surfaces, duplicate Wiki-basename destinations, targets already linked in that entry, and designated common-noun surfaces/destinations are excluded. `organism_common_name: true` means the target's description or opening sentence directly equates its canonical Organism title with that complete surface (or its natural inflection); a bound `fruit fly` never donates the broader head `fly`. It is a locally valid display label, never an instruction to add a global alias, and still needs the ordinary identity/closeness judgment. Other single lowercase aliases of qualified destinations remain candidates and carry `bare_noun_alias: true`; batch-review them under the closeness bar rather than treating the flag as an automatic decision. `discipline_root: true` marks a target that is a Wiki discipline root; the closeness bar accepts one only where the passage discusses the field itself, so batch-review these the same way. A root title directly after a modifier word ("cell biology", "summary statistics"), which names a subfield or a different sense, or named only as a setting ("in/for/within/across …") or genus ("a … system") is not emitted. `base_term: true` marks the base term of a parenthetical title ("outlier" for Outlier (statistics)), offered only when that base term is not a cross-domain floor term (`COMMON_NOUNS` or `CROSS_DOMAIN_PHRASES`) and never when an existing body link already uses the surface as the display label of a different target; a base surface counts as an alias of its entry for `bare_noun_alias` and for `item10/late-link`, and the agent judges it under the closeness bar like any other. An occurrence inside a hyphen or en-dash compound (`protein` in `protein-coding`) or inside a longer italic or bold term (a bolded title opener) is skipped in favor of a later standalone one; `line` is the proposed occurrence's 1-based body line (the line after the closing frontmatter `---` is line 1). `settle_key` is `{"entry", "target", "surface", "context"}`, the [settled-ledger](link-hygiene.md#settled-decisions) record that settles a rejection, where `context` is the SHA-1 hex digest of the whitespace-collapsed sentence holding the proposed occurrence; a row whose key matches a `--settled` record is omitted. Unwritable presentation surfaces are masked so they cannot hide a later eligible occurrence: whole-line italic captions, parsed Markdown-table rows, ATX and Setext headings, fenced/indented/inline code, inline and display LaTeX math, Markdown link-reference definitions, inline Markdown image syntax including alt text, inline/full/collapsed/shortcut Markdown-link labels resolved by those definitions, bare URLs/autolinks, and Obsidian links/embeds. The plural form inflects the title's head token, so irregular forms such as `Confusion matrices` and `Hypotheses` are matched. |
-| `hub_footer` | array | `{"target", "footers", "entries", "settle_keys"}` — a non-root entry listed in at least `max(15, inventory entries ÷ 20)` Related footers (`footers`). `entries` names the footers where `target` is not the entry's resolved parent or child, shares no parent with it other than a discipline root, and does not list the entry in its own Related footer; a target with no such footer is omitted. `target` is the supplied safe destination, as in `backfill_candidates`. Empty while alias ownership is incomplete. `settle_keys` gives one `settle_key` per `entries` item, `{"entry", "target", "context"}`, the [settled-ledger](link-hygiene.md#settled-decisions) record that settles a kept item, where `context` is the SHA-1 hex digest of the whitespace-collapsed footer line; an item whose key matches a `--settled` record is omitted, and so is a target left with no item. Report-only; Task 2 judges each listed item under the [prune rules](link-hygiene.md#prune-links-within-the-requested-scope). |
+| `user_issues` | array | `{"slug", "form", "issues"}` for every entry whose `issues:` value is non-blank: the user's own requests for that entry ([details](#user_issues)). |
+| `collision_candidates` | array | `{"a", "b", "probe", "detail"}`: two slugs the item-5 probes matched, a merge candidate rather than a decision ([details](#collision_candidates)). |
+| `rename_candidates` | array | `{"slug", "new_slug", "inbound_links", "target_exists"}`: entries whose filename ≠ `slug(title)` ([details](#rename_candidates)). |
+| `backfill_candidates` | array | `{"slug", "target", "surface", "bare_noun_alias", "organism_common_name", "discipline_root", "base_term", "line", "settle_key"}`: a bare-text mention of another entry in `slug`'s prose, Task 2's backfill worklist ([details](#backfill_candidates)). |
+| `hub_footer` | array | `{"target", "footers", "entries", "settle_keys"}`: a heavily shared Related-footer target, report-only input to Task 2 ([details](#hub_footer)). |
 | `settled` | object | The `--settled` ledger's effect: `path` (the ledger read, `null` without `--settled`), `backfill_suppressed` and `hub_footer_suppressed` (how many rows and items its records omitted), `stale` (`{"backfill": [...], "hub_footer": [...]}`, the ledger records in its own shape that matched no current row, which the closeout drops; empty while alias ownership is incomplete) and `error` (`null`, or why an unreadable or malformed ledger suppressed nothing). The ledger never suppresses a `problems` finding. |
 | `card_rivals` | array | `{"slug", "cue", "rivals"}` for each entry whose primary cue has a rival: `cue` is line 1 of its first card that carries the primary answer, else of its first card, and `rivals` lists, sorted, the other entries with a cue that are its Related-footer targets or share one of its resolved parents other than a discipline root. A basename shared by several files takes no part. It is input to item 19's forward check, a floor rather than an exhaustive rival set, and authorizes no edit. |
-| `image_folder_findings` | array | `{"path", "kind", "message"}` for a nested directory/file, recognizable temporary/staging artifact, unreadable path, or portable basename collision under the supplied `--images` directory. The `kind` is `nested-directory`, `nested-file`, `temporary-artifact`, `unreadable`, `unusable-file`, or `portable-name-collision`; a collision also carries `paths` with every case/NFC-equivalent owner; paths that reach one underlying file (two links to the same target, or a hard link) are one owner, not a collision. A symlinked subfolder's direct files are indexed, but a directory inside it is a directory finding (`nested-directory`, or `temporary-artifact` for a staging name) and is not descended. The flat-folder and publish-only-finished-files rules come from `CONVENTIONS.md` §8. These are folder-level, report-only observations kept outside `problems`, so they do not inflate entry tallies or authorize moving/renaming/deleting user files. A colliding name remains present for embed-existence checks. An `unreadable` finding suppresses all `item12/missing-image` results for that run because a partial inventory cannot establish absence. The two PDF sidecars and `.DS_Store` are omitted. Empty when `--images` is not supplied or the folder conforms. |
-| `spaced_repetition` | object | Advisory, read-only view of `<vault>/.obsidian/plugins/obsidian-spaced-repetition/data.json`. `settings` is `read`, `absent` or `unreadable` (a symlink, non-regular file, invalid JSON or no `settings` object). `uncovered_tags` maps each discipline slug in use to its entry count when the plugin's `flashcardTags` (default `#flashcards`) does not list it; it is empty when `convertFoldersToDecks` is on. `separator_findings` names a `multilineCardSeparator` other than `?`, a `multilineReversedCardSeparator` other than `??`, a nonempty `multilineCardEndMarker`, a `singleLineCardSeparator` or `singleLineReversedCardSeparator` changed from `::` or `:::` to anything but empty, and each active cloze conversion: every `clozePatterns` entry or, without that list, each of the `convertHighlightsToClozes`, `convertBoldTextToClozes` and `convertCurlyBracketsToClozes` toggles that is on. The scanner never writes the settings file. |
+| `image_folder_findings` | array | `{"path", "kind", "message"}`: report-only observations of the `--images` folder ([details](#image_folder_findings)). |
+| `spaced_repetition` | object | Advisory, read-only view of the Spaced Repetition plugin's settings ([details](#spaced_repetition)). |
 | `hierarchy_diagnostic` | object | Report-only state of entry parents, canonical MOCs, and legacy vault-root MOCs, detailed below. Findings are evidence for an authorized Task 3 closure, never write authorization. |
+
+### `user_issues`
+
+The user's own requests for each entry, handled under
+[User issues](../SKILL.md#user-issues).
+
+- One record per entry whose `issues:` value is non-blank, sorted by slug,
+  with the Wiki-relative `"path"` added when several files share the
+  basename, as in `problems`.
+- `form` is `string` (the Obsidian Text property, one plain or quoted line
+  that may describe several issues; `issues` holds the whole decoded value as
+  one element) or `list` (block or one-line flow form, one decoded element per
+  non-empty item).
+- Blank values
+  ([§2d](../../../shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox):
+  `""`, a bare `issues:`, `null`, `~`, `''`, `[]`, a whitespace-only string, a
+  list whose items are all empty or null) are not listed, and a malformed
+  value is `item2/issues-malformed` instead.
+- Edit the field from the entry's bytes, never from this decoded text.
+
+### `collision_candidates`
+
+**A candidate, never a merge decision:** Task 1b's
+[merge check](qc-items.md#5-filename-collision-and-disambiguation) merges a
+pair only when the evidence verifies one entity under alternate names.
+
+- `probe` ∈ `exact`, `plural`, `hyphenation`, `word-order`,
+  `word-order-singular`, `µ-variant`, `stem-morphology`, `base-term`;
+  `detail` is the shared identifier for `exact`, and the two colliding
+  identifiers joined by `~` for every other probe. Unordered pairs are
+  de-duplicated per probe.
+- The `word-order-singular` probe sorts the tokens *after* singularising
+  each one, which is what catches `weight-tying` against `tying-weights` — a
+  pair a raw token sort misses on `weights` ≠ `weight`.
+- The `stem-morphology` probe is create-time probe (f), using the shared
+  light-stem key, and is emitted only when an earlier, more specific probe has
+  not already covered the pair.
+- The `base-term` probe pairs an entry whose slug or alias, singular or
+  plural, equals a parenthetical title's base term with that qualified entry
+  (`outlier` beside `outlier-statistics`), again only when an earlier probe
+  has not covered the pair: a bare entry or alias that equals a qualified
+  entry's base term is a duplicate or naming candidate, unlike the
+  qualifier-versus-other-base pairs the omitted token-superset probe would
+  flood on.
+- wiki-build's create-time probe (g), token-superset, is deliberately **not**
+  mirrored in this vault-wide sweep — qualified-vs-base pairs
+  (`feature-machine-learning` beside `machine-learning`) are exactly what the
+  disambiguation rules produce on purpose, so a whole-vault pass would flood
+  on legitimate pairs; its absence from this probe list is by design.
+
+### `rename_candidates`
+
+**Task 1b retitles a free destination through the
+[entry-retitle protocol](refactors.md#retitle-an-entry); an occupied one is
+never retitled into, and a same-entity occupant goes to Task 1b's merge
+check.**
+
+- `inbound_links` is how many actual prose/Related wikilinks a rename would
+  have to rewrite. It uses the same path-aware resolver as item 10, so
+  path-qualified, anchored, case/normalization-variant, and explicit-`.md`
+  spellings count against the file they open; a bare target with several
+  same-basename owners is conservatively omitted instead of assigned by walk
+  order.
+- `target_exists: true` means the destination is already taken, so this is a
+  likely duplicate/disambiguation and must **not** be renamed into. It is
+  taken by:
+  - an existing file **(whether or not it parsed as an entry: a file with no
+    frontmatter is absent from `inventory` and still occupies its name, and a
+    rename into it would clobber that occupant)**;
+  - another entry's alias (the renamed file would outrank that alias and
+    capture its links);
+  - **or a second candidate in this same list proposing the same
+    `new_slug`** (applying both of a colliding pair in sequence would have the
+    second silently overwrite the first).
+- `new_slug` is never empty: a title that reduces to the empty slug (CJK,
+  all-symbol) is reported as an `item5` problem instead, because renaming to
+  it would produce a file literally called `.md`.
+
+### `backfill_candidates`
+
+Each row is a bare-text mention of `target`'s title/alias or parenthetical
+base term (or its plural), or an explicitly bound Organism common-name
+surface, found in `slug`'s prose.
+
+- **`target`** is the supplied safe entry destination: an ordinary
+  unambiguous slug, or the full extensionless vault-relative path when another
+  file shares the basename, such as `Wiki/statistics` beside a previous-layout
+  `MOCs/statistics.md`. Preserve that target in body and Related links.
+- **Exclusions.** Existing links, embeds, ambiguous title/alias surfaces,
+  duplicate Wiki-basename destinations, targets already linked in that entry,
+  and designated common-noun surfaces/destinations are excluded.
+- **`organism_common_name: true`** means the target's description or opening
+  sentence directly equates its canonical Organism title with that complete
+  surface (or its natural inflection); a bound `fruit fly` never donates the
+  broader head `fly`. It is a locally valid display label, never an
+  instruction to add a global alias, and still needs the ordinary
+  identity/closeness judgment.
+- **`bare_noun_alias: true`** marks the other single lowercase aliases of
+  qualified destinations, which remain candidates; batch-review them under the
+  closeness bar rather than treating the flag as an automatic decision.
+- **`discipline_root: true`** marks a target that is a Wiki discipline root;
+  the closeness bar accepts one only where the passage discusses the field
+  itself, so batch-review these the same way. A root title directly after a
+  modifier word ("cell biology", "summary statistics"), which names a subfield
+  or a different sense, or named only as a setting ("in/for/within/across …")
+  or genus ("a … system") is not emitted.
+- **`base_term: true`** marks the base term of a parenthetical title
+  ("outlier" for Outlier (statistics)), offered only when that base term is
+  not a cross-domain floor term (`COMMON_NOUNS` or `CROSS_DOMAIN_PHRASES`) and
+  never when an existing body link already uses the surface as the display
+  label of a different target. A base surface counts as an alias of its entry
+  for `bare_noun_alias` and for `item10/late-link`, and the agent judges it
+  under the closeness bar like any other.
+- **`line`** is the proposed occurrence's 1-based body line (the line after
+  the closing frontmatter `---` is line 1). An occurrence inside a hyphen or
+  en-dash compound (`protein` in `protein-coding`) or inside a longer italic or
+  bold term (a bolded title opener) is skipped in favor of a later standalone
+  one.
+- **`settle_key`** is `{"entry", "target", "surface", "context"}`, the
+  [settled-ledger](link-hygiene.md#settled-decisions) record that settles a
+  rejection, where `context` is the SHA-1 hex digest of the
+  whitespace-collapsed sentence holding the proposed occurrence; a row whose
+  key matches a `--settled` record is omitted.
+- **Masked surfaces.** Unwritable presentation surfaces are masked so they
+  cannot hide a later eligible occurrence: whole-line italic captions, parsed
+  Markdown-table rows, ATX and Setext headings, fenced/indented/inline code,
+  inline and display LaTeX math, Markdown link-reference definitions, inline
+  Markdown image syntax including alt text, inline/full/collapsed/shortcut
+  Markdown-link labels resolved by those definitions, bare URLs/autolinks, and
+  Obsidian links/embeds.
+- **Plurals.** The plural form inflects the title's head token, so irregular
+  forms such as `Confusion matrices` and `Hypotheses` are matched.
+
+### `hub_footer`
+
+Report-only; Task 2 judges each listed item under the
+[prune rules](link-hygiene.md#prune-links-within-the-requested-scope).
+
+- `target` is a non-root entry listed in at least
+  `max(15, inventory entries ÷ 20)` Related footers (`footers`), given as the
+  supplied safe destination, as in `backfill_candidates`.
+- `entries` names the footers where `target` is not the entry's resolved
+  parent or child, shares no parent with it other than a discipline root, and
+  does not list the entry in its own Related footer; a target with no such
+  footer is omitted. The list is empty while alias ownership is incomplete.
+- `settle_keys` gives one `settle_key` per `entries` item,
+  `{"entry", "target", "context"}`, the
+  [settled-ledger](link-hygiene.md#settled-decisions) record that settles a
+  kept item, where `context` is the SHA-1 hex digest of the
+  whitespace-collapsed footer line; an item whose key matches a `--settled`
+  record is omitted, and so is a target left with no item.
+
+### `image_folder_findings`
+
+Folder-level, report-only observations under the supplied `--images`
+directory, kept outside `problems` so they do not inflate entry tallies or
+authorize moving/renaming/deleting user files. The flat-folder and
+publish-only-finished-files rules come from `CONVENTIONS.md` §8.
+
+- One record per nested directory/file, recognizable temporary/staging
+  artifact, unreadable path, or portable basename collision. The `kind` is
+  `nested-directory`, `nested-file`, `temporary-artifact`, `unreadable`,
+  `unusable-file`, or `portable-name-collision`.
+- A collision also carries `paths` with every case/NFC-equivalent owner;
+  paths that reach one underlying file (two links to the same target, or a
+  hard link) are one owner, not a collision. A colliding name remains present
+  for embed-existence checks.
+- A symlinked subfolder's direct files are indexed, but a directory inside it
+  is a directory finding (`nested-directory`, or `temporary-artifact` for a
+  staging name) and is not descended.
+- An `unreadable` finding suppresses all `item12/missing-image` results for
+  that run because a partial inventory cannot establish absence.
+- The two PDF sidecars and `.DS_Store` are omitted. The list is empty when
+  `--images` is not supplied or the folder conforms.
+
+### `spaced_repetition`
+
+An advisory, read-only view of
+`<vault>/.obsidian/plugins/obsidian-spaced-repetition/data.json`. The scanner
+never writes the settings file; the run lists these notices under *Notes for
+the user* in its [run report](backlogs.md#run-report).
+
+- `settings` is `read`, `absent` or `unreadable` (a symlink, non-regular file,
+  invalid JSON or no `settings` object).
+- `uncovered_tags` maps each discipline slug in use to its entry count when
+  the plugin's `flashcardTags` (default `#flashcards`) does not list it; it is
+  empty when `convertFoldersToDecks` is on.
+- `separator_findings` names:
+  - a `multilineCardSeparator` other than `?`;
+  - a `multilineReversedCardSeparator` other than `??`;
+  - a nonempty `multilineCardEndMarker`;
+  - a `singleLineCardSeparator` or `singleLineReversedCardSeparator` changed
+    from `::` or `:::` to anything but empty;
+  - each active cloze conversion: every `clozePatterns` entry or, without
+    that list, each of the `convertHighlightsToClozes`,
+    `convertBoldTextToClozes` and `convertCurlyBracketsToClozes` toggles that
+    is on.
 
 ### Hierarchy diagnostics
 
@@ -160,7 +357,7 @@ and label checks.
 
 ### Item keys in `problems`
 
-`item1` … `item19` map to the builder's [numbered checklist](../../wiki-build/SKILL.md#quality-checklist). There is no `item20`; existing `importance:` is preserved and not flagged. The complete repair/report routing is in [QC finding actions](qc-items.md#finding-actions), rather than a second action list here.
+`item1` … `item19` map to the builder's [numbered checklist](../../wiki-build/references/quality-checklist.md). There is no `item20`; existing `importance:` is preserved and not flagged. The complete repair/report routing is in [QC finding actions](qc-items.md#finding-actions), rather than a second action list here.
 
 | Key | Detected condition |
 | --- | --- |
@@ -183,7 +380,7 @@ and label checks.
 | `item4/source-identity` | PDF and Markdown references share a normalized stem; this does not prove they are one source. URL items never enter this check. |
 | `item5` | A portable slug owned by two files, a title that cannot be slugged, `slug(title)` ≠ filename (also listed in `rename_candidates`), or a bare slug that is a word or phrase of the shared cross-domain corpus (`COMMON_NOUNS` or `CROSS_DOMAIN_PHRASES`, such as `tree-of-life`) and needs qualification; Task 1b retitles it. The semantic pass tests every other bare title against the cross-domain naming rule. |
 | `item6` | A code-identifier title, an API-surface failure string, fenced code, or backticked identifiers in a non-`Software` entry. |
-| `item7` | Description missing, longer than 110 characters, more than one conservatively detected sentence, non-plain-text, missing its initial capital where the canonical running form does not start lowercase, missing its final period, or clearly starting with another subject. Plain text excludes LaTeX/dollar signs, Obsidian and Markdown links/images, reference links/definitions, emphasis, strikethrough, backticks, HTML/entities, tags, highlights, comments, footnotes, and block Markdown. The running form is the title's meaning-preserving mathematical plain form in the ordinary case and only the base term's mathematical plain form for a parenthetical-disambiguated title; the full qualified form is a finding in prose. The shared conversion unwraps formatting without dropping operators or indices (`$A^{*}$` → `A-star`; `$\ell_1$` or `ℓ₁` → `ell-one`; `$L^{-1}$` → `L-inverse`; `$x^{1/2}$` → `x-to-the-one-half`; `$R^{+}$` → `R-plus`; `$\chi^2$` or `χ²` → `chi-squared`). The sentence counter excludes decimals, versions, initials, common abbreviations, and taxonomic rank abbreviations; a real boundary immediately after one of those may be under-counted and remains part of the autonomous agent review. The conservative subject check permits an article and first-letter case carve-out; complex grammatical heads and tense still need agent judgment. |
+| `item7` | Description missing, longer than 110 characters, more than one conservatively detected sentence, non-plain-text, missing its initial capital or final period, or clearly starting with another subject ([details](#item7)). |
 | `item8` | Wiki tags are blank/empty, missing, malformed, off-enum, noncanonical, duplicated, name more than one discipline, or combine `#misc` with a specific discipline. The rule is exactly one quoted enum value in block form, with `#misc` as the sole fallback. Genuine blanks remain in `untagged_entries` for evidence-based repair, not automatic misc placement. |
 | `item9` | Blank space after frontmatter, a non-prose opener, non-ATX Setext heading, wrong-level or marked-up body heading, or a missing/malformed Person/Event opener date. Date spelling uses the complete grammar in the builder's rare-types guide, and a full `YYYY-MM-DD` must be a possible calendar date; factual correctness remains source-dependent. Sentence case and whether a heading earns a section are checked by the executing agent. |
 | `item9/imperative-link` | A narrow navigation-only cue (`see`, `see also`, `refer to`, `consult`, or `for details see`) points directly at a wikilink in prose. Listings, figure/table material, and captions are excluded. Ordinary prose such as “to see how…” is not matched. |
@@ -217,13 +414,71 @@ and label checks.
 | `item18` | Empty or own-slug alias, alias duplication/collision/noncanonical form, display-label markup, a label with no plausible target surface, or a label that exactly names a different existing canonical entry or unique alias. A body label that is a cross-domain-corpus word the target introduces in italics (`[[label-machine-learning|target]]`) has a surface. Listings and parsed tables are masked. The competing-owner case is review-only; ambiguous ownership stays silent. |
 | `item18/partial-label` | A body-prose label made only of the target title's modifiers, omitting its head word (`[[greedy-algorithm|greedy]]`, `[[bias-variance-trade-off|bias/variance]]`). An inflected or derived head, an alias, and a term the target defines in italics pass; the Related footer is item 11's canonical-title check instead. |
 | `item18/cross-domain-alias` | An alias that is a word or phrase of the shared cross-domain corpus (`COMMON_NOUNS` or `CROSS_DOMAIN_PHRASES`, such as `entropy` or `tree-of-life`), which is never an alias. Task 1b removes it through the alias-removal protocol. lint_entry reports it as an `18-alias-form` error. |
-| `item19` | Flashcard section and card structure, with a blank line after the `---` separator and the heading; the separator: `??`, or the user's `!!`; line 1's capitalization, single sentence, terminal period, markup and normalized answer leak; the card set (one definition card per entry; every further card is an extra card to remove); plain line 3; no `::` or `:::` on card line 1 or 3 outside a backtick span, which the plugin reads as a card of its own; and the primary answer: the canonical title's plain form or base term plus any opener-established, alias-bound [counterpart](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer) (with several cards, when none carries it and no single card nearly does, one finding asks to rewrite the first card into the definition card, keeping its attachments, and remove the rest). A discipline root (its slug is the enum value its sole tag names) needs no card, with or without an empty section; a card it keeps gets every per-card check. The shared parser hides recognized scheduling and block-ID attachments from this read-only view, never rewriting them. Once the kept card is identified (the primary card, else, with none, the first card, which the no-primary finding rewrites), every per-card finding on another card, card line 1's `item12` findings included, starts `extra card N (remove this extra card; it needs no other repair)`: the card's removal resolves it, except that content after its line 3 that is not a recognized attachment stays and keeps its own finding. On the primary card, the executing agent checks semantic reconstruction, missing mathematical operations, off-rule line-1 math and an alias pair the opener should have bound. |
+| `item19` | Flashcard section and card structure, the separator, card line 1, the card set, line 3 and the primary answer ([details](#item19)). |
 | `item19/brevity-candidate` | Advisory: a card's line 1 over 25 words outside inline math, a `, where` symbol glossary after math, or a semicolon clause outside math. A review candidate, never an order. |
 | `item19/hedge-candidate` | Advisory: a card's line 1 carries a frequency hedge outside inline math (usually, typically, generally, often, sometimes, normally, commonly, frequently). Context-dependent words (mostly, especially), a frequency the cue measures or compares (how often, more often than) and normally distributed are left to the reviewer. A review candidate, never an order; lint_entry reports it as `19-hedge-candidate`. |
 | `item19/sr-marker` | A line before the Flashcards section (the whole body when there is none; a line that starts with an HTML comment is skipped with the line after it, as the plugin does) holding the Spaced Repetition single-line separator `::` or `:::` outside a backtick span and outside a fence opened at column 0. The plugin parses the whole note, so the line becomes an extra card; so does a paragraph with a line that is only `?` or `??`, its multi-line separators, except an unindented `?` with no text before it; this case is checked only when the Flashcards section is found, since otherwise the entry's own card lies in the scanned text. A comment opened at the start of a line and not closed there, or a fence opened at column 0 that no later column-0 line closes, is reported too: the plugin skips the rest of the note, card included. lint_entry reports it as `19-sr-marker`. |
 | `item0` | A file could not be read (encoding, symlink, permissions); it is absent from inventory/worklists and the scan continues with alias-dependent actions suppressed as described above. Its pathname remains occupied. |
 
 A case variant, alias, ambiguous owner, or unparsed file is not a genuinely missing target. Body code samples and embeds are not entry links. Resolve findings with the linked action guide; never infer that an `itemN` is automatically fixable.
+
+#### `item7`
+
+- **Form.** Description missing, longer than 110 characters, more than one
+  conservatively detected sentence, non-plain-text, missing its initial
+  capital where the canonical running form does not start lowercase, missing
+  its final period, or clearly starting with another subject.
+- **Plain text** excludes LaTeX/dollar signs, Obsidian and Markdown
+  links/images, reference links/definitions, emphasis, strikethrough,
+  backticks, HTML/entities, tags, highlights, comments, footnotes, and block
+  Markdown.
+- **Running form.** The running form is the title's meaning-preserving
+  mathematical plain form in the ordinary case and only the base term's
+  mathematical plain form for a parenthetical-disambiguated title; the full
+  qualified form is a finding in prose. The shared conversion unwraps
+  formatting without dropping operators or indices (`$A^{*}$` → `A-star`;
+  `$\ell_1$` or `ℓ₁` → `ell-one`; `$L^{-1}$` → `L-inverse`; `$x^{1/2}$` →
+  `x-to-the-one-half`; `$R^{+}$` → `R-plus`; `$\chi^2$` or `χ²` →
+  `chi-squared`).
+- **Sentences.** The sentence counter excludes decimals, versions, initials,
+  common abbreviations, and taxonomic rank abbreviations; a real boundary
+  immediately after one of those may be under-counted and remains part of the
+  autonomous agent review.
+- **Subject.** The conservative subject check permits an article and
+  first-letter case carve-out; complex grammatical heads and tense still need
+  agent judgment.
+
+#### `item19`
+
+- **Structure.** Flashcard section and card structure, with a blank line
+  after the `---` separator and the heading.
+- **Separator.** `??`, or the user's `!!`.
+- **Line 1.** Its capitalization, single sentence, terminal period, markup and
+  normalized answer leak.
+- **Card set.** The card set holds one definition card per entry; every
+  further card is an extra card to remove.
+- **Lines 1 and 3.** Plain line 3, and no `::` or `:::` on card line 1 or 3
+  outside a backtick span, which the plugin reads as a card of its own.
+- **Primary answer.** The canonical title's plain form or base term plus any
+  opener-established, alias-bound
+  [counterpart](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer).
+  With several cards, when none carries it and no single card nearly does, one
+  finding asks to rewrite the first card into the definition card, keeping its
+  attachments, and remove the rest.
+- **Discipline roots.** A discipline root (its slug is the enum value its sole
+  tag names) needs no card, with or without an empty section; a card it keeps
+  gets every per-card check.
+- **Attachments.** The shared parser hides recognized scheduling and block-ID
+  attachments from this read-only view, never rewriting them.
+- **Extra cards.** Once the kept card is identified (the primary card, else,
+  with none, the first card, which the no-primary finding rewrites), every
+  per-card finding on another card, card line 1's `item12` findings included,
+  starts `extra card N (remove this extra card; it needs no other repair)`:
+  the card's removal resolves it, except that content after its line 3 that is
+  not a recognized attachment stays and keeps its own finding.
+- **Agent checks.** On the primary card, the executing agent checks semantic
+  reconstruction, missing mathematical operations, off-rule line-1 math and an
+  alias pair the opener should have bound.
 
 ## Deterministic scanner and autonomous semantic pass
 

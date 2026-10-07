@@ -20,7 +20,7 @@ context:
 python3 '<skill>/scripts/body_checks.py' sweep '<path to the completed scratch .md>'
 ```
 
-It prints numbered items 1–16 (with 12b), each with its expectation. It skips
+It prints numbered items 1–17 (with 12b), each with its expectation. It skips
 the leading YAML block and fenced code, and reports an unclosed fence, whose
 lines it scans as prose. It does not parse inline code: ignore literal inline
 code when judging a match. Never edit source code to satisfy a prose detector.
@@ -118,8 +118,10 @@ suggested detector; do not edit an installed plugin during clipping processing.
   Sweep item 16 lists the bullet count and the long or linked bullets to judge.
 - [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
   auto-generated backlink panels and run-on navigation are gone; curated
-  further-reading links and intentional source content remain. Hidden
-  AI-directed text was removed only on markup evidence, and reported.
+  further-reading links and intentional source content remain. Each split link
+  that sweep item 17 lists was merged into one link or confirmed as separate
+  links, per [body cleaning](body-cleaning.md#repair-structure-and-markup).
+  Hidden AI-directed text was removed only on markup evidence, and reported.
 - [ ] Images are local embeds or reported failure placeholders. A confirmed
   caption is one italic line below the embed; ambiguous ledes remain prose.
   Caption/credit orphans are removed only with evidence, not when they could
@@ -129,9 +131,10 @@ suggested detector; do not edit an installed plugin during clipping processing.
 - [ ] Decorative rules are removed only from body prose, not YAML, code or the
   Summary/body separator. Code and simple/complex tables follow body-cleaning
   fidelity rules. Footnote references and definitions correspond.
-- [ ] Equations use Obsidian delimiters. Genuine formulas flattened to
-  typographic text were restored only with source evidence; ordinals, prices,
-  dates, chemical names and prose notation were not forced into math mode.
+- [ ] Equations use Obsidian delimiters and follow [equations](equations.md).
+  Genuine formulas flattened to typographic text were restored only with
+  source evidence; ordinals, prices, dates, chemical names and prose notation
+  were not forced into math mode.
 - [ ] Literal currency dollars in the Summary and body are escaped (never in
   YAML values), and math delimiters are balanced.
   Source comparison also catches **dropped** symbols or denominators, such as

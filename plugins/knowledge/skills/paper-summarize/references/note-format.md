@@ -11,6 +11,7 @@
 Read before drafting. This file owns the output shape, writing limits and
 brevity targets; [summary standards](summary-standards.md) owns factual claims and
 confidence, and [figures](figures.md) owns exhibit selection and captions.
+
 ## Frontmatter
 
 Use the shared [source-note schema](../../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
@@ -287,6 +288,8 @@ own scope and comparator, states the claim directly and preserves exact
 technical terms. Bold only terms that could stand as their own wiki entry,
 such as a named model, method, dataset, organization, person or defined
 concept; never generic words, ordinary technical vocabulary or whole phrases.
+A bold span in the callout holds at most five words and does not end with
+sentence punctuation; lint reports either breach as an advisory.
 Do not put URLs or page citations in the callout.
 
 ## Citations

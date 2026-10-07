@@ -4,6 +4,7 @@
 - [Settle a slug before writing images](#settle-a-slug-before-writing-images)
 - [Publish an approved replacement](#publish-an-approved-replacement)
   - [Finish a pending changed-slug handoff](#finish-a-pending-changed-slug-handoff)
+  - [Re-stem a renamed note's images](#re-stem-a-renamed-notes-images)
 
 Use this reference for an approved rewrite or a filename collision. The normal
 scan and its verdicts are in [Select the captures](../SKILL.md#1-select-the-captures-and-check-ownership).
@@ -11,7 +12,7 @@ scan and its verdicts are in [Select the captures](../SKILL.md#1-select-the-capt
 ## Reprocessing an existing note
 
 An eligible clipping's first current `sources:` item is a web URL, and the note
-is not a marked [research extract](../SKILL.md#clipping-clean). Read legacy
+is not a marked [research extract](../SKILL.md#1-select-the-captures-and-check-ownership). Read legacy
 `source:` only when `sources:` is absent; malformed or ambiguous current
 metadata cannot establish ownership through a stale value. A PDF origin belongs
 to `paper-summarize`.
@@ -131,28 +132,47 @@ never moved, deleted or rewritten, including after a successful reprocess.
    occupant. A case/Unicode spelling of the same note is allowed only when
    `os.path.samefile` confirms it and the directory has **one** entry with that
    normalized name. Two distinct hard-link entries are not a spelling alias.
-3. For a driver publication (step 4), stage the finished bytes with the
-   recorded `mode` in a unique hidden temporary directory beside the resolved
-   real `Articles/` directory, outside the note folder and on its filesystem.
-   `publish_files.py` stages its own copy.
+3. Stage nothing in the vault by hand. Each writer in step 4 stages its own
+   copy of the reviewed draft, with the old note's recorded `mode`, in a
+   unique hidden directory outside the note folder and on its filesystem.
 4. Publish the complete note. A same-name rewrite runs `publish_files.py
    publish` against the record with the manifest
    `[{"path": "Articles/<slug>.md", "draft": "<absolute draft path>"}]`, as in
    [publication](../SKILL.md#6-publish-safely); it replaces only the recorded
-   version and keeps its mode. The other two publications use a private driver
-   under the shared
-   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api):
-   `publish_files.py` cannot give a new name the original note's permissions
-   and refuses a case alias. The driver rebuilds the expected token from the
-   old note's JSON record `r` as
+   version and keeps its mode. A changed slug or a same-file case/Unicode
+   respelling runs the shipped writer instead, because `publish_files.py`
+   cannot give a new name the original note's permissions and refuses a case
+   alias. Run it first with `--dry-run`, review the plan, then run the
+   identical command without `--dry-run`:
+
+   ```bash
+   python3 '<skill>/scripts/fetch_images.py' rename --phase publish-note [--dry-run] \
+       --vault '<vault>' --snapshots '<scratch>/clipping-snapshots.json' \
+       --draft '<absolute draft path>' \
+       --owner-note '<vault>/Articles/<old_slug>.md' \
+       --new-owner-note '<vault>/Articles/<new_slug>.md' \
+       --old-slug '<old_slug>' --new-slug '<new_slug>'
+   ```
+
+   The writer follows the shared
+   [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api).
+   It rebuilds the expected token from the old note's JSON record `r` as
    `atomic_move.RegularFileSnapshot(identity=tuple(r["identity"]), digest=r["digest"], mode=r["mode"], size=r["size"])`,
-   never from a fresh snapshot. At a free destination (a changed slug), it calls
-   `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`.
-   For a same-file spelling change, it calls
+   never from a fresh snapshot. It refuses an old note that no longer matches
+   its record, a draft whose first current `sources:` item is another web
+   origin, and a legacy research extract. At a free destination recorded
+   `absent` (a changed slug), it calls
+   `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`
+   with the old note's recorded mode and leaves the old note in place. For a
+   same-file spelling change, it calls
    `atomic_move.replace_expected(staged, target, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`
-   with that token and a fresh `stage_dir`. Never recheck and then call
-   `os.replace`. If publication fails, no attachment has moved and the
-   unchanged old note still resolves.
+   with that token and a fresh `stage_dir`. Any other occupant of the portable
+   name, and any case alias that is not the same single directory entry, is
+   refused. Its JSON `action` is `created`, `respelled`, or `unchanged` on a
+   rerun. A `failed` publication attempt names its retained `stage_dir` and
+   any `recovery_path`. Never recheck and then call `os.replace`, and never
+   publish through a private driver. If publication fails, no attachment has
+   moved and the unchanged old note still resolves.
 5. Read back the published note. For a same-path rewrite, place every newly
    staged remote or recovered image through the guarded
    [image publication procedure](images.md#download-and-publish), then verify
@@ -306,3 +326,30 @@ dependency report. Continue with steps 6–9: repair, the re-probe, finalize and
 old-note removal. Do not re-clean the raw or redraft either note. A reprocess
 request reprocesses the new note only after the handoff finishes; remaining
 blockers stop it.
+
+### Re-stem a renamed note's images
+
+A note renamed outside this workflow can keep embedding images under its old
+stem; `dedup_index.py` lists it under `stem_mismatch`. On request, re-stem
+them with the same prepare, repair and finalize commands, passing
+`'<vault>/Articles/<new_slug>.md'` as both `--owner-note` and
+`--new-owner-note`. This applies only while no `Articles/<old_slug>.md` exists
+and every `<old_slug>_fig*` file is an exact rendered embed of the renamed
+note.
+
+1. Prepare copies each image to its new-stem name and lists the note's own
+   old references under `dependency.owner_references`.
+2. Record the note with `publish_files.py snapshot`, replace only the old stem
+   in each listed reference, and publish it against that record with
+   `publish_files.py publish`.
+3. Repair the other notes' `dependency.blockers` automatically as in
+   [steps 6–7](#publish-an-approved-replacement): run repair (a dry-run, then
+   live) with the renamed note as both owners. It rewrites only old-image
+   references, since there is no old note to relink. It accepts the renamed
+   note before or after its own embeds are republished, but refuses one left
+   half republished.
+4. Re-probe with `dependencies --new-slug '<new_slug>'` and that note as
+   `--owner-note`. A note that repair reports `blocked` stays a blocker; keep
+   both image sets and report it.
+5. Finalize refuses while the note still references an old name, and retires
+   the old copies only after a clean re-probe.

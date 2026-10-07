@@ -2,18 +2,17 @@
 
 Read this before Task 1b consolidates a duplicated explanation, moves a
 misplaced passage to its owner, merges or splits entries, retitles an entry,
-removes a semantic-invalid alias or creates a missing entry, and when the
-current request explicitly authorizes a deletion. An ordinary run performs
+removes a semantic-invalid alias, creates a missing entry or glosses a
+dangling link's term, and when the current request explicitly authorizes a
+deletion. An ordinary run performs
 all of these but deletion once its evidence identifies the duplicate and its
 owner, the wrong title, the invalid alias or the missing concept, or proves
 [step 2](#establish-evidence-and-complete-scope)'s boundary for a merge or
-split. Task 1b's [merge and split rules](../SKILL.md#task-1b--content-repair)
-name what never activates one and send a close call, unapplied, to *Notes
-for the user*, never to the note-content log. A deletion runs only on an
-explicit request, and an ordinary run proposes it; a merge's removal of the
-merged-away file is part of the merge, not a deletion. This skill's
-definition of an ordinary run, or authorization already present in the
-request, is sufficient. This protocol requires no separate human review.
+split; Task 1b's [merge and split rules](../SKILL.md#task-1b--content-repair)
+name what never activates one and where a close call goes. A deletion runs
+only under [Delete an entry](#delete-an-entry); a merge's removal of the
+merged-away file is part of the merge, not a deletion. The ordinary run's
+definition, or the request, is the whole authorization.
 A pure retitle or semantic-invalid alias removal keeps its own protocol below
 ([retitle](#retitle-an-entry), [alias removal](#remove-a-semantic-invalid-alias));
 never disguise either as a split or merge to avoid its
@@ -144,13 +143,22 @@ creation, and it is limited to a concept the wiki already relies on.
 ## Publish in dependency order
 
 Stage complete drafts under `<scratch>` and publish creates and replacements
-with `publish_files.py` ([publishing](../SKILL.md#publishing)). Step 4's
-conditional removal uses `publish_files.py remove` under the
-[shared safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally),
-against the old entry's original snapshot record, as
-[publishing](../SKILL.md#publishing) describes. A refactor spans several files
-but is not one filesystem transaction, so order prevents a disappearing
-target:
+with `publish_files.py` ([publishing](../SKILL.md#publishing)). An old path's
+removal (step 4 below, a retitle's old entry, a deletion) uses the shared
+[conditional removal](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally)
+against the same snapshot file:
+
+```bash
+python3 '<plugin>/shared/scripts/publish_files.py' remove --vault '<vault>' \
+    --snapshots '<scratch>/lint-snapshots.json' '<vault-relative path>'
+```
+
+`remove` deletes each path only while its bytes, identity and mode match its
+original record, and refuses a path with no record. Remove against the record
+taken before the bytes that decided the removal were read (re-recorded with
+`snapshot --replace` first if this run already published the path); never
+re-record it after that read. A refactor spans several files but is not one
+filesystem transaction, so order prevents a disappearing target:
 
 1. Publish every new entry exclusively and conditionally replace retained
    entries from the exact snapshots used to plan them.
@@ -269,12 +277,16 @@ rewritten link keeps its dates and `read:` under the
 Task 1b creates a missing entry for a concept with a stable identity that
 passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities)
 when an open note-content item names it, or when it is a load-bearing term:
-one at least three entries use without a resolving link (a one-clause inline
-gloss still counts as a use). A use is a sentence that needs the term's
-meaning to make its point; a word inside a dataset column or variable name
-("median house value"), a measurement ("135 million nucleotide pairs") or a
-list of examples is not a use. A concept failing those tests is reported. It
-extracts no other topic from the evidence.
+one at least three entries use without a resolving link. A one-clause inline
+gloss still counts as a use, and so does a dangling body-prose link to the
+term. A use is a sentence that needs the term's meaning to make its point; a
+word inside a dataset column or variable name ("median house value"), a
+measurement ("135 million nucleotide pairs"), a list of examples or a
+Related-footer item, dangling or not, is not a use. Count the uses before
+adding any gloss, keep the count across the whole Task 1b sweep, and
+adjudicate every term that reaches three entries in the same run. A concept
+failing those tests is reported. It extracts no other topic from the
+evidence.
 
 1. Derive the canonical title under the builder's
    [title](../../wiki-build/references/writing.md#title) and
@@ -296,7 +308,7 @@ extracts no other topic from the evidence.
    existing entry, not a new entry's source.
 3. Draft it under wiki-build's entry rules: its
    [writing guide](../../wiki-build/references/writing.md) and
-   [Quality Checklist](../../wiki-build/SKILL.md#quality-checklist), one
+   [Quality Checklist](../../wiki-build/references/quality-checklist.md), one
    discipline tag, one `??` definition card, `parents: []`, `read: false`,
    `issues: ""`, and today's `created:` and `updated:`. Run wiki-build's
    [overlap/ownership audit](../../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
@@ -313,3 +325,70 @@ extracts no other topic from the evidence.
    using entry's first eligible body-prose occurrence under the
    [backfill rules](link-hygiene.md#backfill-add-missing-links), and Task 3
    places the entry.
+
+### Dangling-link hand-off
+
+Task 1b reads Step 0's `item10/dangling` findings in its scope and settles
+each target before Task 2 drops any link. A target with a
+`missing-discipline-root` finding is not settled here; it
+[waits for Task 3](link-hygiene.md#dangling-links-target-missing).
+
+1. A target that meets the missing-entry rule above gets its entry, so its
+   links resolve.
+2. For every target that gets no entry, including one whose creation is
+   reported or blocked, each dangling mention whose sentence needs the
+   term's meaning, and that the entry does not already explain, gets a
+   one-clause gloss at that mention ("leaf nodes, the nodes with no
+   children"), from the entry's cited sources or accurate background as
+   [item 14](qc-items.md#14-self-containment) requires. The entry's dates
+   follow [Dates](../SKILL.md#dates).
+3. Task 2 then drops only the remaining genuine danglers to plain text under
+   its [dangler protocol](link-hygiene.md#dangling-links-target-missing).
+
+Never create an entry merely to keep a link; only the missing-entry rule
+above (three uses, or an open note-content item) decides.
+
+## Delete an entry
+
+Delete an entry only on a request in chat that names the deletion, or names
+the entry and its intended outcome; an `issues:` value or log item never
+counts ([explicit requests](../SKILL.md#explicit-requests)); an ordinary run
+proposes a deletion instead. The request names the entry's content for
+deletion, so [publish step 4](#publish-in-dependency-order)'s accounting
+needs no destination for it. A discipline root whose tag another entry still
+carries is not deleted, since Task 3 would
+[recreate it](hierarchy.md#establish-discipline-roots); report the deletion
+as blocked by those entries.
+
+1. Record the entry with `publish_files.py snapshot`
+   ([publishing](../SKILL.md#publishing)) before reading its bytes, then
+   inventory its references under
+   [step 3](#establish-evidence-and-complete-scope), whose write scope
+   applies: a dated historical record stays untouched and is reported.
+   Record each file to rewrite before reading it.
+2. Retarget each inbound link to a successor the request names, keeping its
+   label. Otherwise unlink it to its visible label and remove its Related
+   item, as for a
+   [genuine dangler](link-hygiene.md#dangling-links-target-missing). An
+   `Investments/` reference or an ambiguous reference blocks the deletion. A
+   link or embed to the entry's card block ID blocks it too unless the request
+   names a successor, which it then targets as a plain link keeping any label;
+   so does any transclusion of the entry or one of its sections (`![[old]]`,
+   `![[old#Section]]`), which has no visible label to keep, and with a named
+   successor it too becomes a plain link to the successor. A link retargeted
+   to a successor drops a heading or block anchor the successor does not
+   have, keeping its label. `parents:` values and links in Task 3's generated
+   MOCs are left for step 5 and do not block the removal, despite
+   [publish step 3](#publish-in-dependency-order); a link in any other
+   `MOCs/` file or a legacy vault-root MOC is retargeted or unlinked like any
+   other inbound link. A note whose only change is a rewritten link keeps its
+   dates and `read:`.
+3. Quote the entry's card, with its attachments, and any non-blank `issues:`
+   text in the report.
+4. Re-scan, then run `publish_files.py remove` against step 1's record. A
+   later edit to the entry, or an inbound reference step 2 could not resolve
+   (not the `parents:` values and generated-MOC links step 5 re-derives),
+   retains the file; report the mixed state.
+5. Tasks 1, 2 and 3 on the affected closure then re-derive the children's
+   `parents:` and the MOCs; inside a default pass, its own refresh, Task 2 and
+   Task 3 do this.

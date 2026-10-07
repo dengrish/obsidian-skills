@@ -1,10 +1,24 @@
-# Audits and run report
+# Lint dispositions, audits and run report
 
-Scope: the step-7 audits and run report of a run that drafted or merged entries; the [Quality Checklist](../SKILL.md#quality-checklist) stays the acceptance contract.
+Scope: the step-7 lint dispositions, audits and run report of a run that drafted or merged entries; the [Quality Checklist](quality-checklist.md) stays the acceptance contract.
+
+## Lint dispositions
+
+How [step 7](../SKILL.md#7-review-and-report) handles each `review_tree.py` result, and what the step-7.9 whole-Wiki lint may still show. *Resolve* means fix it privately in a staged draft, within the [run's scope](../SKILL.md#scope-and-files), and rerun `review_tree.py`. *Report* means list it in the [run report](#run-report), under *Unresolved findings and lint dispositions* (an inherited missing date under *Notes for the user*), without repairing or blocking on it.
+
+| Result | Disposition |
+|---|---|
+| `on_staged` | A finding on a manifest draft: resolve it, unless [step 7.2](../SKILL.md#7-review-and-report) or a row below says to report it. |
+| `on_staged` with `inherited: true` | The same finding was already on that path's baseline copy. On an [ownership-handoff](#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors) neighbor, report it. On a merged entry, resolve it unless it is inherited state the [merge rules](merge.md#merge-logic) preserve, or a missing `Person`/`Event` date no [rare-types route](rare-types.md#dates-in-the-opener-person-and-event) supplies; report those. |
+| `introduced` | A finding on an unmodified copy that its baseline lacked: resolve it. An unmodified copy's link or Related label that now names a new entry is reported instead. |
+| `report_only: true` | On a merged entry's inherited state, such as `2-user-issues` or `2-issues-malformed` on the user's `issues:` text (which stays byte-for-byte), report it as a proposal. On a new draft's own content, such as `5-bare-common-noun`, resolve it: it blocks publication until fixed. |
+| `review_only: true`, or a `-candidate` item | A review-only candidate. A supported, recorded decision resolves it without an edit, even if `clean` stays false: keeping prose (hard voting without an equation), or deciding that an all-capital title is a name with no established full form (`9-acronym-expansion`). Report each retained one with its reason; an unresolved candidate is never waived. |
+| baseline, counted in `baseline_count` | A finding the mirror already had on an unmodified copy: wiki-lint's, unreported. Step 7.9 accepts at most `baseline_count` of them on other entries. |
+| `unmirrored` | A path the tree could not mirror (a symlink, non-regular or unreadable path): it stays occupied. A `dangling` link that lists `unmirrored` paths keeps its link when the real vault has the target. Step 7.9 accepts findings on or under these paths. |
 
 ## The three audits
 
-Run them as [step 7.6](../SKILL.md#7-review-and-report), in this order: **missed-entity, overlap/ownership, then orphan-link**, since each can change what the next checks. **Whatever the audits create or change gets the Quality Checklist**, step 7.3's source check, the [editorial reread](writing.md#editorial-reread) and a `review_tree.py` rerun, as in step 7, before continuing.
+Run them as [step 7.6](../SKILL.md#7-review-and-report), in this order: **missed-entity, overlap/ownership, then orphan-link**, since each can change what the next checks. **Whatever the audits create or change gets the [Quality Checklist](quality-checklist.md)**, step 7.3's source check, the [editorial reread](writing.md#editorial-reread) and a `review_tree.py` rerun, as in step 7, before continuing.
 
 ### Missed-entity audit (source coverage)
 
@@ -58,7 +72,7 @@ Include a bullet only when it has content; the audit bullets always report their
 - **Unused source figures** — each unused exhibit or shared-reason group with its [selection](media.md#selection) reason, panels under their composite; any extraction run, its crops and which were visually reviewed.
 - **Atomicity decisions** — borderline split or keep calls, with the identity and source-support reason, never length.
 - **Review-pass fixes** — anything caught and fixed.
-- **Unresolved findings and lint dispositions** — each unresolved in-scope finding or blocker and its cause, each finding step 7 reports without repairing, and each retained [review-only candidate](../SKILL.md#7-review-and-report) with its reason.
+- **Unresolved findings and lint dispositions** — each unresolved in-scope finding or blocker and its cause, each finding step 7 reports without repairing, and each retained [review-only candidate](#lint-dispositions) with its reason.
 - **Source-backed relinks after an earlier prune** — entry → target and the active source's new relationship, never a reworded or moved old sentence.
 - **Semantic-invalid aliases proposed for removal** — entry, alias, active-source evidence and likely owner; proposals, never review-pass fixes.
 - **Notes for the user** — anything else, as two options where a call could go either way: contested claims or contradictions between entries (each also logged under [conflict handling](merge.md#conflict-handling)); footers past ~12, preserved unexpected keys, inherited missing dates; borderline substance, classification or tag calls; proposed media changes (name both exhibits); splits and renames of pre-existing entries, which wiki-lint's ordinary run makes, and deletions, which need its [explicit request](../../wiki-lint/SKILL.md#explicit-requests); each extra card a merge removed, quoted verbatim with its attachments, and any distinct entity it tested as a missing-entry candidate.

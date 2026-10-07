@@ -26,6 +26,12 @@ CLI
     python3 fetch_images.py place --attachments '<vault>/Sources/Images' \\
         --owner-note '<vault>/Articles/Teslo_Pancreatic_Cancer_2026.md' \\
         --slug Teslo_Pancreatic_Cancer_2026 --index 3 --from-file '<rendered file>'
+    python3 fetch_images.py rename --phase publish-note [--dry-run] \\
+        --vault '<vault>' --snapshots '<scratch>/clipping-snapshots.json' \\
+        --draft '<scratch>/draft.md' \\
+        --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
+        --old-slug Old_Slug_2025 --new-slug New_Slug_2026 \\
+        --new-owner-note '<vault>/Articles/New_Slug_2026.md'
     python3 fetch_images.py rename --phase prepare [--dry-run] \\
         --attachments '<vault>/Sources/Images' --sources '<vault>/Sources/PDFs' \\
         --owner-note '<vault>/Articles/Old_Slug_2025.md' \\
@@ -55,11 +61,19 @@ moves the result in under the write guards below. Neither the fetch nor the
 final write is left to the rendering step, because a script that does its own
 `urlopen` and its own `os.replace` into Sources/Images has none of this.
 
-`rename` requires an explicit phase. A clipping reprocess uses `prepare` to
-publish verified new-name copies while retaining the old names, `repair` to
-point every other note's references at the new names, then `finalize` only
-after an unchanged re-probe passes. Every phase requires the old and new
-published owner notes. `repair` rewrites, in each other vault note, only the
+`rename` requires an explicit phase. A changed-slug or respelled reprocess
+first uses `publish-note` to publish the reviewed draft against the old note's
+`publish_files.py snapshot` record, rebuilding the expected token from that
+JSON record rather than a fresh snapshot. A free destination recorded `absent`
+gets the draft through `atomic_move.publish_new` with the old note's recorded
+mode, leaving the old note in place; a same-file case or Unicode respelling
+replaces exactly the recorded version through `atomic_move.replace_expected`.
+It refuses a changed old note, an occupied destination, a case alias that is
+not the same single directory entry, and a draft with another web origin. It
+touches no image. Then `prepare` publishes verified new-name copies while
+retaining the old names, `repair` points every other note's references at the
+new names, and `finalize` runs only after an unchanged re-probe passes. Every
+image phase requires the old and new published owner notes. `repair` rewrites, in each other vault note, only the
 parsed links, embeds, Markdown and HTML targets that resolve to the old note
 or a mapped old image; it keeps each path form, label, anchor, size and alt
 text, edits no owner note, no dated `Investments/` research record and no
@@ -72,8 +86,8 @@ that note's exact rendered embed; repair rewrites other notes' old image
 references only; finalize requires the republished note to embed the mapped
 new names instead, and `dependencies --new-slug` re-probes.
 
-`rename`'s required `--sources` is the vault's `Sources/PDFs`: a `<old_slug>.pdf`
-found anywhere beneath (the folder is recursive — book chapters live in
+The `--sources` every image phase requires is the vault's `Sources/PDFs`: a
+`<old_slug>.pdf` found anywhere beneath (the folder is recursive — book chapters live in
 `Sources/PDFs/<Work>/`) proves the figures under that stem are that document's,
 and the whole rename is refused. PDF manifest ownership is checked regardless
 of this inventory. Label spelling alone cannot distinguish a PDF's plain-numbered
@@ -160,6 +174,9 @@ Importable
                        owner_note=..., new_owner_note=..., dry_run=False) -> dict
     finalize_slug_rename(attachments, old_slug, new_slug, *, sources=...,
                          owner_note=..., new_owner_note=..., dry_run=False) -> dict
+    publish_clipping_note(vault, snapshots, draft, old_slug, new_slug, *,
+                          owner_note=..., new_owner_note=...,
+                          dry_run=False) -> dict           # `publish-note`
     dependency_status(attachments, owner_note, old_slug, new_slug=None) -> dict
     validate_slug(slug, what="--slug") -> str          # raises ValueError
     validate_index(index, what="figure index") -> int  # raises ValueError
@@ -200,7 +217,7 @@ import zipfile
 
 _OBSIDIAN_SHARED_MODULES = (
     "atomic_move", "entry_structure", "figure_state", "markdown_tables",
-    "portable_names", "slugify", "yaml_scalars")
+    "portable_names", "publish_files", "slugify", "yaml_scalars")
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -239,9 +256,11 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from atomic_move import (LinkUnavailable, PublicationConflict, file_identity,
-                         link_noreplace, move_noreplace, remove_expected,
+from atomic_move import (LinkUnavailable, PublicationConflict,
+                         RegularFileSnapshot, file_identity, link_noreplace,
+                         move_noreplace, regular_file_snapshot, remove_expected,
                          replace_expected, publish_new, set_private_mode)
+import publish_files
 from dedup_index import (is_research_extract_text, normalize_url, read_source,
                          split_frontmatter)
 from figure_state import MANIFEST_FILE, read_manifest
@@ -4055,6 +4074,279 @@ def finalize_slug_rename(attachments, old_slug, new_slug, *, sources,
             "retired": len(rows)}
 
 
+def _note_web_origin(data, what, *, require_current):
+    """The normalized web origin of complete note bytes, or a refusal.
+
+    ``sources:`` item 1 decides; a legacy scalar ``source:`` counts only when
+    ``sources:`` is absent and ``require_current`` is false. A marked legacy
+    research extract never qualifies.
+    """
+    try:
+        text = data.decode("utf-8-sig")
+    except UnicodeDecodeError as exc:
+        raise ValueError("%s is not complete UTF-8: %s" % (what, exc)) from exc
+    split = split_frontmatter(text)
+    try:
+        fields = parse_source_fields(split[0]) if split is not None else None
+    except ValueError:
+        fields = None
+    if fields is None:
+        raise ValueError("%s has no closed frontmatter with readable source "
+                         "fields" % what)
+    if "sources" in fields:
+        origin = (fields["sources"] or [None])[0]
+    else:
+        origin = None if require_current else fields.get("source")
+    normalized = normalize_url(origin) if origin else None
+    if not normalized:
+        raise ValueError("%s does not have a web URL as its first current "
+                         "sources item" % what)
+    if is_research_extract_text(text):
+        raise ValueError("%s is a wiki-add research extract; clipping-clean "
+                         "never reprocesses or renames one" % what)
+    return normalized
+
+
+def _read_note_bytes(path, what):
+    """Complete bytes of one regular, non-symlink file."""
+    try:
+        if not stat.S_ISREG(os.lstat(path).st_mode):
+            raise ValueError("%s is a symlink or non-regular file: %r"
+                             % (what, path))
+        flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+        flags |= getattr(os, "O_NONBLOCK", 0)
+        with os.fdopen(os.open(path, flags), "rb") as fh:
+            if not stat.S_ISREG(os.fstat(fh.fileno()).st_mode):
+                raise ValueError("%s changed into a non-regular file: %r"
+                                 % (what, path))
+            return fh.read()
+    except OSError as exc:
+        raise ValueError("%s is missing or unreadable: %s" % (what, exc)) from exc
+
+
+def _publish_note_key(vault, path, slug, what):
+    """The vault-relative key of ``path``, which must be Articles/<slug>.md."""
+    try:
+        key = publish_files.vault_key(vault, os.path.abspath(os.fspath(path)))
+    except publish_files.InputError as exc:
+        raise ValueError("%s: %s" % (what, exc)) from exc
+    wanted = "Articles/" + slug + ".md"
+    if key != wanted:
+        raise ValueError("%s must be <vault>/%s for this slug, not %r"
+                         % (what, wanted, path))
+    return key
+
+
+def publish_clipping_note(vault, snapshots, draft, old_slug, new_slug, *,
+                          owner_note, new_owner_note, dry_run=False):
+    """Publish a reprocessed clipping note under a changed or respelled name.
+
+    The old note's ``publish_files.py snapshot`` record is the expected
+    version: its token is rebuilt from that JSON record, never from a fresh
+    snapshot. A changed slug publishes the draft exclusively at a free
+    ``Articles/<new_slug>.md`` recorded ``absent`` in the same file, with the
+    old note's recorded mode, and leaves the old note in place. A case or
+    Unicode respelling that names the same single directory entry replaces
+    exactly the recorded version under the new spelling. The draft must
+    carry the old note's web origin. A same-spelling rewrite belongs to
+    ``publish_files.py publish``. A refusal before the publication call
+    removes the private stage; a failed publication keeps and reports it.
+    """
+    validate_slug(old_slug, "--old-slug")
+    validate_slug(new_slug, "--new-slug")
+    if old_slug == new_slug:
+        raise ValueError("--old-slug and --new-slug are the same spelling; "
+                         "publish a same-name rewrite with publish_files.py "
+                         "publish")
+    if not vault or not os.path.isdir(vault):
+        raise ValueError("--vault is not a directory: %r" % (vault,))
+    pair = (os.path.abspath(vault), os.path.realpath(vault))
+    old_key = _publish_note_key(pair, owner_note, old_slug, "--owner-note")
+    new_key = _publish_note_key(pair, new_owner_note, new_slug,
+                                "--new-owner-note")
+    articles = os.path.join(pair[1], "Articles")
+    if not os.path.isdir(articles):
+        raise ValueError("%s is not a directory" % articles)
+    old_target = os.path.join(articles, old_slug + ".md")
+    new_name = new_slug + ".md"
+    new_target = os.path.join(articles, new_name)
+
+    try:
+        records = publish_files.load_snapshots(snapshots, pair)
+    except publish_files.InputError as exc:
+        raise ValueError(str(exc)) from exc
+    old_record = records.get(old_key)
+    if old_record is None or old_record.get("state") != "file":
+        raise ValueError("%s has no recorded file version in %s; record it "
+                         "with publish_files.py snapshot before reading it"
+                         % (old_key, snapshots))
+
+    draft = os.fspath(draft)
+    if not os.path.isabs(draft):
+        raise ValueError("--draft must be an absolute scratch path: %r" % draft)
+    if _at_or_inside_existing_directory(draft, pair[1]):
+        raise ValueError("--draft must be a scratch file outside the vault: %r"
+                         % draft)
+    data = _read_note_bytes(draft, "--draft")
+    digest = hashlib.sha256(data).hexdigest()
+    report = {"ok": False, "phase": "publish-note", "old_slug": old_slug,
+              "new_slug": new_slug, "old_note": old_key, "new_note": new_key,
+              "sha256": digest}
+
+    try:
+        listing = os.listdir(articles)
+    except OSError as exc:
+        raise ValueError("cannot inventory %s: %s" % (articles, exc)) from exc
+    wanted = _manifest_name_key(new_name)
+    occupants = sorted(name for name in listing
+                       if _manifest_name_key(name) == wanted)
+    if occupants == [new_name] and not os.path.islink(new_target):
+        try:
+            current = regular_file_snapshot(new_target)
+        except (OSError, UnicodeError):
+            current = None
+        if current is not None and (current.digest, current.size) == (
+                digest, len(data)):
+            # A rerun after success: the exact spelling already holds the draft.
+            report.update(ok=True, action="unchanged", file_mode=current.mode,
+                          detail="%s already equals the draft" % new_key)
+            return report
+
+    status, detail = publish_files.compare(
+        old_record, publish_files.observe(old_target))
+    if status != "unchanged":
+        raise ValueError("%s %s after its snapshot (%s); retain the draft, "
+                         "re-record the note with snapshot --replace and "
+                         "redo the reprocess from its current bytes"
+                         % (old_key, status, detail))
+    old_bytes = _read_note_bytes(old_target, "the old note")
+    if (hashlib.sha256(old_bytes).hexdigest(), len(old_bytes)) != (
+            old_record["digest"], old_record["size"]):
+        raise ValueError("%s changed after its snapshot; retain the draft and "
+                         "redo the reprocess from its current bytes" % old_key)
+    origin = _note_web_origin(old_bytes, "the old note %s" % old_key,
+                              require_current=False)
+    if _note_web_origin(data, "--draft", require_current=True) != origin:
+        raise ValueError("--draft does not carry the old note's web origin as "
+                         "its first current sources item")
+
+    mode = old_record["mode"]
+    if _manifest_name_key(old_slug + ".md") == wanted:
+        try:
+            same = (len(occupants) == 1
+                    and os.path.samefile(os.path.join(articles, occupants[0]),
+                                         old_target)
+                    and os.path.samefile(old_target, new_target))
+        except OSError:
+            same = False
+        if not same:
+            raise ValueError(
+                "Articles/%s is a case or Unicode alias of the old note's name "
+                "but not its one directory entry on this filesystem (portable "
+                "occupants: %s); refusing the case alias"
+                % (new_name, ", ".join(occupants) or "none"))
+        action = "respell"
+        expected = RegularFileSnapshot(
+            identity=tuple(old_record["identity"]),
+            digest=old_record["digest"], mode=mode, size=old_record["size"])
+    else:
+        if occupants:
+            raise ValueError(
+                "Articles/%s is occupied by %s under portable naming; return "
+                "to the naming decision" % (new_name, ", ".join(occupants)))
+        new_record = records.get(new_key)
+        if new_record is None or new_record.get("state") != "absent":
+            raise ValueError("%s has no recorded absent state in %s; record "
+                             "it with publish_files.py snapshot once the slug "
+                             "is settled" % (new_key, snapshots))
+        status, detail = publish_files.compare(
+            new_record, publish_files.observe(new_target))
+        if status != "unchanged":
+            raise ValueError("%s %s after its snapshot (%s); return to the "
+                             "naming decision" % (new_key, status, detail))
+        action = "create"
+        expected = None
+
+    articles_real = os.path.realpath(articles)
+    stage_location = os.path.dirname(articles_real)
+    if os.stat(stage_location).st_dev != os.stat(articles_real).st_dev:
+        raise ValueError("LinkUnavailable: no parent of %s on its filesystem "
+                         "can hold the private stage" % articles_real)
+    report["file_mode"] = mode
+    if dry_run:
+        report.update(ok=True, action="would-" + action, detail=(
+            "would publish the draft at a free destination with the old "
+            "note's recorded mode; the old note stays in place"
+            if action == "create" else
+            "would replace the recorded old note under its new spelling"))
+        return report
+
+    stage_parent = tempfile.mkdtemp(prefix=".clipping-note-publish-",
+                                    dir=stage_location)
+    stage_dir = tempfile.mkdtemp(prefix="note-", dir=stage_parent)
+    staged = os.path.join(stage_dir, "staged")
+    attempted = False
+    try:
+        with open(staged, "xb") as fh:
+            fh.write(data)
+            fh.flush()
+            set_private_mode(fh, mode)
+            os.fsync(fh.fileno())
+        status, detail = publish_files.compare(
+            old_record, publish_files.observe(old_target))
+        if status != "unchanged":
+            raise PublicationConflict(
+                "%s %s before publication (%s)" % (old_key, status, detail))
+        attempted = True
+        if action == "create":
+            published = publish_new(
+                staged, new_target, regular_file_snapshot, stage_parent,
+                recovery_prefix=".clipping-note-recovery-")
+        else:
+            published = replace_expected(
+                staged, new_target, expected, regular_file_snapshot,
+                stage_dir, stage_parent=stage_parent,
+                recovery_prefix=".clipping-note-recovery-")
+        after = regular_file_snapshot(new_target)
+        if after != published or (after.digest, after.size) != (
+                digest, len(data)):
+            raise PublicationConflict(
+                "%s does not read back as the draft bytes" % new_key,
+                keep_stage=True)
+    except (OSError, UnicodeError) as exc:
+        report.update(action="failed", error=type(exc).__name__,
+                      detail=str(exc))
+        if not attempted:
+            # Nothing was linked anywhere public: the stage is only our copy.
+            shutil.rmtree(stage_dir, ignore_errors=True)
+            with contextlib.suppress(OSError):
+                os.rmdir(stage_parent)
+            report["detail"] += "; nothing was published"
+            return report
+        report.update(stage_dir=stage_dir, stage_parent=stage_parent)
+        recovery = getattr(exc, "recovery_path", None)
+        if recovery:
+            report["recovery_path"] = recovery
+        return report
+    shutil.rmtree(stage_dir, ignore_errors=True)
+    with contextlib.suppress(OSError):
+        os.rmdir(stage_parent)
+    if action == "create":
+        detail = ("created at the free destination with the old note's "
+                  "recorded mode; the unchanged old note still resolves")
+    else:
+        try:
+            listed = new_name in os.listdir(articles)
+        except OSError:
+            listed = False
+        detail = ("replaced the recorded old note under its new spelling"
+                  if listed else "replaced the recorded old note, but the "
+                  "folder still lists another spelling")
+    report.update(ok=True, action="created" if action == "create"
+                  else "respelled", detail=detail)
+    return report
+
+
 class _FakeResponse:
     """Just enough of an `http.client.HTTPResponse` for `_stream_to_file`.
 
@@ -7481,6 +7773,20 @@ continues here`
               ("never delete first" in reprocess_words
                and "earlier probe is not standing cleanup authority" in reprocess_words
                and "reports the blocker or" in reprocess_words), True)
+        # A changed slug or respelling used to need a hand-written driver; the
+        # documented step now runs the shipped writer with its guards.
+        publish_note_calls = re.findall(
+            r"fetch_images\.py['\"]? rename --phase publish-note[^\n`]*",
+            commands)
+        check("changed-slug note publication runs the shipped publish-note "
+              "writer with the snapshot file and the scratch draft",
+              (len(publish_note_calls) >= 1,
+               [c for c in publish_note_calls
+                if not all(flag in c for flag in (
+                    "--vault", "--snapshots", "--draft", "--owner-note",
+                    "--new-owner-note", "--old-slug", "--new-slug"))],
+               "rename --phase publish-note" in skill_md),
+              (True, [], True))
 
         # `Sources/PDFs/` is recursive by contract (a split book lives in
         # `Sources/PDFs/<Work>/`), so the step-3 stem-owner probe has to
@@ -7682,6 +7988,213 @@ continues here`
                    populated_stdout.getvalue()).get("error", ""),
                sorted(os.listdir(populated))),
               (1, True, ["Example_Image_2026_fig_1.png"]))
+
+        # --- rename --phase publish-note: the shipped changed-slug writer ---
+        def note_vault(name, old_slug="Old_Note_2025", mode=0o600,
+                       origin="https://example.com/article", marker=""):
+            """A vault with one recorded clipping note and a scratch draft."""
+            root = os.path.join(tmp, name)
+            os.makedirs(os.path.join(root, "Articles"))
+            old = os.path.join(root, "Articles", old_slug + ".md")
+            with open(old, "w", encoding="utf-8") as fh:
+                fh.write('---\nsources:\n  - "%s"\n---\n%sOld body.\n'
+                         % (origin, marker))
+            os.chmod(old, mode)
+            draft_path = os.path.join(tmp, name + "-draft.md")
+            with open(draft_path, "w", encoding="utf-8") as fh:
+                fh.write('---\nsources:\n  - "%s"\n---\nNew body.\n'
+                         % "https://example.com/article")
+            return root, old, draft_path
+
+        def record(root, *keys):
+            snap_path = os.path.join(tmp, os.path.basename(root) + "-snap.json")
+            payload, code = publish_files.cmd_snapshot(
+                root, list(keys), output=snap_path)
+            if code:
+                raise AssertionError("snapshot failed: %r" % (payload,))
+            return snap_path
+
+        def publish_note_cli(root, snap_path, draft_path, old_slug, new_slug,
+                             *extra):
+            out = io.StringIO()
+            with patch.object(sys, "stdout", out):
+                code = main([
+                    "rename", "--phase", "publish-note", *extra,
+                    "--vault", root, "--snapshots", snap_path,
+                    "--draft", draft_path,
+                    "--owner-note", os.path.join(
+                        root, "Articles", old_slug + ".md"),
+                    "--new-owner-note", os.path.join(
+                        root, "Articles", new_slug + ".md"),
+                    "--old-slug", old_slug, "--new-slug", new_slug])
+            return code, json.loads(out.getvalue())
+
+        def residue(root):
+            return sorted(name for name in os.listdir(root)
+                          if name.startswith("."))
+
+        def read_bytes(path):
+            with open(path, "rb") as fh:
+                return fh.read()
+
+        root, old, draft_path = note_vault("publish-note-vault")
+        snap = record(root, "Articles/Old_Note_2025.md",
+                      "Articles/New_Note_2026.md")
+        new = os.path.join(root, "Articles", "New_Note_2026.md")
+        old_bytes = read_bytes(old)
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "New_Note_2026", "--dry-run")
+        check("publish-note --dry-run plans a free-destination publication "
+              "and writes nothing",
+              (code, out["action"], out["file_mode"], os.path.lexists(new),
+               residue(root)), (0, "would-create", 0o600, False, []))
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "New_Note_2026")
+        check("publish-note publishes the draft at the free destination "
+              "with the old note's recorded mode",
+              (code, out["action"], read_bytes(new) == read_bytes(draft_path),
+               stat.S_IMODE(os.lstat(new).st_mode)),
+              (0, "created", True, 0o600))
+        check("...and keeps the unchanged old note and no private stage",
+              (read_bytes(old) == old_bytes, residue(root)), (True, []))
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "New_Note_2026")
+        check("a publish-note rerun after success reports the draft as "
+              "already published", (code, out["action"]), (0, "unchanged"))
+
+        root, old, draft_path = note_vault("publish-note-changed")
+        snap = record(root, "Articles/Old_Note_2025.md",
+                      "Articles/New_Note_2026.md")
+        with open(old, "a", encoding="utf-8") as fh:
+            fh.write("A later user edit.\n")
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "New_Note_2026")
+        check("publish-note refuses an old note that changed after its "
+              "record and publishes nothing",
+              (code, out["ok"], "changed" in out.get("error", ""),
+               os.path.lexists(os.path.join(root, "Articles",
+                                            "New_Note_2026.md")),
+               residue(root)), (1, False, True, False, []))
+
+        root, old, draft_path = note_vault("publish-note-late-edit")
+        snap = record(root, "Articles/Old_Note_2025.md",
+                      "Articles/New_Note_2026.md")
+        real_observe = publish_files.observe
+        seen = []
+
+        def late_edit_observe(target):
+            if os.path.basename(target) == "Old_Note_2025.md":
+                seen.append(target)
+                if len(seen) > 1:      # the recheck just before publication
+                    return "absent", None, None
+            return real_observe(target)
+
+        with patch.object(publish_files, "observe", late_edit_observe):
+            code, out = publish_note_cli(root, snap, draft_path,
+                                         "Old_Note_2025", "New_Note_2026")
+        check("publish-note rechecks the old note just before publication "
+              "and removes its unused private stage",
+              (code, out["action"], "nothing was published" in out["detail"],
+               "stage_dir" in out, residue(root),
+               os.path.lexists(os.path.join(root, "Articles",
+                                            "New_Note_2026.md"))),
+              (1, "failed", True, False, [], False))
+
+        root, old, draft_path = note_vault("publish-note-occupied")
+        snap = record(root, "Articles/Old_Note_2025.md",
+                      "Articles/New_Note_2026.md")
+        late = touch(os.path.join(root, "Articles", "New_Note_2026.md"),
+                     b"---\nsources:\n  - https://example.com/other\n---\n")
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "New_Note_2026")
+        check("publish-note refuses a destination occupied after its absent "
+              "record and leaves the occupant",
+              (code, out["ok"], read_bytes(late)[:3], residue(root)),
+              (1, False, b"---", []))
+        foreign = os.path.join(root, "Articles", "Different_Origin_2026.md")
+        snap = record(root, "Articles/Old_Note_2025.md",
+                      "Articles/Different_Origin_2026.md")
+        with open(draft_path, "w", encoding="utf-8") as fh:
+            fh.write('---\nsources:\n  - "https://example.com/other"\n---\n')
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "Different_Origin_2026")
+        check("publish-note refuses a draft with another web origin",
+              (code, "web origin" in out.get("error", ""),
+               os.path.lexists(foreign)), (1, True, False))
+
+        root, old, draft_path = note_vault("publish-note-alias")
+        other = touch(os.path.join(root, "Articles", "Other_Note_2026.md"),
+                      b"---\nsources:\n  - https://example.com/other\n---\n")
+        snap = record(root, "Articles/Old_Note_2025.md")
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "other_note_2026")
+        check("publish-note refuses a case alias of another note's name",
+              (code, out["ok"], read_bytes(other)[:3],
+               sorted(os.listdir(os.path.join(root, "Articles")))),
+              (1, False, b"---",
+               ["Old_Note_2025.md", "Other_Note_2026.md"]))
+
+        root, old, draft_path = note_vault("publish-note-respell")
+        snap = record(root, "Articles/Old_Note_2025.md")
+        respelled = os.path.join(root, "Articles", "old_note_2025.md")
+        folds_case = os.path.lexists(respelled)
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "old_note_2025")
+        listed = sorted(os.listdir(os.path.join(root, "Articles")))
+        if folds_case:
+            check("publish-note respells the same file against its record "
+                  "on a case-folding volume",
+                  (code, out["action"], listed,
+                   read_bytes(respelled) == read_bytes(draft_path),
+                   stat.S_IMODE(os.lstat(respelled).st_mode), residue(root)),
+                  (0, "respelled", ["old_note_2025.md"], True, 0o600, []))
+        else:
+            check("publish-note refuses a case alias that is a second name "
+                  "on a case-sensitive volume",
+                  (code, out["ok"], listed, read_bytes(old)[:3]),
+                  (1, False, ["Old_Note_2025.md"], b"---"))
+
+        root, old, draft_path = note_vault(
+            "publish-note-extract",
+            marker="<!-- obsidian:wiki-add-research-source -->\n")
+        snap = record(root, "Articles/Old_Note_2025.md",
+                      "Articles/New_Note_2026.md")
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "New_Note_2026")
+        check("publish-note never renames a legacy research extract",
+              (code, "research extract" in out.get("error", ""),
+               os.path.lexists(os.path.join(root, "Articles",
+                                            "New_Note_2026.md"))),
+              (1, True, False))
+        code, out = publish_note_cli(root, snap, draft_path, "Old_Note_2025",
+                                     "Old_Note_2025")
+        check("publish-note sends a same-spelling rewrite to publish_files.py",
+              (code, "publish_files.py" in out.get("error", "")), (1, True))
+
+        usage = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(usage):
+                main(["rename", "--phase", "publish-note",
+                      "--owner-note", old, "--new-owner-note", old,
+                      "--old-slug", "Old_Note_2025",
+                      "--new-slug", "New_Note_2026"])
+            usage_exit = None
+        except SystemExit as exc:
+            usage_exit = exc.code
+        check("publish-note requires --vault, --snapshots and --draft",
+              (usage_exit, "--snapshots" in usage.getvalue()), (2, True))
+        usage = io.StringIO()
+        try:
+            with contextlib.redirect_stderr(usage):
+                main(["rename", "--phase", "prepare",
+                      "--owner-note", old, "--new-owner-note", old,
+                      "--old-slug", "Old_Note_2025",
+                      "--new-slug", "New_Note_2026"])
+            usage_exit = None
+        except SystemExit as exc:
+            usage_exit = exc.code
+        check("the image phases still require --attachments and --sources",
+              (usage_exit, "--attachments" in usage.getvalue()), (2, True))
     finally:
         tempfile.tempdir = previous_tempdir
         shutil.rmtree(tmp, ignore_errors=True)
@@ -7783,11 +8296,14 @@ def main(argv=None):
                         "exactly names the attachment")
 
     r = sub.add_parser(
-        "rename", help="prepare, repair or finalize an attachment handoff "
-        "after a slug change")
-    r.add_argument("--attachments", required=True)
-    r.add_argument("--sources", required=True,
-                   help="the vault's Sources/PDFs folder; "
+        "rename", help="publish a changed-slug note, or prepare, repair or "
+        "finalize an attachment handoff after a slug change")
+    r.add_argument("--attachments",
+                   help="the vault's Sources/Images folder; required by "
+                        "prepare, repair and finalize")
+    r.add_argument("--sources",
+                   help="the vault's Sources/PDFs folder, required by "
+                   "prepare, repair and finalize; "
                    "a <slug>.pdf there proves the figures are a "
                    "PDF's and the rename is refused")
     r.add_argument("--old-slug", required=True)
@@ -7796,19 +8312,35 @@ def main(argv=None):
                    help="the unchanged Articles/<old-slug>.md; every renamed "
                         "attachment must be an exact rendered filename-only "
                         "embed. The same path as --new-owner-note selects a "
-                        "same-note re-stem")
+                        "same-note re-stem. For publish-note, the old note "
+                        "recorded in --snapshots")
     r.add_argument("--new-owner-note", required=True,
                    help="published Articles/<new-slug>.md with the same web "
                         "origin and exact mapped new embeds; required for "
                         "every phase. In a same-note re-stem it is the "
                         "--owner-note path, which embeds the old names at "
-                        "prepare and the mapped new names only at finalize")
-    r.add_argument("--phase", choices=("prepare", "repair", "finalize"),
+                        "prepare and the mapped new names only at finalize. "
+                        "For publish-note, the destination: recorded absent, "
+                        "or a case/Unicode respelling of the same file")
+    r.add_argument("--phase",
+                   choices=("publish-note", "prepare", "repair", "finalize"),
                    required=True,
-                   help="required: prepare publishes new-name copies while "
+                   help="required: publish-note publishes the reviewed draft "
+                        "as the new note against the old note's snapshot "
+                        "record; prepare publishes new-name copies while "
                         "retaining old names; repair points other notes' "
                         "references at the new names; finalize retires exact "
                         "old copies after dependencies are clear")
+    r.add_argument("--vault",
+                   help="publish-note only: the vault root the snapshot file "
+                        "records")
+    r.add_argument("--snapshots",
+                   help="publish-note only: the run's publish_files.py "
+                        "snapshot file holding the old note's record (and "
+                        "the new path's absent record for a changed slug)")
+    r.add_argument("--draft",
+                   help="publish-note only: the reviewed scratch draft, an "
+                        "absolute path outside the vault")
     r.add_argument("--dry-run", action="store_true")
 
     q = sub.add_parser(
@@ -7936,7 +8468,25 @@ def main(argv=None):
                          ensure_ascii=False))
         return 0 if res["ok"] else 1
 
+    if args.phase == "publish-note":
+        missing = [flag for flag, value in (
+            ("--vault", args.vault), ("--snapshots", args.snapshots),
+            ("--draft", args.draft)) if not value]
+        if missing:
+            r.error("rename --phase publish-note requires %s"
+                    % ", ".join(missing))
+    elif not args.attachments or not args.sources:
+        r.error("rename --phase %s requires --attachments and --sources"
+                % args.phase)
     try:
+        if args.phase == "publish-note":
+            report = publish_clipping_note(
+                args.vault, args.snapshots, args.draft, args.old_slug,
+                args.new_slug, owner_note=args.owner_note,
+                new_owner_note=args.new_owner_note, dry_run=args.dry_run)
+            print(json.dumps(dict(report, mode="rename"), indent=2,
+                             ensure_ascii=False))
+            return 0 if report["ok"] else 1
         if args.phase == "prepare":
             report = prepare_slug_rename(
                 args.attachments, args.old_slug, args.new_slug,

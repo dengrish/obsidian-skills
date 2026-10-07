@@ -1,7 +1,16 @@
 # Special document types and reading exceptions
 
-Use the relevant section when the design or input needs it. These cases keep
-[the same six-position structure](note-format.md#section-roles-and-headings),
+- [Empirical approaches with less common methods](#empirical-approaches-with-less-common-methods)
+- [Reading non-empirical arguments](#reading-non-empirical-arguments)
+- [Missing sections](#missing-sections)
+- [Notices and non-English sources](#notices-and-non-english-sources)
+- [Unreadable text and helper failures](#unreadable-text-and-helper-failures)
+- [Byline and duplicate-document cases](#byline-and-duplicate-document-cases)
+- [External PDFs](#external-pdfs)
+- [Folders kept outside the PDF tree](#folders-kept-outside-the-pdf-tree)
+
+Use the relevant section when the design or input needs it. The document cases
+keep [the same six-position structure](note-format.md#section-roles-and-headings),
 but first select the document's [body mode](note-format.md#choose-the-body-mode).
 The [confidence ladder and design ceilings](summary-standards.md#the-hedge-ladder-and-what-sets-its-ceiling)
 remain the single owner of confidence; this reference adds reading and
@@ -102,8 +111,27 @@ elsewhere or adding an unsupported “led by” claim. A many-site population be
 in the finding's scope, not an invented byline.
 
 Two different stems can contain the same paper: the scan checks stem identity,
-not content. If reading reveals matching title/results, summarize one, skip the
+not content. If reading reveals matching title/results, summarize one,
+preferring the filed canonical PDF that already has figures or a note; skip the
 other and report both filenames. Do not create two summaries merely because
 both scans said `new`, and do not delete either PDF. Organization of source
 files belongs to `pdf-organize`; a suffix used for distinct papers must not be
 treated as proof these contents are distinct.
+
+## External PDFs
+
+A PDF outside the vault is usable only as a readable copy, such as a decrypted
+scratch copy, of the one vault PDF with its basename. The scan checks only the
+name, so confirm the same document: identical bytes, a matching page count and
+first-page text, or the user's word. Otherwise stop and report both paths.
+
+When no vault PDF has its basename,
+[intake](../SKILL.md#1-select-and-inventory-the-work) owns the Inbox copy rule;
+the external original stays in place.
+
+## Folders kept outside the PDF tree
+
+For selected folders deliberately kept outside `Sources/PDFs/`, repeat the
+folder scan with `--src '<selected folder>'`, the same notes/images paths and
+any naming exception. When the tree is absent for that reason, scan only those
+inputs. Combine their rows with the tree's by PDF path.
