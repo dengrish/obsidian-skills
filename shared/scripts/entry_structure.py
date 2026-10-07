@@ -28,6 +28,7 @@ from markdown_tables import markdown_block_start, markdown_table_spans
 from slugify import base_term, has_parenthetical
 
 __all__ = [
+    "BOLD_TEXT",
     "CARD_SEPARATORS",
     "DEFINITION_SEPARATOR",
     "DISABLED_SEPARATOR",
@@ -51,8 +52,13 @@ __all__ = [
     "flashcard_brevity_hints",
     "flashcard_hedge_hints",
     "first_letter_ci_equal",
+    "first_prose_paragraph",
+    "first_prose_paragraph_lines",
     "flashcard_line1_faults",
     "flashcard_line1_markup",
+    "heading_repeats_title",
+    "is_review_metadata_block",
+    "leading_title_heading",
     "math_title_plain_text",
     "mask_body_comments",
     "mask_escaped_wikilinks",
@@ -64,6 +70,7 @@ __all__ = [
     "split_sentences",
     "strip_flashcard_review_metadata",
     "title_display_form",
+    "without_leading_title_heading",
 ]
 
 
@@ -197,6 +204,9 @@ def mask_body_comments(text, *, mask_code=False, mask_unclosed_comments=True):
 def _mask_body_comments(text, mask_code, mask_unclosed_comments):
     """The uncached view :func:`mask_body_comments` returns."""
     chars = list(text)
+    # Lex CRLF and bare CR as LF without moving any offset; blank() writes
+    # only to the original characters, so line endings survive.
+    text = text.replace("\r\n", " \n").replace("\r", "\n")
     def blank(start, end):
         for pos in range(start, end):
             if chars[pos] not in "\r\n":
@@ -537,8 +547,16 @@ def title_display_form(title):
     return re.sub(r"\s+", " ", value).strip()
 
 
-_BOLD_OUTER_RE = re.compile(
-    r"(?<!\*)\*\*((?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)\*\*(?!\*)")
+# One unit of bold text is an inline-math span in the form Obsidian renders
+# (an unescaped `$` followed by a non-space, closed by a `$` that follows a
+# non-space and has no digit after it), an italic span, or any other
+# character. A `$` that opens no such span is plain text. Each line then has
+# only one reading, so a `**` that cannot close fails in linear time instead
+# of trying every split of the math spans after it.
+_BOLD_MATH_REST = r"(?=[^\s$])[^$\n]*(?<=[^\s\\])\$(?!\d)"
+BOLD_TEXT = (r"(?:(?<!\\)\$" + _BOLD_MATH_REST + r"|\*[^*\n]+\*|[^*$\n]"
+             r"|(?<=\\)\$|(?<!\\)\$(?!" + _BOLD_MATH_REST + r"))+?")
+_BOLD_OUTER_RE = re.compile(r"(?<!\*)\*\*(" + BOLD_TEXT + r")\*\*(?!\*)")
 
 # The forms below mirror wiki-build/references/rare-types.md. Historical
 # years are not zero-padded: the BCE/CE rule explicitly needs values below
@@ -552,12 +570,16 @@ _CIRCA_YEAR = rf"c\. {_YEAR}"
 _CIRCA_RANGE = rf"(?:{_CIRCA_YEAR} – (?:{_CIRCA_YEAR}|{_YEAR})|{_YEAR} – {_CIRCA_YEAR})"
 _PARTIAL_RANGE = rf"(?:(?:{_CIRCA_YEAR}|{_YEAR}) – \?|\? – (?:{_CIRCA_YEAR}|{_YEAR}))"
 _FLORUIT_RANGE = rf"fl\. {_YEAR}–{_YEAR}"
+# A living Person whose birth year no source states: the earliest stated year
+# of professional activity. Not an Event form.
+_FLORUIT_SINCE = rf"fl\. since {_YEAR}"
 _BORN = rf"b\. {_YEAR}"
 _CALENDAR_DATE = r"(?:[1-9]\d{3})-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])"
 _CALENDAR_DATE_RE = re.compile(_CALENDAR_DATE)
 
 _PERSON_DATE_RE = re.compile(
-    rf"(?:{_EXACT_RANGE}|{_CIRCA_RANGE}|{_PARTIAL_RANGE}|{_FLORUIT_RANGE}|{_BORN})")
+    rf"(?:{_EXACT_RANGE}|{_CIRCA_RANGE}|{_PARTIAL_RANGE}|{_FLORUIT_RANGE}|"
+    rf"{_FLORUIT_SINCE}|{_BORN})")
 _EVENT_DATE_RE = re.compile(
     rf"(?:{_YEAR}|{_CALENDAR_DATE}|{_EXACT_RANGE}|{_CIRCA_YEAR}|"
     rf"{_CIRCA_RANGE}|{_PARTIAL_RANGE}|(?:annual|ongoing), since {_YEAR})")
@@ -772,6 +794,106 @@ def opening_paragraph(text):
     return re.split(r"\n[ \t]*\n", value, maxsplit=1)[0].strip()
 
 
+_ATX_HEADING_LINE_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(.*?))?[ \t]*$")
+
+
+def first_prose_paragraph_lines(text):
+    """Return ``(start, end)`` line indexes of the body's opener paragraph.
+
+    The opener is the first blank-separated paragraph whose first line can
+    begin prose (:func:`body_opens_with_prose`). A leading heading, display
+    math, embed, list, table or listing is skipped, and an ATX heading line
+    is a paragraph of its own. A same-line leading comment, masked to
+    spaces, indents the first line like a listing; when the rest of that
+    line can begin prose, its paragraph is the opener. Without such a
+    paragraph the first visible paragraph is returned, and a text with none
+    gives ``None``.
+    """
+    lines = (text or "").split("\n")
+    visible = strip_code(text or "").split("\n")
+    uncommented = mask_body_comments(text or "").split("\n")
+    first = next((index for index, line in enumerate(uncommented)
+                  if line.strip()), None)
+    if (first is not None and _INDENTED_CODE_RE.match(uncommented[first])
+            and body_opens_with_prose(uncommented[first].lstrip())):
+        end = next((index for index in range(first + 1, len(lines))
+                    if not uncommented[index].strip()), len(lines))
+        return first, end
+    blocks, start = [], None
+    for index, line in enumerate(visible):
+        heading = bool(line.strip()) and bool(
+            _ATX_HEADING_LINE_RE.match(lines[index]))
+        if not line.strip() or heading:
+            if start is not None:
+                blocks.append((start, index))
+                start = None
+            if heading:
+                blocks.append((index, index + 1))
+        elif start is None:
+            start = index
+    if start is not None:
+        blocks.append((start, len(lines)))
+    for start, end in blocks:
+        if body_opens_with_prose("\n".join(lines[start:end])):
+            return start, end
+    return blocks[0] if blocks else None
+
+
+def first_prose_paragraph(text):
+    """Return the opener paragraph :func:`first_prose_paragraph_lines` finds."""
+    span = first_prose_paragraph_lines(text)
+    if span is None:
+        return ""
+    return "\n".join((text or "").split("\n")[span[0]:span[1]]).strip()
+
+
+def heading_repeats_title(heading_text, title):
+    """Whether a heading's text repeats the entry title.
+
+    The title, its base term and the plain form of a math title all count,
+    compared after Unicode normalization and with case folded.
+    """
+    def key(value):
+        value = unicodedata.normalize("NFC", value or "")
+        return " ".join(value.split()).casefold()
+
+    text = re.sub(r"[ \t]+#+[ \t]*$", "", (heading_text or "").strip())
+    if not text or not title:
+        return False
+    forms = {key(title), key(title_display_form(title))}
+    forms.update(key(form) for form in description_subject_forms(title))
+    forms.discard("")
+    return bool({key(text), key(math_title_plain_text(text))} & forms)
+
+
+def leading_title_heading(text, title):
+    """Return the index of a leading heading that repeats the title, else None.
+
+    Only the first nonblank line counts, and it must be an ATX heading. The
+    heading is deleted, never demoted: Obsidian shows the filename as the
+    inline title.
+    """
+    lines = (text or "").split("\n")
+    first = next((index for index, line in enumerate(lines) if line.strip()),
+                 None)
+    if first is None:
+        return None
+    heading = _ATX_HEADING_LINE_RE.match(lines[first])
+    if heading and heading_repeats_title(heading.group(1), title):
+        return first
+    return None
+
+
+def without_leading_title_heading(text, title):
+    """Return the text with a leading title heading blanked, lines kept."""
+    index = leading_title_heading(text, title)
+    if index is None:
+        return text or ""
+    lines = (text or "").split("\n")
+    lines[index] = ""
+    return "\n".join(lines)
+
+
 def count_sentences(text):
     """Conservatively count sentence-ending punctuation runs.
 
@@ -950,7 +1072,8 @@ _HEDGE_RE = re.compile(
 
 
 def flashcard_hedge_hints(text):
-    """Advisory item-19 hints: frequency hedges on a card's line 1.
+    """Advisory hints: frequency hedges on a card's line 1 (item 19) or a
+    description (item 7).
 
     Words inside inline math are ignored. Returns the hedge words in order of
     appearance, lowercased; a candidate for review, never a fault.
@@ -1052,6 +1175,54 @@ def _strip_line3_review_metadata(line):
     return visible
 
 
+def _review_metadata_view(lines):
+    """Return the lint view of ``lines`` and the indexes it hides whole."""
+    visible = list(lines)
+    hidden = set()
+    ordinary_lines = 0
+    card_complete = False
+    index = 0
+    while index < len(lines):
+        if not lines[index].strip():
+            ordinary_lines = 0
+            card_complete = False
+            index += 1
+            continue
+
+        # A block of only schedule state, as a blank line leaves it after a
+        # card, is no card: it stays visible exactly as written.
+        if not ordinary_lines:
+            end = next((later for later in range(index, len(lines))
+                        if not lines[later].strip()), len(lines))
+            if is_review_metadata_block(lines[index:end]):
+                index = end
+                continue
+
+        # Only a complete, contiguous attachment immediately after line 3 is
+        # protected. Keep accepting adjacent attachment blocks so unusual but
+        # valid user-owned scheduling state is never reassigned or deleted.
+        if card_complete:
+            end = (_full_line_html_comment_end(lines, index)
+                   or _metadata_callout_end(lines, index))
+            if end is not None:
+                for attached in range(index, end):
+                    visible[attached] = ""
+                    hidden.add(attached)
+                index = end
+                continue
+
+            # The first non-attachment byte after line 3 closes the attachment
+            # position. A later SR-looking block must remain visible.
+            card_complete = False
+
+        ordinary_lines += 1
+        if ordinary_lines == 3:
+            visible[index] = _strip_line3_review_metadata(lines[index])
+            card_complete = True
+        index += 1
+    return visible, hidden
+
+
 def strip_flashcard_review_metadata(text):
     """Hide recognized review metadata from a read-only flashcard lint view.
 
@@ -1064,46 +1235,7 @@ def strip_flashcard_review_metadata(text):
     and ordinary visible content remain visible so item 19 can report malformed
     cards rather than silently discard content.
     """
-    lines = (text or "").split("\n")
-    visible = list(lines)
-    ordinary_lines = 0
-    card_complete = False
-    index = 0
-    while index < len(lines):
-        if not lines[index].strip():
-            ordinary_lines = 0
-            card_complete = False
-            index += 1
-            continue
-
-        # Only a complete, contiguous attachment immediately after line 3 is
-        # protected. Keep accepting adjacent attachment blocks so unusual but
-        # valid user-owned scheduling state is never reassigned or deleted.
-        if card_complete:
-            comment_end = _full_line_html_comment_end(lines, index)
-            if comment_end is not None:
-                for comment_line in range(index, comment_end):
-                    visible[comment_line] = ""
-                index = comment_end
-                continue
-
-            callout_end = _metadata_callout_end(lines, index)
-            if callout_end is not None:
-                for callout_line in range(index, callout_end):
-                    visible[callout_line] = ""
-                index = callout_end
-                continue
-
-            # The first non-attachment byte after line 3 closes the attachment
-            # position. A later SR-looking block must remain visible.
-            card_complete = False
-
-        ordinary_lines += 1
-        if ordinary_lines == 3:
-            visible[index] = _strip_line3_review_metadata(lines[index])
-            card_complete = True
-        index += 1
-    return "\n".join(visible)
+    return "\n".join(_review_metadata_view((text or "").split("\n"))[0])
 
 
 def parse_flashcard_blocks(text):
@@ -1112,13 +1244,17 @@ def parse_flashcard_blocks(text):
     It never reads line 2, so a card parses alike whatever its separator,
     such as an extra question card's `?`. Recognized Spaced Repetition
     state and trailing block IDs attached to a complete card are omitted by
-    ``strip_flashcard_review_metadata``. Ordinary visible content
+    ``strip_flashcard_review_metadata``. A hidden attachment line, a blank
+    line inside it included, neither splits nor joins a block, so content
+    after an attachment stays in its card's block. Ordinary visible content
     stays in its block so callers can report it as malformed rather than
     silently treating it as review state.
     """
-    visible = strip_flashcard_review_metadata(text)
+    visible, hidden = _review_metadata_view((text or "").split("\n"))
     cards, buffer = [], []
-    for line in visible.split("\n"):
+    for index, line in enumerate(visible):
+        if index in hidden:
+            continue
         if not line.strip():
             if buffer:
                 cards.append(buffer)
@@ -1128,6 +1264,27 @@ def parse_flashcard_blocks(text):
     if buffer:
         cards.append(buffer)
     return cards
+
+
+def is_review_metadata_block(block_lines):
+    """Whether a flashcard block holds only Spaced Repetition schedule state.
+
+    ``block_lines`` is one block from :func:`parse_flashcard_blocks`. It is
+    True only when the whole block is whole-line ``<!--SR:…-->`` comments
+    and exact ``sr|card-metadata`` callouts, as when a blank line separates a
+    schedule from its card. Such a block is neither a card nor an attachment:
+    callers never count it as a card, and report it so it stays byte-for-byte,
+    never deleted, moved or reattached.
+    """
+    lines = list(block_lines or ())
+    index = 0
+    while index < len(lines):
+        end = (_full_line_html_comment_end(lines, index)
+               or _metadata_callout_end(lines, index))
+        if end is None:
+            return False
+        index = end
+    return bool(lines)
 
 
 def opener_subject_date_status(opener, entry_type):
@@ -1541,6 +1698,12 @@ def run_self_test(verbose=False):
          "**Scholar** (c. 970 – 1037) wrote treatises.", "valid"),
         ("floruit Person range", "Person",
          "**Artist** (fl. 1480–1510) painted murals.", "valid"),
+        ("open floruit Person", "Person",
+         "**Researcher** (fl. since 2020) runs a lab.", "valid"),
+        ("unbounded floruit dash is malformed", "Person",
+         "**Researcher** (fl. 2020–) runs a lab.", "malformed"),
+        ("open floruit is not an Event form", "Event",
+         "**Program** (fl. since 2020) met.", "malformed"),
         ("partial Person range", "Person",
          "**Writer** (? – 1650) wrote essays.", "valid"),
         ("approximate partial Person range", "Person",
@@ -1637,6 +1800,48 @@ def run_self_test(verbose=False):
              "Metric | Value\n--- | ---", "[ref]: https://example.test",
              "<div>", "$$x$$", "![[figure.png]]")],
          [True] + [False] * 17),
+        ("the opener is the first prose paragraph after leading blocks",
+         [first_prose_paragraph(value) for value in (
+             "# Mean\n\nThe **mean** is an average.\n\nMore text.",
+             "## Overview\nThe **mean** is an average.",
+             "$$\nx\n$$\n\n- item\n\n```\nfoo\n\n**bar** baz\n```\n\n"
+             "The **mean** opens.",
+             "\n\nThe **mean** is first.\n\n## Later",
+             "## Only a heading", "")],
+         ["The **mean** is an average.", "The **mean** is an average.",
+          "The **mean** opens.", "The **mean** is first.",
+          "## Only a heading", ""]),
+        ("the opener's line span counts from the text's first line",
+         [first_prose_paragraph_lines(value) for value in (
+             "# Mean\n\nThe **mean** is\nan average.", "   \n", "")],
+         [(2, 4), None, None]),
+        ("a same-line leading comment, raw or masked, keeps its paragraph "
+         "the opener",
+         [first_prose_paragraph_lines(value) for value in (
+             "<!-- note --> The **mean** is\nan average.\n\nIt is **linear**.",
+             "%%checked%% The **median** is central.\n\nIt resists outliers.",
+             " " * 12 + "The **mode** is common.\n\nIt is **frequent**.")],
+         [(0, 2), (0, 1), (0, 1)]),
+        ("a heading repeats the title in any case, as its base or math form",
+         [heading_repeats_title(text, title) for text, title in (
+             ("Mean", "Mean"), ("random Forest #", "Random forest"),
+             ("Feature", "Feature (machine learning)"),
+             ("Feature (machine learning)", "Feature (machine learning)"),
+             ("k-nearest neighbors", "$k$-nearest neighbors"),
+             ("Overview", "Mean"), ("", "Mean"), (None, "Mean"))],
+         [True, True, True, True, True, False, False, False]),
+        ("only a leading ATX heading that repeats the title is found",
+         [leading_title_heading(value, "Mean") for value in (
+             "# Mean\n\nThe **mean** is an average.",
+             "\n## Mean\nThe **mean** is an average.",
+             "# Overview\n\nThe **mean** is an average.",
+             "The **mean** is an average.\n\n# Mean",
+             "Mean\n====\n\nThe **mean** is an average.")],
+         [0, 1, None, None, None]),
+        ("blanking the leading title heading keeps every line",
+         [without_leading_title_heading(value, "Mean") for value in (
+             "# Mean\n\nThe **mean** is.", "# Overview\n\nText.")],
+         ["\n\nThe **mean** is.", "# Overview\n\nText."]),
         ("ordinary title text and case are preserved",
          math_title_plain_text("Ordinary Title-Case"),
          "Ordinary Title-Case"),
@@ -2028,8 +2233,41 @@ def run_self_test(verbose=False):
          parse_flashcard_blocks(
              "A complete definition.\n??\nTerm\n"
              "> [!sr|card-metadata]\n> <!--SR:state-->\n> Visible content"),
-         [["A complete definition.", "??", "Term"],
-          ["> Visible content"]]),
+         [["A complete definition.", "??", "Term", "> Visible content"]]),
+        ("a hidden attachment neither splits nor joins a block",
+         [parse_flashcard_blocks(value) for value in (
+             "A complete definition.\n??\nTerm\n<!--SR:state-->\n^term-card",
+             "A complete definition.\n??\nTerm\n"
+             "> [!sr|card-metadata]\n> <!--SR:state-->\n^term-card",
+             "A complete definition.\n??\nTerm\n<!--SR:\na\n\nb\n-->\n"
+             "^term-card")],
+         [[["A complete definition.", "??", "Term", "^term-card"]]] * 3),
+        ("content after an attached schedule stays in the card's block",
+         parse_flashcard_blocks("Def.\n??\nTerm\n<!--SR:s-->\nA.\nB\nC"),
+         [["Def.", "??", "Term", "A.", "B", "C"]]),
+        ("a block of only schedule comments or metadata callouts is review "
+         "state",
+         [is_review_metadata_block(block) for block in (
+             ["<!--SR:!2026-03-01,12,270-->"],
+             ["> [!sr|card-metadata]", "> <!--SR:state-->"],
+             ["> [!sr|card-metadata]", ">", "> <!--SR:state--> ^term-card"],
+             ["<!--SR:a-->", "<!--SR:b-->", "<!--SR:c-->"],
+             ["<!--SR:", "!2026-03-01,12,270", "-->"])],
+         [True] * 5),
+        ("a detached schedule block stays verbatim and is review state",
+         (lambda blocks: (blocks, is_review_metadata_block(blocks[-1])))(
+             parse_flashcard_blocks(
+                 "Def.\n??\nTerm\n\n> [!sr|card-metadata]\n>\n"
+                 "> <!--SR:s--> ^term-card")),
+         ([["Def.", "??", "Term"],
+           ["> [!sr|card-metadata]", ">", "> <!--SR:s--> ^term-card"]],
+          True)),
+        ("a card, an unterminated schedule or plain text is not review state",
+         [is_review_metadata_block(block) for block in (
+             ["Def.", "??"], ["Def.", "??", "Term"], ["<!--SR:state"],
+             ["Visible content"], ["<!--SR:a--> trailing"],
+             ["> [!sr|card-metadata]", "> Visible content"], [])],
+         [False] * 7),
         ("metadata parsing never changes the source bytes",
          (lambda source: (
              parse_flashcard_blocks(source), source.encode("utf-8")))(
@@ -2147,10 +2385,23 @@ def run_self_test(verbose=False):
             ("[[sample]]" in masked, "[[visible]]" in masked,
              masked[:2] == source[:2], len(masked)),
             (False, True, True, len(source))))
-    source = "An unmatched ` tick.\n\n[[visible]]\n\nAnother ` tick."
-    helper_cases.append((
-        "unmatched inline ticks cannot hide later paragraphs",
-        mask_body_comments(source, mask_code=True), source))
+    for newline in ("\n", "\r\n", "\r"):
+        source = ("An unmatched ` tick.\n\n[[visible]]\n\nAnother ` tick."
+                  .replace("\n", newline))
+        helper_cases.append((
+            "unmatched inline ticks cannot hide later paragraphs: "
+            + repr(newline),
+            mask_body_comments(source, mask_code=True), source))
+        source = ("A stray ` tick.\n\n<!-- hidden `x`\nsecret\n-->\n"
+                  .replace("\n", newline))
+        masked = mask_body_comments(source)
+        helper_cases.append((
+            "a stray tick cannot expose a later comment, and line endings "
+            "survive: " + repr(newline),
+            ("secret" in masked, masked.startswith("A stray ` tick."),
+             [(i, c) for i, c in enumerate(masked) if c in "\r\n"]),
+            (False, True,
+             [(i, c) for i, c in enumerate(source) if c in "\r\n"])))
     source = "Wrapped `literal\n<!-- example` then [[visible]]."
     helper_cases.append((
         "soft-wrapped inline code keeps its literal comment delimiter",
@@ -2196,6 +2447,22 @@ def run_self_test(verbose=False):
             ("ArXiv", "arXiv"), ("Arxiv", "arXiv"), ("", ""), ("a", "A"),
             ("ab", "abc"), (None, "a"), ("a", None), ("PCA", "pca"))],
         [True, False, True, True, False, False, False, False]))
+    import time
+    for text in ("Here $a^{**}$ is the dual and " + "$x_i$ and " * 40,
+                 "**a " + "\\$ " * 40):
+        start = time.perf_counter()
+        list(_BOLD_OUTER_RE.finditer(text))
+        helper_cases.append((
+            "an unclosed outer bold fails in linear time: " + text[:20],
+            time.perf_counter() - start < 1.0, True))
+    helper_cases.append((
+        "the outer bold keeps escaped dollars, math, `**` in math and a "
+        "currency dollar",
+        [_BOLD_OUTER_RE.search(text).group(1) for text in (
+            "The **\\$5 bill** (FB) is worth $x$ dollars",
+            "The **$k$-means algorithm** (KMA) uses $k$",
+            "**$a^{**}$ dual** (AD)", "**US$ price** (USP)")],
+        ["\\$5 bill", "$k$-means algorithm", "$a^{**}$ dual", "US$ price"]))
     for name, got, expected in helper_cases:
         ok = got == expected
         if verbose or not ok:

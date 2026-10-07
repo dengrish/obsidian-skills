@@ -84,10 +84,11 @@ and wiki-lint can run independently of any source-processing task.
 
 **Renames repair their links automatically.** When a skill renames a vault
 file (pdf-organize renaming or filing a PDF, clipping-clean reprocessing a
-clipping under a new slug, wiki-lint retitling an entry), it rewrites every
-link to that file in the same run, as Obsidian does. The request that leads
-to the rename authorizes the repair; no skill asks again or hands it to
-another skill. A reference it cannot rewrite safely keeps the old file in
+clipping under a new slug, wiki-lint retitling an entry, figure-extract
+moving Extended Data crops to their ED names), it rewrites every link to that
+file in the same run, as Obsidian does. Each also repairs Obsidian Canvas
+boards: file cards, group backgrounds and text cards follow the moved files. The request that leads to the rename
+authorizes the repair; no skill asks again or hands it to another skill. A reference it cannot rewrite safely keeps the old file in
 place, and the run reports it.
 
 wiki-build adds source-supported content only to the entries in its current
@@ -135,13 +136,15 @@ own the details.
 
 [wiki-add](skills/wiki-add/SKILL.md) is the create-only research route for
 topics queued in `add-to-wiki.md` or a backlog the user selects, or named
-directly without a source document. It leaves every existing entry unchanged
-and checks off only queued topics it created or found already present;
-enriching an existing entry from a new source remains wiki-build's job, and
-deepening it from the sources it already cites is wiki-lint's. wiki-lint also
-creates a missing entry its own run establishes, researched the same way but
-citing only a document the entries using the term already cite or a web page
-by URL, and links and places it in the same run.
+directly without a source document. A queue holds one flush-left list item
+per topic, such as `- [ ] Topic`; wiki-add reports plain lines, table rows
+and nested open tasks instead of processing them. It leaves every existing
+entry unchanged and checks off only queued topics it created or found already
+present; enriching an existing entry from a new source remains wiki-build's
+job, and deepening it from the sources it already cites is wiki-lint's.
+wiki-lint also creates a missing entry its own run establishes, researched the
+same way but citing only a document the entries using the term already cite or
+a web page by URL, and links and places it in the same run.
 
 stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum

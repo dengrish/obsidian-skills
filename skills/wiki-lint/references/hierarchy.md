@@ -15,18 +15,26 @@ outline. `#misc` uses `Wiki/misc` with one level of title-sorted members.
 
 ## Scope closure
 
-Seed the requested entries and named disciplines. Include every current and
+Seed the requested entries and named disciplines. An entry in scope only for
+its [user issues](../SKILL.md#user-issues) is a seed only when one of its
+issues routes to item 8 or Task 3, or a retitle, split or merge resolves one.
+A [missing entry](refactors.md#create-a-missing-entry) created to resolve a
+user issue is a seed, so Task 3 places it. Include every current and
 proven prior group of those entries, all members of those groups, their Wiki
-roots, and their MOCs. Repeat until stable. Keep old-tag and old-placement
+roots, and their MOCs. Repeat until stable. Groups that share no entry, root
+or MOC are separate closures. Keep old-tag and old-placement
 evidence across rescans so retagging removes stale membership; a retag from or
 to `#misc` closes misc together with the old and new disciplines. Legacy
 multi-tagged entries connect all their old groups while Task 1 selects one home.
 
-Run Task 3 only when the request covers that complete set; otherwise report
-the required expansion and complete the narrower authorized tasks. Never
-publish part of a MOC or leave parents derived from a different plan. Blank,
-missing, malformed, or multiple tags need Task 1 resolution; they do not imply
-misc. If one stays unresolved, report the item-8 blocker and still complete the
+Run Task 3 on each closure the request covers in full or whose expansion the
+user authorizes, as a request to
+[fix the flagged issues](../SKILL.md#explicit-requests) does. Skip every
+other closure, report its required expansion, and complete the narrower
+authorized tasks. Never publish part of a MOC or leave parents derived from
+a different plan. Blank, missing, malformed, or multiple tags need Task 1 resolution; they do not imply
+misc. If one stays unresolved, because Task 1 was outside the request or the
+metadata settles no home, report the item-8 blocker and still complete the
 closure: an entry naming no enum discipline stays unplaced with its existing
 parents; otherwise place it in each named group (misc only when `#misc` is its
 sole tag) with the union of its nearest linked ancestors. An entry with one
@@ -58,7 +66,9 @@ questions the definition names. The misc root is `Wiki/misc`, titled
 vault's contents. Use the ordinary entry schema, one matching tag,
 `parents: []` and no Flashcards section; an existing root keeps its card
 unless the user asks to remove it. Like every entry, a root cites at least
-one source: the page or document it is derived from.
+one source: the page or document it is derived from. An existing root with
+an empty `sources:` gets its citation in Task 1b under
+[item 4](qc-items.md#4-sources).
 New roots use today's date for `created:` and `updated:` and set
 `read: false` and `issues: ""`; the date freeze of Tasks 1, 2 and 3 covers
 existing notes only.

@@ -162,8 +162,25 @@ NAME_PARTICLES = {
 
 MULTI_SEP = re.compile(r"\s+and\s+|\s*&\s*|\s*;\s*", re.IGNORECASE)
 
-# Articles, prepositions, possessives and rhetorical filler — dropped from a
-# title when --title derives the topic automatically.
+# Modal verbs and "not". They are filler in a derived topic, but a short one
+# such as CAN (Controller Area Network) can still be an unlisted acronym, so
+# _case_word keeps flagging them.
+MODAL_FILLER = {
+    "may", "might", "can", "could", "will", "would", "should", "must", "not",
+}
+
+# Right after one of these words a modal-spelled word is a noun: "The May Jobs
+# Report", "His Will".
+NOUN_MARKERS = {"a", "an", "the", "his", "her", "its", "my", "your", "our",
+                "their"}
+
+# Articles, prepositions, possessives, auxiliary and modal verbs, "not" and
+# rhetorical filler — dropped from a title when --title derives the topic
+# automatically. Matching ignores case, except that a title with lowercase
+# letters keeps an all-capitals word as an acronym (CAN, IT). A modal-spelled
+# word after an article or possessive, or capitalized inside a sentence-case
+# title, is a noun or a name and stays. "no" is deliberately absent, so
+# phrases like "No Free Lunch" keep it.
 FILLER = {
     "a", "an", "the", "of", "for", "to", "in", "on", "at", "by", "with", "from",
     "and", "or", "but", "as", "is", "are", "was", "were", "be", "been", "it",
@@ -171,7 +188,7 @@ FILLER = {
     "you", "your", "my", "our", "their", "his", "her", "just", "how", "why",
     "what", "when", "where", "who", "met", "about", "into", "over", "up",
     "out", "so", "very", "really", "new", "s",
-}
+} | MODAL_FILLER
 
 # Acronyms and initialisms are fully uppercased (filename-slug.md). Only the
 # documented set plus initialisms that can't collide with an ordinary English
@@ -559,7 +576,8 @@ def _case_word(w, acronyms=None, uncertain=None):
         return w.upper()                          # agi -> AGI
     if _PLURAL_ACRONYM_RE.match(w) and w[:-1].upper() in acronyms:
         return w[:-1].upper() + "s"               # ooms -> OOMs, llms -> LLMs
-    if uncertain is not None and _SHORT_WORD_RE.match(w) and w not in FILLER:
+    if (uncertain is not None and _SHORT_WORD_RE.match(w)
+            and (w not in FILLER or w in MODAL_FILLER)):
         uncertain.append(w)                       # could be an unlisted acronym
     return w[0].upper() + w[1:]                   # plain word -> Title Case
 
@@ -615,8 +633,31 @@ def topic_from_title(title, limit=4, notes=None):
     cleaned = [(x, _clean_word(x)) for x in raw_words]
     words = [w for _, w in cleaned if w]
     reduced = [f"{x} → {w}" for x, w in cleaned if _reported_drops(x, w)]
-    kept = [w for w in words if w.lower() not in FILLER]
-    dropped = [w for w in words if w.lower() in FILLER]
+    # A title with lowercase letters marks an acronym by writing it in
+    # capitals; an all-capitals title marks nothing.
+    shouted = not any(c.islower() for c in title)
+    # A sentence-case title writes its content words in lowercase, so a
+    # capitalized modal-spelled word inside it is a name ("Theresa May
+    # resigns"). A Title-Case title capitalizes modal verbs too.
+    content = [w for w in words[1:] if w[:1].isalpha()
+               and w.lower() not in FILLER and not w.isupper()]
+    lower = sum(w[:1].islower() for w in content)
+    sentence_case = lower > 0 and lower >= len(content) - lower
+
+    def is_filler(k, w):
+        if w.lower() not in FILLER:
+            return False
+        if not shouted and len(w) > 1 and w.isupper():
+            return False                          # an acronym: CAN, IT
+        if w.lower() in MODAL_FILLER and k and (
+                words[k - 1].lower() in NOUN_MARKERS
+                or (sentence_case and w[:1].isupper())):
+            return False                          # a noun or a name
+        return True
+
+    filler = [is_filler(k, w) for k, w in enumerate(words)]
+    kept = [w for w, is_filler in zip(words, filler) if not is_filler]
+    dropped = [w for w, is_filler in zip(words, filler) if is_filler]
     over_limit = kept[limit:]
     kept = kept[:limit]
     if notes is not None:
@@ -1037,6 +1078,36 @@ def run_self_test():
     check("--topic-limit is honoured",
           slug_of(title=_long, no_author=True, year=2025, topic_limit=2),
           "Deep_Learning_2025")
+    # modal verbs and "not" are filler, so they cannot push a content word
+    # past the limit
+    check("--title drops modals and negation",
+          slug_of(title="Why Aging May Be a Program, Not a Breakdown",
+                  no_author=True, year=2026), "Aging_Program_Breakdown_2026")
+    check("...but keeps NO, which can be an acronym",
+          slug_of(title="How NO Signaling Controls Blood Pressure",
+                  no_author=True, year=2026), "NO_Signaling_Controls_Blood_2026")
+    # an all-capitals word in a mixed-case title is an acronym, even when it
+    # spells a filler word; an all-capitals title marks nothing
+    check("...and keeps CAN, an acronym spelled like a modal",
+          slug_of(title="CAN Bus Attacks on Modern Cars", no_author=True,
+                  year=2024), "CAN_Bus_Attacks_Modern_2024")
+    check("...but an all-capitals title still drops its filler",
+          slug_of(title="WHY AGING MAY BE A PROGRAM", no_author=True,
+                  year=2026), "AGING_PROGRAM_2026")
+    # a modal-spelled word after an article is a noun, and a capitalized one
+    # inside a sentence-case title is a name
+    check("...but keeps a month after an article",
+          slug_of(title="The May Jobs Report Surprised Economists",
+                  no_author=True, year=2024), "May_Jobs_Report_Surprised_2024")
+    check("...and a name in a sentence-case title",
+          slug_of(title="Theresa May resigns as prime minister",
+                  no_author=True, year=2019), "Theresa_May_Resigns_Prime_2019")
+    check("...while a sentence-case title still drops its modals",
+          slug_of(title="Why aging may be a program, not a breakdown",
+                  no_author=True, year=2026), "Aging_Program_Breakdown_2026")
+    _can = build_slug(topic="can bus security", no_author=True, year=2024)
+    check("--topic still flags a modal as a possible unlisted acronym",
+          any("unlisted acronyms: bus, can " in n for n in _can["notes"]), True)
 
     # --- the three combined worked examples --------------------------------
     check("combined: Teslo 2026",

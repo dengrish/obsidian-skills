@@ -181,6 +181,15 @@ class CompatibilityTests(unittest.TestCase):
         for path in sorted(p for root in roots for p in root.rglob("*.py")):
             source = path.read_text(encoding="utf-8")
             tree = ast.parse(source, filename=str(path))
+            # PyMuPDF's TextWriter.write_text(page) draws on a PDF page; it
+            # is not a file boundary.
+            text_writers = {
+                target.id for node in ast.walk(tree)
+                if isinstance(node, ast.Assign)
+                and isinstance(node.value, ast.Call)
+                and isinstance(node.value.func, ast.Attribute)
+                and node.value.func.attr == "TextWriter"
+                for target in node.targets if isinstance(target, ast.Name)}
             for node in ast.walk(tree):
                 if not isinstance(node, ast.Call):
                     continue
@@ -189,6 +198,10 @@ class CompatibilityTests(unittest.TestCase):
                 expansion = any(item.arg is None for item in node.keywords)
                 if (isinstance(node.func, ast.Attribute)
                         and node.func.attr in ("read_text", "write_text")):
+                    if (node.func.attr == "write_text"
+                            and isinstance(node.func.value, ast.Name)
+                            and node.func.value.id in text_writers):
+                        continue
                     if "encoding" not in keywords:
                         problems.append(
                             "%s:%d %s() has no encoding" %
@@ -286,6 +299,22 @@ class CompatibilityTests(unittest.TestCase):
                                 encoding="utf-8", timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
         self.assertIn("parser check passed", result.stdout)
+
+    def test_pdf_organize_names_a_text_fallback_for_naming(self):
+        # A host that cannot view a PDF still reads the first pages for a
+        # name, through a packaged reader behind the parser check.
+        text = " ".join((ROOT / "skills/pdf-organize/SKILL.md").read_text(
+            encoding="utf-8").split())
+        self.assertIn("pdftotext -layout -f 1 -l 3 '<pdf>' -", text)
+        self.assertIn("python3 '<plugin>/skills/paper-summarize/scripts/"
+                      "paper_text.py' '<pdf>' --pages", text)
+        self.assertIn("python3 '<plugin>/shared/scripts/check_parsers.py'", text)
+        self.assertTrue(
+            (ROOT / "skills/paper-summarize/scripts/paper_text.py").is_file())
+        mapping = json.loads(
+            (ROOT / "tools/package-files.json").read_text(encoding="utf-8"))
+        self.assertIn("skills/paper-summarize/scripts/paper_text.py",
+                      mapping["knowledge"])
 
     def test_shared_helper_docs_use_the_plugin_python_floor(self):
         helpers = (
@@ -1788,6 +1817,41 @@ issues: ""
                     self.assertEqual(
                         organizer._note_is_about(note, "Doe_Study_2025"),
                         expected == shared.ORIGIN_CASE_PDF)
+                    # The detail reader returns the same origin, and names a
+                    # problem exactly when the metadata is malformed.
+                    origin, problem = shared.read_note_origin_detail(note)
+                    self.assertEqual(origin, shared.read_note_origin(note))
+                    try:
+                        shared.parse_source_fields(metadata.split("\n"))
+                    except ValueError:
+                        malformed = True
+                    else:
+                        malformed = False
+                    self.assertEqual(problem is not None, malformed, problem)
+
+    def test_lint_clean_summary_notes_are_owned_by_the_origin_reader(self):
+        # A lint-clean note must be valid YAML and must belong to its PDF under
+        # the shared origin reader; otherwise every later scan reports this
+        # PDF's own note as a collision.
+        note_lint = load("compat_lint_origin",
+                         ROOT / "skills/paper-summarize/scripts/note_lint.py")
+        shared = load("compat_lint_origin_reader",
+                      ROOT / "shared/scripts/yaml_scalars.py")
+        clean = [("GOOD", note_lint.GOOD, "empirical")] + [
+            (case[0], case[1], case[3] if len(case) == 4 else "empirical")
+            for case in note_lint._cases() if case[2] is note_lint.CLEAN]
+        with tempfile.TemporaryDirectory(prefix="obsidian-lint-origin-") as tmp:
+            note = Path(tmp) / "note.md"
+            for name, text, mode in clean:
+                with self.subTest(case=name):
+                    self.assertEqual(note_lint.lint(text, mode=mode), [])
+                    lines = text.split("\n")
+                    metadata = yaml.safe_load(
+                        "\n".join(lines[1:lines.index("---", 1)]))
+                    self.assertIsInstance(metadata, dict)
+                    note.write_text(text, encoding="utf-8", newline="\n")
+                    self.assertEqual(shared.read_note_origin(note),
+                                     metadata["sources"][0])
 
     def test_heading_contract_requires_its_reference_and_ordered_examples(self):
         conventions = load("convention_heading_contract", ROOT / "tests/test_conventions.py")

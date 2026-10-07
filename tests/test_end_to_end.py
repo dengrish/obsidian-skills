@@ -12,6 +12,7 @@ import json
 import os
 import re
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 import tempfile
@@ -241,6 +242,45 @@ class WorkflowTests(unittest.TestCase):
         self.assertEqual(
             [(row["line"], row["reason"]) for row in report["report_only"]],
             [(2, "unindented line continues the request above")])
+
+    def test_backlog_reports_text_that_is_not_a_pending_request(self):
+        queue = self.vault / "add-to-wiki.md"
+        for number, (text, rows) in enumerate((
+                ("- [x] Done\nParticle filter\n",
+                 [(2, "unindented line continues an item that is not a pending request")]),
+                ("- [ ] A\n\nParticle filter\n",
+                 [(3, "text outside a list item is not a request")]))):
+            with self.subTest(text=text):
+                queue.write_text(text, encoding="utf-8")
+                snapshot = Path(self.scratch.name) / ("stray-%d.json" % number)
+                report = json.loads(self.run_script(
+                    "skills/wiki-add/scripts/backlog.py", "scan", queue,
+                    "--out", snapshot).stdout)
+                self.assertEqual(
+                    [(row["line"], row["reason"]) for row in report["report_only"]], rows)
+                self.assertEqual(report["counts"]["report_only"], 1)
+
+    def test_backlog_reports_a_nested_open_task_before_and_after_completion(self):
+        queue = self.vault / "add-to-wiki.md"
+        queue.write_text("- [ ] Regularization\n  - [ ] Dropout\n", encoding="utf-8")
+        helper = "skills/wiki-add/scripts/backlog.py"
+        nested = [(2, "nested task is not a top-level request")]
+        first = Path(self.scratch.name) / "nested-1.json"
+        report = json.loads(self.run_script(helper, "scan", queue, "--out", first).stdout)
+        self.assertEqual([(item["text"], item["context_lines"]) for item in report["items"]],
+                         [("Regularization", ["  - [ ] Dropout"])])
+        self.assertEqual(
+            [(row["line"], row["reason"]) for row in report["report_only"]], nested)
+        entry = self.vault / "Wiki/regularization.md"
+        entry.write_text("Regularization evidence.\n", encoding="utf-8")
+        self.run_script(helper, "complete", "--snapshot", first,
+                        "--item", report["items"][0]["id"],
+                        "--wiki", self.vault / "Wiki", "--entry", entry)
+        second = Path(self.scratch.name) / "nested-2.json"
+        rescan = json.loads(self.run_script(helper, "scan", queue, "--out", second).stdout)
+        self.assertEqual((rescan["items"], rescan["counts"]["completed_skipped"]), ([], 1))
+        self.assertEqual(
+            [(row["line"], row["reason"]) for row in rescan["report_only"]], nested)
 
     def test_pdf_rename_does_not_claim_a_wrongly_qualified_article_origin(self):
         for folder in ("Missing", "Sources/Other"):
@@ -1006,6 +1046,26 @@ raise SystemExit(main(fixture['args'], client))
         self.run_script("skills/paper-summarize/scripts/note_lint.py", note,
                         "--mode", "notice")
 
+    def test_paper_note_lint_reads_display_math_through_the_shared_floor(self):
+        # The installed command resolves equation_coverage.py from the shared
+        # layer: two equations on one display line are an advisory, and an
+        # absolute value inside a display is math, not a table.
+        note = self.notes / "Doe_Correction_2025.md"
+        cited = "entries.<sup>[[Doe_Correction_2025.pdf#page=1|1]]</sup>"
+        note.write_text(notice_note("Doe_Correction_2025").replace(
+            cited, cited + "\n\n$$\nd_1 = 1.5, \\qquad d_2 = 3.7\n$$\n\n"
+            "Each value is a corrected dose.\n\n$$\n|d_1 - d_2| = 2.2\n$$\n\n"
+            "The bars give the size of the gap."),
+            encoding="utf-8", newline="\n")
+        result = self.run_script(
+            "skills/paper-summarize/scripts/note_lint.py", note,
+            "--mode", "notice")
+        self.assertIn("advisory: a display line holds more than one equation",
+                      result.stdout)
+        self.assertIn("1 advisory(s)", result.stdout)
+        self.assertNotIn("violation", result.stdout.replace(
+            "no violations", ""))
+
     def test_pdf_repair_and_rename_preserve_notes_images_and_ledgers(self):
         organizer = "skills/pdf-organize/scripts/organize.py"
         batch = "skills/figure-extract/scripts/batch_extract.py"
@@ -1090,6 +1150,54 @@ raise SystemExit(main(fixture['args'], client))
                         "--mode", "empirical", "--images", self.images)
         self.assertEqual(self.scan_papers()["counts"]["done"], 1)
 
+    def test_extended_data_switch_moves_links_to_the_crops_it_moves(self):
+        # A default run folds Extended Data into _fig_S<N>, and a summary
+        # embeds those crops. The printed switch moves each Extended Data
+        # figure to _fig_ED<N> and, in the same run, every link with it, so
+        # no embed starts showing the Supplementary figure.
+        batch = "skills/figure-extract/scripts/batch_extract.py"
+        pdf = self.pdfs / "Doe_Nature_2025.pdf"
+        with pymupdf.open() as doc:
+            for caption, fill in (("Figure 1. Main.", (0.5, 0.5, 0)),
+                                  ("Extended Data Figure 1. First.", (1, 0, 0)),
+                                  ("Extended Data Figure 2. Second.", (0, 0.6, 0)),
+                                  ("Supplementary Figure 1. Third.", (0, 0, 1))):
+                page = doc.new_page(width=612, height=792)
+                page.draw_rect((100, 200, 500, 400), fill=fill)
+                page.insert_text((100, 430), caption, fontsize=9)
+            doc.save(pdf)
+        default = self.run_script(batch, "--src", pdf, "--out", self.images,
+                                  "--dpi", 72, expected=1)
+        switch = [line.strip() for line in default.stdout.splitlines()
+                  if "--ed-prefix ED" in line
+                  and "--overwrite-supplementary" in line]
+        self.assertEqual(len(switch), 1, default.stdout)
+        s1 = self.images / "Doe_Nature_2025_fig_S1.png"
+        extended_data = digest(s1)
+        note = self.notes / "Doe_Nature_2025.md"
+        body = summary_note(pdf.stem).replace(
+            "![[Doe_Nature_2025_fig_1.png]]",
+            "![[Doe_Nature_2025_fig_S1.png]]\n\n![[Doe_Nature_2025_fig_S2.png]]")
+        note.write_text(body, encoding="utf-8", newline="\n")
+        entry = self.vault / "Wiki/Control.md"
+        entry.write_text("See ![[Sources/Images/Doe_Nature_2025_fig_S1.png|400]].\n",
+                         encoding="utf-8")
+
+        self.run_script(batch, *shlex.split(switch[0])[2:])
+        self.assertEqual(digest(self.images / "Doe_Nature_2025_fig_ED1.png"),
+                         extended_data)
+        self.assertNotEqual(digest(s1), extended_data)
+        self.assertEqual(note.read_text(encoding="utf-8"), body.replace(
+            "_fig_S1.png", "_fig_ED1.png").replace("_fig_S2.png", "_fig_ED2.png"))
+        self.assertEqual(entry.read_text(encoding="utf-8"),
+                         "See ![[Sources/Images/Doe_Nature_2025_fig_ED1.png|400]].\n")
+        check = self.run_script("skills/pdf-organize/scripts/organize.py", "check",
+                                "--vault", self.vault, pdf, expected=1)
+        cited = [line for line in check.stdout.splitlines() if "cites:" in line]
+        self.assertTrue(cited, check.stdout)
+        self.assertFalse(any("_fig_S1.png" in line or "_fig_S2.png" in line
+                             for line in cited), check.stdout)
+
     def test_pdf_year_rename_keeps_owned_summary_metadata_aligned(self):
         organizer = "skills/pdf-organize/scripts/organize.py"
         source = self.pdfs / "Doe_Correction_2025.pdf"
@@ -1159,6 +1267,64 @@ raise SystemExit(main(fixture['args'], client))
         self.assertFalse(source.exists())
         self.assertEqual(digest(self.pdfs / source.name), original)
 
+    def test_canvas_board_follows_filing_and_rename_of_a_pdf_family(self):
+        organizer = "skills/pdf-organize/scripts/organize.py"
+        source = self.vault / "Inbox/download.pdf"
+        self.make_pdf(source)
+        board = self.vault / "Boards/reading.canvas"
+        board.parent.mkdir()
+
+        def write_board(nodes):
+            board.write_text(json.dumps({"nodes": nodes, "edges": []},
+                                        indent="\t"), encoding="utf-8")
+
+        def card(node_id, path):
+            return {"id": node_id, "type": "file", "file": path,
+                    "x": 0, "y": 0, "width": 400, "height": 400}
+
+        def text_card(text):
+            return {"id": "t", "type": "text", "text": text,
+                    "x": 0, "y": 0, "width": 400, "height": 100}
+
+        write_board([card("p", "Inbox/download.pdf"),
+                     text_card("Read [[download.pdf]] first.")])
+        checked = self.run_script(organizer, "check", source,
+                                  "--vault", self.vault, expected=1)
+        self.assertIn(str(Path("Boards") / "reading.canvas"), checked.stdout)
+        filed = self.run_script(organizer, "rename", "--vault", self.vault,
+                                source, "--to", "Doe_Board_2025.pdf",
+                                "--dest", self.pdfs, "--apply")
+        self.assertIn("Verified: no canvas card points at any of the 1 old "
+                      "path(s).", filed.stdout)
+        nodes = json.loads(board.read_text(encoding="utf-8"))["nodes"]
+        self.assertEqual(nodes[0]["file"], "Sources/PDFs/Doe_Board_2025.pdf")
+        self.assertEqual(nodes[1]["text"], "Read [[Doe_Board_2025.pdf]] first.")
+
+        # The figure and the reading note made from the filed PDF go on the
+        # same board, and a later rename carries all three cards.
+        pdf = self.pdfs / "Doe_Board_2025.pdf"
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
+                        "--src", pdf, "--out", self.images, "--dpi", 72)
+        (self.notes / "Doe_Board_2025.md").write_text(
+            summary_note("Doe_Board_2025"), encoding="utf-8", newline="\n")
+        write_board([card("p", "Sources/PDFs/Doe_Board_2025.pdf"),
+                     card("f", "Sources/Images/Doe_Board_2025_fig_1.png"),
+                     card("n", "Articles/Doe_Board_2025.md"),
+                     text_card("See ![[Doe_Board_2025_fig_1.png]].")])
+        renamed = self.run_script(organizer, "rename", "--vault", self.vault,
+                                  pdf, "--to", "Doe_Renamed_2025.pdf", "--apply")
+        self.assertIn("Verified: no note or canvas cites any of the",
+                      renamed.stdout)
+        nodes = json.loads(board.read_text(encoding="utf-8"))["nodes"]
+        self.assertEqual([node.get("file") for node in nodes[:3]],
+                         ["Sources/PDFs/Doe_Renamed_2025.pdf",
+                          "Sources/Images/Doe_Renamed_2025_fig_1.png",
+                          "Articles/Doe_Renamed_2025.md"])
+        for node in nodes[:3]:
+            self.assertTrue((self.vault / node["file"]).is_file(), node)
+        self.assertEqual(nodes[3]["text"],
+                         "See ![[Doe_Renamed_2025_fig_1.png]].")
+
     def test_book_split_feeds_paper_scan_and_figure_extraction(self):
         book = self.pdfs / "Doe_SynthBook_2025.pdf"
         with pymupdf.open() as doc:
@@ -1207,6 +1373,60 @@ raise SystemExit(main(fixture['args'], client))
         self.assertTrue((self.images /
                          "Doe_SynthBook_2025_01_FirstTopic_fig_1.png").is_file())
 
+        # A split book's figures are its chapters' figures: the named book
+        # lists the chapter crops and extracts over its chapter folder only.
+        named = json.loads(self.run_script(
+            "skills/paper-summarize/scripts/paper_scan.py",
+            "--src", book, "--notes", self.notes,
+            "--images", self.images, "--json").stdout)["pdfs"][0]
+        self.assertEqual(named["status"], "new")
+        self.assertEqual(named["figures"], [])
+        self.assertEqual([Path(path).name for path in named["split_book_chapters"]],
+                         [path.name for path in chapter_paths])
+        self.assertIn("Doe_SynthBook_2025_01_FirstTopic_fig_1.png",
+                      [figure["file"] for figure in named["chapter_figures"]])
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
+                        "--src", chapter_dir, "--out", self.images,
+                        "--dpi", 72)
+        names = [path.name.casefold() for path in self.images.iterdir()]
+        self.assertTrue(any(name.startswith("doe_synthbook_2025_02_secondtopic_fig")
+                            for name in names), names)
+        self.assertFalse(any(name.startswith("doe_synthbook_2025_fig")
+                             for name in names), names)
+        draft = Path(self.scratch.name) / "Doe_SynthBook_2025.md"
+        draft.write_text(summary_note(book.stem).replace(
+            "![[Doe_SynthBook_2025_fig_1.png]]",
+            "![[Doe_SynthBook_2025_01_FirstTopic_fig_1.png]]"),
+            encoding="utf-8", newline="\n")
+        self.run_script("skills/paper-summarize/scripts/note_lint.py", draft,
+                        "--mode", "empirical", "--images", self.images)
+
+    def test_split_book_representations_rename_together(self):
+        # Both copies of a split book pair with one chapter set: renaming one
+        # copy carries the other, so the scanner and extractor still skip both.
+        plain = self.pdfs / "Doe_Book_2020.pdf"
+        scan = self.pdfs / "Doe_Book_2020_src.pdf"
+        chapter = self.pdfs / "Doe_Book_2020" / "Doe_Book_2020_01_Intro.pdf"
+        chapter.parent.mkdir()
+        for path in (plain, scan, chapter):
+            self.make_pdf(path)
+        self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
+                        "--vault", self.vault, scan,
+                        "--to", "Doe_Scan_2020_src.pdf", "--apply")
+        self.assertEqual(sorted(path.name for path in self.pdfs.iterdir()),
+                         ["Doe_Scan_2020", "Doe_Scan_2020.pdf",
+                          "Doe_Scan_2020_src.pdf"])
+        sweep = self.scan_papers()
+        self.assertEqual((sweep["counts"]["book"], sweep["counts"]["chapter"]),
+                         (2, 1))
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
+                        "--src", self.pdfs, "--out", self.images, "--dpi", 72)
+        crops = [path.name for path in self.images.iterdir()
+                 if path.suffix == ".png"]
+        self.assertTrue(crops)
+        self.assertTrue(all(name.startswith("Doe_Scan_2020_01_Intro_fig")
+                            for name in crops), crops)
+
     def test_dotted_pdf_names_require_organization_before_downstream_work(self):
         sources = [self.pdfs / name for name in
                    ("Doe_Study_2025.revised.pdf", "Doe_Study_2025.pdf.pdf")]
@@ -1217,10 +1437,18 @@ raise SystemExit(main(fixture['args'], client))
         self.assertEqual(scan["counts"]["unorganized"], 2)
         self.assertEqual(scan["counts"]["new"], 0)
         batch = "skills/figure-extract/scripts/batch_extract.py"
-        self.run_script(batch, "--src", self.pdfs, "--out", self.images,
-                        "--dpi", 72, expected=1)
+        refused = self.run_script(batch, "--src", self.pdfs, "--out", self.images,
+                                  "--dpi", 72, expected=1)
         self.assertEqual(list(self.images.iterdir()), [])
         self.assertEqual({path: digest(path) for path in sources}, original)
+        # Both remedies say a later pdf-organize rename carries the figures.
+        human = self.run_script(
+            "skills/paper-summarize/scripts/paper_scan.py", "--src", self.pdfs,
+            "--notes", self.notes, "--images", self.images)
+        for output in (refused.stdout, human.stdout):
+            self.assertIn("pdf-organize", output)
+            self.assertIn("carries", output)
+            self.assertNotIn("orphan", output)
 
         self.run_script("skills/pdf-organize/scripts/organize.py", "rename",
                         "--vault", self.vault, sources[0],
@@ -1235,6 +1463,106 @@ raise SystemExit(main(fixture['args'], client))
         self.assertTrue((self.images / "Doe_Study_2025_fig_1.png").is_file())
         self.assertFalse(any("revised" in path.name or ".pdf_fig" in path.name
                              for path in self.images.iterdir()))
+
+    def test_unorganized_extraction_moves_with_a_later_pdf_organize_rename(self):
+        organizer = "skills/pdf-organize/scripts/organize.py"
+        batch = "skills/figure-extract/scripts/batch_extract.py"
+        source = self.pdfs / "download.pdf"
+        self.make_pdf(source)
+        self.run_script(batch, "--src", source, "--out", self.images,
+                        "--dpi", 72, "--allow-unorganized")
+        figure = self.images / "download_fig_1.png"
+        extracted = digest(figure)
+        note = self.notes / "download.md"
+        note.write_text(summary_note("download"), encoding="utf-8", newline="\n")
+        entry = self.vault / "Wiki/rectangle.md"
+        entry.write_text("![[download_fig_1.png]]\n", encoding="utf-8")
+
+        self.run_script(organizer, "rename", "--vault", self.vault, source,
+                        "--to", "Doe_Drawing_2025.pdf", "--apply")
+        renamed_figure = self.images / "Doe_Drawing_2025_fig_1.png"
+        self.assertFalse(figure.exists())
+        self.assertEqual(digest(renamed_figure), extracted)
+        manifest = (self.images / ".figure-manifest.tsv").read_text(encoding="utf-8")
+        self.assertIn("Doe_Drawing_2025_fig_1.png", manifest)
+        self.assertNotIn("download_fig", manifest)
+        self.assertFalse(note.exists())
+        self.assertEqual(
+            (self.notes / "Doe_Drawing_2025.md").read_text(encoding="utf-8"),
+            summary_note("Doe_Drawing_2025"))
+        self.assertEqual(entry.read_text(encoding="utf-8"),
+                         "![[Doe_Drawing_2025_fig_1.png]]\n")
+
+    def test_legacy_crop_of_an_unorganized_pdf_is_adopted_before_its_rename(self):
+        organizer = "skills/pdf-organize/scripts/organize.py"
+        batch = "skills/figure-extract/scripts/batch_extract.py"
+        source = self.pdfs / "Smith2020.pdf"
+        self.make_pdf(source)
+        # A crop from before ownership records existed: real extractor bytes
+        # with no manifest line.
+        legacy_run = Path(self.scratch.name) / "legacy-run"
+        self.run_script(batch, "--src", source, "--out", legacy_run,
+                        "--dpi", 72, "--allow-unorganized")
+        legacy = self.images / "Smith2020_fig_1.png"
+        legacy.write_bytes((legacy_run / legacy.name).read_bytes())
+        original = digest(legacy)
+        entry = self.vault / "Wiki/rectangle.md"
+        entry.write_text("![[Smith2020_fig_1.png]]\n", encoding="utf-8")
+
+        blocked = self.run_script(organizer, "rename", "--vault", self.vault, source,
+                                  "--to", "Smith_Study_2020.pdf", "--apply",
+                                  expected=1)
+        self.assertIn("--adopt-legacy 'Smith2020:<label>'", blocked.stdout)
+        self.assertTrue(source.is_file())
+
+        plain = self.run_script(batch, "--src", source, "--out", self.images,
+                                "--dpi", 72, expected=1)
+        self.assertIn("Run pdf-organize on these first", plain.stdout)
+        adopted = self.run_script(batch, "--src", source, "--out", self.images,
+                                  "--dpi", 72, "--adopt-legacy", "Smith2020:1")
+        self.assertIn("Adoption recorded; nothing was extracted.", adopted.stdout)
+        self.assertEqual(sorted(path.name for path in self.images.glob("*.png")),
+                         [legacy.name])
+
+        self.run_script(organizer, "rename", "--vault", self.vault, source,
+                        "--to", "Smith_Study_2020.pdf", "--apply")
+        renamed = self.images / "Smith_Study_2020_fig_1.png"
+        self.assertFalse(legacy.exists())
+        self.assertEqual(digest(renamed), original)
+        self.assertEqual(entry.read_text(encoding="utf-8"),
+                         "![[Smith_Study_2020_fig_1.png]]\n")
+
+    def test_legacy_crop_of_a_split_book_is_adopted_before_its_rename(self):
+        organizer = "skills/pdf-organize/scripts/organize.py"
+        batch = "skills/figure-extract/scripts/batch_extract.py"
+        book = self.pdfs / "Doe_Book_2025.pdf"
+        chapter = self.pdfs / "Doe_Book_2025" / "Doe_Book_2025_01_Intro.pdf"
+        chapter.parent.mkdir()
+        for path in (book, chapter):
+            self.make_pdf(path)
+        # A whole-book crop from before the split, with no manifest line.
+        legacy_run = Path(self.scratch.name) / "legacy-run"
+        self.run_script(batch, "--src", book, "--out", legacy_run, "--dpi", 72)
+        legacy = self.images / "Doe_Book_2025_fig_1.png"
+        legacy.write_bytes((legacy_run / legacy.name).read_bytes())
+        original = digest(legacy)
+
+        blocked = self.run_script(organizer, "rename", "--vault", self.vault, book,
+                                  "--to", "Doe_Volume_2025.pdf", "--apply",
+                                  expected=1)
+        self.assertIn("--adopt-legacy 'Doe_Book_2025:<label>'", blocked.stdout)
+        adopted = self.run_script(batch, "--src", book, "--out", self.images,
+                                  "--dpi", 72, "--adopt-legacy", "Doe_Book_2025:1")
+        self.assertIn("Adoption recorded; nothing was extracted.", adopted.stdout)
+        self.assertEqual(sorted(path.name for path in self.images.glob("*.png")),
+                         [legacy.name])
+
+        self.run_script(organizer, "rename", "--vault", self.vault, book,
+                        "--to", "Doe_Volume_2025.pdf", "--apply")
+        self.assertFalse(legacy.exists())
+        self.assertEqual(digest(self.images / "Doe_Volume_2025_fig_1.png"), original)
+        self.assertTrue((self.pdfs / "Doe_Volume_2025"
+                         / "Doe_Volume_2025_01_Intro.pdf").is_file())
 
     def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
@@ -1471,8 +1799,11 @@ raise SystemExit(main(fixture['args'], client))
         note = self.notes / (old + ".md")
         metadata = {"title": "Cell signals", "format": "Article",
                     "sources": ["https://example.org/study"], "read": True}
+        # The user's block ID carries into the redraft, so a block link to
+        # the old note still resolves after the rename.
         body = ('---\n' + yaml.safe_dump(metadata, sort_keys=False) + '---\n'
-                + f'![[{old_image}]]\n*The cells exchange signals.*\n')
+                + f'![[{old_image}]]\n*The cells exchange signals.*\n\n'
+                + 'Cells answer a ligand within seconds. ^fast-answer\n')
         note.write_text(body, encoding="utf-8")
         rendered = Path(self.scratch.name) / "browser render.png"
         Image.new("RGB", (64, 48), (20, 100, 180)).save(rendered)
@@ -1480,12 +1811,37 @@ raise SystemExit(main(fixture['args'], client))
                         "--slug", old, "--index", 1, "--from-file", rendered,
                         "--owner-note", note)
         original = digest(self.images / old_image)
+        os.chmod(note, 0o640)
         snapshots = Path(self.scratch.name) / "clipping-snapshots.json"
         self.run_script("shared/scripts/publish_files.py", "snapshot",
                         "--vault", self.vault, "-o", snapshots,
-                        f"Articles/{old}.md")
+                        f"Articles/{old}.md", f"Articles/{new}.md")
+        snap_bytes = snapshots.read_bytes()
         new_note = self.notes / (new + ".md")
-        new_note.write_text(body.replace(old, new), encoding="utf-8")
+
+        # Step 4 publishes the reviewed scratch draft with the shipped writer.
+        draft = Path(self.scratch.name) / "draft.md"
+        draft.write_text(body.replace(old, new), encoding="utf-8")
+        publish = ["rename", "--phase", "publish-note", "--vault", self.vault,
+                   "--snapshots", snapshots, "--draft", draft,
+                   "--owner-note", note, "--new-owner-note", new_note,
+                   "--old-slug", old, "--new-slug", new]
+        planned = json.loads(self.run_script(fetch, *publish, "--dry-run").stdout)
+        self.assertEqual(planned["action"], "would-create")
+        self.assertFalse(new_note.exists())
+        created = json.loads(self.run_script(fetch, *publish).stdout)
+        self.assertEqual(created["action"], "created")
+        self.assertEqual(new_note.read_bytes(), draft.read_bytes())
+        self.assertEqual(new_note.stat().st_mode & 0o777, 0o640)
+        self.assertEqual(snapshots.read_bytes(), snap_bytes)
+        self.assertFalse([path.name for folder in (self.vault, self.notes)
+                          for path in folder.iterdir()
+                          if path.name.startswith(".clipping-note-")])
+        recorded = json.loads(self.run_script(
+            "shared/scripts/publish_files.py", "snapshot", "--vault",
+            self.vault, "-o", snapshots, "--replace",
+            f"Articles/{new}.md").stdout)
+        self.assertEqual(recorded["snapshots"][0]["digest"], created["sha256"])
 
         # Real dependents in every scanned area. Labels, anchors, sizes, a
         # code span and a name that only shares the old prefix must survive.
@@ -1494,7 +1850,7 @@ raise SystemExit(main(fixture['args'], client))
 title: "Cell signaling"
 type: Concept
 sources:
-  - "[[{slug}]]"
+  - "[[{slug}.md]]"
 created: 2026-08-30
 updated: 2026-09-02
 description: "Cell signaling transmits information between cells through chemical messages."
@@ -1504,7 +1860,10 @@ parents: []
 read: true
 issues: ""
 ---
-**Cell signaling** transmits information between cells through chemical messages, as in [[{slug}#Receptors bind ligands|the clipping]].
+**Cell signaling** transmits information between cells through chemical messages.
+
+![[{slug}_fig_1.png]]
+*Cells exchange signals.*
 
 **Related:**
 '''
@@ -1531,13 +1890,22 @@ issues: ""
             'No fixed suggestions.\n')
         log.write_text(log_text.format(slug=old), encoding="utf-8")
         other = self.notes / "Other_Clipping_2026.md"
-        other_text = '---\ntitle: "Other"\n---\nRelated: [[{slug}]]\n'
+        other_text = ('---\ntitle: "Other"\n---\n'
+                      'Related: [[{slug}#^fast-answer|fast answers]]\n')
         other.write_text(other_text.format(slug=old), encoding="utf-8")
+        # A vault folder link to notes stored outside the vault.
+        linked = Path(self.scratch.name) / "linked notes"
+        linked.mkdir()
+        (self.vault / "Shared notes").symlink_to(linked, target_is_directory=True)
+        shared = self.vault / "Shared notes/reading.md"
+        shared_text = 'Shared reading: [[{slug}|the study]].\n'
+        shared.write_text(shared_text.format(slug=old), encoding="utf-8")
         dependents = {wiki: wiki_text.format(slug=new),
                       moc: moc_text.format(slug=new),
                       investment: investment_text.format(image=new_image),
                       log: log_text.format(slug=new),
-                      other: other_text.format(slug=new)}
+                      other: other_text.format(slug=new),
+                      shared: shared_text.format(slug=new)}
         rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
                   "--owner-note", note, "--new-owner-note", new_note,
                   "--old-slug", old, "--new-slug", new]
@@ -1548,9 +1916,10 @@ issues: ""
         self.assertEqual(
             {Path(row["path"]).resolve(): row["references"]
              for row in prepared["dependency"]["blockers"]},
-            {wiki.resolve(): [old + ".md"], moc.resolve(): [old + ".md"],
+            {wiki.resolve(): [old + ".md", old_image],
+             moc.resolve(): [old + ".md"],
              investment.resolve(): [old_image], log.resolve(): [old + ".md"],
-             other.resolve(): [old + ".md"]})
+             other.resolve(): [old + ".md"], shared.resolve(): [old + ".md"]})
         self.assertEqual(digest(self.images / new_image), original)
 
         def vault_state():
@@ -1567,11 +1936,15 @@ issues: ""
             {wiki.resolve(): ("would-rewrite", 2), moc.resolve(): ("would-rewrite", 1),
              investment.resolve(): ("would-rewrite", 1),
              log.resolve(): ("would-rewrite", 1),
-             other.resolve(): ("would-rewrite", 1)})
+             other.resolve(): ("would-rewrite", 1),
+             shared.resolve(): ("would-rewrite", 1)})
         for row in planned["results"]:
             for reference in row["references"]:
                 self.assertEqual(reference["to"],
                                  reference["from"].replace(old, new))
+        # The redraft kept the block ID, so no rewritten anchor is missing.
+        self.assertFalse([row["path"] for row in planned["results"]
+                          if "missing_anchors" in row])
 
         repaired = json.loads(self.run_script(
             fetch, *rename, "--phase", "repair").stdout)
@@ -1588,7 +1961,7 @@ issues: ""
         entry = yaml.safe_load(wiki.read_text(encoding="utf-8").split("---", 2)[1])
         self.assertEqual((str(entry["created"]), str(entry["updated"]), entry["read"]),
                          ("2026-08-30", "2026-09-02", True))
-        self.assertEqual(entry["sources"], [f"[[{new}]]"])
+        self.assertEqual(entry["sources"], [f"[[{new}.md]]"])
         after = {path: path.read_bytes() for path in dependents}
         again = json.loads(self.run_script(
             fetch, *rename, "--phase", "repair").stdout)
@@ -1611,6 +1984,139 @@ issues: ""
         self.assertFalse((self.images / old_image).exists())
         self.assertEqual(digest(self.images / new_image), original)
         self.assertTrue(new_note.is_file())
+
+    def test_clipping_case_only_slug_change_keeps_the_note_spelling(self):
+        # A slug that differs only by case is not a changed slug: publish-note
+        # refuses it, and a same-name rewrite keeps the note's and images'
+        # spelling, so no link needs repair.
+        fetch = "skills/clipping-clean/scripts/fetch_images.py"
+        publish = "shared/scripts/publish_files.py"
+        old, respelled = "Smith_Llm_Agents_2026", "Smith_LLM_Agents_2026"
+        image = old + "_fig_1.png"
+        note = self.notes / (old + ".md")
+        body = ('---\ntitle: "LLM agents"\nsources:\n'
+                '  - "https://example.org/agents"\n---\n'
+                f'![[{image}]]\n*An agent loop.*\n')
+        note.write_text(body, encoding="utf-8")
+        rendered = Path(self.scratch.name) / "browser render.png"
+        Image.new("RGB", (64, 48), (20, 100, 180)).save(rendered)
+        self.run_script(fetch, "place", "--attachments", self.images,
+                        "--slug", old, "--index", 1, "--from-file", rendered,
+                        "--owner-note", note)
+        wiki = self.vault / "Wiki/agent-loop.md"
+        wiki.write_text(f"See [[{old}]] and ![[{image}]].\n", encoding="utf-8")
+        scratch = Path(self.scratch.name)
+        snapshots = scratch / "clipping-snapshots.json"
+        self.run_script(publish, "snapshot", "--vault", self.vault, "-o",
+                        snapshots, f"Articles/{old}.md")
+        draft = scratch / "draft.md"
+        draft.write_text(body + "Reprocessed.\n", encoding="utf-8")
+        before = {path: path.read_bytes()
+                  for path in (self.images / image, wiki)}
+
+        refused = json.loads(self.run_script(
+            fetch, "rename", "--phase", "publish-note", "--vault", self.vault,
+            "--snapshots", snapshots, "--draft", draft, "--owner-note", note,
+            "--new-owner-note", self.notes / (respelled + ".md"),
+            "--old-slug", old, "--new-slug", respelled, expected=1).stdout)
+        self.assertIn("same-name rewrite", refused["error"])
+        self.assertEqual(sorted(path.name for path in self.notes.iterdir()),
+                         [old + ".md"])
+        self.assertEqual(note.read_text(encoding="utf-8"), body)
+
+        manifest = scratch / "manifest.json"
+        manifest.write_text(json.dumps(
+            [{"path": f"Articles/{old}.md", "draft": str(draft)}]),
+            encoding="utf-8")
+        published = json.loads(self.run_script(
+            publish, "publish", "--vault", self.vault, "--snapshots",
+            snapshots, "--manifest", manifest).stdout)
+        self.assertEqual([row["action"] for row in published["results"]],
+                         ["replaced"])
+        self.assertEqual(sorted(path.name for path in self.notes.iterdir()),
+                         [old + ".md"])
+        self.assertEqual(note.read_bytes(), draft.read_bytes())
+        self.assertEqual({path: path.read_bytes() for path in before}, before)
+        self.assertEqual(sorted(path.name for path in self.images.iterdir()),
+                         [image])
+
+    def test_clipping_changed_slug_migrates_legacy_origin_and_resumes_after_finalize(self):
+        fetch = "skills/clipping-clean/scripts/fetch_images.py"
+        publish = "shared/scripts/publish_files.py"
+        old, new = "Smith_Cell_Signals_2026", "Smith_Cell_Receptors_2026"
+        old_image, new_image = old + "_fig_1.png", new + "_fig_1.png"
+        note, new_note = self.notes / (old + ".md"), self.notes / (new + ".md")
+        legacy = ('---\ntitle: "Cell signals"\nsource: "https://example.org/study"\n'
+                  f'---\n![[{old_image}]]\n*The cells exchange signals.*\n')
+        current = legacy.replace("source: ", "sources:\n  - ")
+        note.write_text(legacy, encoding="utf-8")
+        Image.new("RGB", (64, 48), (20, 100, 180)).save(self.images / old_image)
+        original = digest(self.images / old_image)
+        wiki = self.vault / "Wiki/cell-signaling.md"
+        wiki.write_text(f"See [[{old}]] and ![[{old_image}]].\n", encoding="utf-8")
+        scratch = Path(self.scratch.name)
+        snapshots = scratch / "clipping-snapshots.json"
+        self.run_script(publish, "snapshot", "--vault", self.vault, "-o", snapshots,
+                        f"Articles/{old}.md", f"Articles/{new}.md")
+        draft = scratch / "draft.md"
+        draft.write_text(current.replace(old, new), encoding="utf-8")
+        publish_note = ["rename", "--phase", "publish-note", "--vault", self.vault,
+                        "--snapshots", snapshots, "--draft", draft,
+                        "--owner-note", note, "--new-owner-note", new_note,
+                        "--old-slug", old, "--new-slug", new]
+
+        # Every image phase refuses a legacy-only owner, so publish-note
+        # refuses it before the new note is public.
+        refused = json.loads(self.run_script(fetch, *publish_note, expected=1).stdout)
+        self.assertIn("legacy scalar source:", refused["error"])
+        self.assertFalse(new_note.exists())
+        migrated = scratch / "migrated.md"
+        migrated.write_text(current, encoding="utf-8")
+        manifest = scratch / "migration-manifest.json"
+        manifest.write_text(json.dumps(
+            [{"path": f"Articles/{old}.md", "draft": str(migrated)}]), encoding="utf-8")
+        self.run_script(publish, "publish", "--vault", self.vault,
+                        "--snapshots", snapshots, "--manifest", manifest)
+        self.run_script(publish, "snapshot", "--vault", self.vault, "-o", snapshots,
+                        "--replace", f"Articles/{old}.md")
+        created = json.loads(self.run_script(fetch, *publish_note).stdout)
+        self.assertEqual(created["action"], "created")
+        recorded = json.loads(self.run_script(
+            publish, "snapshot", "--vault", self.vault, "-o", snapshots,
+            "--replace", f"Articles/{new}.md").stdout)
+        self.assertEqual(recorded["snapshots"][0]["digest"], created["sha256"])
+
+        rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
+                  "--owner-note", note, "--new-owner-note", new_note,
+                  "--old-slug", old, "--new-slug", new]
+        self.run_script(fetch, *rename, "--phase", "prepare")
+        self.run_script(fetch, *rename, "--phase", "repair")
+        self.assertEqual(wiki.read_text(encoding="utf-8"),
+                         f"See [[{new}]] and ![[{new_image}]].\n")
+        self.run_script(fetch, *rename, "--phase", "finalize")
+
+        # The run stops before old-note removal. Finishing the handoff names
+        # the retired copy instead of asking for a restore, and goes from the
+        # clean re-probe straight to old-note removal.
+        resumed = json.loads(self.run_script(
+            fetch, *rename, "--phase", "prepare", "--dry-run", expected=1).stdout)
+        self.assertIn("already retired", resumed["error"])
+        self.assertNotIn("restore it or replace", resumed["error"])
+        dependency = json.loads(self.run_script(
+            fetch, "dependencies", "--attachments", self.images,
+            "--owner-note", note, "--old-slug", old).stdout)
+        self.assertTrue(dependency["ok"])
+        resume_snapshots = scratch / "resume-snapshots.json"
+        self.run_script(publish, "snapshot", "--vault", self.vault,
+                        "-o", resume_snapshots, f"Articles/{old}.md")
+        removed = json.loads(self.run_script(
+            publish, "remove", "--vault", self.vault,
+            "--snapshots", resume_snapshots, f"Articles/{old}.md").stdout)
+        self.assertEqual(removed["results"][0]["action"], "removed")
+        self.assertFalse(note.exists())
+        self.assertFalse((self.images / old_image).exists())
+        self.assertEqual(digest(self.images / new_image), original)
+        self.assertEqual(new_note.read_text(encoding="utf-8"), current.replace(old, new))
 
     def test_clipping_changed_slug_never_edits_a_dated_research_record(self):
         fetch = "skills/clipping-clean/scripts/fetch_images.py"
@@ -1669,6 +2175,37 @@ issues: ""
         self.assertEqual(digest(self.images / old_image), original)
         self.assertEqual(digest(self.images / new_image), original)
 
+    def test_same_url_clipping_twin_counts_as_prior_coverage(self):
+        # A pending changed-slug handoff keeps two Articles notes of one page.
+        # wiki-build finds the twin with dedup_index and passes both notes to
+        # vault_index, so an entry citing the old note covers the new one.
+        url = "https://example.org/cell-signals"
+        old = self.notes / "Smith_Cell_Signals_2026.md"
+        new = self.notes / "Smith_Cell_Receptors_2026.md"
+        for note in (old, new):
+            note.write_text('---\nsources:\n  - "%s"\n---\nBody.\n' % url,
+                            encoding="utf-8")
+        (self.vault / "Wiki/receptor.md").write_text(
+            '---\ntitle: "Receptor"\ntype: Concept\nsources:\n'
+            '  - "[[Smith_Cell_Signals_2026.md]]"\n---\nBody.\n',
+            encoding="utf-8")
+        dedup = json.loads(self.run_script(
+            "skills/clipping-clean/scripts/dedup_index.py", self.notes,
+            "--url", url).stdout)
+        twins = sorted(Path(path).name for path in dedup["checked"][0]["matches"])
+        self.assertEqual(twins, [new.name, old.name])
+
+        def covered(*notes):
+            index = json.loads(self.run_script(
+                "skills/wiki-build/scripts/vault_index.py", self.vault / "Wiki",
+                "--vault", self.vault,
+                *[arg for note in notes for arg in ("--source", note)]).stdout)
+            return [(item["relpath"], item["identity_confirmed"])
+                    for item in index["source_matches"]]
+
+        self.assertEqual(covered(new), [])
+        self.assertEqual(covered(new, old), [("receptor.md", True)])
+
     def test_fresh_vault_bootstrap_supports_both_article_producers(self):
         fresh = Path(self.scratch.name) / "fresh vault"
         inbox = fresh / "Inbox"
@@ -1700,6 +2237,41 @@ issues: ""
             "--notes", articles, "--images", images, "--json").stdout)
         self.assertEqual(papers["counts"]["new"], 1)
         self.assertFalse((fresh / "Wiki").exists())
+
+    def test_fresh_vault_bootstrap_lets_wiki_build_extract_figures(self):
+        # wiki-build's media rule: an absent Sources/Images keeps the figure
+        # inventory incomplete until an apply run creates the folder with a
+        # plain mkdir; a preview creates nothing.
+        fresh = Path(self.scratch.name) / "fresh figures vault"
+        pdfs = fresh / "Sources/PDFs"
+        pdfs.mkdir(parents=True)
+        pdf = pdfs / "Doe_Fresh_2025.pdf"
+        self.make_pdf(pdf)
+        images = fresh / "Sources/Images"
+        inventory = ("shared/scripts/vault_artifacts.py", "figures",
+                     "--images", images, "--stem", pdf.stem)
+        absent = json.loads(self.run_script(*inventory, expected=1).stdout)
+        self.assertFalse(absent["complete"])
+        self.assertFalse(absent["safe"])
+        self.assertIn("unreadable",
+                      [finding["kind"] for finding in absent["findings"]])
+
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
+                        "--src", pdf, "--out", images, "--dpi", 72,
+                        "--dry-run")
+        self.assertFalse(images.exists())
+
+        images.mkdir()
+        empty = json.loads(self.run_script(*inventory).stdout)
+        self.assertTrue(empty["complete"])
+        self.assertTrue(empty["safe"])
+        self.assertEqual(empty["candidates"], [])
+        self.run_script("skills/figure-extract/scripts/batch_extract.py",
+                        "--src", pdf, "--out", images, "--dpi", 72)
+        filled = json.loads(self.run_script(*inventory).stdout)
+        self.assertTrue(filled["complete"])
+        self.assertEqual([Path(path).name for path in filled["candidates"]],
+                         ["Doe_Fresh_2025_fig_1.png"])
 
     def test_unreadable_alias_owner_cannot_trigger_link_removal(self):
         wiki = self.vault / "Wiki"
@@ -2032,6 +2604,188 @@ issues: ""
         self.assertEqual((fresh / "Wiki/geometric-mean.md").read_bytes(),
                          fresh_draft.read_bytes())
 
+    def test_overlaid_tree_omits_a_symlinked_folder_the_real_wiki_probes(self):
+        # source-cases.md's overlaid tree: an unmirrored path is absent from
+        # the tree and its index, so a multi-source run also probes and
+        # queries the real Wiki while the tree reports one.
+        wiki = self.vault / "Wiki"
+        run = Path(self.scratch.name) / "run"
+        (run / "drafts").mkdir(parents=True)
+        synced = Path(self.scratch.name) / "synced elsewhere"
+        synced.mkdir()
+        try:
+            (wiki / "ml").symlink_to(synced, target_is_directory=True)
+        except (OSError, NotImplementedError):
+            self.skipTest("symlinks are unavailable")
+        (self.pdfs / "Kmeans_Book_2024.pdf").write_bytes(b"%PDF-1.4\n")
+        (synced / "k-means.md").write_text(self.averages_entry(
+            "K-means", "2026-09-05",
+            "**K-means** splits a collection into $k$ groups around their "
+            "means.", "A clustering method that splits data into k groups "
+            "around their means.").replace(
+                "https://example.org/averages",
+                "[[Kmeans_Book_2024.pdf#page=3]]"), encoding="utf-8")
+        draft = run / "drafts/geometric-mean.md"
+        draft.write_text(self.averages_entry(
+            "Geometric mean", "2026-09-06",
+            "The **geometric mean** of $n$ positive numbers is the $n$-th "
+            "root of their product.",
+            "The $n$-th root of the product of $n$ positive numbers."),
+            encoding="utf-8")
+        manifest = run / "manifest.json"
+        manifest.write_text(json.dumps([
+            {"path": "Wiki/geometric-mean.md", "draft": str(draft)}]),
+            encoding="utf-8")
+        review = json.loads(self.run_script(
+            "skills/wiki-build/scripts/review_tree.py", "--vault", self.vault,
+            "--wiki", wiki, "--manifest", manifest,
+            "--out", run / "review").stdout)
+        self.assertEqual([row["path"] for row in review["unmirrored"]],
+                         ["Wiki/ml"])
+        titles = run / "candidates.json"
+        titles.write_text(json.dumps(["K-means"]), encoding="utf-8")
+        source = self.pdfs / "Kmeans_Book_2024.pdf"
+
+        def probe_and_cover(tree, *origin):
+            index = run / "index.json"
+            self.run_script("skills/wiki-build/scripts/vault_index.py", tree,
+                            "-o", index)
+            probe = json.loads(self.run_script(
+                "skills/wiki-build/scripts/find_collisions.py", "--index",
+                index, "--titles", titles).stdout)["results"][0]
+            coverage = json.loads(self.run_script(
+                "skills/wiki-build/scripts/vault_index.py", tree, "--vault",
+                self.vault, "--source", source, *origin).stdout)
+            return ((probe["verdict"],
+                     [match["entry_path"] for match in probe["matches"]]),
+                    [(item["relpath"], item["identity_confirmed"])
+                     for item in coverage["source_matches"]])
+
+        self.assertEqual(probe_and_cover(review["tree"], "--wiki-origin", wiki),
+                         (("create", []), []))
+        self.assertEqual(probe_and_cover(wiki),
+                         (("merge", [os.path.join("ml", "k-means.md")]),
+                          [(os.path.join("ml", "k-means.md"), True)]))
+
+    def test_case_only_retitle_respells_the_same_entry_file(self):
+        # wiki-lint's retitle protocol: a filename that differs from its
+        # title's slug only in case is the entry's own file, so the scanner
+        # calls the destination free. The entry is published under its old
+        # spelling, re-recorded and respelled with publish_files.py move.
+        wiki = self.vault / "Wiki"
+        run = Path(self.scratch.name) / "run"
+        (run / "drafts").mkdir(parents=True)
+        entry = wiki / "Midrange.md"
+        entry.write_text(self.averages_entry(
+            "Midrange", "2026-09-05",
+            "The **midrange** of a collection is the mean of its largest and "
+            "smallest values.",
+            "The mean of the largest and smallest values of a collection."),
+            encoding="utf-8")
+        entry.chmod(0o600)
+        mean = wiki / "arithmetic-mean.md"
+        mean.write_text(self.averages_entry(
+            "Arithmetic mean", "2026-09-05",
+            "The **arithmetic mean** of a collection is its sum divided by "
+            "its size. The [[Midrange]] uses only the two extreme values.",
+            "The sum of a collection of numbers divided by how many numbers "
+            "it holds."), encoding="utf-8")
+        publisher = "shared/scripts/publish_files.py"
+        snapshots = run / "lint-snapshots.json"
+
+        def scan():
+            return json.loads(self.run_script(
+                "skills/wiki-lint/scripts/scan_vault.py", wiki).stdout)
+
+        def names():
+            return sorted(path.name for path in wiki.iterdir())
+
+        def publish(path, draft):
+            manifest = run / "manifest.json"
+            manifest.write_text(json.dumps([{"path": path, "draft": str(draft)}]),
+                                encoding="utf-8")
+            return json.loads(self.run_script(
+                publisher, "publish", "--vault", self.vault, "--snapshots",
+                snapshots, "--manifest", manifest).stdout)
+
+        before = scan()
+        self.assertEqual(before["rename_candidates"], [
+            {"slug": "Midrange", "new_slug": "midrange", "inbound_links": 1,
+             "target_exists": False}])
+        self.assertIn(("Midrange", "item5"),
+                      {(row["slug"], row["item"]) for row in before["problems"]})
+
+        # Step 1 records only the source entry and the inbound file.
+        self.run_script(publisher, "snapshot", "--vault", self.vault, "-o",
+                        snapshots, "Wiki/Midrange.md", "Wiki/arithmetic-mean.md")
+        entry_draft = run / "drafts/midrange.md"
+        entry_draft.write_bytes(entry.read_bytes().replace(
+            b"updated: 2026-09-05", b"updated: 2026-09-06"))
+        mean_draft = run / "drafts/arithmetic-mean.md"
+        mean_draft.write_bytes(mean.read_bytes().replace(
+            b"[[Midrange]]", b"[[midrange]]"))
+
+        # Step 4: publish in place, re-record, then respell the same file.
+        self.assertEqual([row["action"] for row in publish(
+            "Wiki/Midrange.md", entry_draft)["results"]], ["replaced"])
+        self.run_script(publisher, "snapshot", "--vault", self.vault, "-o",
+                        snapshots, "--replace", "Wiki/Midrange.md")
+        inode = (entry.stat().st_dev, entry.stat().st_ino)
+        move = (publisher, "move", "--vault", self.vault, "--snapshots",
+                snapshots, "Wiki/Midrange.md", "Wiki/midrange.md")
+        moved = json.loads(self.run_script(*move).stdout)
+        self.assertEqual([row["action"] for row in moved["results"]],
+                         ["respelled"])
+        respelled = wiki / "midrange.md"
+        self.assertEqual(names(), ["arithmetic-mean.md", "midrange.md"])
+        self.assertEqual((respelled.stat().st_dev, respelled.stat().st_ino),
+                         inode)
+        self.assertEqual(respelled.read_bytes(), entry_draft.read_bytes())
+        self.assertEqual(respelled.stat().st_mode & 0o777, 0o600)
+        self.assertEqual(sorted(path.name for path in self.vault.iterdir()
+                                if path.name.startswith(".")), [])
+        rerun = json.loads(self.run_script(*move).stdout)
+        self.assertEqual([row["action"] for row in rerun["results"]],
+                         ["respelled"])
+        self.assertEqual([row["action"] for row in publish(
+            "Wiki/arithmetic-mean.md", mean_draft)["results"]], ["replaced"])
+
+        after = scan()
+        self.assertEqual(after["rename_candidates"], [])
+        self.assertFalse([row for row in after["problems"]
+                          if row["item"] in ("item5", "item10")
+                          or row["item"].startswith("item10/")],
+                         after["problems"])
+
+    def test_suggestion_log_refuses_a_symlinked_reviews_folder(self):
+        # SUGGESTIONS.md's recipe passes --owned-dir Reviews, so the helper
+        # refuses a Reviews/ that is a symlink to another vault folder.
+        run = Path(self.scratch.name) / "run"
+        run.mkdir()
+        (self.vault / "Other").mkdir()
+        (self.vault / "Reviews").symlink_to("Other")
+        log = "Reviews/wiki-lint-suggestions.md"
+        snapshots = run / "log-snapshots.json"
+        publisher = "shared/scripts/publish_files.py"
+        refused = json.loads(self.run_script(
+            publisher, "snapshot", "--vault", self.vault, "--owned-dir",
+            "Reviews", "-o", snapshots, log, expected=1).stdout)
+        self.assertEqual(refused["snapshots"][0]["state"], "refused")
+        self.run_script(publisher, "snapshot", "--vault", self.vault, "-o",
+                        snapshots, log)
+        draft = run / "log.md"
+        draft.write_text("# Suggestions\n", encoding="utf-8")
+        manifest = run / "log-manifest.json"
+        manifest.write_text(json.dumps([{"path": log, "draft": str(draft)}]),
+                            encoding="utf-8")
+        published = json.loads(self.run_script(
+            publisher, "publish", "--vault", self.vault, "--owned-dir",
+            "Reviews", "--snapshots", snapshots, "--manifest", manifest,
+            expected=1).stdout)
+        self.assertEqual([row["action"] for row in published["results"]],
+                         ["refused"])
+        self.assertEqual(list((self.vault / "Other").iterdir()), [])
+
     def test_user_issues_reach_wiki_lint_and_the_builder_preserves_them(self):
         # `issues:` is the user's issue inbox (CONVENTIONS §2d). The scanner
         # lists a non-blank value, scalar or list, as a wiki-lint worklist
@@ -2092,6 +2846,14 @@ issues: ""
                 *malformed),
             "lehmer-mean": (
                 "Lehmer mean", "read: false\nissues: |\n  The card is vague.\n",
+                *malformed),
+            # An unquoted '#' comment would cut the user's text off, even to
+            # blank, so both validators report it instead of reading it short.
+            "chisini-mean": (
+                "Chisini mean", "read: false\nissues: #1 the card is wrong\n",
+                *malformed),
+            "exponential-mean": (
+                "Exponential mean", "read: false\nissues:\n  - Fix the #2 card\n",
                 *malformed),
             "weighted-median": (
                 "Weighted median", 'issues: ""\nread: false\n',
@@ -3150,6 +3912,117 @@ A compact definition used only to exercise the shared contract.
         for slug in ("web-only-source", "plain-web-source", "web-file-beside-note"):
             self.assertNotIn(slug, clean_matches)
 
+    def test_builder_and_linter_agree_on_parents_form_and_empty_sources(self):
+        # lint_entry's 2-parents-form mirrors the scanner's item2/parents-form
+        # and its moc-parent and root-parent-mismatch hierarchy findings, so
+        # a draft the builder's gate passes is one the next scan passes too.
+        # Both file an empty sources: under item 4 and a missing key under
+        # item 2.
+        wiki = self.vault / "Wiki"
+        (self.vault / "MOCs").mkdir()
+        (self.vault / "MOCs/mathematics-moc.md").write_text(
+            "- [[Wiki/mathematics|Mathematics]]\n", encoding="utf-8")
+        canonical_parents = "parents: []\n"
+        canonical_sources = 'sources:\n  - "https://example.org/averages"\n'
+        form = ({"item2/parents-form"}, set(), {"2-parents-form"})
+        cases = {
+            # slug: (title, parents block, sources block,
+            #        scanner item-2 keys, hierarchy kinds, builder 2-* items)
+            "mathematics": ("Mathematics", canonical_parents,
+                            canonical_sources, set(), set(), set()),
+            "statistics": ("Statistics", 'parents:\n  - "[[mathematics]]"\n',
+                           canonical_sources, set(), {"root-parent-mismatch"},
+                           {"2-parents-form"}),
+            "arithmetic-mean": ("Arithmetic mean",
+                                'parents:\n  - "[[mathematics]]"\n',
+                                canonical_sources, set(), set(), set()),
+            "geometric-mean": ("Geometric mean",
+                               'parents: ["[[mathematics]]"]\n',
+                               canonical_sources, *form),
+            "harmonic-mean": ("Harmonic mean", 'parents: "[[mathematics]]"\n',
+                              canonical_sources, *form),
+            "midrange": ("Midrange", "parents: [ ]\n", canonical_sources, *form),
+            "midhinge": ("Midhinge", 'parents:\n  - "mathematics"\n',
+                         canonical_sources, *form),
+            "trimean": ("Trimean",
+                        'parents:\n  - "[[mathematics|Mathematics]]"\n',
+                        canonical_sources, *form),
+            "power-mean": ("Power mean",
+                           'parents:\n  - "[[mathematics#History]]"\n',
+                           canonical_sources, *form),
+            "lehmer-mean": ("Lehmer mean",
+                            'parents:\n  - "[[mathematics.md]]"\n',
+                            canonical_sources, *form),
+            "chisini-mean": ("Chisini mean",
+                             'parents:\n  - "[[mathematics]]"\n'
+                             '  - "[[mathematics]]"\n',
+                             canonical_sources, *form),
+            "quadratic-mean": ("Quadratic mean",
+                               'parents:\n  - "[[MOCs/mathematics-moc]]"\n',
+                               canonical_sources, set(), {"moc-parent"},
+                               {"2-parents-form"}),
+            "weighted-mean": ("Weighted mean", canonical_parents, "sources: []\n",
+                              set(), set(), set()),
+            "truncated-mean": ("Truncated mean", canonical_parents, "sources:\n",
+                               set(), set(), set()),
+            "trimmed-mean": ("Trimmed mean", canonical_parents, "",
+                             {"item2"}, set(), {"2-field-order"}),
+        }
+        for slug, (title, parents, sources, *_expected) in cases.items():
+            text = self.averages_entry(
+                title, "2026-09-05",
+                f"The **{title.lower()}** is a synthetic fixture for one "
+                "parents: or sources: spelling.",
+                "A synthetic fixture for one parents: or sources: spelling.")
+            text = text.replace('"#mathematics"', '"#statistics"') \
+                if slug == "statistics" else text
+            self.assertIn(canonical_parents, text)
+            self.assertIn(canonical_sources, text)
+            (wiki / f"{slug}.md").write_text(
+                text.replace(canonical_parents, parents)
+                .replace(canonical_sources, sources), encoding="utf-8")
+
+        scan = json.loads(self.run_script(
+            "skills/wiki-lint/scripts/scan_vault.py", wiki,
+            "--images", self.images).stdout)
+        lint = json.loads(self.run_script(
+            "skills/wiki-build/scripts/lint_entry.py", wiki, "--compact").stdout)
+        built = {Path(row["file"]).stem: row["findings"]
+                 for row in lint["entries"]}
+        hierarchy = scan["hierarchy_diagnostic"]["parent_state_findings"]
+        for slug, (*_spelling, scan_keys, kinds, lint_keys) in cases.items():
+            with self.subTest(slug=slug):
+                rows = [row for row in scan["problems"] if row["slug"] == slug]
+                self.assertEqual({row["item"] for row in rows
+                                  if row["item"].split("/")[0] == "item2"},
+                                 scan_keys, rows)
+                self.assertEqual({row["kind"] for row in hierarchy
+                                  if row["slug"] == slug
+                                  and row["kind"] in ("moc-parent",
+                                                      "root-parent-mismatch")},
+                                 kinds, hierarchy)
+                findings = built[slug]
+                self.assertEqual({row["item"] for row in findings
+                                  if row["item"].startswith("2-")},
+                                 lint_keys, findings)
+                empty = slug in ("weighted-mean", "truncated-mean",
+                                 "trimmed-mean")
+                self.assertEqual(any(row["item"] == "item4"
+                                     and "sources: is empty" in row["message"]
+                                     for row in rows), empty, rows)
+                self.assertEqual(any(row["item"] == "4-sources"
+                                     and "sources: is empty" in row["message"]
+                                     for row in findings),
+                                 slug in ("weighted-mean", "truncated-mean"),
+                                 findings)
+        self.assertTrue(any(row["message"] == "missing sources: key"
+                            for row in scan["problems"]
+                            if row["slug"] == "trimmed-mean"))
+        self.assertEqual([row["message"] for row in built["trimmed-mean"]
+                          if row["item"] == "2-field-order"],
+                         ["mandatory key 'sources' is missing (the key is never "
+                          "omitted, even when the value is blank)"])
+
     def test_builder_and_linter_literal_contract_constants_stay_aligned(self):
         def literal(relative, name):
             tree = ast.parse((ROOT / relative).read_text(encoding="utf-8"),
@@ -3276,6 +4149,31 @@ Synthetic deviation
             "item12/equation-coverage-candidate",
             {problem["item"] for problem in scanner["problems"]
              if problem["slug"] == "synthetic-deviation"})
+
+        # A noncanonical display is a form finding, never a missing one; a
+        # backslash ending a display's last line once crashed both tools.
+        entry.write_text(equationless.replace(
+            "$\\operatorname{Var}(X)$.\n",
+            "$\\operatorname{Var}(X)$:\n\n"
+            "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n\n"
+            "Squaring both sides gives the variance back:\n\n"
+            "$$\n\\sigma^2 = \\operatorname{Var}(X) \\\n$$\n"),
+            encoding="utf-8")
+        builder = json.loads(self.run_script(
+            "skills/wiki-build/scripts/lint_entry.py", entry,
+            "--compact").stdout)
+        builder_items = {finding["item"]
+                         for finding in builder["entries"][0]["findings"]}
+        self.assertIn("12-equation-format", builder_items)
+        self.assertNotIn("12-equation-coverage-candidate", builder_items)
+        self.assertNotIn("0-lint-error", builder_items)
+        scanner = json.loads(self.run_script(
+            "skills/wiki-lint/scripts/scan_vault.py", self.vault / "Wiki",
+            "--indent", "0").stdout)
+        scanner_items = {problem["item"] for problem in scanner["problems"]
+                         if problem["slug"] == "synthetic-deviation"}
+        self.assertIn("item12/equation-format", scanner_items)
+        self.assertNotIn("item12/equation-coverage-candidate", scanner_items)
 
 
 if __name__ == "__main__":

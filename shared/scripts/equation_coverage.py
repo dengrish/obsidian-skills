@@ -28,8 +28,13 @@ agent-review candidate rather than an edit.
 
 A third floor lists existing display lines that hold more than one equation,
 such as ``a = ..., \\qquad b = ...``: every equation gets its own line. An
-index range such as ``i = 1, \\ldots, m`` or a condition such as
-``\\text{for } i = 1`` qualifies an equation and is not a second one.
+index range such as ``i = 1, \\ldots, m`` or ``x = 0, 1``, or a condition
+such as ``\\text{for } i = 1`` qualifies an equation and is not a second one.
+
+Displays are found by pairing unescaped ``$$`` delimiters in source order,
+whatever their layout. A display that is not in canonical block form, or
+that uses ``&`` or ``\\\\`` outside an environment, is a form finding: the
+equation exists, so it is never reported as missing.
 
 Stdlib only, Python 3.10+ (the plugin runtime floor).
 """
@@ -39,16 +44,20 @@ import re
 
 __all__ = [
     "find_boilerplate_candidates",
+    "find_display_spans",
     "find_missing_display_equation_candidates",
     "find_multi_relation_display_candidates",
     "find_noncanonical_display_equation_candidates",
 ]
 
 
-_DISPLAY_BLOCK_RE = re.compile(
-    r"(?ms)^ {0,3}\$\$[ \t]*\n(.*?)\n {0,3}\$\$[ \t]*$")
-_ONE_LINE_DISPLAY_RE = re.compile(
-    r"(?m)^ {0,3}\$\$[ \t]*(\S(?:.*?\S)?)[ \t]*\$\$[ \t]*$")
+# An unescaped ``$$`` opens or closes a display. ``\\.`` consumes an escape,
+# so ``\$$`` is a literal dollar followed by a lone ``$``.
+_DISPLAY_DELIMITER_RE = re.compile(r"\\.|\$\$", re.DOTALL)
+# Whitespace and blockquote markers may precede a canonical ``$$`` and may
+# fill the blank line above or below it.
+_LINE_PREFIX_RE = re.compile(r"[ \t]*(?:>[ \t]*)*")
+_QUOTE_MARKER_RE = re.compile(r"(?m)^[ \t]*(?:>[ \t]?)+")
 _INLINE_MATH_RE = re.compile(
     r"(?<![\\$])\$(?!\$)((?:\\.|[^$\n])+?)(?<!\\)\$(?!\$)")
 _OBSIDIAN_LINK_RE = re.compile(r"(?<!!)\[\[([^\[\]\n]+)\]\]")
@@ -244,72 +253,216 @@ def _fold_hard_wraps(text):
     return "".join(chars)
 
 
-def _display_line_spans(prose, require_content=True,
-                        require_blank_adjacency=True):
-    """Return inclusive zero-based line spans for existing display blocks.
+def _excluded_lines(excluded_line_spans):
+    """Zero-based line numbers inside inclusive ``(start, end)`` spans."""
+    return {
+        line
+        for start, end in (excluded_line_spans or ())
+        for line in range(max(0, start), max(0, end) + 1)
+    }
 
-    A one-line ``$$...$$`` spelling still renders as display math and therefore
-    can cover the calculation stated immediately above it.  Its delimiter form
-    is noncanonical and is reported separately by
-    :func:`find_noncanonical_display_equation_candidates`; treating it as
-    absent produced the wrong repair (add another equation) instead of the
-    safe repair (move the existing delimiters onto their own lines).
+
+def _displays(prose, excluded=frozenset()):
+    """Pair the unescaped ``$$`` delimiters of ``prose`` in source order.
+
+    Each display is ``(start, end, open_line, close_line, content)``: the
+    offset of its opening ``$$`` and the offset just past its closing
+    ``$$``, the zero-based lines of the two delimiters, and the math between
+    them. A display opened after blockquote markers loses the markers of its
+    continuation lines. A last unpaired ``$$`` opens no display, and a
+    delimiter on an excluded line, such as a parsed table row, is skipped.
+
+    Every form counts: a one-line or inline ``$$...$$`` still renders as
+    display math and covers the calculation stated beside it. Its form is
+    reported by :func:`find_noncanonical_display_equation_candidates`;
+    treating it as absent produced the wrong repair (add another equation)
+    instead of the safe one (put the existing delimiters on their own lines).
     """
-    spans = []
-    lines = prose.split("\n")
-    matches = [(match, match.group(1))
-               for match in _DISPLAY_BLOCK_RE.finditer(prose)]
-    matches.extend((match, match.group(1))
-                   for match in _ONE_LINE_DISPLAY_RE.finditer(prose))
-    for match, content in matches:
-        if require_content and not content.strip():
+    delimiters = []
+    for match in _DISPLAY_DELIMITER_RE.finditer(prose):
+        if match.group(0) != "$$":
             continue
-        start = _line_number(prose, match.start()) - 1
-        end = _line_number(prose, match.end()) - 1
-        if require_blank_adjacency:
-            blank_before = start == 0 or not lines[start - 1].strip()
-            blank_after = end == len(lines) - 1 or not lines[end + 1].strip()
-            if not (blank_before and blank_after):
-                continue
-        spans.append((start, end))
-    return sorted(set(spans))
+        line = prose.count("\n", 0, match.start())
+        if line not in excluded:
+            delimiters.append((match.start(), line))
+    displays = []
+    for (start, open_line), (close, close_line) in zip(
+            delimiters[0::2], delimiters[1::2]):
+        content = prose[start + 2:close]
+        prefix = prose[prose.rfind("\n", 0, start) + 1:start]
+        if ">" in prefix and _LINE_PREFIX_RE.fullmatch(prefix):
+            first, newline, rest = content.partition("\n")
+            content = first + newline + _QUOTE_MARKER_RE.sub("", rest)
+        displays.append((start, close + 2, open_line, close_line, content))
+    return displays
+
+
+def find_display_spans(prose, excluded_line_spans=()):
+    """Return where each display of ``prose`` lies, paired as above.
+
+    Each result gives the ``start`` offset of the opening ``$$``, the
+    ``end`` offset just past the closing one, and the zero-based
+    ``open_line`` and ``close_line`` of the two delimiters. A caller that
+    masks display math uses it to agree with these finders: a ``$$`` that
+    shares its line with math still opens or closes a display, and a last
+    unpaired ``$$`` opens none.
+    """
+    return [
+        {"start": start, "end": end,
+         "open_line": open_line, "close_line": close_line}
+        for start, end, open_line, close_line, _content in _displays(
+            prose or "", _excluded_lines(excluded_line_spans))
+    ]
+
+
+def _display_form(prose, lines, display):
+    """The delimiter-form defect of one display, or ``None`` when canonical.
+
+    Canonical is each ``$$`` alone on its line, after nothing but whitespace
+    or blockquote markers, with a blank line above and below.
+    """
+    start, end, open_line, close_line, _content = display
+    close = end - 2
+    line_end = prose.find("\n", end)
+    before = prose[prose.rfind("\n", 0, start) + 1:start]
+    after = prose[end:len(prose) if line_end < 0 else line_end]
+    if not _LINE_PREFIX_RE.fullmatch(before) or after.strip():
+        return "inline-display"
+    if open_line == close_line:
+        return "one-line-display"
+    if (prose[start + 2:prose.find("\n", start)].strip()
+            or not _LINE_PREFIX_RE.fullmatch(
+                prose[prose.rfind("\n", 0, close) + 1:close])):
+        return "shared-delimiter-line"
+    above = lines[open_line - 1] if open_line else ""
+    below = lines[close_line + 1] if close_line + 1 < len(lines) else ""
+    if not (_LINE_PREFIX_RE.fullmatch(above)
+            and _LINE_PREFIX_RE.fullmatch(below)):
+        return "missing-blank-line"
+    return None
+
+
+_ALIGNMENT_TOKEN_RE = re.compile(r"\\(?:[A-Za-z]+|.)|[&{}]", re.DOTALL)
+
+
+def _has_bare_alignment(content):
+    """Whether ``&``, or ``\\\\`` outside a group, sits outside environments.
+
+    Both belong inside an ``aligned``, ``gathered`` or similar environment;
+    bare, they fail to render. ``\\&`` is a literal ampersand, a ``\\\\``
+    inside a group such as ``\\substack{...}`` is that group's own, and a
+    ``\\\\`` that ends the display starts no second row.
+    """
+    depth = environments = 0
+    for match in _ALIGNMENT_TOKEN_RE.finditer(content):
+        token = match.group(0)
+        if token == r"\begin":
+            environments += 1
+        elif token == r"\end":
+            environments = max(0, environments - 1)
+        elif token == "{":
+            depth += 1
+        elif token == "}":
+            depth = max(0, depth - 1)
+        elif environments == 0 and (
+                token == "&" or (token == "\\\\" and depth == 0
+                                 and content[match.end():].strip())):
+            return True
+    return False
 
 
 def find_noncanonical_display_equation_candidates(
         masked_prose, excluded_line_spans=()):
-    """Return one-line display equations whose ``$$`` share a content line.
+    """Return existing displays whose form is not canonical.
 
-    Callers pass the same code-masked prose and parsed table spans used by the
-    coverage detector.  Findings are line-oriented so they can identify the
-    existing equation without proposing a second one.
+    Delimiter kinds: ``one-line-display`` (``$$...$$`` alone on one line),
+    ``inline-display`` (prose shares a delimiter's line),
+    ``shared-delimiter-line`` (the math shares a delimiter's line) and
+    ``missing-blank-line`` (no blank line above or below). The kind
+    ``bare-alignment`` is ``&`` or ``\\\\`` outside every environment
+    (:func:`_has_bare_alignment`). A display with both defects gets one
+    result for each.
+
+    Callers pass the same code-masked prose and parsed table spans used by
+    the coverage detector. Each result names the opening ``$$`` line, so the
+    repair keeps the existing equation instead of adding a second one.
     """
-    excluded = {
-        line
-        for start, end in (excluded_line_spans or ())
-        for line in range(start, end + 1)
-    }
+    prose = masked_prose or ""
+    lines = prose.split("\n")
     candidates = []
-    for match in _ONE_LINE_DISPLAY_RE.finditer(masked_prose or ""):
-        line = _line_number(masked_prose, match.start())
-        if line - 1 in excluded:
+    for display in _displays(prose, _excluded_lines(excluded_line_spans)):
+        content = display[4]
+        if not content.strip():
             continue
-        candidates.append({
-            "kind": "one-line-display",
-            "phrase": " ".join(match.group(0).strip().split()),
-            "line": line,
-        })
+        kinds = [_display_form(prose, lines, display)]
+        if _has_bare_alignment(content):
+            kinds.append("bare-alignment")
+        for kind in kinds:
+            if kind:
+                candidates.append({
+                    "kind": kind,
+                    "phrase": " ".join(prose[display[0]:display[1]].split()),
+                    "line": display[2] + 1,
+                })
     return candidates
 
 
 # Row environments lay a display out in lines; each row is checked alone.
-_ROW_ENVIRONMENT_RE = re.compile(
-    r"\\(?:begin|end)\s*\{\s*(?:aligned|align|alignat|alignedat|flalign|"
-    r"gathered|gather|split|multline|eqnarray)\*?\s*\}(?:\s*\{\d+\})?")
+_ROW_ENVIRONMENTS = frozenset((
+    "aligned", "align", "alignat", "alignedat", "flalign", "gathered",
+    "gather", "split", "multline", "eqnarray"))
+# Their column pairs sit side by side on one line: ``a &= 0 & b &= 1``.
+_COLUMN_PAIR_ENVIRONMENTS = frozenset((
+    "aligned", "align", "alignat", "alignedat", "flalign"))
+_ENVIRONMENT_ARGUMENT_RE = re.compile(
+    r"\s*\{\s*([A-Za-z]+)\*?\s*\}(?:\s*\{\d+\})?")
 _LATEX_TOKEN_RE = re.compile(r"\\(?:[A-Za-z]+|.)", re.DOTALL)
 _ENVIRONMENT_NAME_RE = re.compile(r"\s*\{[^{}]*\}")
 _DEFINING_RELATION_COMMANDS = frozenset(
     (r"\coloneqq", r"\triangleq", r"\equiv", r"\defeq"))
 _RANGE_DOTS_COMMANDS = frozenset((r"\ldots", r"\dots", r"\cdots"))
+# Top-level gaps and connectives that end one equation on a line. A bare
+# ``\\`` outside a row layout starts no new line, so it joins two as well.
+_SEGMENT_BREAK_COMMANDS = frozenset((
+    r"\quad", r"\qquad", r"\enspace", r"\hspace", "\\\\",
+    r"\Rightarrow", r"\Longrightarrow", r"\implies", r"\Leftarrow",
+    r"\Longleftarrow", r"\impliedby", r"\iff", r"\Leftrightarrow",
+    r"\Longleftrightarrow", r"\therefore"))
+_HSPACE_ARGUMENT_RE = re.compile(r"\*?\s*\{[^{}]*\}")
+_CLAUSE_COMMANDS = frozenset((r"\text", r"\textrm", r"\mathrm"))
+# A where or with clause defines another quantity; and, so, hence, thus,
+# therefore and i.e. join another equation.
+_CLAUSE_WORD_RE = re.compile(
+    r"\s*\{\s*,?\s*(?:where|with|and|so|hence|thus|therefore|i\.\s*e\.)"
+    r"(?![A-Za-z])")
+_CONJUNCTION_WORD_RE = re.compile(r"\s*\{\s*,?\s*and(?![A-Za-z])")
+# A comma or semicolon separates two equations only when a relation follows
+# before the next one; a list or an index range (i = 1, \ldots, m) has none.
+_RELATION_AHEAD_RE = re.compile(
+    r"(?:\\[,;:! ]|\\(?![,;:! ])|[^,;\\])*?(?:(?<![<>!=])=(?!=)|"
+    r"\\(?:coloneqq|triangleq|equiv|defeq)(?![A-Za-z]))")
+# A right side that only lists values (x = 0, 1 or i = 1, 2, 3) states an
+# index range or a domain, like a list closed by \ldots.
+_LIST_GAP = r"(?:\s|\\[,;:! ])*"
+_LIST_VALUE = r"[-+]?\s*(?:\d+(?:\.\d+)?|[A-Za-z]|\\[A-Za-z]+)"
+_VALUE_LIST_RE = re.compile(
+    r"=%s%s(?:%s,%s%s)+%s[.,;]?%s" % (
+        _LIST_GAP, _LIST_VALUE, _LIST_GAP, _LIST_GAP, _LIST_VALUE,
+        _LIST_GAP, _LIST_GAP))
+# A new physical source line continues the equation above it when that line
+# ends in an operator, a relation, a comma or an opening group, or when the
+# new line starts with an operator, a relation or a closing group.
+_OPERATOR_COMMANDS = (
+    r"cdot|times|div|pm|mp|ast|circ|oplus|otimes|cup|cap|setminus|wedge|"
+    r"vee|land|lor|le|leq|ge|geq|ne|neq|lt|gt|ll|gg|approx|sim|simeq|cong|"
+    r"equiv|propto|in|notin|subset|subseteq|supset|supseteq|to|mapsto|gets|"
+    r"mid|coloneqq|triangleq|defeq")
+_CONTINUED_LINE_END_RE = re.compile(
+    r"(?:[-+*/=<>,;:|^_&({\[]|\\\{|\\(?:left|middle|[bB]igg?[lm]?|frac|"
+    r"dfrac|tfrac|sqrt|sum|prod|int|%s)(?![A-Za-z]))\s*\Z" % _OPERATOR_COMMANDS)
+_CONTINUING_LINE_START_RE = re.compile(
+    r"\s*(?:[-+*/=<>,;:|^_&)}\]{]|\\\}|\\(?:right|middle|end|[bB]igg?[rm]?|"
+    r"%s)(?![A-Za-z]))" % _OPERATOR_COMMANDS)
 # A segment that states a condition on the equation beside it rather than a
 # second equation: "\forall i", "\text{for } i = 1", "\text{subject to}".
 # A "where" or "with" clause defines another quantity, so it is a second
@@ -322,26 +475,35 @@ _LHS_NOISE_RE = re.compile(r"\\[,;:! ]|~|\s")
 
 
 def _display_relation_segments(content):
-    """Split display math at top-level gaps, connectives and where-clauses.
+    """Split one display line at the points where an equation can end.
 
-    A gap is ``\\quad``, ``\\qquad`` or a comma before ``\\;``, ``\\ `` or
-    ``\\,``; a connective is ``\\Rightarrow``, ``\\implies``, ``\\iff`` or a
-    kin; a ``\\text{where}`` or ``\\text{with}`` clause opens a new segment.
+    A segment ends at a top-level gap (``\\quad``, ``\\qquad``,
+    ``\\enspace``, ``\\hspace`` or a ``\\\\`` outside a row layout), at a
+    connective (``\\Rightarrow``, ``\\implies``, ``\\iff``,
+    ``\\Leftrightarrow`` or a kin), at a ``\\text{}`` clause word (where,
+    with, and, so, hence, thus, therefore, i.e.), at a comma or semicolon
+    with a relation before the next one, and at a new physical source line
+    that neither line continues with an operator, a relation or a group.
 
     Braces (literal ``\\{`` too), parentheses, brackets and
-    ``\\begin``...``\\end`` environments nest.  Returns
-    ``(text, lhs, range_qualifier)`` per segment: ``lhs`` is the text before
+    ``\\begin``...``\\end`` environments nest. Returns ``(text, lhs,
+    range_qualifier, continued)`` per segment: ``lhs`` is the text before
     the segment's first top-level ``=`` (or defining relation command), else
-    ``None``; ``range_qualifier`` marks a top-level ``, \\ldots`` index range.
+    ``None``; ``range_qualifier`` marks an index range: a top-level ``,
+    \\ldots`` or a right side that only lists values (``x = 0, 1``);
+    ``continued`` marks a segment opened by a comma, a semicolon or
+    ``\\text{and}``, which carries on the condition before it.
     """
     segments = []
     start, depth, environments = 0, 0, 0
-    lhs_end, range_qualifier = None, False
+    lhs_end, range_qualifier, continued = None, False, False
 
     def close(end):
         text = content[start:end]
         lhs = text[:lhs_end - start] if lhs_end is not None else None
-        segments.append((text, lhs, range_qualifier))
+        listed = lhs is not None and bool(
+            _VALUE_LIST_RE.fullmatch(text, lhs_end - start))
+        segments.append((text, lhs, range_qualifier or listed, continued))
 
     index = 0
     while index < len(content):
@@ -362,23 +524,17 @@ def _display_relation_segments(content):
             elif command in (r"\}", r"\rbrace"):
                 depth = max(0, depth - 1)
             elif top and (
-                    command in (r"\quad", r"\qquad", r"\Rightarrow",
-                                r"\Longrightarrow", r"\implies", r"\iff",
-                                r"\Leftrightarrow", r"\therefore")
-                    or (command in (r"\;", r"\ ", r"\,")
-                        and content[start:token.start()].rstrip()
-                        .endswith(",")
-                        # Not a list or range (i = 1,\, \ldots,\, m): a
-                        # relation must follow before the next comma.
-                        and re.match(
-                            r"[^,]*?(?:(?<![<>!=])=(?!=)|\\(?:coloneqq|"
-                            r"triangleq|equiv|defeq)(?![A-Za-z]))",
-                            content[index:]))
-                    or (command in (r"\text", r"\textrm", r"\mathrm")
-                        and re.match(r"\s*\{\s*(?:where|with)\b",
-                                     content[index:]))):
+                    command in _SEGMENT_BREAK_COMMANDS
+                    or (command in _CLAUSE_COMMANDS
+                        and _CLAUSE_WORD_RE.match(content, index))):
+                if command == r"\hspace":
+                    argument = _HSPACE_ARGUMENT_RE.match(content, index)
+                    index = argument.end() if argument else index
                 close(token.start())
                 start, lhs_end, range_qualifier = index, None, False
+                continued = bool(command in _CLAUSE_COMMANDS
+                                 and _CONJUNCTION_WORD_RE.match(
+                                     content, token.end()))
             elif top and command in _DEFINING_RELATION_COMMANDS:
                 lhs_end = token.start() if lhs_end is None else lhs_end
             elif top and command in _RANGE_DOTS_COMMANDS:
@@ -389,6 +545,17 @@ def _display_relation_segments(content):
             depth += 1
         elif char in "})]":
             depth = max(0, depth - 1)
+        elif (top and char in ",;"
+              and _RELATION_AHEAD_RE.match(content, index + 1)):
+            close(index)
+            start, lhs_end, range_qualifier, continued = (
+                index + 1, None, False, True)
+        elif (top and char == "\n" and content[start:index].strip()
+              and not _CONTINUED_LINE_END_RE.search(content[start:index])
+              and not _CONTINUING_LINE_START_RE.match(content, index + 1)):
+            close(index)
+            start, lhs_end, range_qualifier, continued = (
+                index + 1, None, False, False)
         elif (char == "=" and top and lhs_end is None
               and content[index - 1:index] not in ("<", ">", "!", "=")
               and content[index + 1:index + 2] != "="):
@@ -401,41 +568,81 @@ def _display_relation_segments(content):
 def _display_lines(content):
     """The rendered lines of one display: its rows, or the whole display.
 
-    Row environments (``aligned``, ``gathered``, ``split``...) and their
-    ``&`` column markers are unwrapped and the rows split at top-level
-    ``\\\\``; a ``cases`` or matrix body keeps its own rows.
+    A row environment (``aligned``, ``gathered``, ``split``...) breaks its
+    rows at each ``\\\\`` on its own level. Its markers and ``&`` column
+    markers are dropped, and in an align-family layout every second ``&``
+    of a row, which sets another column pair beside the first, becomes a
+    ``\\quad`` gap. A ``\\\\`` outside every row environment, in a ``cases``
+    or matrix body, or in a group such as ``\\substack`` starts no new line.
     """
-    body = _ROW_ENVIRONMENT_RE.sub(" ", content)
-    body = re.sub(r"(?<!\\)&", " ", body)
-    rows, start, depth, environments, index = [], 0, 0, 0, 0
-    while index < len(body):
-        char = body[index]
+    rows, row = [], []
+    stack = []  # (row environment name or None, enclosing brace depth)
+    depth = ampersands = index = 0
+
+    def in_rows():
+        return bool(stack) and depth == 0 and all(
+            name and saved == 0 for name, saved in stack)
+
+    while index < len(content):
+        char = content[index]
         if char == "\\":
-            token = _LATEX_TOKEN_RE.match(body, index)
+            token = _LATEX_TOKEN_RE.match(content, index)
+            if token is None:
+                # A lone trailing backslash starts no command.
+                row.append(char)
+                index += 1
+                continue
             command = token.group(0)
             if command in (r"\begin", r"\end"):
-                environments = max(0, environments + (
-                    1 if command == r"\begin" else -1))
-            elif command == "\\\\" and depth == 0 and environments == 0:
-                rows.append(body[start:index])
-                start = token.end()
+                argument = _ENVIRONMENT_ARGUMENT_RE.match(content, token.end())
+                name = argument.group(1) if argument else ""
+                if command == r"\begin":
+                    stack.append((name if name in _ROW_ENVIRONMENTS else None,
+                                  depth))
+                    depth = 0
+                elif stack:
+                    depth = stack.pop()[1]
+                if name in _ROW_ENVIRONMENTS:
+                    row.append(" ")
+                    index, ampersands = argument.end(), 0
+                    continue
+            elif command == "\\\\" and in_rows():
+                rows.append("".join(row))
+                row, ampersands = [], 0
+                index = token.end()
+                continue
+            row.append(command)
             index = token.end()
             continue
         if char == "{":
             depth += 1
         elif char == "}":
             depth = max(0, depth - 1)
+        elif char == "&" and (in_rows() or not stack):
+            # A bare ``&`` outside every environment is a form finding.
+            ampersands += 1
+            pair = (in_rows() and stack[-1][0] in _COLUMN_PAIR_ENVIRONMENTS
+                    and ampersands % 2 == 0)
+            row.append(" \\quad " if pair else " ")
+            index += 1
+            continue
+        row.append(char)
         index += 1
-    rows.append(body[start:])
+    rows.append("".join(row))
     return [row for row in rows if row.strip()]
 
 
 def _equation_count(row):
     """How many equations one rendered display line sets side by side."""
-    count, qualify_next = 0, False
-    for text, lhs, range_qualifier in _display_relation_segments(row):
+    count, qualify_next, qualified = 0, False, False
+    for text, lhs, range_qualifier, continued in _display_relation_segments(
+            row):
+        if not _LHS_NOISE_RE.sub("", text).strip(",;"):
+            continue
         led = bool(_QUALIFIER_LEAD_RE.match(text))
-        qualified = qualify_next or range_qualifier or led
+        # A comma, a semicolon or "and" carries on the condition before it.
+        qualified = (qualify_next or range_qualifier or led
+                     or (continued and qualified))
         # A standalone condition ("\text{subject to}") states no equation
         # itself and qualifies the next segment.
         qualify_next = lhs is None and led
@@ -450,41 +657,41 @@ def find_multi_relation_display_candidates(masked_prose,
     """Return displays with a line that holds more than one equation.
 
     Every equation gets its own line: ``a = \\ldots, \\qquad b = \\ldots``
-    in one display line puts two side by side, as does a derivation joined by
-    ``\\Rightarrow`` or a ``\\text{where}`` clause defining another quantity.
-    A line is the whole display, or each row of an ``aligned``, ``gathered``
-    or similar layout; it is split into equations only at top-level gaps,
-    connectives and where/with clauses (:func:`_display_relation_segments`),
-    outside every group and environment, so a ``cases`` or matrix body never
-    splits it. Conditions are not equations: an index range
-    (``i = 1, \\ldots, m``), a segment led by ``\\forall`` or a
-    ``\\text{for|if|when|given|subject to|...}`` word, and the segment after
-    a standalone condition such as ``\\text{subject to}``. Every result is an
-    agent-review candidate: the agent confirms each flagged line really holds
-    two equations and gives each its own line, leaving the math unchanged.
+    in one display line puts two side by side, as do ``a = \\ldots, b =
+    \\ldots``, ``a = \\ldots \\text{ and } b = \\ldots``, a derivation joined
+    by ``\\Rightarrow`` and a ``\\text{where}`` clause defining another
+    quantity. A line is the whole display, or each row of an ``aligned``,
+    ``gathered`` or similar layout (:func:`_display_lines`); two equations
+    on separate source lines of one display, or joined by a bare ``\\\\``,
+    still share a rendered line. A line is split into equations only outside
+    every group and environment (:func:`_display_relation_segments`), so a
+    ``cases`` or matrix body never splits it. Conditions are not equations:
+    an index range (``i = 1, \\ldots, m`` or ``x = 0, 1``), a segment led
+    by ``\\forall`` or
+    a ``\\text{for|if|when|given|subject to|...}`` word, the segment after a
+    standalone condition such as ``\\text{subject to}``, and a comma,
+    semicolon or ``\\text{and}`` that continues a condition. Every result is
+    an agent-review candidate: the agent confirms each flagged line really
+    holds two equations and gives each its own line, leaving the math
+    unchanged. A result names the display's first content line.
     """
     prose = masked_prose or ""
-    excluded = {
-        line
-        for start, end in (excluded_line_spans or ())
-        for line in range(start, end + 1)
-    }
-    matches = list(_DISPLAY_BLOCK_RE.finditer(prose))
-    matches.extend(_ONE_LINE_DISPLAY_RE.finditer(prose))
-    candidates, seen = [], set()
-    for match in matches:
-        line = _line_number(prose, match.start(1))
-        content = match.group(1)
-        if line in seen or line - 1 in excluded:
+    candidates = []
+    for start, _end, open_line, close_line, content in _displays(
+            prose, _excluded_lines(excluded_line_spans)):
+        if not any(_equation_count(row) >= 2
+                   for row in _display_lines(content)):
             continue
-        if any(_equation_count(row) >= 2 for row in _display_lines(content)):
-            seen.add(line)
-            candidates.append({
-                "kind": "multi-relation-display",
-                "phrase": " ".join(content.split()),
-                "line": line,
-            })
-    return sorted(candidates, key=lambda candidate: candidate["line"])
+        line = open_line + 1
+        if (open_line != close_line
+                and not prose[start + 2:prose.find("\n", start)].strip()):
+            line += 1
+        candidates.append({
+            "kind": "multi-relation-display",
+            "phrase": " ".join(content.split()),
+            "line": line,
+        })
+    return candidates
 
 
 def _lhs_has_symbol(lhs, symbols):
@@ -884,19 +1091,22 @@ def _display_supports(kind, block, context=""):
 
 
 def _has_covering_display(kind, line_index, display_spans, lines, context=""):
-    """Whether a matching canonical display follows the prose nearby."""
+    """Whether a matching display follows the prose nearby.
+
+    ``display_spans`` holds ``(open_line, content)`` per display; one that
+    opens on the cue's own line counts as following it.
+    """
     nearby_blocks = []
-    for start, end in display_spans:
+    for start, content in display_spans:
         # At most one short paragraph may sit between, never a heading.
-        if (0 < start - line_index <= 6
+        if (0 <= start - line_index <= 6
                 and not any(re.match(r"[ \t]{0,3}#{1,6}[ \t]", lines[i])
                             for i in range(line_index + 1, start))):
-            block = "\n".join(lines[start:end + 1])
-            if _display_supports(kind, block, context):
+            if _display_supports(kind, content, context):
                 return True
         if (kind == "nearest-center-assignment-and-update"
-                and 0 < start - line_index <= 8):
-            nearby_blocks.append("\n".join(lines[start:end + 1]))
+                and 0 <= start - line_index <= 8):
+            nearby_blocks.append(content)
     if nearby_blocks and _display_supports(
             kind, "\n".join(nearby_blocks), context):
         return True
@@ -1026,33 +1236,21 @@ def find_missing_display_equation_candidates(masked_prose,
     """Return high-confidence prose calculations lacking display math.
 
     Each result has ``kind``, ``phrase``, and one-based ``line``. A prose cue is
-    satisfied only by a nearby canonical display block; an unrelated equation
-    elsewhere in the entry no longer hides it. A defining formula found inline
+    satisfied only by a matching display nearby, whatever its delimiter form
+    (a noncanonical form is a separate form finding); an unrelated equation
+    elsewhere in the entry does not hide it. A defining formula found inline
     is reported because its placement, rather than mere coverage, is the
     problem, unless it directly follows a wikilink, where it restates the
     linked entry's formula. The executing agent still verifies context before
     editing.
     """
     prose = masked_prose or ""
-    excluded = set()
-    for start, end in excluded_line_spans or ():
-        excluded.update(range(max(0, start), max(0, end) + 1))
-
-    display_spans = _display_line_spans(prose)
-    all_display_spans = _display_line_spans(
-        prose, require_content=False, require_blank_adjacency=False)
+    displays = _displays(prose, _excluded_lines(excluded_line_spans))
+    display_spans = [(open_line, content)
+                     for _start, _end, open_line, _close, content in displays
+                     if content.strip()]
     prose_lines = prose.split("\n")
-    visible_lines = []
-    for line_index, line in enumerate(prose_lines):
-        in_display = any(start <= line_index <= end
-                         for start, end in all_display_spans)
-        if line_index in excluded or in_display or _CAPTION_RE.match(line):
-            # A non-whitespace sentinel prevents a match from bridging across
-            # an excluded table or caption while preserving line offsets.
-            visible_lines.append("\0" * len(line))
-        else:
-            visible_lines.append(line)
-    visible = "\n".join(visible_lines)
+    visible = _visible_prose_lines(prose, excluded_line_spans, displays)
 
     # Remove emphasis delimiters only from the prose/cue view. The raw inline
     # formula must remain byte-faithful: deleting ``_`` changed ``x_0`` into
@@ -1220,19 +1418,26 @@ _MATH_GUARDS = [
 _PARAMETER_SUMMAND_RE = re.compile(r"\\(?:boldsymbol\{\\)?theta|\bw_")
 
 
-def _visible_prose_lines(prose, excluded_line_spans=()):
-    """Prose with display blocks, captions and excluded lines blanked."""
-    excluded = {
-        line
-        for start, end in (excluded_line_spans or ())
-        for line in range(max(0, start), max(0, end) + 1)
-    }
-    spans = _display_line_spans(
-        prose, require_content=False, require_blank_adjacency=False)
+def _visible_prose_lines(prose, excluded_line_spans=(), displays=None):
+    """Prose with displays, captions and excluded lines blanked.
+
+    A non-whitespace sentinel prevents a match from bridging across an
+    excluded table, a caption or a display while preserving line offsets.
+    Only a display's own characters, delimiters included, are blanked, so
+    prose that shares a line with a display stays visible.
+    """
+    excluded = _excluded_lines(excluded_line_spans)
+    if displays is None:
+        displays = _displays(prose, excluded)
+    chars = list(prose)
+    for start, end, *_rest in displays:
+        for index in range(start, end):
+            if chars[index] != "\n":
+                chars[index] = "\0"
     lines = []
-    for index, line in enumerate(prose.split("\n")):
-        if (index in excluded or _CAPTION_RE.match(line)
-                or any(start <= index <= end for start, end in spans)):
+    for index, (line, raw) in enumerate(
+            zip("".join(chars).split("\n"), prose.split("\n"))):
+        if index in excluded or _CAPTION_RE.match(raw):
             lines.append("\0" * len(line))
         else:
             lines.append(line)
@@ -1374,12 +1579,20 @@ def run_self_test(verbose=False):
          "It is the square root of variance.\n\n$$\n$$", 1, ()),
         ("a whitespace-only display block does not satisfy coverage",
          "It is the square root of variance.\n\n$$\n   \n$$", 1, ()),
-        ("a display without a blank line before it is not canonical coverage",
+        ("a display without a blank line before it still covers the cue",
          "It is the square root of variance.\n$$\n"
-         "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$", 1, ()),
-        ("a display without a blank line after it is not canonical coverage",
+         "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$", 0, ()),
+        ("a display without a blank line after it still covers the cue",
          "It is the square root of variance.\n\n$$\n"
-         "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\nNext.", 1, ()),
+         "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\nNext.", 0, ()),
+        ("a display opened on its equation's line still covers the cue",
+         "It is the square root of variance.\n\n"
+         "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$", 0, ()),
+        ("a display on the cue's own line covers the cue",
+         "It is the square root of variance, "
+         "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$ in symbols.", 0, ()),
+        ("prose sharing a line with an unrelated display stays visible",
+         "$$x = 1$$ and the scale is the square root of variance.", 1, ()),
         ("negation is not an affirmative cue",
          "It is not the square root of variance.", 0, ()),
         ("possibility is not an affirmative cue",
@@ -1741,17 +1954,45 @@ def run_self_test(verbose=False):
         if not ok:
             print("  expected %r, got %r" % (expected, got))
             failed += 1
+    # Display form: (name, prose, kinds in source order, spans).
     format_cases = [
         ("a one-line display is reported as existing noncanonical math",
-         "Prose.\n\n$$x = 1$$", 1, ()),
-        ("a canonical multiline display has no one-line-form finding",
-         "Prose.\n\n$$\nx = 1\n$$", 0, ()),
+         "Prose.\n\n$$x = 1$$", ["one-line-display"], ()),
+        ("a canonical multiline display has no form finding",
+         "Prose.\n\n$$\nx = 1\n$$", [], ()),
         ("a one-line display in a parsed table is outside body prose",
-         "Name | Value\n--- | ---\nX | $$x = 1$$", 0, ((0, 2),)),
+         "Name | Value\n--- | ---\nX | $$x = 1$$", [], ((0, 2),)),
+        ("an opening or closing delimiter sharing the math's line is reported",
+         "Prose.\n\n$$x = 1\n$$\n\nMore.\n\n$$\ny = 2$$",
+         ["shared-delimiter-line", "shared-delimiter-line"], ()),
+        ("a display sharing a line with prose is reported",
+         "That is $$x = 1$$ in symbols.", ["inline-display"], ()),
+        ("a display without a blank line above or below is reported",
+         "Prose.\n$$\nx = 1\n$$\n\nMore.\n\n$$\ny = 2\n$$\nNext.",
+         ["missing-blank-line", "missing-blank-line"], ()),
+        ("whitespace-only blank lines and a blockquote display are canonical",
+         "Prose.\n \t\n$$\nx = 1\n$$\n \t\n> Quote.\n>\n> $$\n> y = 2\n> $$",
+         [], ()),
+        ("an escaped dollar opens no display",
+         "It costs \\$$5$ in total.", [], ()),
+        ("a one-line aligned display is one form finding",
+         "Prose.\n\n$$\\begin{aligned} a &= 1 \\\\ &= 2 \\end{aligned}$$",
+         ["one-line-display"], ()),
+        ("a bare & or \\\\ outside an environment fails to render",
+         "$$\na &= b \\\\ &= c\n$$\n\n$$\na = 1 \\\\ b = 2\n$$",
+         ["bare-alignment", "bare-alignment"], ()),
+        ("aligned rows, a cases body, an escaped &, a substack and a final "
+         "\\\\ render",
+         "$$\n\\begin{aligned} a &= b \\\\ &= c \\end{aligned}\n$$\n\n"
+         "$$\ns = \\begin{cases} 1 & x > 0 \\\\ 0 & x \\le 0 \\end{cases}\n"
+         "$$\n\n$$\nc = \\text{R\\&D}\n$$\n\n"
+         "$$\nr = \\sum_{\\substack{i=1 \\\\ j \\ne i}} w_i\n$$\n\n"
+         "$$\na = 1 \\\\\n$$", [], ()),
     ]
     total += len(format_cases)
     for name, prose, expected, spans in format_cases:
-        got = len(find_noncanonical_display_equation_candidates(prose, spans))
+        got = [candidate["kind"] for candidate in
+               find_noncanonical_display_equation_candidates(prose, spans)]
         ok = got == expected
         if verbose or not ok:
             print(("PASS" if ok else "FAIL") + ": " + name)
@@ -1810,7 +2051,7 @@ def run_self_test(verbose=False):
         ("gaps inside a group, environment or text never split",
          "$$\nf = \\begin{cases} a = 1, \\quad b = 2 & x \\end{cases}\n$$\n\n"
          "$$\nS = \\{a = 1, \\quad b = 2\\}\n$$\n\n"
-         "$$\na = 1 \\text{ and \\quad } b = 2\n$$", [], ()),
+         "$$\na = 1 \\text{ mod \\quad } b = 2\n$$", [], ()),
         ("each row of a row layout is its own line",
          "$$\n\\begin{aligned} a &= 1 \\\\ b &= 2 \\end{aligned}\n$$\n\n"
          "$$\n\\begin{gathered} a = 1 \\\\ s = \\begin{cases} -1 & x < 0 "
@@ -1822,11 +2063,87 @@ def run_self_test(verbose=False):
         ("a display in a parsed table is outside body prose",
          "Name | Value\n--- | ---\nX | $$a = 1, \\quad b = 2$$", [],
          ((0, 2),)),
+        ("a lone trailing backslash is not a command",
+         "$$\na = 1 \\\n$$", [], ()),
+        ("a bare row break outside a row layout keeps one line",
+         "$$\na = b \\\\ c = d\n$$\n\n$$\na &= b \\\\\nc &= d\n$$\n\n"
+         "$$\n\\begin{aligned} a &= 1 \\end{aligned} \\\\ b = 2\n$$\n\n"
+         "$$\nr = \\sum_{\\substack{i=1 \\\\ j \\ne i}} w_i\n$$", [2, 6, 11],
+         ()),
+        ("two equations on separate source lines share a rendered line",
+         "$$\na = 1\nb = 2\n$$", [2], ()),
+        ("a source line that continues an operator, relation or group is "
+         "one equation",
+         "$$\nv = e - f\n- g = s\n$$\n\n$$\ns = \\sqrt{a}\n= \\sqrt{b}\n$$\n\n"
+         "$$\nJ = \\frac{1}{m}\n\\sum_{i=1}^{m} e_i\n$$", [], ()),
+        ("a comma, a semicolon, a clause word or a connective joins two "
+         "equations",
+         "$$\n\\mu = 0, \\sigma = 1\n$$\n\n$$\na = 1 \\text{ and } b = 2\n$$\n\n"
+         "$$\na = 1; b = 2\n$$\n\n$$\na = 1;\\ b = 2\n$$\n\n"
+         "$$\na = b \\Longleftrightarrow c = d\n$$\n\n"
+         "$$\na = 1 \\hspace{1em} b = 2\n$$\n\n"
+         "$$\nJ = x \\text{, so } K = y\n$$", [2, 6, 10, 14, 18, 22, 26], ()),
+        ("the column pairs of an aligned row share its line",
+         "$$\n\\begin{aligned} a &= 0, & b &= 1 \\end{aligned}\n$$\n\n"
+         "$$\n\\begin{aligned} a &= 0 & b &= 1 \\end{aligned}\n$$", [2, 6],
+         ()),
+        ("lists, ranges, domains and continued conditions add no equation",
+         "$$\nP(X = k) = \\ldots, k = 0, 1, \\ldots, n\n$$\n\n"
+         "$$\nf(x) = x^2, x \\in \\mathbb{R}\n$$\n\n"
+         "$$\np(x;\\theta) = \\ldots\n$$\n\n$$\nx = 1, 2, 3\n$$\n\n"
+         "$$\ny = 1 \\text{ and } y > 0\n$$\n\n"
+         "$$\ny_{ij} = 0 \\quad \\text{for } i = 1 \\text{ and } j = 2\n$$\n\n"
+         "$$\ny_{ij} = 0, \\quad \\text{for } i = 1, j = 2\n$$", [], ()),
+        ("a comma-opened list of values is an index range, not an equation",
+         "$$\np(x) = \\theta^x (1-\\theta)^{1-x}, x = 0, 1\n$$\n\n"
+         "$$\ny_i = 2 x_i, i = 1, 2, 3\n$$\n\n"
+         "$$\na = 1, b = 2\n$$", [10], ()),
+        ("a display opened on its equation's line is read",
+         "$$a = b, \\qquad c = d\n$$", [1], ()),
+        ("a display in a blockquote is read without its markers",
+         "> Prose.\n>\n> $$\n> a = 1, \\quad b = 2\n> $$", [4], ()),
     ]
     total += len(split_cases)
     for name, prose, expected, spans in split_cases:
         got = [candidate["line"] for candidate in
                find_multi_relation_display_candidates(prose, spans)]
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    # Display spans: (name, prose, (open_line, close_line) pairs, spans).
+    span_cases = [
+        ("a closing delimiter on the math's line closes its display",
+         "$$\nr = 1$$\n\nProse.\n\n$$\ns = 1\n$$", [(0, 1), (5, 7)], ()),
+        ("an opening delimiter on the math's line opens its display",
+         "$$r = 1\n$$\n\nProse.\n\n$$\ns = 1\n$$", [(0, 1), (5, 7)], ()),
+        ("a closer followed by a period closes its display",
+         "$$\nr = 1\n$$.\n\nProse.\n\n$$\ns = 1\n$$", [(0, 2), (6, 8)], ()),
+        ("a last unpaired delimiter opens no display",
+         "$$\nr = 1\n$$\n\nProse.\n\n$$\nProse.", [(0, 2)], ()),
+        ("a delimiter on an excluded line is skipped",
+         "X | $$\n\n$$\nr = 1\n$$", [(2, 4)], ((0, 0),)),
+    ]
+    total += len(span_cases)
+    for name, prose, expected, spans in span_cases:
+        got = [(span["open_line"], span["close_line"])
+               for span in find_display_spans(prose, spans)]
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    # Row parsing alone: (name, display content, rendered lines).
+    row_cases = [
+        ("a lone backslash ending the content starts no command",
+         "a = 1 \\", ["a = 1 \\"]),
+    ]
+    total += len(row_cases)
+    for name, content, expected in row_cases:
+        got = _display_lines(content)
         ok = got == expected
         if verbose or not ok:
             print(("PASS" if ok else "FAIL") + ": " + name)

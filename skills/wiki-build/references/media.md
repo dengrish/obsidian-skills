@@ -8,6 +8,8 @@ Scope: source figures, recreated tables and captions. Report a source with no fi
 
 Use [step 1](../SKILL.md#1-read-the-source)'s inventory command, never a recursive shell glob: it matches every case, extension and separator variant of the `<resolved_source_stem>_fig` prefix and returns direct regular files in `candidates`. `Sources/Images/` is flat: symlinks, nonregular occupants, portable-equivalent names and nested matches are `blocked_matches` that make the inventory unsafe, staging residue is reported but never consumed, and an unreadable directory leaves absence unproved. Read the complete JSON and resolve or report its findings; an empty partial result never means "this source has no figures."
 
+`<images-folder>` is `<vault>/Sources/Images/`. An absent folder makes the inventory `unreadable`, so before the inventory an apply run creates a genuinely absent `Sources/Images/`, and a missing `Sources/` parent, each with a plain `mkdir` (never `-p`, never over an occupant), once the existing parents show no case/NFC-equivalent name, symlink, non-directory occupant or unreadable scope. Report the creation. Any such conflict blocks the image steps and is reported. A preview or no-apply run creates no folder: it inventories an empty `<scratch>` folder in place of the absent one and reports the source's figures as a gap.
+
 - **PDF source.** Figures come from `figure-extract`, named `[pdf_stem]_fig_<N>.png` by the source's figure number ([CONVENTIONS §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)). **A source figure with no extracted file stays in the inventory as unavailable**, never fabricated or denied: when the inventory is empty, first [prepare missing PDF figures](#missing-pdf-figures), and report an unavailable figure that would materially help.
 - **Markdown source.** Image references live in the note and resolve directly, even under an older filename prefix; a rendered one is never called unavailable or renamed. Downloads follow [§8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages). A failed download leaves `<!-- image download failed: … -->` in place: inventory it as an unavailable figure with that reason, and never copy the comment or its orphaned caption into an entry. An older note's remote `![alt](https://…)` image is inventoried from the text and reused in Markdown form, never rewritten as a wikilink, which would lose the URL.
 
@@ -16,7 +18,8 @@ Use [step 1](../SKILL.md#1-read-the-source)'s inventory command, never a recursi
 ### Missing PDF figures
 
 When a PDF source shows or refers to figures but its complete, safe step-1
-inventory has no `candidates`, an apply run extracts that PDF alone, once,
+inventory, taken after any [image-folder bootstrap](#images), has no
+`candidates`, an apply run extracts that PDF alone, once,
 after the parser check passes and before selecting exhibits:
 
 ```bash
@@ -27,9 +30,17 @@ python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
 Carry any non-default option intake or an earlier extraction report names
 (`--allow-unorganized`) into this and every repair command. Pass
 `--ed-prefix ED` only when no `<stem>_fig*` crop exists yet and the captions
-number Extended Data figures separately; the batch applies it by itself to a
+(the `raw` column of `auto_fig_bbox.py`) number Extended Data figures
+separately; the batch applies it by itself to a
 PDF that already holds `_fig_ED<N>` crops and prints `Using --ed-prefix ED`.
 Respect the extractor's refusals and read its diagnostics.
+
+A split book's figures are its chapters' figures. When a
+[split book](source-cases.md#several-sources-in-one-run) is processed as one
+file, its inventory is the step-1 inventory of each chapter's stem. When a
+chapter's inventory has no `candidates`, this extraction runs once with
+`--src` on the chapter folder. Never extract from the whole-book PDF or pass
+`--include-split-books`.
 
 Then complete figure-extract's
 [visual review](../../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)

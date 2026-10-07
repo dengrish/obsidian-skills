@@ -61,7 +61,9 @@ python3 '<skill>/scripts/body_checks.py' source '<saved markup file>' --base-url
 ```
 
 Counts are tripwires, not assertions. Exclude the note's generated callout and
-source chrome from interpretation. Account for normalized heading levels,
+source chrome from interpretation. A source heading tagged `[hidden]` is
+screen-reader-only text that readers never saw: it is not a missing heading,
+and no heading is added for it. Account for normalized heading levels,
 converted footnotes, removed share links and known intentional omissions.
 Inspect large divergences: a missing/misordered heading, an unexpectedly small
 figure inventory, or a list/quote/link count differing by a large factor.
@@ -81,7 +83,8 @@ suggested detector; do not edit an installed plugin during clipping processing.
   generated schema; conflicting or uninterpretable values were reported.
 - [ ] First current `sources:` item establishes web ownership; legacy `source:`
   is used only when current `sources:` is absent. This is not a PDF summary.
-  The output has its one preserved capture URL, no substituted canonical URL.
+  The output has its one preserved capture URL (an overwrite keeps the existing
+  note's origin), no substituted canonical URL.
 - [ ] Corrected title, byline and publication date match their evidence. Every
   `author:` value is a human byline supported by the capture or usable source;
   capture-only values remain explicitly unverified against an unavailable live
@@ -94,8 +97,9 @@ suggested detector; do not edit an installed plugin during clipping processing.
   title was retained raw and skipped rather than receiving an invented identity.
   Meaningful Unicode remains.
 - [ ] Description is factual and at most 110 characters, and attributes an
-  argued thesis, forecast or recommendation to its named author (or the
-  publication or issuing body when `author: []`); format follows content
+  argued thesis, forecast or recommendation to whoever argues it
+  ([rule](../SKILL.md#4-assemble-the-complete-draft); the interviewee or
+  quoted subject in a reported piece); format follows content
   (`Article`, `Post`, or `Video` for a substantive transcript), and tags follow
   the shared enum rather than invented synonyms (`tags: []` when none fits).
 - [ ] A new note uses bare `read: false`. A rewrite preserves the review state,
@@ -112,9 +116,10 @@ suggested detector; do not edit an installed plugin during clipping processing.
 
 - [ ] The summary meets [draft assembly](../SKILL.md#4-assemble-the-complete-draft):
   a standalone thesis first; one claim per bullet, naming its own subject and
-  keeping scope, confidence, terms and numbers; opinions attributed and facts
-  stated directly; no contextless “It/This/They”, meta-framing or links;
-  entry-worthy bold only; a bullet count that fits the article's length.
+  keeping scope, confidence, terms and numbers; opinions attributed to whoever
+  holds them and facts stated directly; no contextless “It/This/They”,
+  meta-framing or links; entry-worthy bold only; a bullet count that fits the
+  article's length.
   Sweep item 16 lists the bullet count and the long or linked bullets to judge.
 - [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
   auto-generated backlink panels and run-on navigation are gone; curated
@@ -164,6 +169,9 @@ suggested detector; do not edit an installed plugin during clipping processing.
 - [ ] Reprocessing did not duplicate embeds or placeholders. One Lottie is
   represented by one verified GIF, or a labeled poster, or an actionable
   placeholder. A static poster is not presented as an animation.
+- [ ] A reprocessed draft keeps the old note's block IDs byte-for-byte. Each
+  block ID or linked heading it cannot match is reported with the notes that
+  link it ([body source](duplicates-and-reprocessing.md#reprocessing-an-existing-note)).
 - [ ] Converted GIFs were visually inspected, including the middle frame and
   labels. A bad render gets a draft poster embed at a fresh number or a source
   placeholder. Preserve any existing GIF; never replace its bytes with another

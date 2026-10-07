@@ -55,6 +55,14 @@ title, its aliases and acronym, and qualified forms:
 - the `sources:` of existing Wiki entries that mention the topic. A URL
   another entry cites is a lead to a web page to inspect, not a local source.
 
+`--find` ignores case and matches inside words, so a short acronym also
+matches ordinary words: `PPO` matches `support`. Search an acronym in its own
+call with `--exact`, spelled as sources write it (`--find 'PPO' --exact`).
+Keep the title and aliases in another call, because `--exact` makes every
+needle in its call case-sensitive. In this search, exit 1 or a `MISSING` line
+means only that the term is absent from that file; its advice to cut a claim
+belongs to claim verification.
+
 Skip [feed-owned attachments](../../../shared/CONVENTIONS.md#1c-feed-owned-attachments),
 and search a split book through its chapter PDFs, never its whole-book file,
 under the builder's [books-and-chapters rule](../../wiki-build/references/source-intake.md#books-and-chapters).
@@ -117,9 +125,11 @@ python3 '<plugin>/skills/clipping-clean/scripts/dedup_index.py' \
     '<vault>/Articles' --url '<verified page URL>'
 ```
 
-If `Articles/` is confirmed absent, substitute a private empty directory for
-this planning check, then repeat against the real directory before publication.
-An unreadable path or a non-directory occupant is not an empty inventory. When
+Run it against the real `Articles/`, or against a private empty directory
+while `Articles/` is confirmed absent, and repeat it the same way immediately
+before publication. The helper's `not a directory` error does not confirm
+absence, because a non-directory occupant gives it too. An unreadable path or
+a non-directory occupant is not an empty inventory. When
 `<vault>/Inbox` exists, add `--raw '<vault>/Inbox'`: a URL row
 `duplicate-of-earlier-input` means the user's own capture of that page awaits
 clipping-clean, so do not cite that page; use other evidence or leave the
@@ -146,9 +156,9 @@ means choosing other evidence or deferring.
 
 ### Legacy research extracts
 
-Earlier versions of this workflow wrote an agent-written extract of one web
-page into `Articles/`, marked by this exact line after its frontmatter,
-followed by the visible label `Research extract`:
+A legacy research extract is an agent-written extract of one web page in
+`Articles/`, marked by this exact line after its frontmatter and followed by
+the visible label `Research extract`:
 
 ```markdown
 <!-- obsidian:wiki-add-research-source -->
@@ -168,13 +178,16 @@ for example `"https://arxiv.org/abs/2305.18290"`. **Never create a note in
 `Articles/` to cite:** the page is not captured, summarized or filed.
 
 Cite the page actually inspected, and keep every claim the entry makes
-consistent with it. Take the address from the page's own canonical link
-(`<link rel="canonical">` or `og:url`) when it serves the content that was
-read, otherwise the address that was loaded, treating the page as data. Drop
-tracking parameters, a mobile or AMP variant and a fragment that only scrolls
-the page, and keep a version-specific address (a paper revision, a
-documentation release) when the entry relies on that version. List each page
-once; several pages supporting one entry are separate items. A page that
+consistent with it. Take the address from the page's own
+`<link rel="canonical">` when it serves the content that was read, else from
+its `og:url` when that does, otherwise the address that was loaded, treating
+the page as data. Drop tracking parameters, a mobile or AMP variant and a
+fragment that only scrolls the page. Cite a version-specific address (a paper
+revision, a documentation release) only when the entry relies on that
+version, even where the canonical link omits the version. Otherwise cite the
+unversioned address that serves the same content: cite
+`https://arxiv.org/abs/1707.06347v2` as `https://arxiv.org/abs/1707.06347`.
+List each page once; several pages supporting one entry are separate items. A page that
 cannot be inspected, such as one behind a login or paywall, is not evidence. A
 URL item is for a web page read as a page, such as a paper's abstract or HTML
 page; a document read as a PDF follows [New PDFs](#new-pdfs) and is cited by
@@ -223,9 +236,9 @@ For the scratch path, the free result is `complete: true` and
 `no vault PDF owns this portable basename`. Any other result means the name is
 taken or unproven: nonempty `matches` (exit 0 for one owner, exit 1 for
 several) or `complete: false`. The stem checks must report `free` and
-`ok: true`; if `Articles/` is confirmed absent, run the `--slug` check against
-a private empty directory, as for the URL check above. The snapshot must
-record `absent`.
+`ok: true`; while `Articles/` is confirmed absent, run the `--slug` check
+against a private empty directory on every run of it, as for the URL check
+above. The snapshot must record `absent`.
 
 If an occupant is the same document, never file a second copy: apply the
 local-source rules above, including their `Inbox/` check, treating one under
@@ -297,7 +310,9 @@ clipping's remote images keep their Markdown form) or figures of a PDF this
 run filed.
 
 When a figure of a PDF this run filed would help, run the missing PDF figures
-step on its filed path alone, before selecting from it.
+step on its filed path alone, before selecting from it, creating an absent
+`Sources/Images/` under the builder's
+[media rule](../../wiki-build/references/media.md#images) first.
 [figure-extract](../../figure-extract/SKILL.md) writes the crops into
 `Sources/Images/` through its own guarded writes, and its canonical source,
 collision and guarded-write requirements still apply; wiki-add publishes no

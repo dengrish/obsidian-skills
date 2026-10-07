@@ -27,7 +27,7 @@ import re
 import stat
 import sys
 
-_OBSIDIAN_SHARED_MODULES = ('naming', 'note_provenance', 'portable_names', 'vault_artifacts', 'yaml_scalars')
+_OBSIDIAN_SHARED_MODULES = ('equation_coverage', 'naming', 'note_provenance', 'portable_names', 'vault_artifacts', 'yaml_scalars')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -66,11 +66,13 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from naming import core_stem, looks_canonical
+from equation_coverage import (find_display_spans,
+                               find_multi_relation_display_candidates)
+from naming import chapter_book_stem, core_stem, looks_canonical
 from note_provenance import split_provenance
 from portable_names import portable_identity
 from vault_artifacts import inventory_source_figures
-from yaml_scalars import parse_scalar, strip_comment
+from yaml_scalars import parse_scalar, parse_source_fields, strip_comment
 
 # --- the format, as data -----------------------------------------------------
 
@@ -293,19 +295,59 @@ _PRINTED_ORIGIN_URL = re.compile(
 _TABLE_ROW = re.compile(r"\A\s*\|.*\|\s*\Z")
 # The `|---|---|` row.  A pipe block without one renders as literal pipes.
 _TABLE_SEP = re.compile(r"\A\s*\|(?:\s*:?-{2,}:?\s*\|)+\s*\Z")
+# What may share a line with display math and leave it math only: blanks,
+# blockquote markers and the sentence's closing punctuation.
+_MATH_LINE_REST = re.compile(r"[\s>]*[.,;:]?\s*")
+# An inline code span.  A `$$` shown as code opens no display.
+_CODE_SPAN = re.compile(r"(?<!`)(`+)(?!`)(.*?)(?<!`)\1(?!`)")
 # A footnote marker or definition.  Matched, not substring-searched: `[^a-z]` in
 # an inline code span is a character class, not a footnote.
 _FOOTNOTE = re.compile(r"\[\^[^\]\s]+\]|\A\[\^[^\]]+\]:")
 
 
-def _fenced(lines):
-    """Line numbers inside ``` or ~~~ fences.
+def _fenced(lines, body_start=0):
+    """Line numbers inside ``` or ~~~ fences or display math.
 
     Nothing inside a fence is note structure: a `##` in a shell comment is not a
     section, a `|` in a table of output is not a table, and a `___` in a code
     sample is not the rule.  Left unhandled, one fence in Methods cascades into
-    a dozen findings against correct text.
+    a dozen findings against correct text.  Display math is not structure
+    either: `|f(x) - f(y)| \\le L |x - y|` is an absolute value, not a table
+    row.  Displays are paired by the same shared reader that
+    `_check_display_math` uses, so a `$$` on the math's own line still closes
+    its display and a last unpaired `$$` opens none.  A delimiter line that
+    also holds prose stays checked.
     """
+    out = _code_fenced(lines)
+    prose = _math_prose(lines, body_start)
+    spans = find_display_spans(prose)
+    rest = list(prose)
+    for span in spans:
+        for i in range(span["start"], span["end"]):
+            if rest[i] != "\n":
+                rest[i] = " "
+    rest = "".join(rest).split("\n")
+    for span in spans:
+        out.update(n for n in range(span["open_line"], span["close_line"] + 1)
+                   if _MATH_LINE_REST.fullmatch(rest[n]))
+    return out
+
+
+def _math_prose(lines, body_start=0):
+    """The body as the shared display reader sees it, one line per line.
+
+    Front matter and fenced code are blank lines.  An inline code span keeps
+    its backticks around blanks, so a `$$` shown as code opens nothing.
+    """
+    code = _code_fenced(lines)
+    return "\n".join(
+        "" if n < body_start or n in code else _CODE_SPAN.sub(
+            lambda m: m.group(1) + " " * len(m.group(2)) + m.group(1), l)
+        for n, l in enumerate(lines))
+
+
+def _code_fenced(lines):
+    """Line numbers inside ``` or ~~~ fences: code, never math or prose."""
     inside, fence, out = False, None, set()
     for n, l in enumerate(lines):
         s = l.strip()
@@ -346,6 +388,7 @@ class Note(object):
         self.findings = []
         self.advisories = []
         self.source = None
+        self.front_matter = None      # the lines between the fences, if closed
 
     def fail(self, line, msg):
         """`line` is 1-indexed, or 0 when the finding is about the whole file."""
@@ -375,16 +418,22 @@ def _split_front_matter(note):
     if end is None:
         note.fail(1, "front matter is never closed by a `---` line")
         return [], {}, 1
-    keys, kv, cur = [], {}, None
+    keys, kv, cur, item_indent = [], {}, None, {}
     for i in range(1, end):
         line = lines[i]
         if not line.strip() or line.lstrip().startswith("#"):
             continue
         m = re.match(r"\A([A-Za-z_][A-Za-z0-9_-]*):(.*)\Z", line)
         if m and not line.startswith((" ", "\t", "-")):
-            cur = m.group(1)
+            cur, value = m.group(1), m.group(2)
             keys.append(cur)
-            kv[cur] = [strip_comment(m.group(2)).strip(), [], m.group(2).strip()]
+            if value[:1] not in ("", " ", "\t"):
+                # Still recorded, so the schema checks do not turn this one
+                # fault into a "missing key" finding as well.
+                note.fail(i + 1, "put a space after `%s:`; YAML reads %r as "
+                                 "plain text, which invalidates the whole "
+                                 "front matter" % (cur, line[:50]))
+            kv[cur] = [strip_comment(value).strip(), [], value.strip()]
         elif cur is not None:
             kv[cur][1].append(line)
             if cur not in ("author", "tags", "sources"):
@@ -392,8 +441,20 @@ def _split_front_matter(note):
                                  "silently ignored; keep its value on one line "
                                  "and other keys at column zero: %r"
                           % (cur, line[:50]))
+                continue
+            lead = line[:len(line) - len(line.lstrip(" \t"))]
+            if "\t" in lead:
+                note.fail(i + 1, "`%s` list line is indented with a tab; YAML "
+                                 "forbids tab indentation, which invalidates "
+                                 "the whole front matter" % cur)
+            elif line.lstrip().startswith("-") \
+                    and item_indent.setdefault(cur, lead) != lead:
+                note.fail(i + 1, "`%s` list items must share one indentation; "
+                                 "YAML rejects this item or folds it into the "
+                                 "one above: %r" % (cur, line[:50]))
         else:
             note.fail(i + 1, "front-matter line before any key: %r" % line)
+    note.front_matter = lines[1:end]
     return keys, kv, end + 1
 
 
@@ -610,6 +671,30 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
         note.fail(2, "`read: %s` must be a bare boolean (false on creation; "
                      "preserve true on rewrites). A quoted \"false\" is a "
                      "string and renders permanently ticked" % read)
+
+
+def _check_origin_round_trip(note):
+    """Fail front matter this lint accepts but the shared origin reader rejects.
+
+    paper_scan and clipping-clean decide who owns an Articles/ note with
+    `yaml_scalars.read_note_origin`. A note it cannot read, or reads with
+    another origin, is a `collision` at every later scan.
+    """
+    if note.front_matter is None:
+        return
+    try:
+        fields = parse_source_fields(note.front_matter)
+    except ValueError as exc:
+        note.fail(2, "the shared origin reader cannot read this front matter "
+                     "(%s), so later scans report the note as a collision"
+                  % exc)
+        return
+    origin = (fields.get("sources") or [None])[0]
+    if note.source and (not isinstance(origin, str)
+                        or origin.strip() != "[[%s]]" % note.source):
+        note.fail(2, "the shared origin reader reads `sources` item 1 as %r, "
+                     "not \"[[%s]]\", so later scans report the note as a "
+                     "collision" % (origin, note.source))
 
 
 def _check_callout(note, body_start, fenced):
@@ -872,6 +957,22 @@ def _check_structure(note, body_start, fenced, mode):
             if content and all(l.startswith("- ") for l in content):
                 note.fail(start + 1, "the %s section is prose, not a bullet list"
                                      % name)
+                continue
+            # Per-item bullets sit under the prose sentence that introduces
+            # them (references/note-format.md).  An exhibit and the caption
+            # on its next line are not that sentence.
+            after_exhibit = False
+            for l in content:
+                if l.startswith("- "):
+                    note.fail(start + 1, "bullets open the %s section before "
+                                         "any prose; per-item bullets sit under "
+                                         "the sentence that introduces them "
+                                         "(references/note-format.md)" % name)
+                    break
+                exhibit = bool(_EMBED.match(l.strip()) or _TABLE_ROW.match(l))
+                if not exhibit and not (after_exhibit and _is_caption(l)):
+                    break
+                after_exhibit = exhibit
     return bounds
 
 
@@ -1158,6 +1259,25 @@ def _source_figure_inventory(images, source):
                       "the image-folder inventory did not complete safely"]))
 
 
+def _source_chapter(name, source):
+    """The chapter stem an embed is filed under, when that chapter belongs to
+    the split book `source`; otherwise None.
+
+    A split book's figures are its chapters' figures (CONVENTIONS §1a, §8):
+    figure-extract files them under each chapter's stem, never the book's.
+    """
+    if not source or not source.casefold().endswith(".pdf"):
+        return None
+    book = _name_key(core_stem(source))
+    base = os.path.splitext(name)[0]
+    for i in range(len(base)):
+        if base[i:i + 4].casefold() == "_fig":
+            chapter_book = chapter_book_stem(base[:i], is_stem=True)
+            if chapter_book and _name_key(chapter_book) == book:
+                return base[:i]
+    return None
+
+
 def _direct_regular_image(images, name):
     """No-follow fallback when invalid frontmatter provides no source stem."""
     try:
@@ -1186,9 +1306,9 @@ def _check_figures(note, bounds, images, fenced, source=None):
     off that guess then fires on ordinary prose.
     """
     lines = note.raw_lines
-    available, inventory_error = ((None, None) if images is None else
-                                  _source_figure_inventory(images, source))
-    inventory_error_reported = False
+    # One inventory per stem: the source's own, and each chapter's when the
+    # source is a split book. Each unsafe inventory is reported once.
+    inventories, inventory_errors_reported = {}, set()
     found_span = next(((s, e) for name, s, e in bounds
                        if name == "Results"), None)
     embeds, captions = 0, set()
@@ -1215,7 +1335,8 @@ def _check_figures(note, bounds, images, fenced, source=None):
                 "path separators or dot segments; path qualification can "
                 "escape the selected Sources/Images inventory" % name,
             )
-        if filename_only and source and not _name_key(name).startswith(
+        chapter = _source_chapter(name, source) if filename_only else None
+        if filename_only and source and not chapter and not _name_key(name).startswith(
                 _name_key(os.path.splitext(source)[0]) + "_fig"):
             note.fail(n + 1, "figure embed %r is not filed under this note's "
                              "`sources:` PDF %r; select from its figure inventory"
@@ -1241,10 +1362,14 @@ def _check_figures(note, bounds, images, fenced, source=None):
                 note.fail(n + 2, "caption opens with an exhibit number, which this "
                                  "note never carries: %r" % nxt.strip()[:60])
         if filename_only and images is not None:
+            owner = chapter + ".pdf" if chapter else source
+            if owner not in inventories:
+                inventories[owner] = _source_figure_inventory(images, owner)
+            available, inventory_error = inventories[owner]
             if inventory_error:
-                if not inventory_error_reported:
+                if owner not in inventory_errors_reported:
                     note.fail(n + 1, inventory_error)
-                    inventory_error_reported = True
+                    inventory_errors_reported.add(owner)
             elif available is not None:
                 if _name_key(name) not in available:
                     note.fail(n + 1, "embed names a file that is not in the safe "
@@ -1408,6 +1533,23 @@ def _check_citations(note, body_start, captions, fenced, source=None):
                                  "`sources:` item 1 is %r" % (base, source))
 
 
+def _check_display_math(note, body_start):
+    """Every equation gets its own display line (references/note-format.md).
+
+    The shared candidate floor finds a display line that sets two equations
+    side by side: a `\\qquad`-joined pair, a `\\Rightarrow` chain or a
+    `\\text{where}` definition.  It is conservative, so a candidate is an
+    advisory for the agent to confirm, never a violation.  Front matter and
+    code are blanked in place, which keeps line numbers.
+    """
+    body = _math_prose(note.raw_lines, body_start)
+    for c in find_multi_relation_display_candidates(body):
+        note.advise(c["line"], "a display line holds more than one equation -- "
+                               "give each equation its own `$$` display or its "
+                               "own row of an aligned/gathered block, keeping "
+                               "the math unchanged (references/note-format.md)")
+
+
 
 def _name_key(name):
     return portable_identity(name)
@@ -1442,9 +1584,14 @@ def lint(text, path="<note>", images=None, *, mode,
     except ValueError as exc:
         note.fail(0, "invalid skill provenance: %s" % exc)
     note.raw_lines = text[:-1].split("\n") if text.endswith("\n") else text.split("\n")
+    reported = len(note.findings)
     keys, kv, body_start = _split_front_matter(note)
-    fenced = _fenced(note.raw_lines)
+    fenced = _fenced(note.raw_lines, body_start)
     _check_front_matter(note, keys, kv, allow_unorganized)
+    if len(note.findings) == reported:
+        # Only otherwise-clean front matter: a reported fault already blocks
+        # publication, and repeating it here would report one fault twice.
+        _check_origin_round_trip(note)
     after = _check_callout(note, body_start, fenced)
     _check_rule(note, after)
     bounds = _check_structure(note, body_start, fenced, mode)
@@ -1454,6 +1601,7 @@ def lint(text, path="<note>", images=None, *, mode,
     _check_exhibit_numbers(note, body_start, captions, fenced)
     _check_prose(note, bounds, captions, fenced, body_start, mode)
     _check_citations(note, body_start, captions, fenced, src)
+    _check_display_math(note, body_start)
     if advisories is not None:
         advisories.extend(sorted(note.advisories))
     return sorted(note.findings)
@@ -1548,6 +1696,12 @@ def _cases():
          "not filed under this note's"),
         ("legacy figure separator remains valid",
          _mutate("Doe_X_2025_fig_2.png", "doe_x_2025_figure_2.webp"), CLEAN),
+        # A split book's figures are its chapters' figures (CONVENTIONS §1a, §8).
+        ("a split book embeds its chapter's crop",
+         _mutate("Doe_X_2025_fig_2.png", "Doe_X_2025_03_Methods_fig_2.png"), CLEAN),
+        ("a chapter crop of another book is not this note's figure",
+         _mutate("Doe_X_2025_fig_2.png", "Doe_Y_2025_03_Methods_fig_2.png"),
+         "not filed under this note's"),
         ("zero is not a physical page",
          _mutate("#page=5|5", "#page=0|0"), "physical pages starting at 1"),
         ("negative page cannot evade citation validation",
@@ -1602,9 +1756,29 @@ def _cases():
         ("escaped ASCII in sources resolves to the real paper",
          _mutate('"[[Doe_X_2025.pdf]]"', '"[[\\x44oe_X_2025.pdf]]"'), CLEAN),
         ("comments and indentless sources retain their block-list meaning",
-         _mutate('sources:\n  - "[[Doe_X_2025.pdf]]"',
+         _mutate('sources:\n  - "[[Doe_X_2025.pdf]]"\n'
+                 '  - "https://arxiv.org/abs/2501.02045"',
                  'sources: # recorded origin\n# verified locally\n'
-                 '- "[[\\x44oe_X_2025.pdf]]" # verified'), CLEAN),
+                 '- "[[\\x44oe_X_2025.pdf]]" # verified\n'
+                 '- "https://arxiv.org/abs/2501.02045"'), CLEAN),
+        # Front matter that YAML rejects loses its properties in Obsidian, and
+        # the shared origin reader then reads the note as a collision.
+        ("a deeper second sources item is invalid YAML",
+         _mutate('\n  - "https://arxiv.org/abs/2501.02045"',
+                 '\n    - "https://arxiv.org/abs/2501.02045"'),
+         "__ONLY__must share one indentation"),
+        ("tab-indented sources items are invalid YAML",
+         _mutate('  - "[[Doe_X_2025.pdf]]"\n  - "https://arxiv.org/abs/2501.02045"',
+                 '\t- "[[Doe_X_2025.pdf]]"\n\t- "https://arxiv.org/abs/2501.02045"'),
+         "indented with a tab"),
+        ("a key needs a space after its colon",
+         _mutate("read: false", "read:false"), "__ONLY__put a space after `read:`"),
+        ("author items with mixed indentation are invalid YAML",
+         _mutate("author:\n  - Priya N. Doe", "author:\n  - Priya N. Doe\n- Sam Roe"),
+         "__ONLY__must share one indentation"),
+        ("a quoted title glued to its colon is not the title key",
+         _mutate('title: "A Title: With a Colon"', 'title:"A Title: With a Colon"'),
+         "__ONLY__put a space after `title:`"),
         ("comments on plain schema fields and escaped tags are valid YAML",
          GOOD.replace('read: false', 'read: false # unread')
              .replace('format: Paper', 'format: Paper # local document')
@@ -1696,6 +1870,15 @@ def _cases():
          "canonical PDF filename"),
         ("null publication date requires an nd source stem",
          _mutate("published: 2025-01-03", "published: null"),
+         "reserved for a source PDF"),
+        # A chapter that prints no date takes its book's; without the book
+        # PDF, the chapter stem's year is the book's edition year.
+        ("a chapter dated by its book's stem year",
+         GOOD.replace("Doe_X_2025", "Doe_X_2025_03_Ch")
+         .replace("published: 2025-01-03", "published: 2025-01-01", 1), CLEAN),
+        ("a chapter with a dated stem never takes a null date",
+         GOOD.replace("Doe_X_2025", "Doe_X_2025_03_Ch")
+         .replace("published: 2025-01-03", "published: null", 1),
          "reserved for a source PDF"),
         ("dated publication conflicts with an nd source stem",
          _mutate("[[Doe_X_2025.pdf]]", "[[Doe_X_nd.pdf]]"),
@@ -1898,6 +2081,45 @@ def _cases():
          _mutate(M_H + "\n\nProse.",
                  M_H + "\n\nProse.\n\n```bash\n## build the cohort\n"
                  "cat a | awk '{print $1}'\n___\n| not | a table |\n```"), CLEAN),
+        # Display math is not note structure: `|...|` is an absolute value or
+        # a set size, not a table, in Results or any other section.
+        ("an absolute value in display math is not a table",
+         _mutate("More prose.", "A Lipschitz bound holds.\n\n$$\n"
+                 "|f(x) - f(y)| \\le L |x - y|\n$$\n\nHere L is the constant."
+                 "\n\nMore prose."), CLEAN),
+        ("a set size in display math outside Results is not a table",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nProse.\n\n$$\n"
+                 "|A \\cup B| = |A| + |B| - |A \\cap B|\n$$\n\n"
+                 "Each bar is a set size."), CLEAN),
+        ("an unclosed $$ hides nothing from lint",
+         _mutate("More prose.", "$$\n\n| A | B |\n\nMore prose."),
+         "is not a table"),
+        ("a $$ shown as inline code opens no display",
+         _mutate("More prose.", "Write `$$` alone on its line.\n\n| A | B |"
+                 "\n\n$$\ns = 1\n$$\n\nMore prose."),
+         "is not a table"),
+        # One equation per display line, through the shared candidate floor.
+        ("two equations joined by qquad in one display",
+         _mutate("More prose.", "Two sizes set the scale.\n\n$$\n"
+                 "N = 1.5 \\times 10^{12}, \\qquad T = 3.7 \\times 10^{11}\n"
+                 "$$\n\nMore prose."),
+         "__ADVISORY__more than one equation"),
+        ("a Rightarrow chain in a one-line display",
+         _mutate("More prose.", "The step follows.\n\n"
+                 "$$a = b \\Rightarrow c = d$$\n\nMore prose."),
+         "__ADVISORY__more than one equation"),
+        ("an aligned display with one equation per row",
+         _mutate("More prose.", "Two sizes set the scale.\n\n$$\n"
+                 "\\begin{aligned}\nN &= 1.5 \\times 10^{12} \\\\\n"
+                 "T &= 3.7 \\times 10^{11}\n\\end{aligned}\n$$\n\n"
+                 "More prose."), CLEAN),
+        ("an index range is not a second equation",
+         _mutate("More prose.", "Every residual is zero.\n\n$$\n"
+                 "x_i = 0, \\quad i = 1, \\ldots, m\n$$\n\nMore prose."),
+         CLEAN),
+        ("a qquad display inside a code fence is code",
+         _mutate(M_H + "\n\nProse.", M_H + "\n\nProse.\n\n```latex\n$$\n"
+                 "N = 1, \\qquad T = 2\n$$\n```"), CLEAN),
         ("'figures' meaning numbers is prose",
          _mutate("More prose.<sup>", "The headline figures 45% and 8% both hold."
                  "<sup>"), CLEAN),
@@ -2402,6 +2624,28 @@ def _cases():
         ("a prose section written as bullets",
          _mutate(I_H + "\n\nProse.", I_H + "\n\n- One point.\n- Another point."),
          "__ONLY__the Interpretation section is prose, not a bullet list"),
+        # Parallel per-item facts take one bullet each, under the prose
+        # sentence that introduces them (references/note-format.md).
+        ("per-item bullets under their introducing sentence",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nRelapse differed by site.\n\n"
+                 "- **Oslo.** Relapse reached 40%.\n"
+                 "- **Lyon.** Relapse reached 50%."), CLEAN),
+        ("per-item bullets before their introducing sentence",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\n- **Oslo.** Relapse reached 40%.\n"
+                 "- **Lyon.** Relapse reached 50%.\n\nRelapse differed by site."),
+         "__ONLY__bullets open the Interpretation section before any prose"),
+        ("per-item bullets under exhibits with no introducing sentence",
+         _mutate("More prose.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>",
+                 "- **Oslo.** Recurrence fell to 7%.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>\n"
+                 "- **Lyon.** Recurrence fell to 9%.").replace(
+                     "A claim with a citation.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>\n\n",
+                     "", 1),
+         "__ONLY__bullets open the Results section before any prose"),
+        # A concept with its own Wiki entry is linked in body prose.
+        ("a Wiki entry link in body prose",
+         _mutate("A claim with a citation.",
+                 "A claim about [[faecal-microbiota-transplant|faecal "
+                 "transplant]] with a citation."), CLEAN),
         ("a table as the last block of the file",
          _mutate("- **Code.** github.example/x\n",
                  "- **Code.** github.example/x\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"),
@@ -2478,6 +2722,23 @@ def _selftest():
     else:
         fail += 1
         print("FAIL  --allow-unorganized waived the null date on a canonical dated source")
+    # Lint-clean front matter must be owned by the shared origin reader, or
+    # every later scan reports this PDF's own note as a collision.
+    for front_matter, source, want in (
+            (GOOD.split("---\n")[1].split("\n")[:-1], "Doe_X_2025.pdf", None),
+            (["read:false"], None, "cannot read this front matter"),
+            (['sources:', '  - "[[Other_X_2025.pdf]]"'], "Doe_X_2025.pdf",
+             "reads `sources` item 1 as")):
+        probe = Note("")
+        probe.front_matter, probe.source = front_matter, source
+        _check_origin_round_trip(probe)
+        got = [message for _line, message in probe.findings]
+        if (not got if want is None else len(got) == 1 and want in got[0]):
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  origin round trip of %r -> %r, expected %r"
+                  % (front_matter, got, want))
     # The Limitations cap counts what the reader sees; a required citation
     # must not shrink the allowance.
     cited = "- **One.** " + "x" * (MAX_LIMITATION_CHARS - 12) + "." \
@@ -2545,6 +2806,38 @@ def _selftest():
                     print("FAIL  a source-keyed symlink outside Images passed "
                           "the figure inventory: %r" % linked_findings)
                 os.unlink(linked_image)
+        # A split book's chapter crop is checked against that chapter's own
+        # inventory, never waved through by the book's.
+        with open(os.path.join(scratch, "Doe_X_2025_03_Methods_fig_2.png"),
+                  "wb") as fh:
+            fh.write(b"")
+        for figure, wanted in (("Doe_X_2025_03_Methods_fig_2.png", False),
+                               ("Doe_X_2025_03_Methods_fig_5.png", True)):
+            chapter_findings = lint(GOOD.replace("Doe_X_2025_fig_2.png", figure),
+                                    images=scratch, mode="empirical")
+            if any("not in the safe source figure inventory" in message
+                   for _line, message in chapter_findings) is wanted \
+                    and (wanted or not chapter_findings):
+                ok += 1
+            else:
+                fail += 1
+                print("FAIL  a split book's chapter crop %s was misjudged: %r"
+                      % (figure, chapter_findings))
+        # A display whose `$$` shares a line with its math, or with a period,
+        # still closes there: the embed after it is checked.
+        for display in ("$$\nr = 0.18\\,R$$", "$$r = 0.18\\,R\n$$",
+                        "$$\nr = 0.18\\,R\n$$."):
+            displayed = GOOD.replace(
+                "More prose.", "More prose.\n\n" + display + "\n\nThe ratio "
+                "is the drop.\n\n![[Doe_X_2025_fig_9.png]]\n*Invented "
+                "figure.*\n\n$$\ns = 1\n$$\n\nS is one.", 1)
+            if any("not in the safe source figure inventory" in message
+                   for _line, message in lint(displayed, images=scratch,
+                                              mode="empirical")):
+                ok += 1
+            else:
+                fail += 1
+                print("FAIL  the display %r hid the embed after it" % display)
         # Invalid frontmatter names no source stem, so the embeds fall back
         # to a no-follow check of the image folder itself.
         sourceless = GOOD.replace('  - "[[Doe_X_2025.pdf]]"\n',

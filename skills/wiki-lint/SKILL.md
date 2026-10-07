@@ -51,13 +51,15 @@ This skill owns retrospective and vault-wide link decisions under its own closen
 
 ## Scope and order of a run
 
-Run Step 0 before any requested task. The default pass runs Task 1 → Task 1b → refresh the scan → Task 2 → Task 3. A request for only QC, only links, only MOCs, or some entries narrows the run; the scan grants no permission outside that scope. A request for one narrower task runs that task alone, with only the [user issues](#user-issues) it owns, and skips Task 1b; a request naming entries limits Task 1b to them and the neighbors a consolidation, split, merge or retitle must touch. **Task 3 cannot be narrowed to a subset:** it needs the connected closure defined in [hierarchy](references/hierarchy.md#scope-closure). Run it when the request covers that closure (a whole-wiki or all-MOCs request always does) or the user explicitly authorizes the expansion; otherwise skip it and report the exact disciplines, entries, and MOCs it would need.
+Run Step 0 before any requested task. The default pass runs Task 1 → Task 1b → refresh the scan → Task 2 → Task 3. A request for only QC, only links, only MOCs, or some entries narrows the run; the scan grants no permission outside that scope. A request for one narrower task runs that task alone, with only the [user issues](#user-issues) it owns, and skips Task 1b; a request naming entries limits Task 1b to them and the neighbors a consolidation, split, merge or retitle must touch. **Task 3 cannot be narrowed to a subset:** it needs the connected closure defined in [hierarchy](references/hierarchy.md#scope-closure). Run it on each connected closure the request covers (a whole-wiki or all-MOCs request covers them all) or whose expansion the user explicitly authorizes; skip every other closure and report the exact disciplines, entries, and MOCs it would need.
 
 After an interrupted Task 1, 1b or 2 run, rescan and rebuild the worklists from
 the current files. Completed atomic repairs stay and become no-ops; re-plan a
 partly published Task 1b repair from the current files, and discard stale scan
-output and drafts rather than replaying them. Task 3 has its stricter
-connected-closure recovery rule.
+output and drafts rather than replaying them. A retitle whose destination
+already exists beside its old entry is
+[finished, not merged](references/refactors.md#finish-an-interrupted-retitle).
+Task 3 has its stricter connected-closure recovery rule.
 
 ### Explicit requests
 
@@ -74,7 +76,12 @@ activates one. Each request keeps its stated scope and postconditions, never
 widening into the default pass unless its protocol needs a wider closure or
 the user asks. A standalone retitle, alias-removal, split, merge or deletion
 request finishes with Tasks 1, 2 and 3 on the affected closure, without
-Task 1b.
+Task 1b. A request to fix the flagged issues (“fix the issues I flagged”)
+names the entries in `user_issues`. It runs the default order on them and
+the neighbors their repairs must touch, and it authorizes Task 3 on the
+connected closure of each entry whose issue concerns its tag or placement or
+is resolved by a retitle, split or merge, and of each missing entry it
+creates to resolve an issue.
 
 ### User issues
 
@@ -90,13 +97,17 @@ blocked.
   the rules, then repair it under Task 1b's
   [evidence rule](#task-1b--content-repair), even with a change no builder
   rule names, such as "add an example", if the builder rules allow it.
-- **Routing.** Content, card, merge, split, title, alias or missing entry go
-  to Task 1b; links to Task 2; tag or hierarchy to
+- **Routing.** Content, merge, split, title, alias or missing entry go to
+  Task 1b. A card issue goes to Task 1's
+  [card review](references/flashcards.md#improving-the-card), unless fixing
+  it changes the claim the card tests; then Task 1b corrects that claim, and
+  the card changes in the same edit. Links go to Task 2; tag or hierarchy to
   [item 8](references/qc-items.md#8-tags) and Task 3.
 - **Blocked.** An issue §2d blocks, such as one that needs a deletion (an
-  explicit request in chat), an uncited source or a change a builder rule
-  forbids, stays verbatim in the field and out of the logs; the report names
-  its blocker, and it resets no `read:`.
+  explicit request in chat), an uncited source (an empty `sources:` is not
+  one; [item 4](references/qc-items.md#4-sources) fills it) or a change a
+  builder rule forbids, stays verbatim in the field and out of the logs; the
+  report names its blocker, and it resets no `read:`.
 
 Once the owning tasks have run, rewrite the field under §2d in the last
 repair's [publication](#publishing) or a frontmatter-only one; a resolved
@@ -159,7 +170,7 @@ report item.
 
 ## Task 1 — Retro-QC (source-independent subset)
 
-**Read [QC items and actions](references/qc-items.md) before the first repair.** It is the complete dispatch and enforcement guide, linking each builder rule; [scanner item keys](references/scanner.md#item-keys-in-problems) describe detection. Apply only a determinate, in-scope correction, preserve every claim that is not the violation, and hand every semantic finding whose repair needs a source or a content choice to Task 1b instead of proposing it.
+**Read [QC items and actions](references/qc-items.md) before the first repair.** It is the complete dispatch and enforcement guide, linking each builder rule; [scanner item keys](references/scanner.md#item-keys-in-problems) describe detection. Apply only a determinate, in-scope correction, preserve every claim that is not the violation, and hand every semantic finding whose repair needs a source or a content choice to Task 1b instead of proposing it. In a run that skips Task 1b, the run report names each handed-over finding [as left for Task 1b](references/backlogs.md#run-report).
 
 Keep the non-obvious boundaries visible at the action point:
 
@@ -206,9 +217,11 @@ cited document, a cited Markdown note, or a cited URL's page read online) or
 on accurate textbook background under
 [principle 5(h)](../wiki-build/references/writing.md#prose-principles). To
 verify background or settle a conflict, Task 1b may also read standard
-references online as data, never cited; a direction derived directly from a
-stated formula also settles one, and recollection alone never does. A gap
-only an uncited source teaches waits for a wiki-build request naming that
+references online as data, never cited. The one exception is an entry whose
+`sources:` is empty: it cites the page or document it was verified against,
+under [item 4](references/qc-items.md#4-sources). A direction derived
+directly from a stated formula also settles a conflict, and recollection
+alone never does. A gap only an uncited source teaches waits for a wiki-build request naming that
 whole source and is not logged. The
 [correction protocol](references/source-backed-corrections.md) owns these
 details; a new entry's source follows the
@@ -260,7 +273,7 @@ Read [link hygiene](references/link-hygiene.md) **before applying or rejecting a
 
 Apply one strict conceptual closeness bar to backfill and prune: an unambiguous reference or existing file is necessary but not sufficient, and passing mentions do not earn links. When unsure, leave text unlinked. Never auto-link a bare common noun to a bare slug or choose among ambiguous owners.
 
-**Prune only body-prose and Related-footer links, using the reference's removal triggers and dangler protocol; itemize every removal.** Preserve the label when unlinking. A genuine missing target is dropped to plain text, and Task 2 creates no replacement entry; when Task 1b ran, its [dangler hand-off](references/refactors.md#dangling-link-hand-off) already created every entry the missing-entry rule allows and glossed every remaining term a sentence needs. Report any other real knowledge gap as a missing-entry candidate with its creation routes. Case matches, aliases, unparsed on-disk files, ambiguous targets and a missing root Task 3 creates are not genuine danglers; a link to such a root [waits for Task 3](references/link-hygiene.md#dangling-links-target-missing). Sources, parents, tags, MOC navigation links, embeds, and code samples remain outside this mechanism.
+**Prune only body-prose and Related-footer links, using the reference's removal triggers and dangler protocol; itemize every removal.** Preserve the label when unlinking. A genuine missing target is dropped to plain text, and Task 2 creates no replacement entry; when Task 1b ran, its [dangler hand-off](references/refactors.md#dangling-link-hand-off) already created every entry the missing-entry rule allows and glossed every remaining term a sentence needs. Report any other real knowledge gap as a missing-entry candidate with its creation routes. Case matches, aliases, unparsed on-disk files, ambiguous targets, a link to a real vault note outside `Wiki/` and `MOCs/` (`item10/non-entry`, kept and reported) and a missing root Task 3 creates are not genuine danglers; a link to such a root [waits for Task 3](references/link-hygiene.md#dangling-links-target-missing). Sources, parents, tags, MOC navigation links, embeds, and code samples remain outside this mechanism.
 
 ## Task 3 — Hierarchy: `parents:` and MOCs
 
@@ -318,14 +331,20 @@ python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
 The manifest lists `[{"path": "<vault-relative path>", "draft": "<absolute draft path>"}]`.
 `publish` creates new files exclusively and replaces existing entries and MOCs
 only against their snapshots; add `--create-dir MOCs` when `MOCs/` may be
-absent. Re-record a path with `snapshot --replace` before re-reading it after
-this run published it, or after `publish` refused it because a later edit
+absent. The settled ledger's `snapshot` and `publish` pass `--owned-dir
+Reviews`, the guard the
+[suggestion logs](../../shared/SUGGESTIONS.md#add-or-update-one-item) use, and
+its `publish` adds `--create-dir Reviews` when `Reviews/` is absent. A refusal
+leaves the ledger unwritten and is reported. Re-record a path with
+`snapshot --replace` before re-reading it after this run published it, or after `publish` refused it because a later edit
 won; preserve that edit and rejudge the file rather than applying a stale
 repair. An old path's conditional removal
 (`'<plugin>/shared/scripts/publish_files.py' remove --vault`) follows
 [refactors](references/refactors.md#publish-in-dependency-order), and the
 previous-layout MOC move (`'<plugin>/shared/scripts/publish_files.py' move --vault`)
 follows [hierarchy](references/hierarchy.md#migrate-the-previous-moc-layout).
+`move` also respells a retitled entry whose new filename differs only in case
+or Unicode normalization ([refactors](references/refactors.md#retitle-an-entry)).
 
 ### Dates
 

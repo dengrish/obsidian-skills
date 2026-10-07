@@ -11,22 +11,31 @@ existing file is unsafe, and a Unicode normalization variant is replaced
 under its on-disk spelling, so a replacement never renames the file. Manifest
 paths that differ only in case or normalization are refused.
 
-  snapshot --vault VAULT [-o OUT [--replace]] PATH...
+``--owned-dir DIR`` (repeatable; ``snapshot``, ``verify`` and ``publish``)
+names a direct child of the vault that must be one readable real directory.
+A path under it is refused when DIR is a symlink, not a directory,
+unreadable, spelled differently on disk, or shares its case/Unicode identity
+with another entry. An absent DIR passes; only ``--create-dir`` creates it.
+
+  snapshot --vault VAULT [-o OUT [--replace]] [--owned-dir DIR] PATH...
       Record each path before the workflow reads it: absent, or a regular
       file's identity, digest, mode and size. ``-o`` merges into an existing
       snapshot file and keeps the earlier record of a path already there,
       failing when that path no longer matches it. ``--replace`` instead
       records the named paths afresh, before the workflow re-reads them.
-  verify --vault VAULT --snapshots SNAP.json
+  verify --vault VAULT --snapshots SNAP.json [--owned-dir DIR]
       Report each recorded path as unchanged, changed, appeared, removed or
       unsafe.
   publish --vault VAULT --snapshots SNAP.json --manifest MANIFEST.json
-          [--create-dir DIR] [--dry-run]
+          [--create-dir DIR] [--owned-dir DIR] [--dry-run]
       Publish a JSON list of {"path": <vault-relative target>, "draft":
       <absolute draft path>}: new files first, then replacements. A path that
       already equals its draft is skipped, so the same command can be rerun
       after a partial failure. Any failed precheck publishes nothing; the
       first publication failure stops the run and leaves later paths pending.
+      ``--create-dir`` creates a missing direct child of the vault, and
+      refuses its paths when the vault holds a case or Unicode variant of
+      that name.
   remove --vault VAULT --snapshots SNAP.json PATH...
       Remove each recorded file with ``atomic_move.remove_expected`` only
       while its bytes, identity and mode match the record. A path with no
@@ -34,8 +43,11 @@ paths that differ only in case or normalization are refused.
       nothing. A path that is already absent is reported and skipped.
   move --vault VAULT --snapshots SNAP.json SRC DST
       Move a recorded file that still matches its record to an unoccupied DST
-      in an existing directory with ``atomic_move.move_noreplace``. Record DST
-      with ``snapshot --replace`` before publishing to it.
+      in an existing directory with ``atomic_move.move_noreplace``. A DST that
+      differs from SRC only in the file name's case or Unicode normalization
+      respells the same file in place; no other file may share that name's
+      case/Unicode identity. Record DST with ``snapshot --replace`` before
+      publishing to it.
 
 Every command prints JSON and exits 1 unless everything is clean.
 Run ``python3 publish_files.py --test`` for the self-test.
@@ -128,6 +140,64 @@ def _listed_spelling(name, names):
     wanted = unicodedata.normalize("NFC", name)
     return next((n for n in names
                  if unicodedata.normalize("NFC", n) == wanted), None)
+
+
+def _direct_child(value, flag):
+    """VALUE as a direct child of the vault; refuse anything else."""
+    name = os.path.normpath(value)
+    if (os.sep in name or os.path.isabs(name)
+            or name in (os.curdir, os.pardir)):
+        raise InputError("%s must name a direct child of the vault, not %s"
+                         % (flag, value))
+    return name
+
+
+def _root_owners(vault, name):
+    """The vault's direct children that share NAME's case/Unicode identity."""
+    wanted = portable_identity(name)
+    return sorted(n for n in os.listdir(vault[1])
+                  if portable_identity(n) == wanted)
+
+
+def _owned_dir_error(vault, name):
+    """Why NAME/ is not one readable real directory, or ``None``.
+
+    An absent NAME/ is not an error: its paths observe as absent, and only
+    ``--create-dir`` creates it.
+    """
+    try:
+        owners = _root_owners(vault, name)
+    except OSError as exc:
+        return "cannot list the vault (%s)" % _describe(exc)
+    if not owners:
+        return None
+    if owners != [name]:
+        return ("%s/ has other or differently spelled owners: %s"
+                % (name, ", ".join(owners)))
+    path = os.path.join(vault[1], name)
+    try:
+        item = os.lstat(path)
+        if stat.S_ISLNK(item.st_mode):
+            return "%s/ is a symlink; it is not followed" % name
+        if not stat.S_ISDIR(item.st_mode):
+            return "%s/ is not a directory" % name
+        os.listdir(path)
+    except OSError as exc:
+        return "%s/ is unreadable (%s)" % (name, _describe(exc))
+    return None
+
+
+def _owned_dir_refusal(vault, key, owned_dirs):
+    """Refusal detail for KEY under an unsafe ``--owned-dir``, or ``None``."""
+    if "/" not in key:
+        return None
+    first = key.split("/", 1)[0]
+    for name in owned_dirs:
+        if portable_identity(first) == portable_identity(name):
+            if first != name:
+                return "spell the owned directory %s/, not %s/" % (name, first)
+            return _owned_dir_error(vault, name)
+    return None
 
 
 def observe(target):
@@ -254,9 +324,10 @@ def _write_json(path, data):
         raise
 
 
-def cmd_snapshot(vault_arg, paths, output=None, replace=False):
+def cmd_snapshot(vault_arg, paths, output=None, replace=False, owned_dirs=()):
     try:
         vault = _vault(vault_arg)
+        owned_dirs = [_direct_child(name, "--owned-dir") for name in owned_dirs]
         records = {}
         if output is not None:
             output = os.path.abspath(output)
@@ -276,6 +347,11 @@ def cmd_snapshot(vault_arg, paths, output=None, replace=False):
         except InputError as exc:
             ok = False
             results.append({"path": path, "state": "refused", "error": str(exc)})
+            continue
+        refusal = _owned_dir_refusal(vault, key, owned_dirs)
+        if refusal:
+            ok = False
+            results.append({"path": key, "state": "refused", "error": refusal})
             continue
         observed = observe(_target(vault, key))
         if key in records and not replace:
@@ -306,10 +382,11 @@ def cmd_snapshot(vault_arg, paths, output=None, replace=False):
     return {"ok": ok, "vault": vault[1], "snapshots": results}, 0 if ok else 1
 
 
-def cmd_verify(vault_arg, snapshots):
+def cmd_verify(vault_arg, snapshots, owned_dirs=()):
     try:
         vault = _vault(vault_arg)
         records = load_snapshots(snapshots, vault)
+        owned_dirs = [_direct_child(name, "--owned-dir") for name in owned_dirs]
     except InputError as exc:
         return {"ok": False, "error": str(exc)}, 1
     results = []
@@ -317,6 +394,9 @@ def cmd_verify(vault_arg, snapshots):
         try:
             if vault_key(vault, key) != key:
                 raise InputError("%s is not a normalized vault path" % key)
+            refusal = _owned_dir_refusal(vault, key, owned_dirs)
+            if refusal:
+                raise InputError(refusal)
         except InputError as exc:
             status, detail = "unsafe", str(exc)
         else:
@@ -374,7 +454,7 @@ def _refuse(plan, detail):
     return plan
 
 
-def _plan(vault, records, item, create_dir, new_mode):
+def _plan(vault, records, item, create_dir, new_mode, owned_dirs=()):
     """Check one manifest item without writing; return its planned action."""
     plan = {"path": item["path"]}
     try:
@@ -382,6 +462,20 @@ def _plan(vault, records, item, create_dir, new_mode):
     except InputError as exc:
         return _refuse(plan, str(exc))
     plan["path"] = key
+    refusal = _owned_dir_refusal(vault, key, owned_dirs)
+    if refusal:
+        return _refuse(plan, refusal)
+    if (create_dir is not None and "/" in key
+            and portable_identity(key.split("/", 1)[0])
+            == portable_identity(create_dir)):
+        try:
+            owners = _root_owners(vault, create_dir)
+        except OSError as exc:
+            return _refuse(plan, "cannot list the vault (%s)" % _describe(exc))
+        if owners not in ([], [create_dir]):
+            return _refuse(plan, "the vault holds %s, a case or Unicode "
+                                 "variant of --create-dir %s"
+                           % (", ".join(owners), create_dir))
     record = records.get(key)
     if record is None:
         return _refuse(plan, "no snapshot record; snapshot the path before "
@@ -451,6 +545,11 @@ def _publish_one(vault, plan, stage_parent, made_dirs):
     target = plan["_target"]
     directory = os.path.dirname(target)
     if plan["_make_dir"] and directory not in made_dirs:
+        twins = _root_owners(vault, os.path.basename(directory))
+        if twins:
+            raise atomic_move.PublicationConflict(
+                "the vault now holds %s; not creating %s"
+                % (", ".join(twins), os.path.basename(directory)))
         os.mkdir(directory)
         made_dirs.add(directory)
         item = os.lstat(directory)
@@ -488,22 +587,19 @@ def _publish_one(vault, plan, stage_parent, made_dirs):
 
 
 def cmd_publish(vault_arg, snapshots, manifest, create_dir=None,
-                dry_run=False):
+                dry_run=False, owned_dirs=()):
     try:
         vault = _vault(vault_arg)
         records = load_snapshots(snapshots, vault)
         items = _load_manifest(manifest)
         if create_dir is not None:
-            create_dir = os.path.normpath(create_dir)
-            if (os.sep in create_dir or os.path.isabs(create_dir)
-                    or create_dir in (os.curdir, os.pardir)):
-                raise InputError("--create-dir must name a direct child of "
-                                 "the vault, not %s" % create_dir)
+            create_dir = _direct_child(create_dir, "--create-dir")
+        owned_dirs = [_direct_child(name, "--owned-dir") for name in owned_dirs]
     except InputError as exc:
         return {"ok": False, "error": str(exc)}, 1
 
     new_mode = _new_file_mode()
-    plans = [_plan(vault, records, item, create_dir, new_mode)
+    plans = [_plan(vault, records, item, create_dir, new_mode, owned_dirs)
              for item in items]
     keys = [portable_identity(plan["path"]) for plan in plans]
     for plan, key in zip(plans, keys):
@@ -543,6 +639,9 @@ def cmd_publish(vault_arg, snapshots, manifest, create_dir=None,
                 continue
             done = "created" if plan["action"] == "create" else "replaced"
             try:
+                refusal = _owned_dir_refusal(vault, plan["path"], owned_dirs)
+                if refusal:
+                    raise atomic_move.PublicationConflict(refusal)
                 if stage_parent is None:
                     stage_parent = tempfile.mkdtemp(
                         prefix=STAGE_PREFIX, dir=plan["_location"])
@@ -674,6 +773,43 @@ def cmd_remove(vault_arg, snapshots, paths):
     return payload, 0 if ok else 1
 
 
+def _respelling_source(record, target, dst_target):
+    """Check a same-file respelling without writing.
+
+    Returns ``(source, problem)``: the source's listed path to move, or a
+    refusal detail. ``(None, None)`` means the folder already lists the
+    recorded file under the destination spelling.
+    """
+    directory = os.path.dirname(target)
+    wanted = os.path.basename(dst_target)
+    try:
+        names = os.listdir(directory)
+    except OSError as exc:
+        return None, "cannot inspect the source directory (%s)" % _describe(exc)
+    owners = [n for n in names
+              if portable_identity(n) == portable_identity(wanted)]
+    if (owners == [wanted]
+            and compare(record, observe(dst_target))[0] == "unchanged"):
+        return None, None
+    status, detail = compare(record, observe(target))
+    if status != "unchanged":
+        return None, "%s: %s" % (status, detail)
+    listed = _listed_spelling(os.path.basename(target), names)
+    others = sorted(n for n in owners if n != listed)
+    if others:
+        return None, ("the destination is occupied by %s, a different file "
+                      "with the same case/Unicode identity" % ", ".join(others))
+    source = os.path.join(directory, listed)
+    try:
+        if os.path.lexists(dst_target):
+            here, there = os.lstat(source), os.lstat(dst_target)
+            if (here.st_dev, here.st_ino) != (there.st_dev, there.st_ino):
+                return None, "the destination is occupied"
+    except OSError as exc:
+        return None, "cannot inspect the destination (%s)" % _describe(exc)
+    return source, None
+
+
 def cmd_move(vault_arg, snapshots, source, destination):
     try:
         vault = _vault(vault_arg)
@@ -694,9 +830,13 @@ def cmd_move(vault_arg, snapshots, source, destination):
         result["to"] = dst_key
     except InputError as exc:
         return refused(str(exc))
-    if portable_identity(key) == portable_identity(dst_key):
-        return refused("the destination is the source up to case or Unicode "
-                       "normalization; a respelling is not a move")
+    if key == dst_key:
+        return refused("the destination is the source")
+    respell = portable_identity(key) == portable_identity(dst_key)
+    if respell and os.path.dirname(key) != os.path.dirname(dst_key):
+        return refused("a respelling changes only the file name; spell the "
+                       "directory as the source does")
+    done = "respelled" if respell else "moved"
     record = records.get(key)
     if record is None:
         return refused("no snapshot record; snapshot the path before "
@@ -704,22 +844,31 @@ def cmd_move(vault_arg, snapshots, source, destination):
     if record["state"] != "file":
         return refused("the source is recorded as absent")
     target = _target(vault, key)
-    status, detail = compare(record, observe(target))
     dst_target = _target(vault, dst_key)
-    if (status == "removed"
-            and compare(record, observe(dst_target))[0] == "unchanged"):
-        result.update(action="moved", detail="already moved; snapshot "
-                      "--replace the destination before publishing to it")
-        return {"ok": True, "results": [result]}, 0
-    if status != "unchanged":
-        return refused("%s: %s" % (status, detail))
-    if not os.path.isdir(os.path.dirname(dst_target)):
-        return refused("the destination directory %s does not exist"
-                       % os.path.dirname(dst_key))
-    occupant = observe(dst_target)
-    if occupant[0] != "absent":
-        return refused("the destination is occupied"
-                       + (" (%s)" % occupant[2] if occupant[2] else ""))
+    if respell:
+        target, problem = _respelling_source(record, target, dst_target)
+        if target is None and problem is None:
+            result.update(action=done, detail="already respelled; snapshot "
+                          "--replace the new spelling before publishing to it")
+            return {"ok": True, "results": [result]}, 0
+        if problem:
+            return refused(problem)
+    else:
+        status, detail = compare(record, observe(target))
+        if (status == "removed"
+                and compare(record, observe(dst_target))[0] == "unchanged"):
+            result.update(action=done, detail="already moved; snapshot "
+                          "--replace the destination before publishing to it")
+            return {"ok": True, "results": [result]}, 0
+        if status != "unchanged":
+            return refused("%s: %s" % (status, detail))
+        if not os.path.isdir(os.path.dirname(dst_target)):
+            return refused("the destination directory %s does not exist"
+                           % os.path.dirname(dst_key))
+        occupant = observe(dst_target)
+        if occupant[0] != "absent":
+            return refused("the destination is occupied"
+                           + (" (%s)" % occupant[2] if occupant[2] else ""))
     try:
         location = _stage_location(vault[1],
                                    os.path.realpath(os.path.dirname(target)))
@@ -743,10 +892,21 @@ def cmd_move(vault_arg, snapshots, source, destination):
         if recovery:
             result["recovery_paths"] = list(recovery)
     else:
-        result.update(action="moved", detail="moved the snapshotted version; "
+        result.update(action=done, detail="%s the snapshotted version; "
                       "snapshot --replace the destination before publishing "
-                      "to it")
-    payload = {"ok": result["action"] == "moved", "results": [result]}
+                      "to it" % done)
+        if respell:
+            try:
+                kept = os.path.basename(dst_target) in os.listdir(
+                    os.path.dirname(dst_target))
+            except OSError:
+                kept = False
+            if not kept:
+                result.update(action="failed", error="SpellingNotKept",
+                              detail="the folder does not list the respelled "
+                              "file as %s; the filesystem keeps another "
+                              "spelling" % os.path.basename(dst_key))
+    payload = {"ok": result["action"] == done, "results": [result]}
     if stage_parent is not None:
         with contextlib.suppress(OSError):
             os.rmdir(stage_parent)
@@ -1020,6 +1180,124 @@ def run_self_test():
               (code, actions(payload), read(wiki("mv-dst.md"))),
               (0, ["moved"], b"moved\n"))
 
+        def spellings(name):
+            return sorted(n for n in os.listdir(os.path.join(vault, "Wiki"))
+                          if portable_identity(n) == portable_identity(name))
+
+        respells = os.path.join(scratch, "respells.json")
+        put(wiki("Resp.md"), b"respell\n", 0o600)
+        put(wiki("Resp-edit.md"), b"read\n")
+        cmd_snapshot(vault, ["Wiki/Resp.md", "Wiki/Resp-edit.md"], respells)
+        put(wiki("Resp-edit.md"), b"editor save\n")
+        refusals = [cmd_move(vault, respells, src, dst) for src, dst in (
+            ("Wiki/Resp-edit.md", "Wiki/resp-edit.md"),
+            ("Wiki/Resp.md", "wiki/resp.md"))]
+        check("a respelling refuses a changed source or a respelled directory",
+              ([(code, actions(payload)) for payload, code in refusals],
+               "changed: bytes differ"
+               in refusals[0][0]["results"][0]["detail"],
+               "only the file name" in refusals[1][0]["results"][0]["detail"],
+               spellings("resp-edit.md"), spellings("resp.md"),
+               read(wiki("Resp-edit.md"))),
+              ([(1, ["refused"])] * 2, True, True, ["Resp-edit.md"],
+               ["Resp.md"], b"editor save\n"))
+        identity = atomic_move.file_identity(wiki("Resp.md"))
+        payload, code = cmd_move(vault, respells, "Wiki/Resp.md",
+                                 "Wiki/resp.md")
+        check("a case-only respelling keeps the recorded inode, bytes and mode",
+              (code, actions(payload), spellings("resp.md"),
+               read(wiki("resp.md")),
+               atomic_move.file_identity(wiki("resp.md")) == identity,
+               stat.S_IMODE(os.stat(wiki("resp.md")).st_mode),
+               stage_parents(),
+               [n for n in os.listdir(os.path.join(vault, "Wiki"))
+                if n.startswith(".")]),
+              (0, ["respelled"], ["resp.md"], b"respell\n", True, 0o600, [],
+               []))
+        payload, code = cmd_move(vault, respells, "Wiki/Resp.md",
+                                 "Wiki/resp.md")
+        check("a rerun of a finished respelling reports it respelled",
+              (code, actions(payload),
+               "already respelled" in payload["results"][0]["detail"],
+               spellings("resp.md")),
+              (0, ["respelled"], True, ["resp.md"]))
+
+        put(wiki("Café resp.md"), b"nfd\n")
+        cmd_snapshot(vault, ["Wiki/Café resp.md"], respells)
+        payload, code = cmd_move(vault, respells, "Wiki/Café resp.md",
+                                 "Wiki/Café resp.md")
+        check("a Unicode-only respelling stores the requested spelling",
+              (code, actions(payload), spellings("Café resp.md"),
+               read(wiki("Café resp.md"))),
+              (0, ["respelled"], ["Café resp.md"], b"nfd\n"))
+
+        put(wiki("Twin.md"), b"twin\n")
+        if not os.path.lexists(wiki("tWIN.md")):
+            put(wiki("twin.md"), b"other twin\n")
+            twins = os.path.join(scratch, "twins.json")
+            cmd_snapshot(vault, ["Wiki/Twin.md"], twins)
+            payload, code = cmd_move(vault, twins, "Wiki/Twin.md",
+                                     "Wiki/twin.md")
+            check("a respelling never takes a distinct case-variant file",
+                  (code, actions(payload),
+                   "occupied by twin.md" in payload["results"][0]["detail"],
+                   read(wiki("Twin.md")), read(wiki("twin.md"))),
+                  (1, ["refused"], True, b"twin\n", b"other twin\n"))
+        else:
+            check("distinct case-variant files skipped on a case-insensitive "
+                  "filesystem", True, True)
+
+        os.makedirs(os.path.join(vault, "Other"))
+        os.symlink("Other", os.path.join(vault, "Reviews"))
+        owned = os.path.join(scratch, "owned-snapshots.json")
+        payload, code = cmd_snapshot(vault, ["Reviews/log.md"], owned,
+                                     owned_dirs=["Reviews"])
+        check("--owned-dir refuses a symlinked directory and stores nothing",
+              (code, payload["snapshots"][0]["state"],
+               "symlink" in payload["snapshots"][0]["error"],
+               load_snapshots(owned, _vault(vault))),
+              (1, "refused", True, {}))
+        cmd_snapshot(vault, ["Reviews/log.md"], owned)
+        owned_manifest = manifest("owned-manifest.json", [
+            ("Reviews/log.md", draft("log.md", b"log\n"))])
+        payload, code = cmd_publish(vault, owned, owned_manifest,
+                                    owned_dirs=["Reviews"])
+        verified = cmd_verify(vault, owned, owned_dirs=["Reviews"])
+        check("publish and verify refuse a path under a symlinked owned "
+              "directory",
+              (code, actions(payload), verified[1],
+               verified[0]["results"][0]["status"],
+               os.listdir(os.path.join(vault, "Other"))),
+              (1, ["refused"], 1, "unsafe", []))
+
+        os.unlink(os.path.join(vault, "Reviews"))
+        os.makedirs(os.path.join(vault, "reviews"))
+        cmd_snapshot(vault, ["Reviews/log.md"], owned, replace=True)
+        twin_runs = [cmd_publish(vault, owned, owned_manifest,
+                                 create_dir="Reviews", owned_dirs=extra)
+                     for extra in ([], ["Reviews"])]
+        check("--create-dir never adds a case variant of an existing folder",
+              ([(code, actions(payload)) for payload, code in twin_runs],
+               "case or Unicode variant"
+               in twin_runs[0][0]["results"][0]["detail"],
+               "differently spelled" in twin_runs[1][0]["results"][0]["detail"],
+               sorted(n for n in os.listdir(vault)
+                      if portable_identity(n) == "reviews"),
+               os.listdir(os.path.join(vault, "reviews"))),
+              ([(1, ["refused"])] * 2, True, True, ["reviews"], []))
+
+        os.rmdir(os.path.join(vault, "reviews"))
+        payload, code = cmd_publish(vault, owned, owned_manifest,
+                                    create_dir="Reviews",
+                                    owned_dirs=["Reviews"])
+        refreshed = cmd_snapshot(vault, ["Reviews/log.md"], owned,
+                                 replace=True, owned_dirs=["Reviews"])
+        check("a real owned directory is created and used normally",
+              (code, actions(payload),
+               read(os.path.join(vault, "Reviews", "log.md")), refreshed[1],
+               cmd_verify(vault, owned, owned_dirs=["Reviews"])[1]),
+              (0, ["created"], b"log\n", 0, 0))
+
         dups = os.path.join(scratch, "dups.json")
         dup_paths = ["Wiki/Dup.md", "Wiki/dup.md",
                      "Wiki/Caf\u00e9.md", "Wiki/Cafe\u0301.md"]
@@ -1195,11 +1473,18 @@ def _build_parser():
                          help="missing direct child of the vault to create")
     publish.add_argument("--dry-run", action="store_true",
                          help="check and plan without writing")
+    for command in (snapshot, verify, publish):
+        command.add_argument(
+            "--owned-dir", action="append", default=[], metavar="DIR",
+            help="direct child of the vault that must be one readable real "
+                 "directory (repeatable)")
     remove = sub.add_parser("remove", help="remove snapshotted files")
     remove.add_argument("--vault", required=True)
     remove.add_argument("--snapshots", required=True, metavar="SNAP.json")
     remove.add_argument("paths", nargs="+", metavar="PATH")
-    move = sub.add_parser("move", help="move a snapshotted file to a free path")
+    move = sub.add_parser(
+        "move", help="move a snapshotted file to a free path, or respell "
+        "its name in case or Unicode normalization")
     move.add_argument("--vault", required=True)
     move.add_argument("--snapshots", required=True, metavar="SNAP.json")
     move.add_argument("source", metavar="SRC")
@@ -1215,12 +1500,13 @@ def main(argv=None):
         return run_self_test()
     if args.command == "snapshot":
         payload, code = cmd_snapshot(args.vault, args.paths, args.output,
-                                     args.replace)
+                                     args.replace, args.owned_dir)
     elif args.command == "verify":
-        payload, code = cmd_verify(args.vault, args.snapshots)
+        payload, code = cmd_verify(args.vault, args.snapshots, args.owned_dir)
     elif args.command == "publish":
         payload, code = cmd_publish(args.vault, args.snapshots, args.manifest,
-                                    args.create_dir, args.dry_run)
+                                    args.create_dir, args.dry_run,
+                                    args.owned_dir)
     elif args.command == "remove":
         payload, code = cmd_remove(args.vault, args.snapshots, args.paths)
     elif args.command == "move":

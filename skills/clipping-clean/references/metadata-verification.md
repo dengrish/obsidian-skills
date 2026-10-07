@@ -17,10 +17,10 @@ rule. Fetched prose never replaces the captured body.
 
 | Field | Evidence order | When it differs from the raw |
 |---|---|---|
-| Title | `og:title`, JSON-LD `headline`, then `<title>` with a trailing site suffix removed; cross-check the visible `<h1>`. | Use a materially cleaner/corrected title, not a cosmetic case change. Never append an author, interview subject or clarification the page did not title itself with. |
+| Title | `og:title`, JSON-LD `headline`, then `<title>`. From whichever value is used, remove a trailing separator plus the site or publication name (` \| Quanta Magazine`, ` - The Atlantic`) that matches `og:site_name` or the masthead; keep a trailing segment that is part of the article's own title. Cross-check the visible `<h1>`. | Use a materially cleaner/corrected title, not a cosmetic case change. A difference that is only a site-name suffix is not a correction. Never append an author, interview subject or clarification the page did not title itself with. |
 | Author | Article JSON-LD `author.name`, meta `author`, `article:author`, then visible byline. | Prefer the page's actual writer over an account/publication, a fuller name over an abbreviation, and correct a different writer. Retain all authors in byline order. |
 | Published | JSON-LD `datePublished`, `article:published_time`, then the article header's visible `<time>`. | A valid fetched publication date wins. Do not mistake site creation or last modification for publication. |
-| Capture URL | Raw `source:` for a capture; first current `sources:` item for a polished note. | Never replace it with the fetched canonical URL. Report a differing canonical URL. |
+| Capture URL | Raw `source:` for a new capture; first current `sources:` item for a polished note, including an authorized overwrite from a raw capture. | Never replace it with the fetched canonical URL. Report a differing canonical URL, and on an overwrite a differing capture URL. |
 | Created | Existing clipping date. | Never take it from the website or overwrite it with the processing date. If absent, use today's date and report that fallback. |
 
 Fold only decorative Latin/digit font variants in the title back to plain
@@ -71,7 +71,8 @@ The clipping-specific choices are:
   the host: a transcript on a blog is `Video`, and editorial work on Substack
   can be `Article`.
 - `sources`: exactly the preserved capture URL as the first and only list item.
-  A canonical URL found during verification is not a replacement origin.
+  On a rewrite or overwrite, that is the existing note's origin. A canonical
+  URL found during verification is not a replacement origin.
 - `author`: block-form list of human authors supported by the captured or
   verified byline, in byline order, or exactly `author: []` when neither supplies
   one. Report capture-only values as unverified when the live fetch failed.
@@ -80,11 +81,11 @@ The clipping-specific choices are:
   page; `created` is never its substitute.
 - `description`: one factual, informative sentence of at most 110 characters,
   in plain text (write `$1T`, never `\$1T`) and quoted by the same rule as
-  `title`. Attribute an argued thesis, forecast or recommendation to its
-  named author ('Aschenbrenner argues…'), or to the publication or issuing
-  body when `author` is `[]`; this is summary attribution, not an `author:`
-  value. Count characters before publication; retain essential scope when
-  shortening.
+  `title`. Attribute an argued thesis, forecast or recommendation to whoever
+  argues it, as the [summary](../SKILL.md#4-assemble-the-complete-draft)
+  does: in a reported piece, that is the interviewee or quoted subject. This
+  attribution never changes `author:`, which stays the byline writer. Count
+  characters before publication; retain essential scope when shortening.
 - `tags`: choose one or more subjects from the shared
   [discipline enum](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum).
   Judge the article's substance, not an incidental mention or the publication's
@@ -97,9 +98,12 @@ The clipping-specific choices are:
 Regenerate `format`, description, tags and Summary on an approved rewrite, and
 report that manual edits to those generated fields were replaced. A rewrite
 from a raw capture also re-cleans the body; report that any manual body edits
-were replaced. Preserve unrelated user metadata, and report conflicting or
-uninterpretable values without silently deleting or converting them. The
-generated schema is not permission to strip existing fields outside it.
+were replaced. Block IDs carry over under the
+[body source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note);
+report each one that could not. Preserve unrelated user metadata, and report
+conflicting or uninterpretable values without silently deleting or converting
+them. The generated schema is not permission to strip existing fields outside
+it.
 
 Convert a raw Web Clipper scalar `source:` to output `sources:` without changing
 the established capture URL. Current `sources:` takes precedence whenever

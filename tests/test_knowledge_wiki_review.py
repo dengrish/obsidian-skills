@@ -114,6 +114,38 @@ class SourceCoverageTests(unittest.TestCase):
                  for source in item["sources"]]
         self.assertNotIn(url, cited)
 
+    def test_user_issues_text_never_blocks_prior_coverage(self):
+        source = self.source("Sources/PDFs/Roe_Paper_2021.pdf")
+        for slug, issues in (
+                ("listed", 'issues:\n- "The opener is wrong"\n- the card is unclear'),
+                ("colon", "issues: The opener is wrong: it says X")):
+            note = self.note(slug, "[[Roe_Paper_2021.pdf#page=1]]")
+            note.write_text(note.read_text(encoding="utf-8").replace(
+                'issues: ""', issues), encoding="utf-8")
+        result = self.index(source)
+        self.assertEqual(result["problems"], [])
+        self.assertEqual(result["source_match_candidates"], [])
+        self.assertEqual(sorted((item["slug"], item["identity_confirmed"])
+                                for item in result["source_matches"]),
+                         [("colon", True), ("listed", True)])
+
+    def test_title_edit_leaves_only_its_own_citation_unconfirmed(self):
+        book = self.source("Sources/PDFs/Doe_Book_2020.pdf")
+        paper = self.source("Sources/PDFs/Roe_Paper_2021.pdf")
+        renamed = self.note("entry-a", "[[Doe_Book_2020.pdf#page=5]]")
+        renamed.write_text(renamed.read_text(encoding="utf-8").replace(
+            "title: Entry-a", 'title: "Entry A (statistics)"'), encoding="utf-8")
+        self.note("entry-b", "[[Roe_Paper_2021.pdf#page=1]]")
+        result = self.index(book, paper)
+        self.assertEqual(len(result["problems"]), 1)
+        self.assertTrue(result["problems"][0].startswith("entry-a.md: filename stem"))
+        self.assertEqual([(item["slug"], item["sources"])
+                          for item in result["source_match_candidates"]],
+                         [("entry-a", ["[[Doe_Book_2020.pdf#page=5]]"])])
+        self.assertEqual([(item["slug"], item["sources"], item["identity_confirmed"])
+                          for item in result["source_matches"]],
+                         [("entry-b", ["[[Roe_Paper_2021.pdf#page=1]]"], True)])
+
     def test_url_ending_in_the_queried_pdf_name_is_not_coverage(self):
         source = self.source("Sources/PDFs/Doe_Example_2025.pdf")
         self.note("probe", "https://example.org/papers/Doe_Example_2025.pdf")
@@ -209,8 +241,15 @@ class SourceCoverageTests(unittest.TestCase):
         note.write_text(text, encoding="utf-8")
         result = self.scan()
         failures = [item for item in result["problems"] if item["slug"] == "probe"
-                    and item["item"] in {"item10/dangling", "item10/case", "item11"}]
+                    and item["item"] in {"item10/dangling", "item11"}]
         self.assertEqual(failures, [])
+        # Both links resolve to neighbor; no other vault file needs the
+        # relative path, so CONVENTIONS §6 spells each one bare.
+        respellings = [item["message"] for item in result["problems"]
+                       if item["slug"] == "probe" and item["item"] == "item10/case"]
+        self.assertEqual(len(respellings), 2, respellings)
+        self.assertTrue(all('rewrite the target to "neighbor"' in message
+                            for message in respellings), respellings)
         self.assertFalse(any(item["slug"] == "probe"
                              for item in result["hierarchy_diagnostic"]["unresolved_parents"]))
         self.assertFalse(any(item["slug"] == "probe" and item["target"] == "neighbor"
@@ -322,6 +361,38 @@ class VaultRootScanTests(unittest.TestCase):
                 self.assertEqual(output.read_text(encoding="utf-8"), "Original report.\n")
                 self.assertEqual(self.snapshot(), before)
         self.assertFalse((self.root / "missing-vault").exists())
+
+    def test_wiki_outside_the_vault_or_inside_its_wiki_is_usage_error(self):
+        self.fixture()
+        other = self.root / "Other vault"
+        other.mkdir()
+        (self.wiki / "sub").mkdir()
+        output = self.root / "existing-report.json"
+        output.write_text("Original report.\n", encoding="utf-8")
+        before = self.snapshot()
+        for wiki, vault, message in (
+                (self.wiki, other, "WIKI is not inside the vault"),
+                (self.wiki / "sub", self.vault,
+                 "WIKI is a subfolder of the wiki folder")):
+            with self.subTest(wiki=wiki, vault=vault):
+                self.wiki = wiki
+                result = self.scan_cli("--vault", vault, "--out", output)
+                self.assertEqual(result.returncode, 2)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(result.stdout, "")
+                self.assertEqual(output.read_text(encoding="utf-8"), "Original report.\n")
+                self.assertEqual(self.snapshot(), before)
+
+    def test_vault_alias_scans_in_the_wiki_spelling(self):
+        self.fixture()
+        alias = self.root / "Vault alias"
+        try:
+            alias.symlink_to(self.vault, target_is_directory=True)
+        except (OSError, NotImplementedError) as exc:
+            self.skipTest("no directory symlinks here: %s" % exc)
+        result = self.scan_cli("--vault", alias)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+        self.assert_resolved(json.loads(result.stdout))
 
     def test_omitted_vault_retains_images_marker_and_parent_inference(self):
         self.fixture()

@@ -5,6 +5,7 @@
 - [Choose the body mode](#choose-the-body-mode)
 - [Body content](#body-content)
 - [Prose and key messages](#prose-and-key-messages)
+- [Links to Wiki entries](#links-to-wiki-entries)
 - [Citations](#citations)
 - [Complete shape](#complete-shape)
 
@@ -54,21 +55,29 @@ read: false
   item. Preserve a collective byline rather than mining individuals from a
   footnote. If the document supplies no byline, write the canonical empty
   exception `author: []` and report it; never use bare `author:` or invent an
-  author from an affiliation, publisher or filename.
+  author from an affiliation, publisher or filename. A book chapter follows
+  the chapter bullet below.
 - **Published:** valid `YYYY-MM-DD`, using every component the document prints.
   Pad an unstated month/day with `01` and report the padding. Do not look up a
-  more precise date elsewhere. If the year is absent, the organized PDF must
-  already carry its canonical `_nd` segment; write the explicit YAML null
-  `published: null` and report it. Under intake's deliberate noncanonical-name
-  exception, such as a named feed-owned attachment, retain that filename and use
-  `published: null` when the source is undated; carry `--allow-unorganized` to
-  lint rather than inventing a year or forcing an `_nd` rename.
+  more precise date elsewhere. If the year is still absent (for a book
+  chapter, after the chapter bullet below), the organized PDF must already carry its
+  canonical `_nd` segment; write the explicit YAML null `published: null` and
+  report it. Under intake's deliberate noncanonical-name exception, such as a
+  named feed-owned attachment, retain that filename and use `published: null`
+  when the source is undated; carry `--allow-unorganized` to lint rather than
+  inventing a year or forcing an `_nd` rename.
   For canonical filenames, a `published` year that differs from the stem's year
   segment, including a date paired with `_nd` or a null paired with a
   year-bearing stem, means one of them misreads the document. Recheck the
   printed date: correct `published` only if the note misread it; otherwise
   route the rename to `pdf-organize`. Never reconcile from outside knowledge or
   change a correctly read date to pass lint.
+- **Book chapter without a byline or date:** take each missing value from the
+  parent book's printed one and report it. The parent book is the whole-book
+  PDF whose core stem is the chapter's book stem, anywhere under
+  `Sources/PDFs/`. Without that PDF, write `author: []`, and use the chapter
+  stem's year as the book's edition year (`<year>-01-01`); report where each
+  value came from. A chapter with a dated stem never uses `published: null`.
 - **Created:** on creation, the date the note is written. Preserve it on an
   authorized rewrite unless correcting that field is specifically in scope.
   Clippings instead preserve their capture date; do not import that producer's
@@ -257,9 +266,22 @@ position, or a relevant missing-disclosure limitation, not in Availability.
 
 ## Prose and key messages
 
-Write for a scientist outside the document's field. Keep technical terms and gloss
-unfamiliar ones once, in their own sentence. Use active voice, simple tenses and
+Write for a scientist outside the document's field. Keep technical terms. Link a
+concept that has its own Wiki entry instead of explaining it
+([links to Wiki entries](#links-to-wiki-entries)); gloss an unfamiliar term with
+no entry once, briefly, in its own sentence. Use active voice, simple tenses and
 one topic per paragraph, with at most six sentences per paragraph.
+
+Parallel facts about several items (the same measure for each organism, site or
+variant) go one self-contained bullet per item, under the prose sentence that
+introduces them. Open each bullet with the item's bold name and state the same
+property for every item. A causal or procedural chain, where each step follows
+from or acts on the previous one, or an argument stays prose (a reported
+procedure keeps its numbered steps), and a prose section never holds bullets
+alone. Time order alone does not make a chain:
+stages or periods that each carry their own facts take one bullet per stage,
+in order, each opened by its stage or period. The bullets count toward the
+section's length limits.
 
 Aim for at most **25 words per prose sentence and 20 per numbered step**,
 including callout bullets and exhibit captions. These are strong brevity targets.
@@ -272,8 +294,24 @@ calls for this judgment; it is not permission to retain avoidable detail.
 When the contribution needs display math, put each equation in its own
 `$$…$$` display or its own row of an `aligned`/`gathered` block, never two per
 line (no `\qquad`-joined pairs, `\Rightarrow` chains or `\text{where}`
-definitions), and say beside it what each term means and where the relation
-comes from.
+definitions). Lint reports a likely pair as an advisory. Transcribe each
+equation from its page image, not the text capture, which drops accents such
+as hats and loses grouping and indices;
+[verification](review-checklist.md#locate-the-claims) checks it there. Beside
+each display, say what each term means and where the relation comes from. Use
+the document's own derivation or reasoning when it gives one. Otherwise give a
+one-sentence intuitive account in standard terms, glossed like a term (the
+normal equation solves for the point where the error's slope is zero in every
+direction).
+
+State each complexity, scaling or iteration bound the note keeps by its
+practical takeaway (a cost of `O(n^2.4)` to `O(n^3)` in `n` features means
+doubling the features multiplies the time by about 5.3 to 8). Give every such
+bound a one-sentence intuitive reason for its form (it inverts a matrix with
+one row and one column per feature). Take the reason from the document's own
+explanation or proof when it gives one, otherwise use a sound standard reason.
+Never invent a reason or a derivation. Leave out a bound that has no sound
+one-sentence reason, and any display or bound the contribution does not need.
 
 The Summary callout holds 3–7 `> - ` bullets, one line per bullet. Each bullet
 makes one claim in one or two sentences, at most about 45 words, and leaves
@@ -291,6 +329,34 @@ concept; never generic words, ordinary technical vocabulary or whole phrases.
 A bold span in the callout holds at most five words and does not end with
 sentence punctuation; lint reports either breach as an advisory.
 Do not put URLs or page citations in the callout.
+
+## Links to Wiki entries
+
+A concept that has its own Wiki entry is linked to that entry, not explained
+again: the note says only what role the concept plays in this document. A term
+with no entry keeps its one brief gloss. Before drafting, index the vault's
+Wiki entries; when `Wiki/` is absent, no term has an entry.
+
+```bash
+python3 '<plugin>/skills/wiki-build/scripts/vault_index.py' '<vault>/Wiki' \
+    -o '<scratch>/wiki-index.json'
+```
+
+Look up each concept the note would explain by the `title` and `aliases` of the
+index's `entries`, ignoring case. Read a matching entry to confirm it is the same
+concept in this document's sense; a similar filename or a shared word is not a
+match. An ambiguous match or an unreadable entry leaves the term glossed.
+
+Write each link in the vault's canonical form
+([CONVENTIONS §6](../../../shared/CONVENTIONS.md#6-wikilink-forms)): `[[slug]]`
+when the display text equals the slug, `[[slug|display text]]` otherwise, and
+`[[Wiki/<entry-path>|display text]]` when another vault file shares the
+basename. The display text follows wiki-build's
+[display-label rules](../../wiki-build/references/writing.md#display-label-casing).
+Link the first mention in body prose, inside the sentence that uses the
+concept; never link in the callout, a heading, a caption or a table cell, or
+as a `see [[…]]` pointer. A passing mention that needs no explanation stays
+plain.
 
 ## Citations
 
@@ -416,8 +482,10 @@ The first line is `---`, with no BOM or leading blank line. The Summary callout
 starts immediately after the closing YAML fence. Put one blank line on each
 side of the single `___` separator. Use six `##` headings with blank lines
 around them, no H1 or H3, no other horizontal rules, and no empty sections.
-The fifth and Availability sections are bullet lists; the other sections are
-prose apart from a reported procedure in the second and exhibits in the third.
+The fifth and Availability sections are bullet lists. The other sections are
+prose, apart from a reported procedure in the second, exhibits in the third and
+[per-item bullets](#prose-and-key-messages) under the sentence that introduces
+them.
 Every embed/table has its italic caption on the next line. No figure or table
 number appears in the prose or captions. End after Availability with a single
 newline.

@@ -44,8 +44,8 @@ Importable
 
 Output: one JSON object on stdout. Exit status is 0 whenever the scan ran.
 Each `checked` row lists, in `research_extracts`, the matching Articles notes
-that are legacy research extracts written by earlier wiki-add versions (current
-wiki-add creates none). `stem_mismatch` lists URL-owning notes whose rendered
+that are legacy wiki-add research extracts (wiki-add creates none).
+`stem_mismatch` lists URL-owning notes whose rendered
 `![[…_fig…]]` embeds use another stem. Dot-prefixed subfolders (private
 stages, hidden folders) are not scanned. Stdlib only.
 """
@@ -100,7 +100,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from entry_structure import mask_body_comments
-from yaml_scalars import read_note_origin, read_regular_text
+from yaml_scalars import read_note_origin, read_regular_text, yaml_lines
 
 
 # Tracking parameters carry no page identity: the same article shared by email,
@@ -238,28 +238,28 @@ def split_frontmatter(text):
     """(frontmatter_lines, body) for a closed leading YAML block, else None.
 
     Leading blank lines are skipped before the opening fence. Fences are
-    tested on ``splitlines()`` lines, and ``body`` is the exact text suffix
+    tested on ``yaml_lines()`` lines, which break only at CR, LF and CRLF as
+    the shared origin reader's do, and ``body`` is the exact text suffix
     after the closing fence, so callers can recover the prefix by length.
     """
-    bare = text.splitlines()
+    bare = yaml_lines(text)
     opening = next((i for i, line in enumerate(bare) if line.strip()), None)
     if opening is None or not _frontmatter_fence(bare[opening]):
         return None
     for i in range(opening + 1, len(bare)):
         if _frontmatter_fence(bare[i]):
-            # Both splitlines forms yield the same items, so `i` lines up.
+            # Both yaml_lines forms yield the same items, so `i` lines up.
             return (bare[opening + 1:i],
-                    "".join(text.splitlines(keepends=True)[i + 1:]))
+                    "".join(yaml_lines(text, keepends=True)[i + 1:]))
     return None
 
 
 #: wiki-add's research guide (skills/wiki-add/references/research.md, "Legacy
-#: research extracts") owns this marker. Earlier wiki-add versions placed it on
-#: the first body line after the frontmatter of an agent-written extract;
-#: current wiki-add cites web pages directly and writes no new extracts. A
-#: marked note is a legacy extract that stays valid: it remains in the URL
-#: index as a URL and name owner, but clipping-clean never overwrites,
-#: reprocesses or renames it.
+#: research extracts") owns this marker. A legacy wiki-add research extract
+#: carries it on the first body line after its frontmatter; wiki-add cites web
+#: pages directly and creates none. A marked note is a legacy extract that
+#: stays valid: it remains in the URL index as a URL and name owner, but
+#: clipping-clean never overwrites, reprocesses or renames it.
 RESEARCH_EXTRACT_MARKER = "<!-- obsidian:wiki-add-research-source -->"
 
 
@@ -279,7 +279,7 @@ def is_research_extract_text(text):
 def is_research_extract(path):
     """Whether a readable regular note is a legacy wiki-add research extract.
 
-    Earlier wiki-add versions wrote these; current wiki-add creates none.
+    wiki-add creates none.
     """
     text = _read_regular_text(path)
     return text is not None and is_research_extract_text(text)
@@ -1163,6 +1163,33 @@ def run_self_test():
              ((["sources:", "  - %s" % URL], "Body\r\n"), True))
         case("split_frontmatter refuses an unterminated block",
              split_frontmatter("---\nsources:\n  - %s\nBody\n" % URL), None)
+        # U+2028, U+2029 and NEL are YAML content, not line breaks. Splitting
+        # at them cut a quoted title in two and hid the note's origin.
+        sep_note = ('---\ntitle: "Old title"\nsources:\n  - "%s"\n---\n'
+                    'Body line\x85\n' % URL)
+        case("split_frontmatter keeps U+2028, U+2029 and NEL inside their lines",
+             split_frontmatter(sep_note),
+             (['title: "Old title"', "sources:", '  - "%s"' % URL],
+              "Body line\x85\n"))
+        for folder in ("sep-inbox", "sep-articles"):
+            os.makedirs(os.path.join(tmp, folder))
+        note(os.path.join("sep-inbox", "raw.md"),
+             '---\ntitle: "Why X matters"\n'
+             'source: "https://example.com/post"\n---\n')
+        note(os.path.join("sep-articles", "Doe_X_2026.md"),
+             '---\ntitle: "Old title"\n'
+             'sources: ["https://example.com/owned"]\n---\n')
+        code, result = scan([os.path.join(tmp, "sep-articles"),
+                             "--raw", os.path.join(tmp, "sep-inbox"),
+                             "--url", "https://example.com/owned"])
+        case("a U+2028 title keeps a capture's source: the capture is new",
+             (code, [(row["status"], row["source"])
+                     for row in result.get("checked", [])][:1]),
+             (0, [("new", "https://example.com/post")]))
+        case("...and a note with a U+2029 title stays indexed as a duplicate",
+             (result.get("unindexable"),
+              [row["status"] for row in result.get("checked", [])][1:]),
+             ([], ["duplicate"]))
         code, result = scan([vault, "--raw", os.path.join(tmp, "Inbx")])
         case("a mistyped --raw path is an error, not a silent no-source row",
              (code, "does not exist" in result.get("error", ""),

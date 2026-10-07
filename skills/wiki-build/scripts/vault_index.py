@@ -61,9 +61,17 @@ Per-entry record:
     identity_complete
 
 ``identity_complete`` is false when an error can hide the entry's slug, title
-or alias ownership: an unread, unsafe or unparsed file, or a malformed title or
-aliases field. Date, source, tag, type, description and filename/title errors
-leave it true.
+or alias ownership: an unread, unsafe or unparsed file, an unclosed or
+malformed opening fence (one that only the separator above ``## Flashcards``
+closes included), or a malformed title or aliases field. Date, source,
+tag, type, description and filename/title errors leave it true. So does a
+readable plain note whose text does not begin ``---`` (after a BOM): it claims
+no title or alias, and its "no YAML frontmatter" error stays in ``errors``.
+
+``errors`` leaves out the parser errors on the ``issues:`` value's lines. That
+value is the user's text; lint_entry reports it as item 2. When only the
+separator above ``## Flashcards`` closes the frontmatter, ``issues:`` owns the
+body, and ``errors`` keeps one error for the lost fence.
 
 Obsidian embeds (``![[fig.png]]``) are excluded from the wikilink
 targets, and dot-directories are skipped during the walk. A leaf ``.md``
@@ -172,6 +180,9 @@ __all__ = [
     "source_matches",
     "source_coverage",
     "iter_markdown_files",
+    "issues_spans",
+    "outside_issues",
+    "flashcards_close_error",
     "unquote_scalar",
 ]
 
@@ -423,6 +434,60 @@ def parse_frontmatter(text):
     return fm
 
 
+def issues_spans(fm, lines):
+    """``(key, end)`` 0-based line spans owned by each ``issues:`` key.
+
+    A span runs from the key line to the line before the next column-0 key
+    or the closing fence, as in scan_vault's ``issues_spans``.  ``lines`` is
+    the text the parser read, split on ``"\\n"``.
+    """
+    if not fm.found:
+        return []
+    close = fm.body_start_line - 2          # the closing fence, 0-based
+    keys = [i for i in range(1, close) if _KEY_RE.match(lines[i])]
+    return [(i, (keys[k + 1:] or [close])[0]) for k, i in enumerate(keys)
+            if _KEY_RE.match(lines[i]).group("key") == "issues"]
+
+
+def outside_issues(fm, lines):
+    """``fm.errors`` without the parser errors on the ``issues:`` value's lines.
+
+    That value is the user's text (CONVENTIONS section 2d), and it can never
+    hide a slug, title or alias.  lint_entry's item 2 is its only reporter.
+    """
+    owned = {str(i + 1) for start, end in issues_spans(fm, lines)
+             for i in range(start, end)}
+
+    def on_issues(error):
+        hit = re.match(r"line (\d+): ", error)
+        return bool(hit) and hit.group(1) in owned
+    return [error for error in fm.errors if not on_issues(error)]
+
+
+def flashcards_close_error(fm, lines):
+    """The error for a frontmatter that only the separator above ``## Flashcards`` closes.
+
+    With the closing fence lost, or spelled ``----`` or ``--- text``, the
+    first exact ``---`` is that separator, and ``issues:``, the last key,
+    owns the whole body. The body then opens with the Flashcards heading,
+    and an ``issues:`` span holds a column-0 line that is no key, list item
+    or comment. The span stays the user's text, so ``outside_issues`` drops
+    its line errors; this error names the fence line instead, as scan_vault
+    reports it under item1.  Returns None for any other entry.
+    """
+    first = next((line for line in fm.body.split("\n") if line.strip()), "")
+    if not fm.found or not FLASH_HEAD_LINE_RE.match(first.rstrip("\r")):
+        return None
+    if any(line.strip() and not line[0].isspace()
+           and not line.startswith("#")
+           and not _KEY_RE.match(line) and not _ITEM_RE.match(line)
+           for start, end in issues_spans(fm, lines)
+           for line in lines[start + 1:end]):
+        return ("line %d: frontmatter is not closed before the body; the '---' "
+                "above '## Flashcards' closes it" % (fm.body_start_line - 1))
+    return None
+
+
 # --------------------------------------------------------------------------
 # body sectioning + wikilinks
 # --------------------------------------------------------------------------
@@ -601,10 +666,22 @@ def index_entry(path, text=None, root=None):
             return record
 
     fm = parse_frontmatter(text)
-    record["errors"].extend(fm.errors)
+    lines = text.split("\n")
+    # A frontmatter that only the Flashcards separator closes has no valid
+    # properties in Obsidian: the fence error stays, like an unclosed fence.
+    lost_fence = flashcards_close_error(fm, lines)
+    if lost_fence:
+        fm.errors.append(lost_fence)
+    # The issues: value's parser errors stay out of the record: the user's
+    # text is item 2's to report, and it never blocks coverage or a merge.
+    record["errors"].extend(outside_issues(fm, lines))
     # A parser error off the title/aliases fields cannot drop a title or
     # alias; any other one can, and so can a malformed title or aliases below.
-    identity_complete = len(fm.errors) == fm.non_identity_errors
+    # A readable plain note (an empty Untitled.md, a README) shows no
+    # properties in Obsidian, so it claims no title or alias; its filename
+    # stays a probed target.  Only text that may open a fence can hide them.
+    identity_complete = (len(fm.errors) == fm.non_identity_errors
+                         or not text.lstrip("\ufeff").startswith("---"))
 
     record["title"] = fm.scalar("title")
     record["type"] = fm.scalar("type")
@@ -679,11 +756,24 @@ def iter_markdown_files(root, on_error=None):
     scan_vault's walk gives: a synced or shared subfolder under the wiki is
     a symlink in plenty of real vaults, and skipping it hides its entries
     from the collision probes -- verdict ``create``, duplicate written.
-    ``seen`` keeps a symlink loop from walking forever.
+    ``seen`` keeps a symlink loop through an outside folder from walking
+    forever. A symlinked folder that points back into the tree is not
+    walked, as in scan_vault: the real folder already holds its files, and
+    a link that sorts first would otherwise hide their real paths.
     """
     root = os.path.abspath(root)
     found = []
     seen = set()
+    real_root = os.path.realpath(root)
+    inside_root = real_root.rstrip(os.sep) + os.sep
+
+    def links_back(dirpath, name):
+        path = os.path.join(dirpath, name)
+        if not os.path.islink(path):
+            return False
+        real = os.path.realpath(path)
+        return real == real_root or real.startswith(inside_root)
+
     for dirpath, dirnames, filenames in os.walk(root, followlinks=True, onerror=on_error):
         try:
             st = os.stat(dirpath)
@@ -701,7 +791,8 @@ def iter_markdown_files(root, on_error=None):
             dirnames[:] = []
             continue
         seen.add(key)
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".")
+                             and not links_back(dirpath, d))
         for name in filenames:
             if name.lower().endswith(".md") and not name.startswith("."):
                 found.append(os.path.join(dirpath, name))
@@ -1029,6 +1120,23 @@ def run_self_test():
         check("entries are sorted by slug", slugs, sorted(slugs))
         check("entry_count counts what is in entries",
               idx["entry_count"], len(idx["entries"]))
+        # A symlinked folder back into the wiki is pruned by name, so a link
+        # that sorts before the real folder never hides its real paths.
+        back = os.path.join(tmp, "WikiBack")
+        os.makedirs(os.path.join(back, "topics"))
+        with open(os.path.join(back, "topics", "mean.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_st_entry_text("Mean"))
+        try:
+            os.symlink("topics", os.path.join(back, "alias-dir"))
+        except (OSError, NotImplementedError, AttributeError):
+            back_seen = ["topics/mean.md"]
+        else:
+            back_seen = [os.path.relpath(path, back).replace(os.sep, "/")
+                         for path in iter_markdown_files(back)]
+        check("a symlinked folder back into the wiki is not walked "
+              "(skipped where symlink creation is unavailable)",
+              back_seen, ["topics/mean.md"])
 
         # -- the shape the other two scripts consume ------------------------
         check("the top-level index keys are the documented ones",
@@ -1131,16 +1239,52 @@ def run_self_test():
                            '---\ntitle: "Shape"\nissues:' + value
                            + '\n---\nBody\n', root=wiki)["errors"]
                for value in (' ""', ' "Fix the card."',
-                             '\n  - "Fix the card."\n  - Add an example.')],
-              [[], [], []])
-        check("an unreadable issues: value cannot hide title ownership",
-              [index_entry(os.path.join(wiki, "shape.md"),
-                           '---\ntitle: "Shape"\nissues:' + value
-                           + '\n---\nBody\n', root=wiki)["identity_complete"]
+                             '\n  - "Fix the card."\n  - Add an example.',
+                             '\n- "Fix the card."\n- Add an example.',
+                             '\n    - "Fix the card."\n    - Add an example.')],
+              [[], [], [], [], []])
+        check("an unreadable issues: value cannot hide title ownership and "
+              "is no index error",
+              [(lambda rec: (rec["identity_complete"], rec["errors"]))(
+                  index_entry(os.path.join(wiki, "shape.md"),
+                              '---\ntitle: "Shape"\nissues:' + value
+                              + '\n---\nBody\n', root=wiki))
                for value in (' |\n  The card is wrong.', '\n  card: vague',
                              '\n  Fix the card', ' "The card\n  is wrong"',
-                             ' The card is vague.\nAlso the opener.')],
-              [True] * 5)
+                             ' The card is vague.\nAlso the opener.',
+                             ' The opener is wrong: it says X')],
+              [(True, [])] * 6)
+        check("...while the same error on another field stays an index error",
+              index_entry(os.path.join(wiki, "shape.md"),
+                          '---\ntitle: "Shape"\ntype: The type: X\n'
+                          'issues: ""\n---\nBody\n', root=wiki)["errors"],
+              ["line 3: unparseable YAML scalar: expected a single-line "
+               "YAML scalar"])
+        # A lost, `----` or `--- text` closing fence leaves the separator above
+        # `## Flashcards` to close the frontmatter, so issues: owns the body.
+        check("a frontmatter that only the Flashcards separator closes keeps "
+              "one index error and can hide identity",
+              [(lambda rec: (rec["identity_complete"], [
+                  error.split(": ", 1)[1] for error in rec["errors"]]))(
+                  index_entry(os.path.join(wiki, "lost.md"),
+                              _st_entry_text("Lost").replace(
+                                  'issues: ""\n---\n', 'issues: ""\n' + fence),
+                              root=wiki))
+               for fence in ("", "----\n", "--- closed\n")],
+              [(False, ["frontmatter is not closed before the body; the "
+                        "'---' above '## Flashcards' closes it"])] * 3)
+        check("...while a closed frontmatter before a body that opens with "
+              "## Flashcards is clean",
+              index_entry(os.path.join(wiki, "lost.md"), _st_entry_text(
+                  "Lost", body="## Flashcards\n\nA definition.\n??\nLost\n"),
+                  root=wiki)["errors"], [])
+        check("a readable plain note claims no title or alias; a possible "
+              "fence that does not parse can hide them",
+              [index_entry(os.path.join(wiki, "plain.md"), text,
+                           root=wiki)["identity_complete"]
+               for text in ("", "# Notes\n", "\ufeffJust a note.\n",
+                            '--- \ntitle: "X"\n---\n', '---\ntitle: "X"\n')],
+              [True, True, True, False, False])
         check("scalars are unquoted",
               (anchor["title"], anchor["type"], anchor["created"]),
               ("Anchor", "Concept", "2026-01-01"))

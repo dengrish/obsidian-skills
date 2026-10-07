@@ -38,7 +38,7 @@ possible-initials token such as `Jun LEE`), and rerun with a corrected
 
 ## Short topic segment
 
-Use 2–4 content words from the **corrected** title, **Title-Cased** (capitalize the first letter of each word), underscore-separated. Keep the nouns and verbs that actually identify the topic; drop articles, prepositions, possessives, and rhetorical filler (`a`, `the`, `of`, `for`, `just`, `how`, `why`, `is`, `met`, etc.). **Acronyms and initialisms are fully uppercased** (`LLM`, `RNA`, `AI`, `KRAS`, `GPT`, `AGI`, `OOM`) — and a trailing plural `s` stays lowercase, so `LLMs`, `OOMs`, `GPUs`. A word that mixes a known acronym with a number is uppercased as a unit: `gpt4` → `GPT4`; ordinary numeric terms keep their spelling (`web3` → `Web3`, `10x` → `10x`, `1st` → `1st`). **A word that already carries an internal capital — a brand, product, or camelCase name — keeps its own casing rather than being forced to Title Case:** `iPhone` stays `iPhone` (not `Iphone`), `macOS` stays `macOS`, `PyTorch` stays `PyTorch`, `eLife` stays `eLife`. (The Title-Case topic plus the proper-cased author make the file pane far more scannable than an all-lowercase slug.)
+Use 2–4 content words from the **corrected** title, **Title-Cased** (capitalize the first letter of each word), underscore-separated. Keep the nouns and verbs that actually identify the topic; drop articles, prepositions, possessives, modal verbs, `not`, and rhetorical filler (`a`, `the`, `of`, `for`, `just`, `how`, `why`, `is`, `may`, `not`, `met`, etc.). **Acronyms and initialisms are fully uppercased** (`LLM`, `RNA`, `AI`, `KRAS`, `GPT`, `AGI`, `OOM`) — and a trailing plural `s` stays lowercase, so `LLMs`, `OOMs`, `GPUs`. A word that mixes a known acronym with a number is uppercased as a unit: `gpt4` → `GPT4`; ordinary numeric terms keep their spelling (`web3` → `Web3`, `10x` → `10x`, `1st` → `1st`). **A word that already carries an internal capital — a brand, product, or camelCase name — keeps its own casing rather than being forced to Title Case:** `iPhone` stays `iPhone` (not `Iphone`), `macOS` stays `macOS`, `PyTorch` stays `PyTorch`, `eLife` stays `eLife`. (The Title-Case topic plus the proper-cased author make the file pane far more scannable than an all-lowercase slug.)
 
 - "Pancreatic cancer just met its match" → `Pancreatic_Cancer`
 - "How LLMs work: a deep dive" → `LLMs_Deep_Dive`
@@ -73,7 +73,9 @@ Sources/Images folder. Since the note's filename stem *is* the source stem,
 `wiki-build` finds these images by the shared
 [consumer rule](../../../shared/CONVENTIONS.md#8a-the-consumer-rule-the-one-that-matters),
 `[source_stem]_fig*` with any extension, when the cleaned note is later
-processed as a source. Don't diverge from it.
+processed as a source. Don't diverge from it. A reprocess keeps the existing
+spelling of the note and its images when the new slug differs only by
+[case or Unicode normalization](duplicates-and-reprocessing.md#settle-a-slug-before-writing-images).
 
 Use the author and title retained by [metadata verification](metadata-verification.md):
 corrected live evidence when available, otherwise supported capture values

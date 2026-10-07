@@ -20,7 +20,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
-from entry_structure import first_letter_ci_equal, split_sentences
+from entry_structure import BOLD_TEXT, first_letter_ci_equal, split_sentences
 
 __all__ = [
     "bound_common_names",
@@ -68,7 +68,7 @@ _GENERIC_BINDING_HEADS = {
 # this immediate slot prevents an unrelated italic species later in the first
 # sentence from proving the title scientific.
 _BOLD_PAREN_RE = re.compile(
-    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
+    r"(?<!\*)\*\*(?P<bold>" + BOLD_TEXT + r")"
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
     r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
     re.IGNORECASE,
@@ -365,6 +365,12 @@ def _self_test():
                              "is the thale cress.")],
          [[], []]),
     ]
+    import time
+    start = time.perf_counter()
+    list(_BOLD_PAREN_RE.finditer("The **weighted mean** of " + ", ".join(
+        "$x_{%d}$" % i for i in range(40))))
+    cases.append(("a bold with no parenthetical stays linear on 40 math spans",
+                  time.perf_counter() - start < 1.0, True))
     bad = [(name, got, want) for name, got, want in cases if got != want]
     for name, got, want in bad:
         print("FAIL %s: got %r, want %r" % (name, got, want))

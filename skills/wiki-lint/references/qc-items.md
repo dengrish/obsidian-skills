@@ -34,12 +34,12 @@ ownership.
 
 | Finding or worklist | Action |
 | --- | --- |
-| Ordinary `itemN` | Apply the determinate, source-independent correction allowed by item N below. Hand a finding that needs the entry's sources, accurate background or a coordinated cross-entry change to Task 1b; report only what Task 1b cannot settle, such as ambiguous ownership. |
+| Ordinary `itemN` | Apply the determinate, source-independent correction allowed by item N below. Hand a finding that needs the entry's sources, accurate background or a coordinated cross-entry change to Task 1b; report only what Task 1b cannot settle, such as ambiguous ownership. In a run that skips Task 1b, the run report names each hand-off as [left for Task 1b](backlogs.md#run-report). |
 | `item0` | Report the unreadable path and error; there is no parsed entry to repair. Its unknown aliases suppress dependent link actions until readability is restored and the vault is rescanned; direct-filename checks remain usable. |
-| `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. The lines of an `issues:` value are never an item-1 repair ([item 2](#2-field-order-and-quoting)). |
+| `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. The lines of an `issues:` value are never an item-1 repair ([item 2](#2-field-order-and-quoting)); a lost closing fence is ([item 1](#1-valid-yaml)). |
 | `item2/read-type` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
 | `item2/type-enum` | Write the exact enum spelling only when the body makes the intended type unambiguous; otherwise preserve and report. |
-| `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Report only: [item 2](#2-field-order-and-quoting). |
+| `item2/read-missing`, `item2/read-null`, `item2/read-unknown` | Report only, apart from a resolved user issue and a merge's survivor: [item 2](#2-field-order-and-quoting). |
 | `item2/issues-missing` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
 | `item2/issues-malformed` | Report only and preserve: [item 2](#2-field-order-and-quoting). |
 | `item2/parents-null` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
@@ -48,6 +48,7 @@ ownership.
 | `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Legacy metadata is read-only compatibility data; do not add or refresh it or infer a historical creator. |
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
 | `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source; otherwise report. |
+| `item7/hedge-candidate` | Review the description under [item 7](#7-description) and item 9's [caveat review](#9-body-structure-coherence-flow-and-scope): Task 1 drops a hedge whose plain claim the note establishes for the ordinary case; otherwise Task 1b names the condition from the cited source, or keeps evidence-bearing uncertainty. Keep the description, opener and card aligned; the candidate alone is never an order. |
 | `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or accurate background, and integrates the link. |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or accurate background, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
@@ -55,16 +56,17 @@ ownership.
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Report only: [item 10](#10-wikilinks); the target file's `item0` or `item1` governs repair. |
+| `item10/non-entry` | Report only: preserve the link, its path, anchor and display text. Never unlink it as a dangler, retarget it to an entry or alias, or count it toward the [missing-entry rule](refactors.md#create-a-missing-entry). |
 | `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
 | `item10/dangling` | Task 1b first settles the target under its [dangler hand-off](refactors.md#dangling-link-hand-off): the entry the [missing-entry rule](refactors.md#create-a-missing-entry) allows, or a gloss for each mention that needs the term; Task 2 resolves the rest under its [dangler protocol](link-hygiene.md#dangling-links-target-missing), which leaves a link to a missing root for Task 3. |
 | `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
-| `item12/equation-format` | Preserve the existing equation and put its opening and closing `$$` delimiters on separate lines. Do not add a duplicate display. |
+| `item12/equation-format` | Preserve the existing equation and put each `$$` alone on its line with a blank line above and below. Wrap rows that use `&` or `\\` outside an environment in `\begin{aligned}...\end{aligned}`, or `gathered` when nothing aligns. Keep the math unchanged and do not add a duplicate display. |
 | `item12/equation-split-candidate` | When the flagged line really holds two equations, give each its own line under the [equation guide](../../wiki-build/references/equations.md#2-form--defining-equations-are-display-math): a separate display beside the prose that introduces it, or a row of an `aligned` or `gathered` display. Keep the math unchanged; this formatting repair changes no dates or review state. |
 | `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math, or replace it with its verbal core, only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
-| `item12/panel-composite`, `item12/remote-image`, `item12/missing-image` | Report only: [item 12](#12-equations-images-and-tables). |
+| `item12/panel-composite`, `item12/remote-image`, `item12/missing-image`, `item12/image-outside-folder` | Report only: [item 12](#12-equations-images-and-tables). |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item18/partial-label` | Task 1 repair; a label naming another entity goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
@@ -74,7 +76,7 @@ ownership.
 | `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
-| `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. An occupied destination is never retitled into: a same-entity occupant goes to Task 1b's [merge check](#5-filename-collision-and-disambiguation), and any other stays a disambiguation report with its collision warning. |
+| `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. A `new_slug` that differs from the filename only in case or Unicode normalization names the entry's own file, which the protocol respells. An occupied destination is never retitled into: a same-entity occupant goes to Task 1b's [merge check](#5-filename-collision-and-disambiguation), and any other stays a disambiguation report with its collision warning. |
 | `collision_candidates` | Task 1b's [merge check](#5-filename-collision-and-disambiguation): merge the pair through the [refactor protocol](refactors.md) only when it is one entity under alternate names; a probe match alone never activates a merge. |
 | `hierarchy_diagnostic` (every field) | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. Actions are in [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion). |
 | Semantic-invalid alias | Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias) when the canonical owner is unambiguous; ambiguous ownership is reported. |
@@ -96,6 +98,14 @@ Flow lists may be empty only as `[]`. One trailing comma after the last item
 is valid YAML; any other empty element is invalid. Repair only values the file
 unambiguously establishes.
 
+A frontmatter that only the separator above `## Flashcards` closes has lost
+its closing fence, so `issues:` holds the whole body. Restoring or correcting
+that fence is not an `issues:` repair. When the `issues:` value ends on its
+key line, Task 1 makes the next line an exact `---`, inserting the lost fence
+or rewriting a `----` or `--- text` line there; otherwise it reports the
+defect. Rescan before acting on that entry's item 9, 11, 16 or 19 findings or
+its `item2/issues-malformed`, which the lost fence causes.
+
 ### 2. Field order and quoting
 
 Apply the canonical [fields and quoting](../../wiki-build/references/writing.md#1-frontmatter-fields).
@@ -115,9 +125,11 @@ Linter-specific routing:
 - A missing, null, or unrecognizable `read:` has no recoverable answer: report
   it and do not write one. A quoted boolean, YAML `yes`/`no`, or `0`/`1`
   carries a recognizable answer, so normalize only its representation to the
-  equivalent bare boolean. A [resolved user issue](../SKILL.md#user-issues)
-  is the one exception: it sets `read: false`, inserting a missing key
-  directly before `issues:`.
+  equivalent bare boolean. Two exceptions set `read: false` from any prior
+  state, inserting a missing key directly before `issues:`: a
+  [resolved user issue](../SKILL.md#user-issues) and a merge's
+  [surviving entry](refactors.md#build-the-refactored-entries)
+  ([Dates](../SKILL.md#dates)).
 - For `item2/issues-missing`, insert `issues: ""` directly after `read:`, or,
   when `read:` is absent, after the last schema key that precedes it. This is
   a format repair: dates and `read:` stay unchanged. Every blank spelling
@@ -139,19 +151,33 @@ Linter-specific routing:
 
 Require valid `YYYY-MM-DD` dates with `created <= updated`, as builder
 [item 3](../../wiki-build/references/quality-checklist.md) and the
-[date fields](../../wiki-build/references/writing.md#created--updated) define. The linter
-writes neither field. Report invalid values, impossible ordering, and any
-history-dependent question; do not guess which date is wrong or try to make
-`updated:` equal a presumed merge date.
+[date fields](../../wiki-build/references/writing.md#created--updated) define. An
+item-3 finding is report-only: report invalid values, impossible ordering, and
+any history-dependent question; never repair a date as such, guess which date
+is wrong, or try to make `updated:` equal a presumed merge date. Every date
+wiki-lint does write, such as today's `updated:` after a content change,
+follows [Dates](../SKILL.md#dates).
 
 ### 4. Sources
 
 Use the canonical [source format](../../wiki-build/references/writing.md#sources).
 Every entry, a [discipline root](hierarchy.md#establish-discipline-roots)
-included, cites at least one source; an empty `sources:` is reported, never
-filled from memory. An online page's URL item is valid as a quoted,
-full http(s) address. Task 1 never fetches it; Task 1b may read the page to
-verify a repair under the [source-backed correction protocol](source-backed-corrections.md).
+included, cites at least one source. Task 1 hands an empty `sources:` to
+Task 1b, which never fills it from memory. Task 1b chooses the evidence: a
+vault document other entries already cite that introduces the subject, cited
+at that page, or else one reliable overview, such as a textbook introduction
+or an encyclopedia article (a Wikipedia page will do), cited by its URL under
+[conventions §7](../../../shared/CONVENTIONS.md#7-source-references). It
+reads that source, verifies the entry against it under the
+[source-backed correction protocol](source-backed-corrections.md), correcting
+any claim it contradicts, and then cites it. It creates no source note and
+adds no citation to an entry that already cites a source; when no such
+source is reachable, it reports the entry.
+An online page's URL item is valid as a full http(s) address, either
+double-quoted or as a plain scalar that
+[§2a's quoting rule](../../../shared/CONVENTIONS.md#2a-wiki-entry--wikimd)
+accepts; keep a plain URL as found and never re-quote it. Task 1 never
+fetches it; Task 1b may read the page to verify a repair under the [source-backed correction protocol](source-backed-corrections.md).
 Lint never converts it to or from a vault citation, and reports a malformed one
 without guessing a repair.
 Remove an exact repeated list item, URL items included. A same-stem PDF/Markdown pair remains
@@ -163,7 +189,8 @@ page-anchor form; the physical page's factual correctness needs the source.
 
 ### 5. Filename, collision, and disambiguation
 
-Apply the canonical [naming rules](../../wiki-build/references/writing.md#3-wikilinks-and-naming).
+Apply the canonical [naming rules](../../wiki-build/references/writing.md#3-wikilinks-and-naming)
+and the builder's [title rule](../../wiki-build/references/writing.md#title).
 Task 1 never renames. A title/filename mismatch goes to Task 1b, which
 retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry)
 when the canonical name is determinate and its slug is free.
@@ -184,7 +211,9 @@ and accurate background verify one entity under alternate names
 ([step 2](refactors.md#establish-evidence-and-complete-scope)). Related
 concepts, overlapping wording or a probe match alone never activate a merge.
 A close call stays unapplied under
-[Task 1b's rule](../SKILL.md#task-1b--content-repair).
+[Task 1b's rule](../SKILL.md#task-1b--content-repair). An entry beside its
+own half-published retitle destination is not a merge candidate: the
+retitle protocol [finishes it](refactors.md#finish-an-interrupted-retitle).
 
 A bare cross-domain title is retitled the same way. The scanner flags a slug
 that is a word or phrase of the builder's corpus (`tree-of-life`); the semantic
@@ -197,6 +226,15 @@ the old bare slug never stays as an alias. A slug the same entity occupies
 goes to the merge check above; one another entity occupies, or an
 indeterminate qualifier, stays a report. Report an unsluggable title with a
 representable alternative.
+
+A title whose acronym-or-full-form choice breaks the
+[title rule](../../wiki-build/references/writing.md#title) is retitled the
+same way. The semantic pass checks every acronym or expanded title against
+it: `PPO` takes `Proximal policy optimization`, and `Long short-term memory`
+takes `LSTM`. When the rule's form is determinate and its slug is free, Task
+1b retitles the entry, keeping the old form as an alias when it is a valid
+same-entity name. A slug the same entity occupies goes to the merge check
+above.
 
 ### 6. Type and API surface
 
@@ -246,10 +284,11 @@ one home. Re-home a single-tag entry only when the entry and vault make the
 canonical home unambiguous; otherwise report the competing candidates. Reduce
 a legacy multi-tag list to one of its tags using the entry's main treatment
 and the calibration's governing test and defaults, reporting a close call with
-its two-option framing. Leave multiple tags only when the entry's identity is
-unresolved (for example, it conflates two concepts); Task 1b's
-[split](#9-body-structure-coherence-flow-and-scope) then tags each result, and
-a split it does not apply leaves that blocker reported. For a genuinely blank key or empty list, inspect the note and assign its
+its two-option framing. An entry that conflates two concepts still gets one
+tag: the home of the concept its title and opener lead with. Task 1b's
+[split](#9-body-structure-coherence-flow-and-scope) then tags each result. A
+split it does not apply goes under *Notes for the user* with the other
+concept's home, and the entry keeps its one tag. For a genuinely blank key or empty list, inspect the note and assign its
 best supported specific discipline, or `"#misc"` alone if none fits. Never combine
 misc with specific tags. Missing, malformed, mixed, or uncertain metadata
 requires its own evidence-based resolution, not blind replacement with misc.
@@ -312,8 +351,9 @@ close call stays unapplied under
 to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
 Judge a concrete defect, not a preference for different wording. Inspect
 equation lead-ins and paragraph endings as well as the opening sentences.
-Bullets are parallel, not sequential; body links sit in sentences that state
-their relationships. Task 1b trims source/tutorial scaffolding and
+Bullets are parallel, not a causal or procedural chain (time-ordered stages
+that each carry their own facts are parallel); body links sit in sentences
+that state their relationships. Task 1b trims source/tutorial scaffolding and
 application catalogs that do not serve the entry, after checking the cited
 source. It consolidates a definition, explanation, argument, worked example
 or property with its justification duplicated across entries into its owner
@@ -377,11 +417,15 @@ establishes an unambiguous meaning:
 - Clarify a transition only from a relationship already established in the
   entry. Do not infer causation, contrast, chronology, or generality from
   proximity; use a paragraph boundary when no bridge is supported.
-- Convert an already explicit sequence from bullets to prose, or integrate a
+- Convert an already explicit causal or procedural chain from bullets to prose
+  (never time-ordered stages whose bullets each stand alone), or integrate a
   navigation-only link when adjacent prose already states the relationship.
 - Rewrite parallel facts about several items (the same gene in several
   organisms, one property per variant) as one bullet per item, keeping every
   claim.
+- Delete a body heading that repeats the entry's title; never demote it.
+  Obsidian shows the filename as the inline title. A leading one leaves the
+  body opening with its existing prose sentence.
 
 **Preservation and verification.** Task 1's local repairs change prose expression, not
 the knowledge recorded. Preserve every substantive claim, condition, degree,
@@ -430,7 +474,8 @@ without changing display text or anchors. Replace table-cell links with visible
 plain text. In body prose, collapse an exact `[[slug|slug]]` to `[[slug]]`;
 do not apply that cleanup to the Related footer, whose canonical-title pipe is
 mandatory even when the title text equals the slug. Preserve unparsed and
-ambiguous targets.
+ambiguous targets, and a link to a real vault note outside `Wiki/`
+(`item10/non-entry`).
 
 Self-links, duplicate resolving links, and dangling targets use Task 2's
 [link protocol](link-hygiene.md). Preserve genuine local section/block
@@ -470,8 +515,11 @@ whose numbers a caption matches exactly; a caption drops a hedge principle 3
 excludes even when the source's own caption carries it. An ambiguous placement
 is reported.
 
-Never delete a missing embed or caption: repair belongs to extraction or
-pdf-organize's source rename. Preserve a composite and lowercase-suffixed panel
+Never delete or hand-patch a missing embed or its caption; report it. A
+missing figure is extracted with figure-extract, and pdf-organize's source
+rename already rewrites embeds in its own run. An embed whose image sits
+elsewhere in the vault (`item12/image-outside-folder`) renders; leave the
+file and the embed where they are. Preserve a composite and lowercase-suffixed panel
 until source-backed review decides whether the entry needs the default
 composite or the panel-specific view. Figure selection, source fidelity,
 table values, and retained rows or columns remain source-dependent: Task 1b
@@ -663,6 +711,8 @@ and every recognized scheduling or block-ID attachment byte-for-byte and in
 place. Remove every [other card](flashcards.md#card-set) and quote it
 verbatim, attachments included, in the report. When a Task 1b repair changes
 the claim the definition card tests, the card follows in the same edit.
+A [user issue](../SKILL.md#user-issues) about the card is evidence for this
+review, which resolves it under these rules or reports its blocker.
 
 ## Coding content in non-Software entries (item 6)
 

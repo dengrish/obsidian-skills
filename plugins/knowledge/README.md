@@ -43,8 +43,9 @@ their `Inbox/`, `Articles/` and `Sources/` routes; entries remain in `Wiki/`
 and generated navigation stays in `MOCs/`. When a skill renames a file, such
 as pdf-organize filing a PDF or clipping-clean reprocessing a clipping under a
 new name, it repairs every link to that file in the same run, as Obsidian
-does. This plugin leaves `Investments/` records outside its intake and repair
-scope, apart from clipping-clean respelling a link or embed to a clipping or
+does, Obsidian Canvas boards included. This
+plugin leaves `Investments/` records outside its intake and repair scope,
+apart from clipping-clean respelling a link or embed to a clipping or
 image it renames; dated research records are never edited. Open and fixed
 suggestions are kept in `Reviews/<skill>-suggestions.md` under the
 [shared protocol](shared/SUGGESTIONS.md).

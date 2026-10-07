@@ -56,6 +56,8 @@ __all__ = [
     "verify_selected_pdf",
     "source_stem_groups",
     "output_vault_root",
+    "on_disk_spelling",
+    "UnlistedFolderError",
     "inventory_source_figures",
     "looks_staging",
     "run_self_test",
@@ -556,6 +558,47 @@ def output_vault_root(out_dir):
     except (OSError, ValueError):
         return None
     return None
+
+
+class UnlistedFolderError(ValueError):
+    """The folder cannot be listed, so the stored spelling is unconfirmed."""
+
+
+def on_disk_spelling(path):
+    """Return *path* with its basename as its folder stores it.
+
+    A case- or normalization-insensitive filesystem opens a file under any
+    portable-equivalent spelling, but a stem taken from a typed path must use
+    the stored one.  A typed basename the folder lists exactly is kept.
+    Otherwise the one listed name with the same portable identity that is the
+    same file replaces it.  More than one such name raises ``ValueError``; an
+    unreadable folder raises its subclass ``UnlistedFolderError``, so a caller
+    may keep the typed name.  No such name leaves *path* unchanged.
+    """
+    path = os.path.abspath(os.path.expanduser(os.fspath(path)))
+    directory, name = os.path.split(path)
+    try:
+        names = os.listdir(directory)
+    except OSError as exc:
+        raise UnlistedFolderError(
+            "cannot list %r to read the stored spelling of %r: %s"
+            % (directory, name, exc)) from exc
+    if name in names:
+        return path
+    key = portable_identity(name)
+    stored = []
+    for entry in names:
+        if portable_identity(entry) != key:
+            continue
+        try:
+            if os.path.samefile(os.path.join(directory, entry), path):
+                stored.append(entry)
+        except (OSError, ValueError):
+            continue
+    if len(stored) > 1:
+        raise ValueError("%r matches more than one stored name: %s"
+                         % (path, ", ".join(sorted(stored, key=_sort_key))))
+    return os.path.join(directory, stored[0]) if stored else path
 
 
 _STAGING_SUFFIX = re.compile(
@@ -1124,6 +1167,41 @@ def run_self_test():
             ok("case-insensitive output-alias regression skipped on this filesystem", True)
         check("uncreated lowercase scratch spelling is not inferred as canonical",
               output_vault_root(Path(tmp) / "scratch" / "sources" / "images"), None)
+
+        # A typed case or Unicode variant takes the folder's stored spelling.
+        # The listing is mocked so every host runs the same cases.
+        check("a stored basename keeps its typed spelling",
+              on_disk_spelling(selected), str(selected))
+        typed = str(pdfs / "garcía_study_2025.PDF")
+        stored_nfd = "García_Study_2025.pdf"
+        with mock.patch.object(os, "listdir", return_value=[stored_nfd, "x.pdf"]), \
+                mock.patch.object(os.path, "samefile", return_value=True):
+            check("a typed variant takes the stored spelling",
+                  on_disk_spelling(typed), str(pdfs / stored_nfd))
+        with mock.patch.object(os, "listdir", return_value=[stored_nfd]), \
+                mock.patch.object(os.path, "samefile", return_value=False):
+            check("an equivalent name that is another file is not the spelling",
+                  on_disk_spelling(typed), typed)
+        with mock.patch.object(os, "listdir",
+                               return_value=[stored_nfd, "García_Study_2025.pdf"]), \
+                mock.patch.object(os.path, "samefile", return_value=True):
+            try:
+                on_disk_spelling(typed)
+                two_stored = None
+            except ValueError as exc:
+                two_stored = str(exc)
+                two_stored_unlisted = isinstance(exc, UnlistedFolderError)
+        ok("two stored names for one typed variant are refused",
+           two_stored is not None and stored_nfd in two_stored)
+        with mock.patch.object(os, "listdir", side_effect=PermissionError("injected")):
+            try:
+                on_disk_spelling(typed)
+                unlisted = False
+            except ValueError as exc:
+                unlisted = isinstance(exc, UnlistedFolderError)
+        ok("an unreadable folder cannot prove the stored spelling", unlisted)
+        ok("only an unreadable folder raises UnlistedFolderError",
+           two_stored is not None and not two_stored_unlisted)
 
         # Source figure matching is literal, loose at ``_fig``, portable, and
         # accepts any extension.  A glob metacharacter in a legacy stem remains

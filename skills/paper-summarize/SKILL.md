@@ -1,10 +1,11 @@
 ---
 name: paper-summarize
 description: >
-  Summarize one PDF, or a folder of PDFs, into self-contained reading notes in
-  the Articles/ folder of an Obsidian vault, with scoped claims, figures,
-  rebuilt tables and page citations. Covers research papers, books or
-  chapters, reports, standards and publication notices such as retractions.
+  Summarize one PDF, or a folder of PDFs, into reading notes in the Articles/
+  folder of an Obsidian vault, with scoped claims, figures, rebuilt tables,
+  page citations and links to existing wiki entries. Covers research papers,
+  books or chapters, reports, standards and publication notices such as
+  retractions.
   Use for "explain this paper", "summarize this PDF", "summarize chapter 3 of
   this book", "summarize the new PDFs in my vault", "redo the summary of this
   paper" or "write a reading note". Unorganized PDFs go through pdf-organize
@@ -18,7 +19,7 @@ description: >
 One selected PDF produces one reading note in `Articles/`, named after its PDF
 stem. Write for a scientist from another field: explain the document's main
 contribution, what supports it and what limits it. This skill never edits,
-moves or deletes a PDF; naming and filing go through pdf-organize.
+moves or deletes a PDF; naming, filing and splitting go through pdf-organize.
 
 Read [runtime setup](../../shared/RUNTIME.md) once per task and resolve `<vault>`,
 `<skill>`, `<plugin>` and, when a step needs it, `<scratch>`. After setting up
@@ -37,6 +38,8 @@ at `<scratch>` paths, and publishes nothing. It creates no vault folder, writes
 no crop and publishes no note: the scan reads an empty `<scratch>` folder in
 place of an absent `Articles/` or `Sources/Images/`, the extractor runs with
 `--dry-run`, and publication runs, if at all, only as a `--dry-run` plan.
+When the scan reads a `<scratch>` image folder, add `--vault '<vault>'` so it
+still proves the selected PDF's basename unique across the vault.
 Report the result as partial, not ready to publish, when the scan read an empty
 `<scratch>` folder or the dry-run extractor left figures missing, and name
 those figures as gaps. A PDF that needs naming or filing gets only
@@ -45,14 +48,31 @@ pdf-organize's read-only plan, without `--apply`.
 ## 1. Select and inventory the work
 
 A named PDF selects exactly that file, even when it is a book chapter or a
-split book. A folder request selects that folder recursively. Record those
-selected files before any move. For ordinary vault processing, invoke
-`pdf-organize` for selected PDFs that need naming or filing, including Inbox
-PDFs, **before requiring a `Sources/PDFs/` inventory**. Track each resulting
+split book, unless the request asks for one chapter of it. A named split book
+is the note's unit; [its figures](#prepare-the-figure-inventory) are its
+chapters'. A
+folder request selects that folder recursively. Record those selected files
+before any move. For ordinary vault processing, invoke `pdf-organize` for
+selected PDFs that need naming or filing, including Inbox PDFs, **before
+requiring a `Sources/PDFs/` inventory**. Track each resulting
 path so filing a PDF does not drop it from the selection. Notes, source links
 and figures depend on this [canonical source identity](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 Honor explicit no-rename/no-import instructions; report and carry a deliberate
 `--allow-unorganized` exception when a preserved name is noncanonical.
+
+A request for one chapter of a book ("summarize chapter 3 of this book")
+selects that chapter's PDF, found by number or title among the
+`split_book_chapters` that the book's single-file scan lists. When only
+chapter PDFs exist, find it by its `_NN_` number or title in the book's
+`Sources/PDFs/<Work>/` folder of the whole-tree scan and select it directly.
+For an unsplit book, the request authorizes
+[pdf-organize](../pdf-organize/SKILL.md#5-test-for-a-book-and-split-only-when-justified)
+to split that one book, keeping the original; then summarize the chapter PDF.
+A [preview run](#preview-runs) splits nothing and reports the proposed split.
+If pdf-organize finds no chapter structure, or the split or a rename it needs
+is blocked, write nothing from the book and report the blocker and the
+proposed split. Never write a chapter-only note under the book's stem: a note
+covers the whole PDF it is named after.
 
 A PDF outside the vault is usable only as a readable copy of the one vault PDF
 with its basename. When that vault PDF exists, run the
@@ -94,10 +114,13 @@ file never authorizes summarizing it.
 
 The single-file scan of a named PDF, or of each PDF a sweep will process, gives
 that PDF's **step-1 row**: the snapshot, figure preparation and step 6 use its
-`note` path and `figures[].file`.
+`note` path and `figures[].file`. A split book's row also lists its chapter
+PDFs in `split_book_chapters` and their crops in `chapter_figures`.
 
-With canonical `Sources/Images/` output, each scan also proves the selected
-PDF's basename is unique across the whole vault, including `Inbox/`.
+With canonical `Sources/Images/` output, or `--vault` in a preview, each scan
+also proves the selected PDF's basename is unique across the whole vault,
+including `Inbox/`. The row's `stem` and `note` use the stored spelling of the
+vault PDF, even when the request typed another case.
 `Articles/` is one flat namespace shared with clippings and wiki-add research
 extracts. The scan decides ownership: a note whose first `sources:` item (or
 legacy `source:`) is not a wikilink resolving to this PDF, a note with
@@ -109,7 +132,7 @@ case-folded) duplicate name is a `collision`.
 | `new` | Continue. |
 | `done` | Skip unless the request already authorizes replacing existing summaries; for a named file without that authorization, ask whether to overwrite or skip. |
 | `legacy` | Leave the older embed note untouched and report it: the user removes or renames it; a rescan then reports `new`. |
-| `collision` | Write nothing; report the existing origin, `source_conflicts`, `note_conflicts` or `source_gate_error`. For another producer's note or `note_conflicts`, the user renames, moves or removes the other note, or all but one of the portable-equivalent names; a rescan then reports `new`, or `done` when the remaining note is this PDF's. When this PDF's own note has malformed or duplicate origin metadata, the user repairs that metadata rather than renaming or removing the note. Resolve `source_conflicts` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
+| `collision` | Write nothing; report the existing origin, `note_origin_error`, `source_conflicts`, `note_conflicts` or `source_gate_error`. For another producer's note or `note_conflicts`, the user renames, moves or removes the other note, or all but one of the portable-equivalent names; a rescan then reports `new`, or `done` when the remaining note is this PDF's. A `note_origin_error` means the existing note's origin metadata is malformed: if it is this PDF's own note, the user repairs that metadata rather than renaming or removing the note; otherwise the other-producer remedy applies. Resolve `source_conflicts` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. An incomplete inventory names the unreadable or looping vault paths; report them for the user to repair. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
 | `unorganized` | Stop for that PDF and route naming to `pdf-organize`. After it files the PDF, re-run the inventory and continue from the new path; the old path is no longer the source identity. |
 | `feed` | A [feed-owned attachment](../../shared/CONVENTIONS.md#1c-feed-owned-attachments): skip it, and never route it to `pdf-organize`. Only when the user names one, rescan that file alone with `--allow-unorganized`, keep its collector path and feed receipts unchanged, and report the exception. |
 | `book` | Skip a whole split book in a folder sweep and name the chapter folder; `--include-split-books` selects split books only for a sweep that asks for them. |
@@ -141,12 +164,21 @@ Compare each selected PDF's inventory with the figures its text cites. This is
 the only step that invokes `figure-extract`; otherwise the image folder is
 read-only.
 
+A split book's figures are its chapters' figures. For a row with
+`split_book_chapters`, run items 1–6 on those chapter PDFs instead of the book:
+a chapter's inventory is its entries in `chapter_figures`, and item 4 extracts
+over the folder that holds them. Never extract from the whole-book PDF; that
+files every figure a second time under the book's stem.
+
 1. **Choose the prefix.** Pass `--ed-prefix ED` to `--cites` and to every
    extractor command below when `<stem>_fig_ED*` files exist, or when no
    `<stem>_fig*` crop exists yet and the captions number Extended Data figures
-   alongside main ones.
-   `python3 '<skill>/scripts/paper_text.py' '<pdf path>' --find 'Extended Data'`
-   reports pages that mention them; a MISSING line, exit 1, means none.
+   alongside main ones. Check the captions with
+   `python3 '<plugin>/skills/figure-extract/scripts/auto_fig_bbox.py' '<pdf path>'`:
+   its `raw` column must list an `Extended Data Fig…` caption. A body-text
+   citation or a journal's "extended data is available" line does not count.
+   `paper_text.py --find 'Extended Data'` also finds those lines, so it can
+   only rule Extended Data out: a MISSING line, exit 1, means none.
    Otherwise keep the default prefix; switching existing crops is
    figure-extract's
    [Extended Data procedure](../figure-extract/references/review-and-repair.md#extended-data-and-supplementary-figures).
@@ -162,7 +194,7 @@ read-only.
    gap. No citations do **not** prove there are no figures: inspect pages for
    unnumbered, non-English or image-only exhibits.
 4. **If figures are missing, extract them** with the existing extractor, over
-   this PDF alone:
+   this PDF alone; for a split book, `--src` is its chapter folder:
 
    ```bash
    python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' \
@@ -195,8 +227,9 @@ read-only.
    governs a needed figure that is still absent or badly cropped.
 7. **Rescan if anything changed.** If items 4–6 wrote, renamed or repaired any
    crop, repeat the single-file scan and use its figure list; otherwise use the
-   step-1 row's. Embed only a file named in its `figures[].file`, never a
-   filename rebuilt from a label.
+   step-1 row's. Embed only a file named in its `figures[].file` or, for a
+   split book, its `chapter_figures[].file`, never a filename rebuilt from a
+   label.
 
 ## 2. Read the PDF and record the claims
 
@@ -229,17 +262,20 @@ an abstract or a guess because the body could not be read.
 ## 3. Assemble the draft and its exhibits
 
 Read [the note format](references/note-format.md) before writing; it owns the
-fields, body shape, citations, length limits and brevity targets. Choose its
-empirical, argument/synthesis or notice body mode before drafting; that choice
-determines what the six section positions mean.
+fields, body shape, Wiki links, citations, length limits and brevity targets.
+Choose its empirical, argument/synthesis or notice body mode before drafting;
+that choice determines what the six section positions mean. Index the vault's
+Wiki entries before drafting, so a concept that has its own entry is
+[linked, not explained again](references/note-format.md#links-to-wiki-entries).
 Keep the document's main contribution and material contrary evidence central,
 without inventing a study design for a non-empirical source.
 
 If the scan listed figures or a main contribution merits a table, read
 [exhibit selection](references/figures.md), which owns selection, placement,
-captions and table reconstruction; inspect every embedded file. **The note is
-self-contained:** include an exhibit the argument needs or state the supported
-claim in prose; never point to an unseen figure, table or supplement.
+captions and table reconstruction; inspect every embedded file. **The note
+stands in for the document:** include an exhibit the argument needs or state
+the supported claim in prose; never point to an unseen figure, table or
+supplement.
 
 Save the complete draft at a unique `<scratch>` path; never put an unfinished
 note in `Articles/`. When the assembled form is unclear, use the
@@ -257,8 +293,9 @@ python3 '<skill>/scripts/note_lint.py' '<draft note>' \
 Use the body mode chosen in step 3 and the same `--images` folder the scan
 used. Fix violations and rerun; review every advisory, including sentence/step
 length against the
-[brevity targets](references/note-format.md#prose-and-key-messages) and a
-one-item empirical Limitations section against the anti-filler exception.
+[brevity targets](references/note-format.md#prose-and-key-messages), a
+one-item empirical Limitations section against the anti-filler exception, and
+a display line flagged as holding more than one equation.
 Repeat intake's deliberate `--allow-unorganized` exception here, and only then;
 it also permits a source-backed null date when the name gives no year, and
 waives nothing else. Lint does not check facts, image contents, page upper
@@ -319,13 +356,17 @@ Fill in this template, omitting lines that do not apply:
   correction ([report separate outcomes](references/review-checklist.md#report-separate-outcomes)).
 - **Lint:** its own line, with the reason for every retained advisory
   exception.
-- **Metadata and disclosures:** padded or null dates, `author: []`, an absent
-  `read:`, a metadata conflict that kept the original, and missing basis,
+- **Metadata and disclosures:** padded or null dates, `author: []`, a chapter
+  byline or date taken from its parent book or stem, an absent `read:`, a
+  metadata conflict that kept the original, and missing basis,
   methodological or mode-relevant availability information.
 - **Calls and exceptions:** abstract-results discrepancies, low-confidence
   calls, approved rewrites, explicit scan overrides such as
   `--allow-unorganized`, duplicate documents, and affected papers that have
   their own note.
+- **Chapter request:** the chapter PDFs pdf-organize split from the book, with
+  the original kept; or the proposed split, with any blocker that left the
+  chapter unsummarized.
 - **Blockers:** each unpublished draft, with the reason and every staging or
   recovery path the helper printed.
 

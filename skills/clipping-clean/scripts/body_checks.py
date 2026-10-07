@@ -22,18 +22,23 @@ are in references/review-checklist.md and references/nested-lists.md.
                   image URL resolved against URL, alt, figcaption, figure
                   number, nearest preceding heading and Lottie source. Counts
                   are elements outside nav/aside and page-level header/footer,
-                  whose headings and rows are tagged instead. Read-only: the
-                  stdlib html.parser reads the file; nothing is fetched or
-                  executed.
+                  whose headings and rows are tagged instead. A visually
+                  hidden (screen-reader-only) heading is tagged `hidden` and
+                  is never a row's nearest heading. Read-only: the stdlib
+                  html.parser reads the file; nothing is fetched or executed.
   repair --op OP --lines RANGES PATH [--dry-run]
                   apply one confirmed nested-list repair to the listed lines
                   only (1-based, `12` or `12-18`, comma-separated), keeping any
                   blockquote prefix. OP is `stacked` (collapse a run of list
                   markers to one), `overindent` (collapse two or more leading
                   tabs to one) or `dedent` (strip exactly one leading tab).
-                  YAML and fenced-code lines are never changed. The draft is
-                  rewritten in place; a path inside an Obsidian vault is
-                  refused, because a draft belongs in the run's scratch.
+                  YAML is never changed. Fenced code keeps its content:
+                  `stacked` skips it, and `overindent`/`dedent` move a
+                  list-nested fenced block only as a whole, by its fence's
+                  indent change, refusing a range that covers part of one.
+                  The draft is rewritten in place; a path inside an Obsidian
+                  vault is refused, because a draft belongs in the run's
+                  scratch.
 
     python3 '<skill>/scripts/body_checks.py' sweep '<draft>'
     python3 '<skill>/scripts/body_checks.py' repair --op dedent --lines '41-44' '<draft>'
@@ -61,8 +66,11 @@ import urllib.parse
 #: POSIX [[:space:]] without the newline a split line never carries.
 SP = r"[ \t\r\f\v]"
 
-#: A fenced-code opener or closer, optionally inside a blockquote.
-FENCE_RE = re.compile(r"^((?:>[ \t]?)*)[ ]{0,3}(`{3,}|~{3,})(.*)$")
+#: A fenced-code opener or closer, optionally inside a blockquote: groups are
+#: the quote prefix, the indent, the fence and the info string. Any indent
+#: opens a fence, because Web Clipper indents a fence inside a list item with
+#: tabs.
+FENCE_RE = re.compile(r"^((?:>[ \t]?)*)([ \t]*)(`{3,}|~{3,})(.*)$")
 
 H1_RE = re.compile(r"^# ")
 SUMMARY_RE = re.compile(r"^> \[!Summary\]")
@@ -76,9 +84,14 @@ BACKLINK_RE = re.compile(
     r"^[\s>#*]*(?:backlinks?|what links here|mentioned in"
     r"|citations of this page)(?:[^A-Za-z0-9]|$)", re.I)
 STAR_RUN_RE = re.compile(r"\*+")
+#: A horizontal rule after its indent: three or more of one of `-`, `*` or
+#: `_`, optionally separated by spaces or tabs (`---`, `* * *`).
+RULE = r"(?P<rule>[-*_])(?:[ \t]*(?P=rule)){2,}%s*$" % SP
+#: Two or more list markers on one line; a line that is just a spaced rule
+#: such as `- - -` is not stacked markers.
 STACKED_RE = re.compile(
-    r"^(?:>%s?)*%s*(?:[-*]|[0-9]+\.)(?:%s+(?:[-*]|[0-9]+\.))+%s"
-    % (SP, SP, SP, SP))
+    r"^(?!(?:>%s?)*%s*%s)(?:>%s?)*%s*(?:[-*]|[0-9]+\.)"
+    r"(?:%s+(?:[-*]|[0-9]+\.))+%s" % (SP, SP, RULE, SP, SP, SP, SP))
 CURRENCY_RE = re.compile(r"\$[0-9]")
 UNESCAPED_DOLLAR_RE = re.compile(r"(?:^|[^\\])\$")
 DROPPED_DOLLAR_RE = re.compile(
@@ -93,7 +106,7 @@ TABLE_RE = re.compile(r"<table")
 TABLE_DELIMITER_RE = re.compile(
     r"^[ \t]*(?:>[ \t]?)*[ \t]*\|?(?:[ \t]*:?-+:?[ \t]*\|)+"
     r"(?:[ \t]*:?-+:?)?[ \t]*$", re.M)
-HR_RE = re.compile(r"^(?:[-*_]{3,}|<hr>)%s*$" % SP)
+HR_RE = re.compile(r"^(?:[ ]{0,3}%s|<hr>%s*$)" % (RULE, SP))
 SEPARATOR_RE = re.compile(r"^___%s*$" % SP)
 #: A top-level bullet of the Summary callout.
 SUMMARY_BULLET_RE = re.compile(r"^>[ \t]?[-*+][ \t]+(.*)$")
@@ -140,8 +153,11 @@ class RepairError(ValueError):
 
 
 def frontmatter_end(lines):
-    """Index of the first body line after a leading YAML block, else 0."""
-    if lines and lines[0].rstrip() == "---":
+    """Index of the first body line after a leading YAML block, else 0.
+
+    A byte-order mark before the opening fence does not hide the block.
+    """
+    if lines and lines[0].lstrip("\ufeff").rstrip() == "---":
         for i in range(1, len(lines)):
             if lines[i].rstrip() in ("---", "..."):
                 return i + 1
@@ -149,28 +165,31 @@ def frontmatter_end(lines):
 
 
 def code_regions(lines, start=0):
-    """``(set of 0-based fenced lines, [unclosed opener indexes], [opener
-    indexes of closed blocks])``.
+    """``(set of 0-based fenced lines, [unclosed opener indexes], [(opener,
+    closer) indexes of closed blocks])``.
 
-    Fence lines count as code. An opener with no closer is not treated as a
+    Fence lines count as code. A closer may be indented no deeper than its
+    opener (or three spaces). An opener with no closer is not treated as a
     fence, so a damaged fence cannot hide the rest of the note from the sweep.
     """
     inside, unclosed, openers = set(), [], []
     i = start
     while i < len(lines):
         m = FENCE_RE.match(lines[i])
-        if m and not (m.group(2)[0] == "`" and "`" in m.group(3)):
-            char, width = m.group(2)[0], len(m.group(2))
+        if m and not (m.group(3)[0] == "`" and "`" in m.group(4)):
+            char, width = m.group(3)[0], len(m.group(3))
+            indent = max(3, len(m.group(2).expandtabs(4)))
             j = i + 1
             while j < len(lines):
                 c = FENCE_RE.match(lines[j])
-                if (c and c.group(2)[0] == char and len(c.group(2)) >= width
-                        and not c.group(3).strip()):
+                if (c and c.group(3)[0] == char and len(c.group(3)) >= width
+                        and len(c.group(2).expandtabs(4)) <= indent
+                        and not c.group(4).strip()):
                     break
                 j += 1
             if j < len(lines):
                 inside.update(range(i, j + 1))
-                openers.append(i)
+                openers.append((i, j))
                 i = j + 1
                 continue
             unclosed.append(i)
@@ -218,14 +237,20 @@ def sibling_candidates(lines):
 
     A block is a run of list items and their continuations. Blank lines,
     including a blank `>` line in a loose quoted list, are neutral; a block
-    ends only at an unindented paragraph that follows a blank line, or at
-    fenced code. Every item exactly one tab deep that comes after an earlier
-    flush item of the same block is reported, even when a stray indented item
-    precedes that flush item. Genuine parent-child nesting has the same
-    shape, so every hit is a candidate to judge against the source.
+    ends only at an unindented paragraph that follows a blank line, or at an
+    unindented code fence. Fenced code whose fence is indented continues its
+    list item and is not scanned. Every item exactly one tab deep that comes
+    after an earlier flush item of the same block is reported, even when a
+    stray indented item precedes that flush item. Genuine parent-child
+    nesting has the same shape, so every hit is a candidate to judge against
+    the source.
     """
     start = frontmatter_end(lines)
-    inside, _unclosed, _openers = code_regions(lines, start)
+    inside, _unclosed, openers = code_regions(lines, start)
+    nested = set()
+    for first, last in openers:
+        if FENCE_RE.match(lines[first]).group(2):
+            nested.update(range(first, last + 1))
     hits, block = [], []
 
     def flush():
@@ -243,7 +268,8 @@ def sibling_candidates(lines):
     for i in range(start, len(lines)):
         raw = lines[i]
         if i in inside:
-            flush()
+            if i not in nested:
+                flush()
             prev_blank = False
             continue
         body = raw[len(QUOTE_PREFIX_RE.match(raw).group(1)):]
@@ -485,6 +511,10 @@ CHROME = ("nav", "aside", "header", "footer")
 #: Element bodies that are not page content: no headings, counts or rows.
 INERT = ("script", "style", "template", "svg")
 IMG_TAGS = ("img", "amp-img")
+#: Classes that hide a heading from sight but not from screen readers.
+SR_ONLY_CLASSES = frozenset((
+    "screen-reader-text", "sr-only", "visually-hidden", "visuallyhidden",
+    "screen-reader-only"))
 LOTTIE_TAGS = ("lottie-player", "dotlottie-player", "dotlottie-wc")
 LOTTIE_PATH_ATTRS = ("data-animation-path", "data-anim-path", "data-bm-path")
 LOTTIE_FILE_RE = re.compile(r"\.(?:json|lottie)(?:[?#]|$)", re.I)
@@ -654,7 +684,11 @@ class SourceInventory:
         chrome = self.chrome()
         if tag in HEADING_TAGS:
             self.finish_heading()
-            self.heading = (int(tag[1]), [], chrome)
+            # aria-hidden does not hide a heading from sight, so it stays.
+            hidden = "hidden" in attrs or not SR_ONLY_CLASSES.isdisjoint(
+                attrs.get("class", "").lower().split())
+            self.heading = (int(tag[1]), [],
+                            chrome or ("hidden" if hidden else None))
         elif tag == "br" and self.heading is not None:
             self.heading[1].append(" ")
         elif tag == "a" and not chrome:
@@ -762,7 +796,7 @@ class SourceInventory:
             text = _text(parts)
             if text:
                 self.headings.append((level, text, chrome))
-                if chrome not in ("nav", "aside"):
+                if chrome not in ("nav", "aside", "hidden"):
                     self.last_heading = text
 
     def finish_picture(self):
@@ -815,10 +849,13 @@ def _split_quote(line):
 
 
 def collapse_stacked_markers(line):
-    """`- - text` -> `- text`; the last marker of the run is kept."""
+    """`- - text` -> `- text`; the last marker of the run is kept.
+
+    A spaced rule such as `* * *` is not a run of markers and stays.
+    """
     prefix, body = _split_quote(line)
     m = STACKED_MARKERS_RE.match(body)
-    if m:
+    if m and not HR_RE.match(body.lstrip()):
         body = "%s%s %s" % (m.group(1), m.group(2).split()[-1], m.group(3))
     return prefix + body
 
@@ -875,20 +912,64 @@ def inside_vault(path):
         d = parent
 
 
+def _leading_tabs(text):
+    return len(text) - len(text.lstrip("\t"))
+
+
+def nested_code_moves(lines, openers, op, listed):
+    """``{0-based line: new text}`` for the list-nested fenced blocks that
+    ``overindent`` or ``dedent`` moves.
+
+    A block moves only when its fence is indented and the op changes the
+    opener's tabs. Each line then loses, after its quote prefix, the tabs the
+    op removes from the opener, so the code keeps its own indentation. A
+    block listed only in part, or with a code line too shallow to move, is
+    refused.
+    """
+    moves = {}
+    if op == "stacked":
+        return moves
+    for first, last in openers:
+        block = set(range(first, last + 1))
+        if not FENCE_RE.match(lines[first]).group(2) or not block & listed:
+            continue
+        tabs = (_leading_tabs(_split_quote(lines[first])[1])
+                - _leading_tabs(_split_quote(REPAIRS[op](lines[first]))[1]))
+        if not tabs:
+            continue
+        if not block <= listed:
+            raise RepairError("lines %d-%d are one fenced code block: list "
+                              "all of it or none" % (first + 1, last + 1))
+        for i in range(first, last + 1):
+            prefix, body = _split_quote(lines[i])
+            if body.strip() and _leading_tabs(body) < tabs:
+                raise RepairError(
+                    "line %d has fewer than %d leading tabs, so lines %d-%d "
+                    "cannot move as one fenced code block"
+                    % (i + 1, tabs, first + 1, last + 1))
+            moves[i] = prefix + body[min(tabs, _leading_tabs(body)):]
+    return moves
+
+
 def plan_repair(text, op, spec):
     """``(new text, changed, skipped)`` for one repair over the listed lines."""
     if op not in REPAIRS:
         raise RepairError("unknown repair %r" % op)
     lines = text.split("\n")
     start = frontmatter_end(lines)
-    inside, _unclosed, _openers = code_regions(lines, start)
+    inside, _unclosed, openers = code_regions(lines, start)
+    wanted = parse_ranges(spec, len(lines))
+    moves = nested_code_moves(lines, openers, op, set(n - 1 for n in wanted))
     changed, skipped = [], []
-    for n in parse_ranges(spec, len(lines)):
+    for n in wanted:
         i = n - 1
-        if i < start or i in inside:
+        if i in moves:
+            after = moves[i]
+        elif i < start or i in inside:
             skipped.append({"line": n, "reason": "YAML or fenced code"})
             continue
-        after = REPAIRS[op](lines[i])
+        else:
+            after = REPAIRS[op](lines[i])
         if after != lines[i]:
             changed.append({"line": n, "before": lines[i], "after": after})
             lines[i] = after
@@ -962,6 +1043,10 @@ def run_self_test():
           sibling_lines("> - A: hi\n> - B: hello"), [])
     check("a list inside fenced code is not scanned",
           sibling_lines("```\n- a\n\t- b\n```"), [])
+    check("a list inside a tab-indented fence is not scanned, and the "
+          "fence does not end its list item",
+          sibling_lines("- **Q:** how?\n\t```yaml\n\t- name: a\n\t```\n"
+                        "\t- **A:** like that."), [5])
     check("a stray indented item before a loose flush Q&A pair does not "
           "hide the split",
           sibling_lines("Intro para.\n\n\t- stray indented item\n\n"
@@ -1038,6 +1123,19 @@ def run_self_test():
     check("an HTML table is listed", [r[:4] for r in got["14"]], ["L25:"])
     check("a rule below the separator is listed; YAML and fenced ones are not",
           got["15"], ["L31: ***"])
+    spaced = items("> [!Summary]\n> - a\n\n___\n\n* * *\n\n- - -\n\n_ _ _")
+    check("spaced rules below the separator are decorative rules, not "
+          "stacked markers", (spaced["15"], spaced["8"]),
+          (["L6: * * *", "L8: - - -", "L10: _ _ _"], []))
+    nested = items("1. Run it:\n\t```bash\n\techo $HOME costs $5 and $X<br>\n"
+                   "\t\tindented\n\t```")
+    check("a tab-indented fence in a list item is code to the sweep",
+          [nested[k] for k in ("4", "9", "10", "12")],
+          [[], [], ["0 (even)"], []])
+    bom = '\ufeff---\ntitle: "Costs $5"\ntags:\n  - - nested\n---\nBody \\$3.\n'
+    check("a BOM does not expose YAML to the sweep",
+          [items(bom)[k] for k in ("8", "9", "10")],
+          [[], ["L6: Body \\$3."], ["0 (even)"]])
     report, notes = sweep_report("x\n```\nnever closed\n# heading")
     check("an unclosed fence is reported and scanned as prose",
           (notes, dict((h.split()[0], r) for h, r in report)["1"]),
@@ -1145,6 +1243,8 @@ def run_self_test():
     check("outline does not count an unclosed fence as a code block",
           outline_report("```a\nx\n```\n```\nnever closed")[1]["code_blocks"],
           1)
+    check("outline counts a tab-indented fenced block in a list item",
+          outline_report("1. step\n\t```\n\tx\n\t```\n")[1]["code_blocks"], 1)
 
     check("srcset keeps commas inside a URL and reads descriptors",
           parse_srcset("https://c.test/w_400,h_300/a.jpg 400w,"
@@ -1253,6 +1353,13 @@ def run_self_test():
               "<figure><img src=\"chart.png\"><figcaption>Figure 2"
               "</figcaption></figure></article>", "https://x.test/")[2]],
           ["Results"])
+    hidden = source_report(
+        "<h1>Title</h1><h2 class='screen-reader-text'>Introduction</h2>"
+        "<figure><img src=\"a.png\"></figure>", "https://x.test/")
+    check("a screen-reader-only heading is tagged hidden and is not the "
+          "heading of later content",
+          (hidden[0], [r.get("heading") for r in hidden[2]]),
+          ([(1, "Title", None), (2, "Introduction", "hidden")], ["Title"]))
     check("a gallery's nested figures give captioned media rows, no stub",
           [(r["tag"], r.get("caption")) for r in source_report(
               "<figure class=\"wp-block-gallery\"><figure><img src=a.jpg>"
@@ -1295,6 +1402,12 @@ def run_self_test():
           collapse_stacked_markers("> - - - **A:** x"), "> - **A:** x")
     check("stacked collapse handles ordered markers",
           collapse_stacked_markers("1. 1. text"), "1. text")
+    check("stacked collapse leaves a spaced rule, quoted or not",
+          (collapse_stacked_markers("* * *"),
+           collapse_stacked_markers("> - - -")), ("* * *", "> - - -"))
+    check("a stacked repair over a spaced rule changes only the stacked line",
+          [c["line"] for c in plan_repair("- - -\n- - text", "stacked",
+                                          "1-2")[1]], [2])
     check("overindent collapses 2+ tabs to one",
           collapse_overindent("> \t\t\t\t- **B:** y"), "> \t- **B:** y")
     check("overindent leaves a one-tab line alone",
@@ -1315,6 +1428,24 @@ def run_self_test():
           (new.split("\n")[4], [c["line"] for c in changed],
            [s["line"] for s in skipped]),
           ("- b", [5], [2, 7]))
+    new, changed, skipped = plan_repair(bom, "stacked", "1-5")
+    check("a BOM does not let repair touch YAML",
+          (new == bom, changed, [s["line"] for s in skipped]),
+          (True, [], [1, 2, 3, 4, 5]))
+    qa = ("- - **Q:** how do I loop?\n\t\t- **A:** like this:\n\t\t\t```go\n"
+          "\t\t\tfor i := range xs {\n\t\t\t\tfmt.Println(\"$HOME\", i)\n"
+          "\t\t\t}\n\t\t\t```")
+    check("overindent moves a nested fenced block whole, keeping the code's "
+          "own indent", plan_repair(qa, "overindent", "2-7")[0].split("\n")[1:],
+          ["\t- **A:** like this:", "\t```go", "\tfor i := range xs {",
+           "\t\tfmt.Println(\"$HOME\", i)", "\t}", "\t```"])
+    peer = "> - a\n> \t- b\n> \t\t```\n> \t\tx\n> \t\t\ty\n> \t\t```"
+    check("dedent shifts a peer item and its whole nested block by one tab",
+          plan_repair(peer, "dedent", "2-6")[0],
+          "> - a\n> - b\n> \t```\n> \tx\n> \t\ty\n> \t```")
+    check("stacked skips every line of a nested fenced block",
+          [s["line"] for s in plan_repair(qa, "stacked", "1-7")[2]],
+          [3, 4, 5, 6, 7])
 
     with tempfile.TemporaryDirectory() as tmp:
         draft = os.path.join(tmp, "draft.md")
@@ -1333,6 +1464,15 @@ def run_self_test():
         check("a repair rewrites the draft in place, keeping line endings "
               "and mode", (code, written, os.stat(draft).st_mode & 0o777),
               (0, "- - a\r\n\t- b\n", 0o600))
+        with open(draft, "w", encoding="utf-8", newline="") as fh:
+            fh.write(qa)
+        payload, code = cmd_repair(draft, "overindent", "2-5")
+        with open(draft, encoding="utf-8", newline="") as fh:
+            unchanged = fh.read()
+        check("a range covering part of a nested fenced block is refused "
+              "unchanged", (code, payload["error"], unchanged),
+              (1, "lines 3-7 are one fenced code block: list all of it or "
+               "none", qa))
         vault = os.path.join(tmp, "vault")
         os.makedirs(os.path.join(vault, ".obsidian"))
         os.makedirs(os.path.join(vault, "Articles"))

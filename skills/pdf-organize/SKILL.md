@@ -20,10 +20,12 @@ Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per task for vault
 selection, script paths, Python dependencies, and host tools. Use
 `scripts/organize.py` for checks, renames, and splits; do not recreate its
 filesystem or link-repair logic in shell snippets. `canonical`, `check` and
-`rename` need only Python's standard library, so a rename-only run installs
-nothing; read pages for naming with the host's PDF viewing tools. Before the
-first `pages` or `split` command, or any other step that parses a PDF or
-image with this environment, set up the environment from
+`rename` need only Python's standard library, so a rename-only run on a host
+that can view PDF pages installs nothing. Read pages for naming with the
+host's PDF viewing tools, or with the
+[step-2 text fallback](#2-read-enough-to-choose-a-stable-name) when the host
+has none. Before the first `pages` or `split` command, or any other step that
+parses a PDF or image with this environment, set up the environment from
 `<plugin>/requirements.txt` and run
 `python3 '<plugin>/shared/scripts/check_parsers.py'` with it under the
 [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows).
@@ -67,9 +69,12 @@ independently with its own `check` and `rename` plan, never reusing names or
 collision decisions from the start of the batch. It records failed or
 refused plans and splits (exit 1) and unreadable or encrypted PDFs, then
 continues with the next file; exit 2 from `rename --apply` stops the whole
-batch ([step 4](#4-apply-then-verify-the-whole-family)). Each PDF takes the
-first row that matches its state; a single selected PDF always gets the
-step-5 book test:
+batch ([step 4](#4-apply-then-verify-the-whole-family)). A target stem that
+another source's files occupy is no refusal: the batch re-plans that PDF
+under a distinguishing name and files it, as
+[step 3](#3-check-references-and-prepare-the-complete-rename-plan) says.
+Each PDF takes the first row that matches its state; a single selected PDF
+always gets the step-5 book test:
 
 | PDF state | Steps 1–4 | Step 5 book test in a batch |
 |---|---|---|
@@ -77,9 +82,9 @@ step-5 book test:
 | In a book folder that already holds canonical chapter files | Skip the whole folder | None: the existing split stands |
 | Found unreadable, corrupt, or encrypted | Leave it unchanged and record it | None |
 | Not canonical, in `Inbox/` | Name it and file it in `Sources/PDFs/` (`--dest`) | After filing |
-| Canonical, in `Inbox/` | Keep its basename and file it from step 3 | After filing |
+| Canonical, in `Inbox/` | Keep its basename and file it from step 3, unless another source's files occupy its stem | After filing |
 | Not canonical, in `Sources/PDFs/` | Rename it where it stands | After renaming |
-| Canonical, in `Sources/PDFs/`, including an unsplit book | Skip it as already canonical | Only when the request asks to split books |
+| Canonical, in `Sources/PDFs/`, including an unsplit book | Skip it as already canonical | Only when the request asks to split books, or a hand-off asks for one of its chapters |
 | In another vault folder the request names | File it as from `Inbox/` when asked to organize or file it; otherwise rename it in place | After renaming or filing |
 | Outside the vault | Rename a non-canonical name in place, with no `--vault` or `--dest`; a canonical name stays | After renaming; a canonical one only when the request asks to split books |
 
@@ -103,14 +108,30 @@ exits 1 when any of them is not canonical.
 
 A canonical PDF already under `Sources/PDFs/`, or outside the vault, needs no
 metadata rename. A canonical PDF that the scope rule above files, usually in
-`Inbox/`, still needs filing: keep its basename and continue at step 3.
-An explicit request to correct a canonical name uses the normal guarded
-workflow. A skipped rename never skips the book test that step 5 requires.
+`Inbox/`, still needs filing: keep its basename and continue at step 3. When
+another source's files occupy that stem, step 3's
+[target-stem rule](#3-check-references-and-prepare-the-complete-rename-plan)
+files it under a distinguishing name instead. An explicit request to correct
+a canonical name uses the normal guarded workflow. A chapter in its book
+folder keeps the [`<book core>_NN_Name` form](references/book-splitting.md#3-choose-chapter-names-once):
+a correction changes only its chapter name, or its number within its
+neighbours' order, and the helper blocks any other name. A skipped rename
+never skips the book test that step 5 requires.
 
 ### 2. Read enough to choose a stable name
 
 Read the first two or three pages with the host's PDF viewing tools for
-author, title, and year. Use `AuthorLastName_AbbreviatedTitle_Year.pdf`:
+author, title, and year. When the host cannot view a PDF, read those pages as
+text instead:
+
+- Use `pdftotext -layout -f 1 -l 3 '<pdf>' -` when it is available.
+- Otherwise set up the environment and pass the parser check as in setup,
+  then read the first page blocks of
+  `python3 '<plugin>/skills/paper-summarize/scripts/paper_text.py' '<pdf>' --pages`.
+
+Do not choose names from `organize.py pages`, which lowercases the text.
+
+Name the PDF `AuthorLastName_AbbreviatedTitle_Year.pdf`:
 
 - Use the first author's surname with normal capitalization, or an
   organization's recognizable short name. Join a multi-word surname in
@@ -122,8 +143,9 @@ author, title, and year. Use `AuthorLastName_AbbreviatedTitle_Year.pdf`:
   Prefer a meaningful heading to a generic invented title, and report
   uncertainty.
 - Use the publication year printed in the document (for a book, the specific
-  edition's year). A periodic report uses its release year; put the covered
-  period in the abbreviated title. Do not take the year from outside the
+  edition's year; for a preprint, the year this version was posted, as
+  printed on it, not the date inside its DOI). A periodic report uses its
+  release year; put the covered period in the abbreviated title. Do not take the year from outside the
   document; if none is printed, use `nd`.
 - For non-English sources, use an English title provided by the document;
   otherwise transliterate the original rather than inventing a translation.
@@ -135,7 +157,9 @@ year. Examples: `Vaswani_AttnAllYouNeed_2017.pdf`, `Cormen_CLRS_2022.pdf`,
 Name segments use only ASCII letters, digits, and hyphens, separated by
 underscores; the helper refuses any other name. Preserve an existing `_src`
 marker (another representation of the same document) exactly; never add or
-remove it during a rename. A trailing `_2`, `_3`, … distinguishes a
+remove it during a rename. Both representations of a split book pair with
+one chapter set, so renaming one also renames the other, with its figures
+and note; each keeps its own marker. A trailing `_2`, `_3`, … distinguishes a
 **different document** with an otherwise colliding name; it follows `_src`
 when both occur. Figures keep the PDF's exact on-disk stem, including these
 markers.
@@ -158,8 +182,9 @@ A `REFERENCED` report exits 1 and lists the citing paths; it is not a failed
 scan, and the rename plan below decides whether any citing note blocks. A scan
 error never establishes that the source is unreferenced.
 
-The check reports references, including extensionless note links, to the
-PDF and its candidate [family](references/rename-repair.md#establish-the-owned-family).
+The check reports references in notes and Canvas boards, including
+extensionless note links, to the PDF and its candidate
+[family](references/rename-repair.md#establish-the-owned-family).
 **The request that leads to a rename or filing move, including the rename a
 split requires, authorizes the helper's verified reference repair.** Review
 the read-only plan below; when nothing blocks it, apply it without asking.
@@ -170,8 +195,8 @@ python3 '<skill>/scripts/organize.py' rename '<vault>/Inbox/<original>.pdf' \
     --dest '<vault>/Sources/PDFs'
 ```
 
-Without `--apply`, this only reports moves, note rewrites, sidecar changes,
-unreadable notes, and blockers. Omit `--dest` for a PDF renamed where it
+Without `--apply`, this only reports moves, note and canvas rewrites,
+sidecar changes, unreadable notes, and blockers. Omit `--dest` for a PDF renamed where it
 stands; omit both `--dest` and `--vault` outside the vault. A supplied vault
 destination must be absolute and inside that vault. Changing the canonical
 year also reconciles the owned summary note's `published` field under the
@@ -197,8 +222,24 @@ edition, bytes):
 - **Target stem occupied.** `<new stem>_fig*` images or an
   `Articles/<new stem>.md` note outside the family, for the PDF or any
   renamed chapter, block the plan even when the figure manifest records
-  them. Report the occupants and the notes citing them, and relay the
-  helper's remedy.
+  them. Filing a PDF under its unchanged stem checks that stem too. Report
+  the occupants and the notes citing them; the next step depends on whose
+  files they are:
+  - *This PDF's own files.* Figure-extract crops or a reading note of this
+    same PDF are no reason for another name: the PDF stays where it is
+    under **Blocked or failed**. Ask the user whether to clear those files
+    from that name before the rename or filing and restore them afterward.
+  - *Any other occupant*, such as a clipping-clean note or its images,
+    another tool's images (a slide deck's crops) or another document's
+    files, keeps its name: re-plan the PDF now under a distinguishing
+    abbreviated title, as for a proposed name taken (never `_2` for a
+    book), and file it. Report the natural name it could not take and its
+    occupants, and ask whether the user wants to move those files so the
+    PDF can take that name later. That later rename repairs links itself.
+  - *Another source's images under the PDF's current stem* block it as
+    unowned crops. Once a comparison with its pages shows they are not its
+    crops, re-plan: pass `--foreign-image '<name>'` for each in that
+    re-plan, and they keep their names.
 
 Never delete or move either copy; the redundant one is the user's to
 remove. Other blockers need their actual cause resolved.
@@ -212,9 +253,9 @@ figures, note, and chapter folder stay in their own folders and are renamed
 there.
 
 The CLI rechecks the plan and verifies references to **every obsolete name**,
-including figures and notes. If verification fails, **report and stop that
-repair; do not hand-patch the reported notes**. Report the actual rollback
-result. A file changed after the scan is preserved and fails the apply
+including figures and notes, and that no Canvas card still points at an old
+path. If verification fails, **report and stop that repair; do not hand-patch
+the reported notes**. Report the actual rollback result. A file changed after the scan is preserved and fails the apply
 closed: re-plan from the current files, and keep every recovery path the
 error names until reconciled.
 
@@ -230,12 +271,22 @@ contents, repeated chapter headings, or a book title page. Length around 50
 pages or more is a supporting signal, not enough on its own. If it is an
 article, finish. If it is already one chapter, do not split it again.
 
-When a book is detected under a broad request to organize PDFs, process or
-clean the inbox, or split a book, splitting is part of that authorized
-workflow: **keep the original and add chapter PDFs**. A narrow request to
-rename or identify one PDF authorizes only that rename/identification;
-report the book and proposed split, but do not create chapters unless the
-user also asks to organize or split it. Read
+When a book is detected, the user's own request decides whether to split
+it, not the wording of a hand-off from another skill:
+
+- **Split it: keep the original and add chapter PDFs** when the request
+  asks to organize or file PDFs (one, several, a folder or the inbox, as in
+  "rename and file the PDFs in my Inbox"), to process or clean the inbox, or
+  to split a book. A request for one chapter of an unsplit book, handed off
+  by wiki-build or paper-summarize ("build chapter 3 into my wiki",
+  "summarize chapter 3 of this book"), counts as a request to split that
+  one book.
+- **Report the book and its proposed split, and create no chapters,** for
+  any other request: one that asks only to rename or identify PDFs, one or
+  several, and a paper-summarize or figure-extract run that hands this
+  skill its source only to name or file it.
+
+Read
 [book splitting](references/book-splitting.md) before choosing boundaries or
 writing chapters; it also governs names, collisions and existing chapter
 sets. Its `pages` and `split` commands parse the PDF, so the parser check
@@ -247,10 +298,11 @@ before a dependent split.
 Report in these groups, leaving out empty ones:
 
 - **Renamed and filed:** old and new paths, with any uncertain metadata
-  choice explained; outside the vault, say that vault-wide checks did not
-  run.
-- **Repairs:** note and sidecar repairs, and any notes that could not be
-  read.
+  choice explained; for a PDF filed under a distinguishing name, the
+  natural name it could not take, its occupants and the question for the
+  user; outside the vault, say that vault-wide checks did not run.
+- **Repairs:** note, canvas and sidecar repairs, and any notes or canvases
+  that could not be read.
 - **Dates:** when the year changed, the planned old and new `published`
   values for each owned summary note, saying that a new dated value is
   `01-01` padding.

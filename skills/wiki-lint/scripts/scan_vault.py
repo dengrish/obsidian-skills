@@ -188,14 +188,17 @@ from entry_structure import (  # noqa: E402
     flashcard_hedge_hints,
     flashcard_line1_markup,
     flashcard_line1_faults,
+    first_prose_paragraph,
+    heading_repeats_title,
+    is_review_metadata_block,
     math_title_plain_text,
     mask_body_comments,
     normalized_answer_surface,
-    opening_paragraph,
     opener_subject_date_status,
     parse_flashcard_blocks,
     split_sentences,
     title_display_form,
+    without_leading_title_heading,
 )
 from introduced_aliases import missing_introduced_aliases  # noqa: E402
 from markdown_tables import (  # noqa: E402
@@ -606,7 +609,9 @@ def split_frontmatter(text, bad=None):
         bad.append("closing frontmatter fence has trailing whitespace; write exactly '---'")
     after = text[m.end():]                        # starts at the fence line's own "\n" (or EOF)
     body = after.lstrip("\n")
-    blank_after = (len(after) - len(body)) >= 2   # ≥2 leading newlines ⇒ a blank line after the fence
+    # The blank lines between the fence and the body. Body line numbers add
+    # them back, so line 1 is the line after the closing fence.
+    blank_after = max(0, len(after) - len(body) - 1)
     return text[4:m.start()].strip("\n"), body, blank_after
 
 # Key regex shared by parse_fm, the key_order scan and the item-2 quoting scan, so
@@ -660,6 +665,14 @@ _ISSUES_KEY_LINE = re.compile(r"^\s+[^\s#\"'][^:]*:(?:\s|$)")
 #: Malformed ``issues:`` shapes that are not YAML at all.
 ISSUES_NOT_YAML = ("an unreadable value", "an unreadable flow list",
                    "a value followed by list items")
+#: An unquoted ``#`` that YAML reads as a comment cuts the user's text off,
+#: even to blank, so the value is malformed rather than read short.
+ISSUES_COMMENT = "a YAML comment (an unquoted '#') that cuts its text off"
+
+
+def _cuts_comment(raw):
+    """Whether YAML reads part of one ``issues:`` value or item as a comment."""
+    return strip_comment(raw).strip() != raw.strip()
 
 
 class _IssuesShape(ValueError):
@@ -680,6 +693,34 @@ def issues_spans(fm_raw):
     return [(i, (keys[k + 1:] or [len(lines)])[0])
             for k, i in enumerate(keys)
             if FM_KEY.match(lines[i]).group(1) == "issues"]
+
+
+#: The item-1 message for a frontmatter that only the Flashcards separator
+#: closes; lint_entry reports the same defect as 1-valid-yaml.
+FLASHCARDS_CLOSE_MESSAGE = (
+    "frontmatter is not closed before the body: the '---' above "
+    "'## Flashcards' closes it; restore an exact '---' after the last property")
+
+
+def flashcards_close_frontmatter(fm_raw, body):
+    """Whether only the separator above ``## Flashcards`` closes the frontmatter.
+
+    With the closing fence lost, or spelled ``----`` or ``--- text``, the
+    first exact ``---`` is that separator, and ``issues:``, the last key,
+    owns the whole body. Two signs show it together: the body opens with the
+    Flashcards heading, and an ``issues:`` span holds a column-0 line that is
+    no key, list item or comment. The span stays the user's text either way;
+    this only reports the lost fence as item 1.
+    """
+    first = next((line for line in body.split("\n") if line.strip()), "")
+    if not FLASH_HEAD_LINE_RE.match(first):
+        return False
+    lines = fm_raw.split("\n")
+    return any(line.strip() and not line[0].isspace()
+               and not line.startswith("#")
+               and not FM_KEY.match(line) and not FM_ITEM.match(line)
+               for start, end in issues_spans(fm_raw)
+               for line in lines[start + 1:end])
 
 
 def _issues_text(raw, more):
@@ -716,6 +757,8 @@ def _issues_list(more):
             match = FM_ITEM.match(line)
             if not match or dash not in (None, indent):
                 raise _IssuesShape("an unreadable value")
+            if _cuts_comment(match.group(1) or ""):
+                raise _IssuesShape(ISSUES_COMMENT)
             dash = indent
             entries.append((strip_comment(match.group(1) or "").strip(), []))
         elif entries:
@@ -741,9 +784,10 @@ def issues_value(fm_raw):
     whose items are all blank or null), ``issues`` or ``malformed``.  For
     ``issues``, ``form`` is ``string`` (one plain or quoted line) or ``list``
     (block or one-line flow form) and ``items`` holds the decoded texts: the
-    whole string, or one per non-blank list item.  A block scalar and a value
-    continued on another line are ``malformed``, as in wiki-build's draft
-    linter.  For ``malformed``,
+    whole string, or one per non-blank list item.  A block scalar, a value
+    continued on another line and a value or item that an unquoted ``#``
+    comment cuts off are ``malformed``, as in wiki-build's draft linter.  For
+    ``malformed``,
     ``detail`` names the shape; ``ISSUES_NOT_YAML`` lists those that are not
     YAML at all.  Nothing here rewrites a value.
     """
@@ -754,7 +798,10 @@ def issues_value(fm_raw):
         return "malformed", None, [], "a duplicate issues: key"
     lines = fm_raw.split("\n")
     start, end = spans[0]
-    raw = strip_comment(FM_KEY.match(lines[start]).group(2)).strip()
+    full = FM_KEY.match(lines[start]).group(2)
+    if _cuts_comment(full):
+        return "malformed", None, [], ISSUES_COMMENT
+    raw = strip_comment(full).strip()
     more = lines[start + 1:end]
 
     def _body():
@@ -958,6 +1005,11 @@ READ_BOOLEANS = {"true", "false"}
 #: retype — so they route with the missing key, not with `read: yes`.  See the
 #: `read:` block in `scan()`.
 READ_NULLS = {"", "null", "~"}
+
+#: The two cases that do write a missing, null or unknown `read:` (CONVENTIONS
+#: §2c), appended to each report-only `read:` message; `%s` names the write.
+READ_EXCEPTIONS = ("The exceptions (CONVENTIONS §2c): resolving one of the "
+                   "entry's user_issues, or keeping it as a merge's survivor, %s")
 _YAML_TYPED_PLAIN_RE = re.compile(
     r"^(?:null|~|true|false|yes|no|on|off|\.nan|[+-]?\.inf|"
     r"[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:e[+-]?[0-9]+)?|"
@@ -981,8 +1033,8 @@ TAG_ALIASES = {"ml":"machine-learning","ai":"machine-learning","artificial-intel
 
 #: A generated MOC is `MOCs/<discipline>-moc.md`. The suffix keeps its basename
 #: apart from the discipline's Wiki root (`Wiki/biology.md`), so a link to the
-#: root is an ordinary bare `[[biology]]`. Before knowledge 1.4.0 the MOC was
-#: `MOCs/<discipline>.md`; that previous layout is inventoried as legacy.
+#: root is an ordinary bare `[[biology]]`. A previous-layout MOC is
+#: `MOCs/<discipline>.md`; that layout is inventoried as legacy.
 MOC_SUFFIX = "-moc"
 
 
@@ -1084,8 +1136,10 @@ def _index_surfaces(surf_map):
     for s in surf_map:
         # Plurals and aliases cannot make a forbidden bare destination safe:
         # excluding only "entropy" still proposed [[entropy|entropies]]. A
-        # cross-domain phrase ("tree of life") is excluded like a set word.
-        if s in COMMON_NOUNS or bare_common_noun_slug(fold_name(surf_map[s])):
+        # cross-domain phrase ("tree of life") is excluded like a set word,
+        # and so is a floor word's plural surface ("targets").
+        if (bare_common_noun_slug(s)
+                or bare_common_noun_slug(fold_name(surf_map[s]))):
             continue
         m = list(WORD.finditer(s))
         if not m: continue
@@ -1294,8 +1348,9 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
     first-link label they spell.
 
     Returns ``(slug, target, matched, surface, line, context)`` rows, one per
-    target: the first eligible occurrence, its 1-based body line, and the
-    :func:`settle_context` of the sentence holding it.
+    target and sentence, in text order: the first eligible occurrence in that
+    sentence, its 1-based body line, and the :func:`settle_context` of the
+    sentence. :func:`apply_settled` keeps the first unsettled one per target.
     """
     by_tokens, maxwords = _index_surfaces(surf_map)
     backfill = []
@@ -1397,7 +1452,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                 masked_lines[line_i - 1] = " " * len(masked_lines[line_i - 1])
                 masked_lines[line_i] = " " * len(line)
         masked = "\n".join(masked_lines)
-        proposed = set()
+        proposed = {}                     # target -> contexts already proposed
         late = set()
         global_hits = []
         # A `_` or `*` inside LaTeX (`$\hat{y}_{i}$`, `$\theta^*$`) is not an
@@ -1490,7 +1545,6 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                     late.add(tgt)
                     late_links.append((sl, tgt, matched, surface))
                 continue
-            if tgt in proposed: continue
             if tgt in root_targets and _compound_modifier_before(masked, start):
                 continue
             if tgt in root_targets and _root_named_as_setting_or_genus(
@@ -1499,12 +1553,17 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             # A later standalone mention may still carry the link.
             if _inside_longer_term(start, end) or _own_title_term(start, end):
                 continue
-            proposed.add(tgt)
+            # One row per sentence: when the ledger settles a rejected
+            # occurrence, the target's next sentence is offered instead.
+            context = settle_context(WIKILINK.sub(
+                lambda m: (m.group(2) or m.group(1)).strip(),
+                _sentence_at(sentence_text, start)))
+            if context in proposed.setdefault(tgt, set()):
+                continue
+            proposed[tgt].add(context)
             backfill.append((sl, tgt, matched, surface,
-                             prose.count("\n", 0, start) + 1,
-                             settle_context(WIKILINK.sub(
-                                 lambda m: (m.group(2) or m.group(1)).strip(),
-                                 _sentence_at(sentence_text, start)))))
+                             prose.count("\n", 0, start) + 1
+                             + e.get("body_line_offset", 0), context))
         if late_links is None:
             continue
         # The first link's own label can be a word the surface index leaves
@@ -1550,14 +1609,29 @@ def iter_entry_files(wiki, on_error=None):
     `os.listdir` was flat, so an entry filed in `Wiki/sub/` was invisible to the
     whole scan — and every wikilink pointing at it was reported as dangling.
     wiki-build's vault_index.py has always walked recursively; this matches it.
+    A symlinked folder that points back into the Wiki tree is not walked:
+    Obsidian does not support a symlink to a folder inside its own vault, and
+    the real folder already covers its files.
     """
     out = []
     seen_dirs = set()
+    real_wiki = os.path.realpath(wiki)
+    inside_wiki = real_wiki.rstrip(os.sep) + os.sep
+
+    def links_back(dirpath, name):
+        path = os.path.join(dirpath, name)
+        if not os.path.islink(path):
+            return False
+        real = os.path.realpath(path)
+        return real == real_wiki or real.startswith(inside_wiki)
+
     for dirpath, dirnames, filenames in os.walk(wiki, followlinks=True, onerror=on_error):
         # followlinks, because a synced or shared subfolder under Wiki/ is a
         # symlink in plenty of real vaults, and skipping it made every link
         # into it read as dangling -- whose repair would unlink a working
-        # reference. `seen_dirs` keeps a symlink loop from walking forever.
+        # reference. `seen_dirs` keeps a symlink loop through an outside
+        # folder from walking forever. A link back into the Wiki tree is
+        # pruned by name, so a link that sorts first never hides the real path.
         try:
             directory_stat = os.stat(dirpath)
             key = directory_stat.st_ino, directory_stat.st_dev
@@ -1570,7 +1644,8 @@ def iter_entry_files(wiki, on_error=None):
             dirnames[:] = []
             continue
         seen_dirs.add(key)
-        dirnames[:] = sorted(d for d in dirnames if not d.startswith("."))
+        dirnames[:] = sorted(d for d in dirnames if not d.startswith(".")
+                             and not links_back(dirpath, d))
         for name in filenames:
             if name.lower().endswith(".md") and not name.startswith("."):
                 out.append(os.path.join(dirpath, name))
@@ -1581,8 +1656,9 @@ def iter_entry_files(wiki, on_error=None):
 #: document forms CONVENTIONS 6/7 blesses in a `sources:` list. A link to one
 #: is not an entry dangler and must never be unlinked as one. `.md` is absent
 #: on purpose: in body prose and the Related footer, `[[x.md]]` is only another
-#: spelling of the entry link `[[x]]`, so it resolves when that Wiki file
-#: exists and is a dangler when it does not.
+#: spelling of the link `[[x]]`, so it resolves when that Wiki file exists, is
+#: `item10/non-entry` when a vault note outside Wiki/ owns the name, and is a
+#: dangler when neither does.
 _DOC_EXTS = {".pdf", ".epub", ".docx", ".html", ".txt"}
 
 
@@ -1756,6 +1832,58 @@ def image_index(images):
     # missing-image repair cue; None has the same established meaning as an
     # intentionally omitted --images inventory and suppresses those findings.
     return (None if walk_failed else names), findings
+
+
+#: An image filename that `IMG_EMBED` accepts.
+_IMAGE_FILE_RE = re.compile(
+    r"\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)$", re.I)
+
+
+def _folder_identity(path):
+    """``(st_dev, st_ino)`` of the folder at ``path``, or None."""
+    try:
+        info = os.stat(path)
+    except OSError:
+        return None
+    return info.st_dev, info.st_ino
+
+
+def _is_folder(path, identity):
+    """Whether ``path`` is the folder whose identity is ``identity``.
+
+    Identity, unlike a path string, matches a case-folding host's other
+    spelling of the folder (``wiki`` for ``Wiki``) and a symlink to it.
+    """
+    return identity is not None and _folder_identity(path) == identity
+
+
+def vault_image_index(vault_root, images):
+    """Index the vault's image files outside the `--images` folder.
+
+    Returns a dict from each folded basename to the sorted vault-relative
+    paths that hold it. Obsidian resolves an embed by basename anywhere in
+    the vault, so an image outside `Sources/Images/` still renders.
+    Dot-folders, which Obsidian does not index, and the image folder, which
+    `image_index` already covers, are skipped. Folder symlinks are not
+    followed, and a folder that cannot be read is skipped.
+    """
+    paths = {}
+    root = os.path.abspath(vault_root)
+    images_identity = _folder_identity(images)
+    for dirpath, dirnames, filenames in os.walk(root):
+        dirnames[:] = sorted(
+            name for name in dirnames
+            if not name.startswith(".")
+            and not _is_folder(os.path.join(dirpath, name), images_identity))
+        for name in sorted(filenames):
+            if name.startswith(".") or not _IMAGE_FILE_RE.search(name):
+                continue
+            if not os.path.isfile(os.path.join(dirpath, name)):
+                continue
+            relative = os.path.relpath(
+                os.path.join(dirpath, name), root).replace(os.sep, "/")
+            paths.setdefault(fold_name(name), []).append(relative)
+    return paths
 
 
 def moc_file_state(path, *, _directory_fd=None, _texts=None):
@@ -2198,26 +2326,87 @@ def spaced_repetition_report(vault_root, discipline_counts):
 
 
 def _vault_root_for(wiki, images=None, vault=None):
-    """Use an explicit vault root, otherwise retain legacy path inference."""
+    """Use an explicit vault root, otherwise retain legacy path inference.
+
+    Returns ``(root, known)``. ``known`` is false only for the last fallback,
+    the Wiki folder's parent, which may be any directory rather than a vault.
+    """
     if vault is not None:
         if not os.path.isdir(vault):
             raise ValueError("vault is not a directory: %s" % vault)
-        return os.path.abspath(vault)
+        return os.path.abspath(vault), True
     if images:
         image_path = os.path.abspath(images)
         if (fold_name(os.path.basename(image_path)) == "images"
                 and fold_name(os.path.basename(os.path.dirname(image_path)))
                 == "sources"):
-            return os.path.dirname(os.path.dirname(image_path))
+            return os.path.dirname(os.path.dirname(image_path)), True
     current = os.path.abspath(wiki)
     while True:
         if os.path.isdir(os.path.join(current, ".obsidian")):
-            return current
+            return current, True
         parent = os.path.dirname(current)
         if parent == current:
             break
         current = parent
-    return os.path.dirname(os.path.abspath(wiki))
+    return os.path.dirname(os.path.abspath(wiki)), False
+
+
+def vault_note_index(vault_root, wiki):
+    """Index the vault's real Markdown notes outside the Wiki tree.
+
+    Returns ``(paths, basenames, complete)``. ``paths`` maps each folded,
+    extensionless vault-relative path to the exact vault-relative paths
+    (with ``.md``) that own it, and ``basenames`` maps each folded basename
+    the same way. ``complete`` is false when a folder could not be read.
+    Dot-folders, the scanned Wiki tree and the vault-root ``MOCs/`` folder,
+    which the MOC inventory owns, are skipped. Folder symlinks are followed,
+    as Obsidian indexes them, with a loop guard; one that points back into
+    the vault is not walked, because the real folder already covers its
+    files.
+    """
+    paths, basenames = {}, {}
+    complete = True
+    root = os.path.abspath(vault_root)
+    wiki_identity = _folder_identity(wiki)
+    inside_root = os.path.realpath(root).rstrip(os.sep) + os.sep
+    seen = set()
+
+    def failed(_exc):
+        nonlocal complete
+        complete = False
+
+    def links_back(path):
+        return (os.path.islink(path)
+                and (os.path.realpath(path) + os.sep).startswith(inside_root))
+
+    for dirpath, dirnames, filenames in os.walk(
+            root, followlinks=True, onerror=failed):
+        identity = _folder_identity(dirpath)
+        if identity is None:
+            complete = False
+        if identity is None or identity in seen:
+            dirnames[:] = []
+            continue
+        seen.add(identity)
+        top = dirpath == root
+        dirnames[:] = sorted(
+            name for name in dirnames
+            if not name.startswith(".")
+            and not (top and fold_name(name) == "mocs")
+            and not _is_folder(os.path.join(dirpath, name), wiki_identity)
+            and not links_back(os.path.join(dirpath, name)))
+        for name in sorted(filenames):
+            if name.startswith(".") or not name.lower().endswith(".md"):
+                continue
+            if not os.path.isfile(os.path.join(dirpath, name)):
+                continue
+            relative = os.path.relpath(
+                os.path.join(dirpath, name), root).replace(os.sep, "/")
+            key = fold_name(relative[:-3])
+            paths.setdefault(key, []).append(relative)
+            basenames.setdefault(key.rsplit("/", 1)[-1], []).append(relative)
+    return paths, basenames, complete
 
 
 class _ProblemList(list):
@@ -2251,40 +2440,41 @@ SETTLED_FIELDS = {"backfill": ("entry", "target", "surface", "context"),
 
 
 def read_settled(path):
-    """``({kind: set of record tuples}, error)`` from a settled ledger.
+    """``({kind: set of record tuples}, version, error)`` from a settled ledger.
 
-    A missing file is an empty ledger. An unreadable or malformed one yields
-    no records and an error message, so it suppresses nothing.
+    A missing file is an empty version-2 ledger. An unreadable or malformed
+    one yields no records and an error message, so it suppresses nothing.
     """
     empty = {kind: set() for kind in SETTLED_FIELDS}
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except FileNotFoundError:
-        return empty, None
+        return empty, 2, None
     except (OSError, UnicodeDecodeError, ValueError) as exc:
-        return empty, "cannot read the ledger: %s" % exc
+        return empty, 2, "cannot read the ledger: %s" % exc
     if (not isinstance(data, dict) or type(data.get("version")) is not int
-            or data["version"] != 1):
-        return empty, 'the ledger is not a {"version": 1, ...} object'
+            or data["version"] not in (1, 2)):
+        return empty, 2, 'the ledger is not a {"version": 2, ...} object'
     unknown = sorted(set(data) - {"version"} - set(SETTLED_FIELDS))
     if unknown:
-        return empty, "the ledger has unknown keys: %s" % ", ".join(unknown)
+        return empty, 2, "the ledger has unknown keys: %s" % ", ".join(unknown)
     records = {}
     for kind, fields in SETTLED_FIELDS.items():
         rows = data.get(kind, [])
         if not isinstance(rows, list):
-            return empty, "the ledger's %s is not a list" % kind
+            return empty, 2, "the ledger's %s is not a list" % kind
         records[kind] = set()
         for row in rows:
             if (not isinstance(row, dict) or set(row) != set(fields)
                     or not all(isinstance(row[f], str) and row[f]
                                for f in fields)
                     or not re.fullmatch(r"[0-9a-f]{40}", row["context"])):
-                return empty, ("the ledger's %s holds a malformed record: %s"
-                               % (kind, json.dumps(row, ensure_ascii=False)))
+                return empty, 2, (
+                    "the ledger's %s holds a malformed record: %s"
+                    % (kind, json.dumps(row, ensure_ascii=False)))
             records[kind].add(tuple(row[f] for f in fields))
-    return records, None
+    return records, data["version"], None
 
 
 def apply_settled(backfill_rows, hub_footer, path, complete=True):
@@ -2292,16 +2482,26 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
 
     A ``backfill_candidates`` row or a ``hub_footer`` item is omitted when
     its ``settle_key`` equals a ledger record, and a hub target left with no
-    item goes too. ``stale`` lists the records that matched no current row,
-    in the ledger's own shape; it stays empty when ``complete`` is false,
-    since the rows themselves were then not computed.
+    item goes too. ``backfill_rows`` holds one row per target and sentence,
+    each target's in text order; the first unsettled one per entry and
+    target is kept, with ``settle_keys``: its own key and those of the
+    target's later unsettled sentences, which a rejection records together.
+    In a version-1 ledger, a record that matches the target's first sentence
+    settles all of that entry's sentences of the target, and ``upgrade``
+    lists the records of the others, so a version-2 rewrite keeps them
+    settled. ``stale`` lists the records that matched no current row, in
+    the ledger's own shape. Both stay empty when ``complete`` is false,
+    since the rows themselves were then not computed, and ``upgrade`` is
+    then None for a version-1 ledger.
     """
     settled = {"path": path, "backfill_suppressed": 0,
                "hub_footer_suppressed": 0,
-               "stale": {kind: [] for kind in SETTLED_FIELDS}, "error": None}
+               "stale": {kind: [] for kind in SETTLED_FIELDS}, "upgrade": [],
+               "error": None}
     if path is None:
-        return backfill_rows, hub_footer, settled
-    records, settled["error"] = read_settled(path)
+        records, version = {kind: set() for kind in SETTLED_FIELDS}, 2
+    else:
+        records, version, settled["error"] = read_settled(path)
     matched = {kind: set() for kind in SETTLED_FIELDS}
 
     def _is_settled(kind, key):
@@ -2311,9 +2511,23 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
             return True
         return False
 
-    kept = [row for row in backfill_rows
-            if not _is_settled("backfill", row["settle_key"])]
-    settled["backfill_suppressed"] = len(backfill_rows) - len(kept)
+    pairs = {}
+    for row in backfill_rows:
+        pairs.setdefault((row["slug"], row["target"]), []).append(row)
+    kept = []
+    for rows in pairs.values():
+        # Every row is checked, so a record that still matches is not stale.
+        done = [_is_settled("backfill", row["settle_key"]) for row in rows]
+        if version == 1 and done[0]:
+            settled["upgrade"] += [row["settle_key"]
+                                   for row, row_done in zip(rows, done)
+                                   if not row_done]
+            done = [True] * len(rows)
+        settled["backfill_suppressed"] += sum(done)
+        open_rows = [row for row, row_done in zip(rows, done) if not row_done]
+        if open_rows:
+            kept.append(dict(open_rows[0], settle_keys=[
+                row["settle_key"] for row in open_rows]))
     hubs = []
     for row in hub_footer:
         items = [(entry, key)
@@ -2328,6 +2542,8 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
             kind: [dict(zip(fields, record)) for record
                    in sorted(records[kind] - matched[kind])]
             for kind, fields in SETTLED_FIELDS.items()}
+    elif version == 1:
+        settled["upgrade"] = None
     return kept, hubs, settled
 
 
@@ -2350,8 +2566,11 @@ def scan(wiki, images=None, vault=None, settled=None):
     `settled` is the settled-decisions ledger's path, or None; the rows it
     records are omitted (see `apply_settled`).
     """
-    vault_root = _vault_root_for(wiki, images, vault)
+    vault_root, vault_root_known = _vault_root_for(wiki, images, vault)
     img_fold, image_folder_findings = image_index(images)
+    # Images elsewhere in a known vault, built on the first embed that the
+    # image folder does not hold.
+    vault_images = None
     entries, problems = {}, _ProblemList()
     # Every slug whose FILE is on disk, whether or not it parsed as an entry.
     # A link to an unparseable file resolves in Obsidian, so it is not dangling
@@ -2478,6 +2697,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                 alias_inventory_gaps.add((sl, problems.current_path))
             on_disk.add(sl)
             continue
+        if flashcards_close_frontmatter(fm_raw, body):
+            _frontmatter_boundary_bad.append(FLASHCARDS_CLOSE_MESSAGE)
         for _message in _frontmatter_boundary_bad:
             problems.append((sl, "item1", _message))
         _fm_bad = []
@@ -2583,7 +2804,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                       tags_value_count=len(fm["tags"]) if isinstance(fm.get("tags"), list) else 0,
                       sources=sources, sources_is_list=isinstance(fm.get("sources"), list),
                       body=body, prose=prose, rel=rel, fcsec=fcsec, desc=desc,
-                      created=created, updated=updated, blank_after=blank_after,
+                      created=created, updated=updated,
+                      blank_after=bool(blank_after),
+                      body_line_offset=blank_after,
                       parents=parents_all,
                       parents_present=parents_present,
                       parents_is_list=parents_is_list,
@@ -2685,6 +2908,16 @@ def scan(wiki, images=None, vault=None, settled=None):
             if name.lower().endswith(".md") and moc_discipline(name[:-3])}
     except OSError:
         _root_moc_basenames = set()
+    # Real notes outside Wiki/ and MOCs/, such as an Articles/ reading note:
+    # Obsidian resolves a link to one by path or basename, so it is neither
+    # an entry dangler nor an alias, and it is another owner of a same-named
+    # entry's bare name. Only a known vault root is walked; the parent-folder
+    # fallback may be any directory, so it proves nothing about the vault.
+    if vault_root_known:
+        _outside_paths, _outside_basenames, _outside_complete = \
+            vault_note_index(vault_root, wiki)
+    else:
+        _outside_paths, _outside_basenames, _outside_complete = {}, {}, False
 
     def _origin_target_key(raw_target, note_path=None):
         target = entry_link_path_key(raw_target)
@@ -2762,6 +2995,28 @@ def scan(wiki, images=None, vault=None, settled=None):
         record = path_records.get(owner)
         return record, ("parsed" if record is not None else "unparsed"), owner
 
+    def _outside_owners(raw_target, note_path=None):
+        """Vault notes outside Wiki/ and MOCs/ that a link target names.
+
+        Uses `_resolve_entry_file`'s rules: a `./` or `../` path from the
+        note's folder, an exact vault path, a path suffix or a bare basename.
+        Several owners are still a real note that Obsidian opens, so any
+        match means the target is not a dangler. Returns exact paths.
+        """
+        if not _outside_paths:
+            return []
+        key = _origin_target_key(raw_target, note_path)
+        if not key:
+            return []
+        if entry_link_path_key(raw_target).startswith(("./", "../")):
+            return _outside_paths.get(key, [])
+        if "/" not in key:
+            return _outside_basenames.get(key, [])
+        if key in _outside_paths:
+            return _outside_paths[key]
+        return sorted(path for owner_key, owned in _outside_paths.items()
+                      if owner_key.endswith("/" + key) for path in owned)
+
     _vault_targets = {}
 
     def _entry_vault_target(record):
@@ -2785,6 +3040,40 @@ def scan(wiki, images=None, vault=None, settled=None):
                 or fold_name(record["slug"]) in ambiguous_files):
             return _entry_vault_target(record)
         return record["slug"]
+
+    def _entry_link_target(record):
+        """Body and Related form: also qualified beside a note outside Wiki/.
+
+        CONVENTIONS §6 qualifies a body or Related link when any other real
+        vault file owns the bare name; a `parents:` value counts only Wiki
+        and MOC owners (`_entry_parent_target`).
+        """
+        if fold_name(record["slug"]) in _outside_basenames:
+            return _entry_vault_target(record)
+        return _entry_parent_target(record)
+
+    def _final_link_target(raw_target, record, qualified_target):
+        """The canonical spelling of a body or Related link to one entry.
+
+        Drops an explicit `.md` suffix, which never changes the destination.
+        Drops a path as well when the complete vault inventory proves that no
+        other file owns the bare name. Otherwise keeps the on-disk spelling of
+        the path the link uses. A bare link is qualified only when its `.md`
+        is respelled anyway and another vault file owns the bare name, so it
+        takes the form `_entry_link_target` supplies.
+        """
+        written = raw_target.replace("\\", "/").strip().strip("/")
+        if qualified_target is None:
+            if written.lower().endswith(".md"):
+                return _entry_link_target(record)
+            return record["slug"]
+        if (_outside_complete
+                and _entry_link_target(record) == record["slug"]):
+            return record["slug"]
+        if written.lower().endswith(".md") and \
+                qualified_target.lower().endswith(".md"):
+            return qualified_target[:-3]
+        return qualified_target
 
     def _resolve_parent_target(target, note_path=None):
         """Resolve paths before basenames; legacy MOCs never supply a new root."""
@@ -3041,9 +3330,11 @@ def scan(wiki, images=None, vault=None, settled=None):
         # read: — the user's review checkbox (CONVENTIONS.md §2c).  Four
         # distinct states, and they route three different ways, which is why
         # they are three messages rather than one:
-        #   absent      -> REPORT ONLY.  The linter never writes this field, and
-        #                  the only value it could supply is `false`, which would
-        #                  mark an entry the user has already read as unread —
+        #   absent      -> REPORT ONLY.  The linter writes no value here outside
+        #                  READ_EXCEPTIONS (a resolved user issue or a merge's
+        #                  survivor), and the only value it could supply is
+        #                  `false`, which would mark an entry the user has
+        #                  already read as unread —
         #                  destroying the one piece of state the field exists to
         #                  hold. Same class as item3/report-only.
         #   present, no -> REPORT ONLY, same class and for the same reason: a
@@ -3065,9 +3356,10 @@ def scan(wiki, images=None, vault=None, settled=None):
             _read_value, _read_style = None, "invalid"
         if "read" not in e["key_order"]:
             problems.append((sl,"item2/read-missing",
-                             "missing read: key — the user's review checkbox. Report it; "
-                             "never write a value, since `false` would mark an entry they "
-                             "have already read as unread"))
+                             "missing read: key — the user's review checkbox. Report it "
+                             "and write no value, since `false` would mark an entry they "
+                             "have already read as unread. " + READ_EXCEPTIONS
+                             % "inserts `read: false` directly before issues:"))
         elif _read_raw.strip().lower() in READ_NULLS and not has_block_items(fm_raw, "read"):
             problems.append((sl,"item2/read-null",
                              'read: is present but carries no value (%s) — YAML null, not a '
@@ -3075,14 +3367,16 @@ def scan(wiki, images=None, vault=None, settled=None):
                              'records no answer at all. Report it; DO NOT FIX. There is no '
                              'value here to preserve, so writing `false` would invent one and '
                              'clear a tick the user may have set — the same harm, and the same '
-                             'report-only class, as a missing read: key'
+                             'report-only class, as a missing read: key. '
                              % ("bare `read:`" if not _read_raw.strip()
-                                else "`read: %s`" % _read_raw.strip())))
+                                else "`read: %s`" % _read_raw.strip())
+                             + READ_EXCEPTIONS % "sets `read: false`"))
         elif not isinstance(_read_value, str) or _read_value.lower() not in {"true", "false", "yes", "no", "0", "1"}:
             problems.append((sl,"item2/read-unknown",
                              'read: has no recognizable boolean answer (%r) -- REPORT ONLY, '
                              'DO NOT FIX. Neither true nor false can be inferred safely; '
-                             'leave this user-owned state unresolved and continue the run' % _read_raw))
+                             'leave this user-owned state unresolved and continue the run. '
+                             % _read_raw + READ_EXCEPTIONS % "sets `read: false`"))
         elif _read_style != "bare" or _read_value.lower() not in READ_BOOLEANS:
             problems.append((sl,"item2/read-type",
                              'read: must be a bare boolean (`true` / `false`), not %r — a '
@@ -3099,7 +3393,8 @@ def scan(wiki, images=None, vault=None, settled=None):
         if _issues_state == "missing":
             problems.append((sl,"item2/issues-missing",
                              "missing issues: key — the user's issue inbox. Insert "
-                             '`issues: ""` directly after read:, keeping dates and read:'))
+                             '`issues: ""` directly after read: (after the last schema key '
+                             "before it when read: is absent too), keeping dates and read:"))
         elif _issues_state == "malformed":
             problems.append((sl,"item2/issues-malformed",
                              "issues: holds %s, not a string or a list of strings — "
@@ -3308,8 +3603,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                 return datetime.datetime.strptime(d, "%Y-%m-%d").date()
             except (ValueError, TypeError):
                 return None
-        # created > updated is REPORT-ONLY, not a fixable violation: wiki-lint never writes created:/updated:
-        # (see Dates), so filing it as a lint problem would re-report the same entries forever with nothing the
+        # created > updated is REPORT-ONLY, not a fixable violation: wiki-lint never repairs a date or its
+        # ordering (qc-items item 3; dates it writes follow SKILL.md#dates), so filing it as a lint problem would re-report the same entries forever with nothing the
         # linter can do. Its own item key routes it to the nonblocking report-only bucket instead.
         # Compared as DATES, never as strings — the strings are only interchangeable
         # with the dates once both are known to be zero-padded, which is what _valid checks.
@@ -3411,6 +3706,17 @@ def scan(wiki, images=None, vault=None, settled=None):
                                      "description does not start with a capitalized word"))
             if not ends_with_sentence_period(e["desc"]):
                 problems.append((sl,"item7","description does not end with a period"))
+            # The caveat review covers the description as well as the card;
+            # the card's frequency-hedge words apply unchanged (lint_entry's
+            # 7-hedge-candidate). A review candidate, never a fault.
+            _desc_hedges = flashcard_hedge_hints(e["desc"])
+            if _desc_hedges:
+                problems.append((
+                    sl, "item7/hedge-candidate",
+                    "description hedges with "
+                    + ", ".join(f'"{word}"' for word in _desc_hedges)
+                    + " — state the ordinary case plainly when the note "
+                    "establishes it; a candidate is never an order"))
         # ---- item 8: exactly one discipline tag; misc is the sole fallback ----
         e_tags_raw, e_tag_slugs = e["tags_raw"], e["tag_slugs"]
         if e["tags_value_count"] > 1:
@@ -3467,12 +3773,18 @@ def scan(wiki, images=None, vault=None, settled=None):
             spellings = ", ".join(f'"{t}"' for t, c in _canon_by_tag if c == d)
             problems.append((sl,"item8",f'discipline "#{d}" tagged more than once (as {spellings}) — keep one'))
         # ---- item 9: body structure ----
+        # Body line numbers in messages count from the line after the
+        # closing fence, so blank lines dropped before the body add back.
+        _line_off = e["body_line_offset"]
         if e["blank_after"]:
             problems.append((sl,"item9","blank line immediately after frontmatter"))
-        if not body_opens_with_prose(e["prose"]):
+        # A leading heading that repeats the title gets its own delete
+        # finding below; the body then opens at the line after it.
+        if not body_opens_with_prose(
+                without_leading_title_heading(e["prose"], title)):
             problems.append((sl,"item9","body does not open with a prose sentence"))
         if e["type"] in ("Person","Event"):
-            opener = opening_paragraph(e["prose"].lstrip())
+            opener = first_prose_paragraph(e["prose"])
             date_status = opener_subject_date_status(opener, e["type"])
             if date_status == "missing":
                 problems.append((sl,"item9",f'{e["type"]} opener needs a date '
@@ -3487,7 +3799,7 @@ def scan(wiki, images=None, vault=None, settled=None):
         # with its full form: the shared floor lint_entry also runs. An
         # all-capital name that is no acronym (ELIZA) still matches the shape,
         # so the message names that exit rather than demanding an expansion.
-        if acronym_expansion_missing(title, opening_paragraph(e["prose"].lstrip())):
+        if acronym_expansion_missing(title, first_prose_paragraph(e["prose"])):
             problems.append((
                 sl, "item9/acronym-expansion",
                 f'acronym title "{base_term(title)}" has no full-form '
@@ -3500,7 +3812,8 @@ def scan(wiki, images=None, vault=None, settled=None):
         for line_no, cue_line in navigation_only_link_lines(e["prose"]):
             problems.append((
                 sl, "item9/imperative-link",
-                f'navigation-only cross-reference on prose line {line_no}: '
+                f'navigation-only cross-reference on prose line '
+                f'{line_no + _line_off}: '
                 f'"{cue_line[:100]}" — integrate it where adjacent prose already '
                 f'states the relationship without adding a claim; otherwise '
                 f'Task 1b states the relationship from the entry\'s or the '
@@ -3517,9 +3830,16 @@ def scan(wiki, images=None, vault=None, settled=None):
         for line_i, heading_line in enumerate(heading_lines):
             if line_i in heading_table_rows:
                 continue
-            line_no = line_i + 1
+            line_no = line_i + 1 + _line_off
             heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$", heading_line)
-            if heading:
+            if heading and heading_repeats_title(heading.group(2), title):
+                problems.append((
+                    sl, "item9",
+                    "body heading on prose line %d repeats the entry title: "
+                    "%s — delete it, never demote it; Obsidian shows the "
+                    "filename as the inline title"
+                    % (line_no, heading_line.strip()[:80])))
+            elif heading:
                 faults = []
                 if heading.group(1) != "##":
                     faults.append("level must be exactly ##")
@@ -3552,7 +3872,7 @@ def scan(wiki, images=None, vault=None, settled=None):
         if nd:
             problems.append((sl,"item12",f'{nd} unescaped literal "$" in body — escape as \\$ (a lone $ renders as math; a $ in a URL needs the image localized)'))
         for _line_no, _line in enumerate(
-                strip_code(e["prose"]).split("\n"), 1):
+                strip_code(e["prose"]).split("\n"), 1 + _line_off):
             if re.search(r"ℓ(?:[0-9₀-₉])", _line):
                 problems.append((
                     sl, "item12/equation-typography",
@@ -3570,11 +3890,11 @@ def scan(wiki, images=None, vault=None, settled=None):
         _equation_candidates = find_missing_display_equation_candidates(
             _equation_prose, _equation_tables)
         if _equation_candidates:
-            _lines = ", ".join(str(line) for line in sorted(
+            _lines = ", ".join(str(line + _line_off) for line in sorted(
                 {candidate["line"] for candidate in _equation_candidates}))
             _details = "; ".join(
                 f'{candidate["kind"]} "{candidate["phrase"]}" '
-                f'(line {candidate["line"]})'
+                f'(line {candidate["line"] + _line_off})'
                 for candidate in _equation_candidates)
             problems.append((
                 sl, "item12/equation-coverage-candidate",
@@ -3593,18 +3913,32 @@ def scan(wiki, images=None, vault=None, settled=None):
             find_noncanonical_display_equation_candidates(
                 _equation_prose, _equation_tables)
         if _equation_form_candidates:
-            _lines = ", ".join(str(line) for line in sorted(
+            _lines = ", ".join(str(line + _line_off) for line in sorted(
                 {candidate["line"] for candidate in _equation_form_candidates}))
+            _form_kinds = {candidate["kind"]
+                           for candidate in _equation_form_candidates}
+            _repairs = []
+            if _form_kinds - {"bare-alignment"}:
+                _repairs.append(
+                    "display math is not in canonical block form (a `$$` "
+                    "shares a line with the equation or with prose, or a "
+                    "blank line is missing above or below); put each `$$` "
+                    "alone on its line with a blank line above and below")
+            if "bare-alignment" in _form_kinds:
+                _repairs.append(
+                    "display math uses `&` or `\\\\` outside an aligned or "
+                    "gathered environment, which fails to render; wrap its "
+                    "rows in `\\begin{aligned}...\\end{aligned}`, or "
+                    "`gathered` when nothing aligns")
             problems.append((
                 sl, "item12/equation-format",
-                "display math has content on the same line as its `$$` "
-                f"delimiters (prose line(s) {_lines}) — keep the existing "
-                "equation and put each delimiter on its own line"))
+                "; ".join(_repairs) + f" (prose line(s) {_lines}) — keep the "
+                "existing equation and do not add a second display"))
         _equation_split_candidates = \
             find_multi_relation_display_candidates(
                 _equation_prose, _equation_tables)
         if _equation_split_candidates:
-            _lines = ", ".join(str(line) for line in sorted(
+            _lines = ", ".join(str(line + _line_off) for line in sorted(
                 {candidate["line"]
                  for candidate in _equation_split_candidates}))
             problems.append((
@@ -3624,7 +3958,8 @@ def scan(wiki, images=None, vault=None, settled=None):
             problems.append((
                 sl, "item12/boilerplate-candidate",
                 "possible well-definedness boilerplate in body prose — "
-                + "; ".join(f'line {candidate["line"]}: {candidate["kind"]} '
+                + "; ".join(f'line {candidate["line"] + _line_off}: '
+                            f'{candidate["kind"]} '
                             f'"{candidate["phrase"][:60]}"'
                             for candidate in _boilerplate)
                 + " — executing agent: remove a condition the formula "
@@ -3699,19 +4034,36 @@ def scan(wiki, images=None, vault=None, settled=None):
                 _img = _m.group(1).strip().replace("\\", "/").rsplit("/", 1)[-1]
                 if fold_name(_img) in img_fold:
                     continue
+                # The same basename rule finds a file elsewhere in a known
+                # vault, such as a pasted image in Attachments/. It renders,
+                # so it is not missing; it only sits outside the image folder.
+                if vault_root_known and vault_images is None:
+                    vault_images = vault_image_index(vault_root, images)
+                _elsewhere = (vault_images or {}).get(fold_name(_img))
+                if _elsewhere:
+                    problems.append((sl, "item12/image-outside-folder",
+                                     f'embed resolves to {", ".join(_elsewhere)} '
+                                     f'outside the image folder (Obsidian renders '
+                                     f'it); CONVENTIONS §1 keeps every image in the '
+                                     f'flat Sources/Images/ folder — REPORT ONLY, do '
+                                     f'not move, rename or delete the file or the '
+                                     f'embed'))
+                    continue
                 problems.append((sl,"item12/missing-image",
                                  f'embed names a file that is not in the image folder: {_img} '
                                  f'(Obsidian renders this as plain text, silently) — REPORT '
-                                 f'ONLY, DO NOT DELETE THE EMBED OR ITS CAPTION. There are two '
-                                 f'repairs and neither is the linter\'s: the figure was never '
-                                 f'extracted (run figure-extract on the source), or a '
-                                 f'source rename renamed it with the source '
-                                 f'(CONVENTIONS §1a), in which case the embed is rewritten to '
-                                 f'the new stem. Deleting the embed throws away the one record '
-                                 f'of which figure belongs here'))
+                                 f'ONLY, DO NOT DELETE THE EMBED OR ITS CAPTION. Neither cause '
+                                 f'is the linter\'s to repair: the figure was never '
+                                 f'extracted (run figure-extract on the source), or the '
+                                 f'image file was renamed or moved without its references. '
+                                 f'pdf-organize\'s source rename rewrites embeds in the same '
+                                 f'run (CONVENTIONS §1a), so this is not a pending step of '
+                                 f'it; do not hand-patch the embed. Deleting the embed throws '
+                                 f'away the one record of which figure belongs here'))
         # ---- item 16: opener title text plus type-specific emphasis ----------
-        # A masked leading comment is blank; the opener starts at visible text.
-        opener = opening_paragraph(e["prose"].lstrip())
+        # The opener is the first prose paragraph: a masked leading comment
+        # is blank, and a leading heading or display block is skipped.
+        opener = first_prose_paragraph(e["prose"])
         mo = _BOLD_OUTER_RE.search(
             " ".join(line.strip() for line in opener.splitlines()))
         # The PRESENCE half: an opener with no bold span at all used to be
@@ -3796,7 +4148,8 @@ def scan(wiki, images=None, vault=None, settled=None):
             problems.append((
                 sl, "item16",
                 'bare %(kind)s %(token)r on prose line %(line)d — wrap the '
-                'literal shape in backticks' % occurrence))
+                'literal shape in backticks'
+                % dict(occurrence, line=occurrence["line"] + _line_off)))
         # ---- item 13: stray frontmatter key, `---` or digit line mid-body (stacked-merge scars) ----
         # Shared with lint_entry; listings are masked (shown, not asserted).
         # If Related is missing, regions() reaches the legitimate separator
@@ -3868,10 +4221,16 @@ def scan(wiki, images=None, vault=None, settled=None):
             # belong to the review plugin/user. None is another card to
             # remove. Mask it only in this read-only check.
             cards = parse_flashcard_blocks(after_head)
-            if not cards and not _root_entry:
+            # A block of only schedule state, which a blank line separates
+            # from its card, is neither a card nor an attachment (lint_entry
+            # reports the same); block numbers stay as parsed.
+            _schedules = {ci for ci, cl in enumerate(cards, 1)
+                          if is_review_metadata_block(cl)}
+            if len(cards) == len(_schedules) and not _root_entry:
                 problems.append((sl,"item19","## Flashcards section has no card"))
             for _message in flashcard_set_faults(
-                    sum(1 for cl in cards if len(cl) >= 3)):
+                    sum(1 for ci, cl in enumerate(cards, 1)
+                        if len(cl) >= 3 and ci not in _schedules)):
                 problems.append((sl, "item19", "## Flashcards holds " + _message))
             alias_forms = list(e["aliases"])
             _expected_term, _expected_counterpart = flashcard_primary_answer(
@@ -3887,12 +4246,21 @@ def scan(wiki, images=None, vault=None, settled=None):
                 (f"card {ci}" if len(cards) > 1 else "flashcard", cl[2],
                  flashcard_line3_fault(cl[2], title, e["aliases"], opener,
                                        e["type"]))
-                for ci, cl in enumerate(cards, 1) if len(cl) >= 3]
+                for ci, cl in enumerate(cards, 1)
+                if len(cl) >= 3 and ci not in _schedules]
             _primary_tag = (kept_card_label(
                 _complete_rows, _expected_term, _expected_counterpart)
                 if len(_complete_rows) > 1 and title else None)
             for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
+                if ci in _schedules:
+                    problems.append((
+                        sl, "item19",
+                        f"block {ci} is a Spaced Repetition schedule that a "
+                        "blank line separates from the card — it is neither "
+                        "a card nor an attachment; preserve it byte-for-byte, "
+                        "never delete, move or reattach it, and report it"))
+                    continue
                 if len(cl) < 3:
                     problems.append((sl,"item19",f'{tag} malformed — needs 3 contiguous lines (cue / separator / answer), found {len(cl)} (a blank line between lines 1–3 breaks the card)'))
                     continue
@@ -4178,7 +4546,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                     problems.append((
                         sl, "item10/table",
                         f'wikilink {_shown} appears in a Markdown table cell on '
-                        f'body line {_line_i + 1} — replace the link markup with '
+                        f'body line {_line_i + 1 + _line_off} — replace the '
+                        f'link markup with '
                         f'its rendered plain text; table cells do not take wikilinks'))
         _p10 = mask_line_spans(
             strip_code(e["prose"]), e.get("table_spans", ()))
@@ -4190,14 +4559,15 @@ def scan(wiki, images=None, vault=None, settled=None):
                 continue
             _link_region = ("Related footer" if m.start() > len(_p10)
                             else "body prose")
-            # Three forms Obsidian resolves that a bare `tgt in entries` test
-            # calls dangling. A path-qualified link (`sub/delta`) and an
-            # explicit `.md` suffix resolve like the bare entry link, and fall
-            # through to the alias/dangling branches when no Wiki file exists;
-            # a link to a document rather than an entry (`Doe_Foo_2025.pdf`,
-            # the form CONVENTIONS 6/7 blesses in a `sources:` list) is skipped.
+            # Forms Obsidian resolves that a bare `tgt in entries` test calls
+            # dangling. A path-qualified link (`sub/delta`) and an explicit
+            # `.md` suffix resolve like the bare entry link; when they name an
+            # entry, item10/case respells them to the §6 form. With no Wiki
+            # file they fall through to the vault-note, alias and dangling
+            # branches. A link to a document rather than an entry
+            # (`Doe_Foo_2025.pdf`, the form CONVENTIONS 6/7 blesses in a
+            # `sources:` list) is skipped.
             bare = tgt.replace("\\", "/").rsplit("/", 1)[-1]
-            lookup = bare[:-3] if bare.lower().endswith(".md") else bare
             lookup_key = entry_link_key(tgt)
             file_record, file_status, _file_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if file_status == "moc":
@@ -4242,17 +4612,35 @@ def scan(wiki, images=None, vault=None, settled=None):
                 if file_record is not None and _file_path is not None else None
             )
             normalized_target = tgt.replace("\\", "/").strip().strip("/")
-            if (canonical_target is not None
-                    and normalized_target != canonical_target):
+            final_target = (_final_link_target(tgt, file_record, canonical_target)
+                            if file_record is not None else None)
+            if final_target is not None and normalized_target == final_target:
+                continue
+            if (final_target is not None
+                    and fold_name(normalized_target) != fold_name(final_target)):
+                # An explicit `.md` or a path no other owner needs: CONVENTIONS
+                # §6 spells the link bare and extensionless.
+                _extra = []
+                if normalized_target.lower().endswith(".md"):
+                    _extra.append("an explicit `.md` suffix")
+                if "/" in normalized_target and "/" not in final_target:
+                    _extra.append("a path that no other vault file with "
+                                  "this basename needs")
+                problems.append((
+                    sl, "item10/case",
+                    f'wikilink target "{tgt}" names the entry "{actual}" with '
+                    f'{" and ".join(_extra) or "a noncanonical path"} — this is a '
+                    f'FIX IN PLACE (rewrite the target to "{final_target}", '
+                    "preserving its anchor and display label)"))
+                continue
+            if canonical_target is not None:
                 problems.append((
                     sl, "item10/case",
                     f'wikilink target "{tgt}" matches the on-disk path '
-                    f'"{canonical_target}" only under the portable '
+                    f'"{final_target}" only under the portable '
                     "case/normalization identity — this is a FIX IN PLACE "
-                    f'(rewrite the target to "{canonical_target}", preserving '
+                    f'(rewrite the target to "{final_target}", preserving '
                     "its anchor and display label), without creating a replacement note"))
-                continue
-            if actual == lookup:
                 continue
             if actual:
                 problems.append((sl,"item10/case",
@@ -4272,6 +4660,19 @@ def scan(wiki, images=None, vault=None, settled=None):
                                  f'on disk but could not be parsed as an entry. '
                                  f'The link resolves; fix that file. NEVER overwrite '
                                  f'this target with a replacement note'))
+            elif _outside_owners(tgt, _entry_vault_target(e)):
+                # A real note outside Wiki/ outranks an entry alias, as any
+                # file does, and is not an entry the link could be missing.
+                _outside = _outside_owners(tgt, _entry_vault_target(e))
+                problems.append((
+                    sl, "item10/non-entry",
+                    f'wikilink target "{tgt}" resolves to the vault note '
+                    f'"{_outside[0]}"'
+                    + (f" (and {len(_outside) - 1} more)" if len(_outside) > 1 else "")
+                    + " outside Wiki/, not to an entry; preserve the link, its "
+                    "path, anchor and display text. Report only: never unlink "
+                    "it as a dangler, retarget it to an entry or alias, or "
+                    "create an entry for it"))
             elif os.path.splitext(bare)[1].lower() in _DOC_EXTS:
                 continue
             elif lookup_key in alias_of:
@@ -4301,7 +4702,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                 _anchor_match = re.search(r"[#^].*", m.group(1))
                 _anchor = _anchor_match.group(0) if _anchor_match else ""
                 _label = m.group(2) if m.group(2) is not None else tgt
-                _own_target = _entry_parent_target(entries[_own_sl])
+                _own_target = _entry_link_target(entries[_own_sl])
                 _replacement = f'[[{_own_target}{_anchor}|{_label}]]'
                 problems.append((sl,"item10/alias",
                                  f'wikilink target "{tgt}" is an alias of the entry '
@@ -4335,6 +4736,10 @@ def scan(wiki, images=None, vault=None, settled=None):
             elif status in {"ambiguous", "moc"}:
                 # No safe duplicate-removal action exists until the bare or
                 # partially qualified target identifies one file.
+                continue
+            elif _outside_owners(raw_target, _entry_vault_target(e)):
+                # A note outside Wiki/ is not an entry: item10/non-entry
+                # reports it, and no removal is inferred.
                 continue
             elif not alias_inventory_complete:
                 # A repeated unresolved spelling can belong to a skipped
@@ -4372,7 +4777,8 @@ def scan(wiki, images=None, vault=None, settled=None):
             record, status, _owner_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if status == "ambiguous" or lookup_key in ambiguous_aliases:
                 continue
-            if record is None and status == "missing" and lookup_key in alias_of:
+            if (record is None and status == "missing" and lookup_key in alias_of
+                    and not _outside_owners(tgt, _entry_vault_target(e))):
                 record = entries.get(alias_of[lookup_key][0])
             if (record is not None
                     and record.get("path_key") == e.get("path_key")):
@@ -4519,6 +4925,10 @@ def scan(wiki, images=None, vault=None, settled=None):
             if _link["marks"]:
                 problems.append((sl, "item18", _link["message"]))
                 continue
+            # A Related-footer label's wording is item 11's canonical-title
+            # check, as in lint_entry; only its markup is item 18.
+            if _link["line"] > _display_label_prose_lines:
+                continue
             # A label passes when its tokens are a subset or a superset of
             # the target's title or an alias (entry_checks.label_shares_surface
             # explains why the test must stay that loose).
@@ -4526,10 +4936,10 @@ def scan(wiki, images=None, vault=None, settled=None):
             target_record, target_status, _target_path = _resolve_entry_file(tgt, _entry_vault_target(e))
             if (target_record is None and target_status == "missing"
                     and target_key not in ambiguous_aliases
-                    and target_key in alias_of):
+                    and target_key in alias_of
+                    and not _outside_owners(tgt, _entry_vault_target(e))):
                 target_record = entries.get(alias_of[target_key][0])
-            if (target_record is not None and disp
-                    and _link["line"] <= _display_label_prose_lines):
+            if target_record is not None and disp:
                 _body_label_owners.setdefault(
                     " ".join(disp.split()).lower(), set()).add(
                         target_record["slug"])
@@ -4585,11 +4995,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                     ok = True
                 # A body label may be a cross-domain synonym the target itself
                 # introduces in italics (wiki-build writing.md's first
-                # display-label carve-out); the Related footer keeps item 11's
-                # canonical title.
-                if (not ok and _link["line"] <= _display_label_prose_lines
-                        and cross_domain_synonym_label(
-                            disp, _surfaces, target_record.get("prose", ""))):
+                # display-label carve-out).
+                if not ok and cross_domain_synonym_label(
+                        disp, _surfaces, target_record.get("prose", "")):
                     ok = True
                 if not ok:
                     target_title = target_record.get("title") or target_slug
@@ -4597,12 +5005,10 @@ def scan(wiki, images=None, vault=None, settled=None):
                     problems.append((sl,"item18",f'wikilink [[{tgt}|{disp}]] — "{disp}" shares no surface form with the canonical target "{target_title}" at "{location}" (its title/aliases), and no explicit Organism common-name binding applies; likely wrong target or invented label'))
                     continue
                 # The loose floor above also passes a label built only from
-                # the title's modifiers (`greedy` for Greedy algorithm). The
-                # Related footer is item 11's canonical-title check instead.
-                _head = ("" if _link["line"] > _display_label_prose_lines
-                         else label_drops_head(disp, target_record["title"],
-                                               target_record["aliases"],
-                                               target_record.get("prose", "")))
+                # the title's modifiers (`greedy` for Greedy algorithm).
+                _head = label_drops_head(disp, target_record["title"],
+                                         target_record["aliases"],
+                                         target_record.get("prose", ""))
                 if _head and not organism_common_name_bound(target_record, disp):
                     target_title = target_record.get("title") or target_slug
                     problems.append((
@@ -4898,48 +5304,50 @@ def scan(wiki, images=None, vault=None, settled=None):
                 continue
             inbound[_owner_path] = inbound.get(_owner_path, 0) + 1
     renames = []
-    _rename_targets = {}                  # folded new_slug -> [entries proposing it]
-    for _sl,_e in sorted(entries.items()):
+    _rename_targets = {}                  # folded new_slug -> [paths proposing it]
+    # Every physical file, not only the first owner of a shared basename:
+    # each twin may need its own rename, and each proposal competes for its
+    # destination.
+    for _e in diagnostic_records:
+        _sl = _e["slug"]
         _new = slug(_e["title"]) if _e["title"] else ""
         # An unsluggable title (CJK, all-symbol) yields "" — renaming to it produces a
         # file literally called ".md".  Never propose it; item 5 already reports the title.
         if not _new or _new == _sl: continue
-        _rename_targets.setdefault(fold_name(_new), []).append(_sl)
-        renames.append([_sl, _new, inbound.get(_e["path_key"], 0)])
+        _rename_targets.setdefault(fold_name(_new), []).append(_e["path_key"])
+        renames.append([_sl, _new, inbound.get(_e["path_key"], 0), _e["path_key"]])
     # Alias owners from every parsed record, even when the alias inventory
     # has gaps: an incomplete inventory must not hide a known owner here.
     _any_alias_owners = {}
     for _e in diagnostic_records:
         for _a in _e["aliases"]:
-            _any_alias_owners.setdefault(fold_name(_a), set()).add(_e["slug"])
+            _any_alias_owners.setdefault(fold_name(_a), set()).add(_e["path_key"])
     for _r in renames:
         # target_exists ⇒ likely duplicate/disambiguation; do NOT rename into it, flag both.
         # Compared folded because a destination is taken whenever a file shares
-        # its portable case/normalization identity. The entry being renamed is
-        # excluded; a case-only rename still changes that same file's spelling.
-        # Two candidates aiming at one destination
+        # its portable case/normalization identity. Only the file being
+        # renamed is excluded, by its path: a twin sharing its basename still
+        # occupies the destination, and a case-only rename still changes that
+        # same file's spelling. Two candidates aiming at one destination
         # counts too: applying both in sequence would have the second silently
         # overwrite the first.
         #
-        # `on_disk_fold` is consulted as well as `fold_of`, and for the same
-        # reason the item10/unparsed carve-out above consults it: a file that
-        # is ON DISK but did not parse (no frontmatter, unreadable) is absent
-        # from `entries`, so `fold_of` alone answers "free" for a destination
-        # that is a real file. The approved rename is `mv wrong-name.md
-        # broken.md`, which destroys it. Both sets are the same question —
-        # "does a file already answer to this name?" — and only their union
-        # answers it.
+        # Occupancy comes from every physical path, not from `entries`, for
+        # the same reason the item10/unparsed carve-out above consults
+        # `on_disk_fold`: a file that is ON DISK but did not parse (no
+        # frontmatter, unreadable) is absent from `entries`, yet it is a real
+        # file. The approved rename is `mv wrong-name.md broken.md`, which
+        # destroys it.
         #
         # Another entry's alias is taken too: the renamed file would outrank
         # that alias and capture every link that now resolves through it.
-        # The entry's own alias is not a collision.
+        # The file's own alias is not a collision.
         _fold_new = fold_name(_r[1])
-        _owner = fold_of.get(_fold_new)
-        _r.append((_owner is not None and _owner != _r[0])
+        _r.append(bool(paths_by_basename.get(_fold_new, set()) - {_r[3]})
                   or _fold_new in on_disk_fold
                   or len(_rename_targets[_fold_new]) > 1
                   or _fold_new in ambiguous_aliases
-                  or bool(_any_alias_owners.get(_fold_new, set()) - {_r[0]}))
+                  or bool(_any_alias_owners.get(_fold_new, set()) - {_r[3]}))
 
     # ---- Hierarchy diagnostic (Task 3): existing parent/MOC state ----------
     # Reflect existing parents. Generated trees root at their discipline entry,
@@ -5002,8 +5410,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "slug": _p,
                 "children": len(_children[_p]),
                 "footer_links": _footer_links.get(_p, 0),
-                "unlinked": [_entry_parent_target(entries[c]) for c in _missing],
-                "branch_heads": [_entry_parent_target(entries[c])
+                "unlinked": [_entry_link_target(entries[c]) for c in _missing],
+                "branch_heads": [_entry_link_target(entries[c])
                                  for c in _missing if _children.get(c)],
             })
 
@@ -5028,7 +5436,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                     continue
                 _listed.append(_s)
             if _listed:
-                _hub_target = _entry_parent_target(entries[_t])
+                _hub_target = _entry_link_target(entries[_t])
                 hub_footer.append({
                     "target": _hub_target, "footers": _n, "entries": _listed,
                     # One per `entries` item: its footer line's settled record.
@@ -5467,8 +5875,11 @@ def scan(wiki, images=None, vault=None, settled=None):
             _stack.append((_nxt, iter(sorted(_parent_of.get(_nxt, [])))))
     _cycles.sort()
     _backfill_rows = []
-    for s, t, f, key, line, context in sorted(backfill):
-        _target = _entry_parent_target(entries[t])
+    # Sorting on entry and target alone keeps each target's sentences in
+    # text order, so apply_settled offers the first unsettled one.
+    for s, t, f, key, line, context in sorted(backfill,
+                                              key=lambda row: row[:2]):
+        _target = _entry_link_target(entries[t])
         _backfill_rows.append({
             "slug": s, "target": _target, "surface": f,
             "bare_noun_alias": key in bare_noun_alias,
@@ -5508,8 +5919,12 @@ def scan(wiki, images=None, vault=None, settled=None):
                               key=lambda row: (row["slug"], row.get("path", ""))),
         "collision_candidates": [{"a": a, "b": b, "probe": p, "detail": d}
                                  for a,b,p,d in sorted(collisions2)],
-        "rename_candidates": [{"slug": s, "new_slug": n, "inbound_links": c, "target_exists": x}
-                              for s,n,c,x in sorted(renames)],
+        # A basename that several files share adds the file's path, as in
+        # `problems`, so each twin's row names the file to rename.
+        "rename_candidates": [
+            dict({"slug": s, "new_slug": n, "inbound_links": c, "target_exists": x},
+                 **({"path": p} if fold_name(s) in ambiguous_files else {}))
+            for s, n, c, p, x in sorted(renames, key=lambda r: (r[0], r[3]))],
         # `bare_noun_alias`: the matched surface is a single all-lowercase word
         # reached only through an alias — batch these in the report; the
         # closeness judgment itself stays with the executing agent (see build_backfill).
@@ -5519,7 +5934,9 @@ def scan(wiki, images=None, vault=None, settled=None):
         # closeness bar accepts only where the passage discusses the field
         # itself — batch-review these like `bare_noun_alias`.
         # `base_term`: the surface is a parenthetical title's base term.
-        # `settle_key`: the settled-ledger record for a rejection.
+        # `settle_key`: the settled-ledger record of the offered sentence;
+        # `settle_keys`: it and the target's later unsettled sentences, the
+        # records a rejection stores.
         "backfill_candidates": _backfill_rows,
         # Report-only; Task 2 judges each listed footer item; no write authority.
         "hub_footer": hub_footer,
@@ -5824,6 +6241,34 @@ def run_self_test():
         check("a symlink loop under Wiki/ scans each entry once "
               "(skipped where symlink creation is unavailable)",
               not _have_loop or _loop_seen == (1, []), True)
+        # A symlinked folder back into the Wiki tree is pruned by name, so a
+        # link that sorts before the real folder never hides its paths.
+        v_back = os.path.join(tmp, "v1-symlink-back")
+        _st_write(v_back, "topics/mean.md", _st_entry(
+            "Mean", "**Mean** is a worked example."))
+        _st_write(v_back, "topics/sample-mean.md", _st_entry(
+            "Sample mean", "**Sample mean** is a worked example.",
+            parents=('"[[Wiki/topics/mean]]"',)))
+        _st_write(v_back, "median.md", _st_entry(
+            "Median", "**Median** is compared with the "
+            "[[Wiki/topics/mean|mean]].",
+            related="[[Wiki/topics/mean|Mean]]"))
+        _back_want = (["median.md", "topics/mean.md", "topics/sample-mean.md"],
+                      False, [])
+        try:
+            os.symlink("topics", os.path.join(v_back, "alias-dir"))
+        except (OSError, NotImplementedError, AttributeError):
+            _back_seen = _back_want
+        else:
+            _back_res = scan(v_back)
+            _back_seen = (
+                [os.path.relpath(path, v_back).replace(os.sep, "/")
+                 for path in iter_entry_files(v_back)],
+                "item10/dangling" in _st_keys(_back_res, "median"),
+                _back_res["hierarchy_diagnostic"]["unresolved_parents"])
+        check("a symlinked folder back into Wiki/ is not walked, and its "
+              "real paths still resolve (skipped where symlink creation is "
+              "unavailable)", _back_seen, _back_want)
 
         # zero entries, and one entry
         empty = os.path.join(tmp, "empty")
@@ -5931,6 +6376,12 @@ def run_self_test():
               "sub/delta" in _st_msg(res, "hub", "item10/dangling"), False)
         check("an explicit .md suffix resolves",
               "delta.md" in _st_msg(res, "hub", "item10/dangling"), False)
+        check("without a known vault root an explicit .md suffix is still "
+              "respelled, but a path is kept",
+              ('wikilink target "delta.md" names the entry "delta" with an '
+               "explicit `.md` suffix" in _st_msg(res, "hub", "item10/case"),
+               '"sub/delta"' in _st_msg(res, "hub", "item10/case")),
+              (True, False))
         check("a document link (.pdf) is not an entry link",
               "Doe_Foo_2025.pdf" in _st_msg(res, "hub", "item10/dangling"), False)
         check("an explicit .md suffix naming no Wiki file is item10/dangling "
@@ -6136,22 +6587,47 @@ def run_self_test():
         upper_ext = os.path.join(v_ext, "extension.MD")
         with open(lower_ext, "w", encoding="utf-8") as fh:
             fh.write(ext_body)
+        upper_body = ext_body.replace("type: Concept\n", "type: Model\n", 1)
         try:
             descriptor = os.open(
                 upper_ext, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         except FileExistsError:
-            descriptor = None       # case-insensitive host: exercise on Linux
-        if descriptor is None:
-            extension_case_observed = ["extension.MD"]
-        else:
+            descriptor = None
+        if descriptor is not None:
             with os.fdopen(descriptor, "w", encoding="utf-8") as fh:
-                fh.write(ext_body.replace("type: Concept\n", "type: Model\n", 1))
+                fh.write(upper_body)
             ext_res = scan(v_ext)
-            extension_case_observed = [
-                p.get("path") for p in ext_res["problems"]
-                if p["item"] == "item2/type-enum"
-            ]
-        check("extension-case twins retain separate physical QC records",
+        else:
+            # A case-folding host cannot hold the twin. Keep its body outside
+            # the Wiki folder and add the second spelling to walk, stat and
+            # open, so the scan still reads two physical files.
+            twin_real = os.path.join(tmp, "v2-extension-case-twin")
+            with open(twin_real, "w", encoding="utf-8") as fh:
+                fh.write(upper_body)
+            real_walk, real_stat, real_open = os.walk, os.stat, os.open
+
+            def twin_path(path):
+                return twin_real if path == upper_ext else path
+
+            def twin_walk(root, *args, **kwargs):
+                for dirpath, dirnames, filenames in real_walk(
+                        root, *args, **kwargs):
+                    if os.path.normpath(dirpath) == os.path.normpath(v_ext):
+                        filenames = sorted(set(filenames) | {"extension.MD"})
+                    yield dirpath, dirnames, filenames
+
+            with patch.object(os, "walk", twin_walk), \
+                    patch.object(os, "stat", lambda path, *args, **kwargs:
+                                 real_stat(twin_path(path), *args, **kwargs)), \
+                    patch.object(os, "open", lambda path, *args, **kwargs:
+                                 real_open(twin_path(path), *args, **kwargs)):
+                ext_res = scan(v_ext)
+        extension_case_observed = [
+            p.get("path") for p in ext_res["problems"]
+            if p["item"] == "item2/type-enum"
+        ]
+        check("extension-case twins retain separate physical QC records "
+              "(simulated where the filesystem folds case)",
               (len({_entry_physical_key(v_ext, lower_ext),
                     _entry_physical_key(v_ext, upper_ext)}),
                extension_case_observed),
@@ -6202,6 +6678,138 @@ def run_self_test():
               sorted({p.get("path") for p in case_res["problems"]
                       if p["slug"] in ("Case-Twin", "case-twin")}),
               ["a/Case-Twin.md", "b/case-twin.md"])
+
+        # An NFD filename (as Finder often writes it) and an NFC link share
+        # one portable identity: the link resolves and is only respelled.
+        v_nfd = os.path.join(tmp, "v2-unicode-forms")
+        _st_write(v_nfd, "poincaré-conjecture.md", _st_entry(
+            "Poincaré conjecture",
+            "**Poincaré conjecture** is a worked example."))
+        _st_write(v_nfd, "nfc-reader.md", _st_entry(
+            "Nfc reader", "**Nfc reader** links "
+            "[[poincaré-conjecture|Poincaré conjecture]]."))
+        nfd_res = scan(v_nfd)
+        check("an NFC link to an NFD filename is item10/case, never a dangler",
+              ("item10/dangling" in _st_keys(nfd_res, "nfc-reader"),
+               "item10/case" in _st_keys(nfd_res, "nfc-reader")),
+              (False, True))
+
+        # A real note outside Wiki/ and MOCs/ resolves in Obsidian by path or
+        # basename. It is reported as a non-entry and never unlinked as a
+        # dangler, retargeted to an alias or counted as a duplicate entry.
+        v_notes = os.path.join(tmp, "v2-vault-notes")
+        os.makedirs(os.path.join(v_notes, ".obsidian"))
+        for _note in ("Articles/Doe_X_2025.md", "People/Ada Lovelace.md",
+                      "People/turing-note.md", "Articles/variance.md"):
+            _st_write(v_notes, _note, "A note outside the Wiki.\n")
+        w_notes = os.path.join(v_notes, "Wiki")
+        _st_write(w_notes, "turing-machine.md", _st_entry(
+            "Turing machine", "**Turing machine** is a worked example.",
+            aliases=('"turing-note"',)))
+        _st_write(w_notes, "note-reader.md", _st_entry(
+            "Note reader", "**Note reader** cites "
+            "[[Articles/Doe_X_2025|Doe 2025]], [[People/Ada Lovelace|Ada]], "
+            "[[Ada Lovelace]], [[Doe_X_2025.md|the note]], "
+            "[[turing-note|Turing]] and [[nowhere]]. It names "
+            "[[Ada Lovelace]] again."))
+        # A body or Related link drops an explicit .md suffix, and a path
+        # that no other vault file with the basename needs.
+        _st_write(w_notes, "mean.md", _st_entry(
+            "Mean", "**Mean** is a worked example."))
+        _st_write(w_notes, "variance.md", _st_entry(
+            "Variance", "**Variance** is a worked example."))
+        for _slug, _link, _footer in (
+                ("md-reader", "[[mean.md|mean]]", None),
+                ("path-reader", "[[Wiki/mean|mean]]", None),
+                ("footer-reader", "the mean", "[[Wiki/mean.md|Mean]]"),
+                ("shared-reader", "[[Wiki/variance|variance]]", None),
+                ("shared-md-reader", "[[Wiki/variance.md|variance]]", None)):
+            _title = _slug.replace("-", " ").capitalize()
+            _st_write(w_notes, _slug + ".md", _st_entry(
+                _title, "**%s** uses %s." % (_title, _link),
+                related=_footer))
+        notes_res = scan(w_notes)
+        check("links to vault notes outside Wiki/ are item10/non-entry, "
+              "never dangling, alias or dup",
+              (_st_msg(notes_res, "note-reader", "item10/non-entry").count(
+                  "outside Wiki/, not to an entry"),
+               [_name in _st_msg(notes_res, "note-reader", "item10/non-entry")
+                for _name in ('"Articles/Doe_X_2025.md"',
+                              '"People/Ada Lovelace.md"',
+                              '"People/turing-note.md"')],
+               [k for k in _st_keys(notes_res, "note-reader")
+                if k in ("item10/dangling", "item10/alias", "item10/dup")],
+               _st_msg(notes_res, "note-reader", "item10/dangling")),
+              (6, [True, True, True], ["item10/dangling"],
+               'wikilink target "nowhere" does not resolve'))
+        check("an unneeded .md suffix or Wiki/ path is item10/case naming "
+              "the bare slug; a path a same-named vault note needs is kept",
+              [_st_msg(notes_res, _slug, "item10/case").split(
+                  "rewrite the target to ")[-1].split(",")[0]
+               for _slug in ("md-reader", "path-reader", "footer-reader",
+                             "shared-reader", "shared-md-reader")],
+              ['"mean"', '"mean"', '"mean"', "", '"Wiki/variance"'])
+        # Beside a same-named note outside Wiki/, every body or Related target
+        # the scan supplies is the qualified path (CONVENTIONS §6).
+        v_outside = os.path.join(tmp, "v2-outside-twin")
+        os.makedirs(os.path.join(v_outside, ".obsidian"))
+        _st_write(v_outside, "Articles/variance.md", "An outside note.\n")
+        w_outside = os.path.join(v_outside, "Wiki")
+        _st_write(w_outside, "mean.md", _st_entry(
+            "Mean", "**Mean** is a worked example."))
+        _st_write(w_outside, "variance.md", _st_entry(
+            "Variance", "**Variance** is a worked example.",
+            aliases=('"var-alias"',), parents=('"[[mean]]"',)))
+        for _slug, _prose in (
+                ("twin-mention", "depends on the variance of the data"),
+                ("twin-alias", "uses [[var-alias|variance]]"),
+                ("twin-md", "uses [[variance.md|variance]]")):
+            _title = _slug.replace("-", " ").capitalize()
+            _st_write(w_outside, _slug + ".md", _st_entry(
+                _title, "**%s** %s." % (_title, _prose)))
+        res = scan(w_outside)
+        check("beside an outside same-named note, backfill, alias, .md and "
+              "unlinked-child targets are all the qualified path",
+              ([row["target"] for row in res["backfill_candidates"]
+                if row["slug"] == "twin-mention"],
+               '"[[Wiki/variance|variance]]"' in _st_msg(
+                   res, "twin-alias", "item10/alias"),
+               _st_msg(res, "twin-md", "item10/case").split(
+                   "rewrite the target to ")[-1].split(",")[0],
+               [row["unlinked"] for row in
+                res["hierarchy_diagnostic"]["unlinked_children"]
+                if row["slug"] == "mean"]),
+              (["Wiki/variance"], True, '"Wiki/variance"',
+               [["Wiki/variance"]]))
+        # Obsidian indexes a symlinked folder, so its same-named note keeps a
+        # needed Wiki/ path. A loop and a link back into the vault add nothing.
+        v_linked = os.path.join(tmp, "v2-symlinked-outside")
+        os.makedirs(os.path.join(v_linked, ".obsidian"))
+        _st_write(os.path.join(tmp, "v2-shared"), "mean.md", "A shared note.\n")
+        _st_write(v_linked, "Articles/doe.md", "An outside note.\n")
+        w_linked = os.path.join(v_linked, "Wiki")
+        _st_write(w_linked, "mean.md", _st_entry(
+            "Mean", "**Mean** is a worked example."))
+        _st_write(w_linked, "median.md", _st_entry(
+            "Median", "**Median** is unlike the [[Wiki/mean|mean]]."))
+        _linked_want = ({"articles/doe": ["Articles/doe.md"],
+                         "shared/mean": ["Shared/mean.md"]}, True, [])
+        try:
+            os.symlink(os.path.join(tmp, "v2-shared"),
+                       os.path.join(v_linked, "Shared"))
+            os.symlink(os.path.join(tmp, "v2-shared"),
+                       os.path.join(tmp, "v2-shared", "loop"))
+            os.symlink("Articles", os.path.join(v_linked, "Aa-alias"))
+        except (OSError, NotImplementedError, AttributeError):
+            _linked_seen = _linked_want
+        else:
+            _linked_paths, _, _linked_complete = vault_note_index(
+                v_linked, w_linked)
+            _linked_seen = (_linked_paths, _linked_complete,
+                            _st_keys(scan(w_linked), "median"))
+        check("a note in a symlinked outside folder owns its basename and "
+              "keeps the Wiki/ path (skipped where symlink creation is "
+              "unavailable)", _linked_seen, _linked_want)
 
         # ------------------------------------------------------------------
         # 3. item 8 -- tag aliases, case variants, and the duplicate check
@@ -6697,22 +7305,25 @@ def run_self_test():
         _st_write(v, "random-forest.md", _st_entry(
             "Random forest", "**Random forest** is a worked example.",
             aliases=('"random-decision-forest"',)))
+        _st_write(v, "label-machine-learning.md", _st_entry(
+            "Label (machine learning)", "**Label** is a worked example.",
+            aliases=('"targets"',), card="Label"))
         _st_write(v, "reader2.md", _st_entry(
-            "Reader two", "**Reader two** mentions entropy, online learning "
-            "and the tree of life."))
+            "Reader two", "**Reader two** mentions entropy, entropies, "
+            "online learning, targets and the tree of life."))
         res = scan(v)
         check("a cross-domain alias of a qualified destination is not a "
-              "backfill surface",
+              "backfill surface, nor is its plural",
               [row for row in res["backfill_candidates"]
                if row["slug"] == "reader2" and row["target"] in (
                    "entropy-information-theory", "online-machine-learning",
-                   "tree-of-life-biology")], [])
-        check("an alias that is a cross-domain floor term is an "
+                   "tree-of-life-biology", "label-machine-learning")], [])
+        check("an alias that is a cross-domain floor term or its plural is an "
               "item18/cross-domain-alias finding; an ordinary alias is not",
               sorted(p["slug"] for p in res["problems"]
                      if p["item"] == "item18/cross-domain-alias"),
-              ["entropy-information-theory", "online-machine-learning",
-               "tree-of-life-biology"])
+              ["entropy-information-theory", "label-machine-learning",
+               "online-machine-learning", "tree-of-life-biology"])
         # A parenthetical title's base term is a backfill surface unless it
         # is a cross-domain floor term (or its plural) or another target's
         # body-link label; a bare entry equal to it is a collision.
@@ -6956,6 +7567,28 @@ def run_self_test():
         check("a root cannot acquire a parent even when it resolves to a Wiki entry",
               any(row["slug"] == "machine-learning" and row["kind"] == "root-parent-mismatch"
                   for row in _root_report["hierarchy_diagnostic"]["parent_state_findings"]), True)
+
+        # A link to a missing root waits for Task 3 (link-hygiene.md). That
+        # rule pairs each spelling's item10/dangling finding with the
+        # missing-discipline-root row for the same folded slug, so the scan
+        # must report both and must not call either spelling a case or alias
+        # match.
+        v = os.path.join(tmp, "v6-missing-root", "Wiki")
+        _st_write(v, "mitochondrion.md", _st_entry(
+            "Mitochondrion", "**Mitochondrion** is an organelle studied in "
+            "[[biology]], which [[Biology|life science]] also names.",
+            tags=('"#biology"',)))
+        _root_report = scan(v)
+        _dangling = _st_msg(_root_report, "mitochondrion", "item10/dangling")
+        check("each spelling of a link to a missing root is reported as dangling",
+              ('"biology"' in _dangling, '"Biology"' in _dangling), (True, True))
+        check("a missing root that entries link is diagnosed for the same slug",
+              [(row["slug"], row["kind"])
+               for row in _root_report["hierarchy_diagnostic"]["parent_state_findings"]],
+              [("biology", "missing-discipline-root")])
+        check("a link to a missing root is no case or alias match",
+              [key for key in _st_keys(_root_report, "mitochondrion")
+               if key in ("item10/case", "item10/alias")], [])
 
         # Parent resolution and MOC ownership live outside the entry-only
         # inventory: the vault root is the parent of Wiki/, and a valid root
@@ -7349,7 +7982,7 @@ def run_self_test():
               'resolves to "statistics"' in _st_msg(res, "leaf", "item2/parents-form"),
               True)
 
-        # Before knowledge 1.4.0 the MOC was `MOCs/<discipline>.md`. While that
+        # A previous-layout MOC is `MOCs/<discipline>.md`. While that
         # previous-layout file exists it is a legacy owner of the root's
         # basename: a qualified root link stays canonical and a bare one is
         # ambiguous rather than resolved to either file.
@@ -8316,7 +8949,7 @@ def run_self_test():
         _imgdir = os.path.join(tmp, "v13-images")
         os.makedirs(_imgdir)
         for _f in ("Doe_X_2025_fig_2.png", "doe_x_2025_fig_3.png",
-                   "Doe_X_2025_fig_4.ico"):
+                   "Doe_X_2025_fig_4.ico", "Garci\u0301a_X_2025_fig_5.png"):
             open(os.path.join(_imgdir, _f), "w", encoding="utf-8").close()
         # Valid sidecars/OS metadata stay quiet.  Nested and staging residue is
         # reported without making a nested-but-resolving embed look missing.
@@ -8342,6 +8975,7 @@ def run_self_test():
             "![[Doe_X_2025_fig_2.png]]\n*A figure that is.*\n\n"
             "![[Sources/Images/Doe_X_2025_fig_2.png]]\n*The same file, path-qualified.*\n\n"
             "![[Doe_X_2025_FIG_3.png]]\n*The same file in another case.*\n\n"
+            "![[Garc\u00eda_X_2025_fig_5.png]]\n*The same file in another Unicode normalization.*\n\n"
             "![[nested-only.png]]\n*A nested file that still resolves.*\n\n"
             "![[COLLISION.PNG]]\n*A portable-colliding basename that remains present.*\n\n"
             "![[Doe_X_2025_fig_4.ico]]\n*An ICO that resolves.*\n\n"
@@ -8358,12 +8992,17 @@ def run_self_test():
               ("item12/missing-image" in _st_keys(res, "figured"),
                "fig_99" in _st_msg(res, "figured", "item12/missing-image")),
               (True, True))
-        check("...and it says not to delete the embed (the repair is at the "
-              "filesystem, or is a §1a rename)",
-              "DO NOT DELETE" in _st_msg(res, "figured", "item12/missing-image"), True)
+        _missing_msg = _st_msg(res, "figured", "item12/missing-image")
+        check("...and it says not to delete or hand-patch the embed, since "
+              "pdf-organize's rename rewrites embeds in its own run",
+              ("DO NOT DELETE" in _missing_msg,
+               "rewrites embeds in the same run" in _missing_msg,
+               "embed is rewritten" in _missing_msg), (True, True, False))
         check("an .ico emitted by clipping-clean uses the same existence "
               "check as every other supported image extension",
               "fig_100.ico" in _st_msg(res, "figured", "item12/missing-image"), True)
+        check("an NFC embed of an NFD-named image file is not missing",
+              "fig_5" in _st_msg(res, "figured", "item12/missing-image"), False)
         check("NEAR MISS: an embed present under the portable identity — bare, "
               "path-qualified, in another case, or from a "
               "nested legacy folder — is clean, and a fenced sample of embed "
@@ -8401,6 +9040,34 @@ def run_self_test():
               all("report only" in finding["message"]
                   and "do not" in finding["message"]
                   for finding in res["image_folder_findings"]), True)
+
+        # Obsidian resolves an embed by basename anywhere in the vault. An
+        # image elsewhere in a known vault renders, so it is not missing; one
+        # found only under a dot-folder, which Obsidian does not index, is.
+        _iv = os.path.join(tmp, "v13b-vault-images")
+        os.makedirs(os.path.join(_iv, ".obsidian"))
+        _iv_images = os.path.join(_iv, "Sources", "Images")
+        os.makedirs(_iv_images)
+        for _rel in ("Attachments/Pasted image 20260101.png",
+                     ".trash/Trashed.png"):
+            os.makedirs(os.path.join(_iv, os.path.dirname(_rel)))
+            open(os.path.join(_iv, _rel), "w", encoding="utf-8").close()
+        _st_write(_iv, "Wiki/pasted.md", _st_entry(
+            "Pasted", "**Pasted** is a worked example.\n\n"
+            "![[Pasted image 20260101.png]]\n*A pasted image.*\n\n"
+            "![[Trashed.png]]\n*An image found only in the trash.*"))
+        _iv_res = scan(os.path.join(_iv, "Wiki"), _iv_images, vault=_iv)
+        check("an embed found elsewhere in the vault is outside the image "
+              "folder, not missing; one only under a dot-folder is missing",
+              ("Attachments/Pasted image 20260101.png" in _st_msg(
+                  _iv_res, "pasted", "item12/image-outside-folder"),
+               "REPORT ONLY" in _st_msg(
+                   _iv_res, "pasted", "item12/image-outside-folder"),
+               [p["message"].split(": ", 1)[1].split(" (", 1)[0]
+                for p in _iv_res["problems"]
+                if p["slug"] == "pasted"
+                and p["item"] == "item12/missing-image"]),
+              (True, True, ["Trashed.png"]))
         check("a `.dltmp` download staging name is temporary on its own",
               [looks_staging(name) for name in (
                   "Doe_X_2025_fig_1.png.dltmp", "Doe_X_2025_fig_1.png")],
@@ -8604,6 +9271,37 @@ def run_self_test():
               _st_keys(res, "four-dash"), ["item1"])
         check("a `--- text` closing fence is item1, not a clean entry",
               _st_keys(res, "fence-text"), ["item1"])
+        # (a2) With a card, a lost, `----` or `--- text` closing fence leaves
+        #      the separator above `## Flashcards` to close the frontmatter,
+        #      and issues: owns the whole body. That is item1 as well. A body
+        #      that merely opens with the heading, with no stray line in the
+        #      issues: span, is not.
+        v_close = os.path.join(tmp, "v12b-flash-close")
+        _close_slugs = ("lost-fence", "four-dash-card", "fence-text-card")
+        for _name, _fence in zip(_close_slugs, (
+                'issues: ""\n', 'issues: ""\n----\n',
+                'issues: ""\n--- closed\n')):
+            _title = _name.replace("-", " ").capitalize()
+            _st_write(v_close, _name + ".md", _st_entry(
+                _title, "**%s** is a worked example." % _title)
+                .replace('issues: ""\n---\n', _fence, 1))
+        _st_write(v_close, "flash-only.md", _st_entry(
+            "Flash only", "", related=False, card=False)
+            + "## Flashcards\n\nThe idea this entry is about, stated once."
+              "\n??\nFlash only\n")
+        res_close = scan(v_close)
+        check("a frontmatter that only the Flashcards separator closes is item1",
+              [FLASHCARDS_CLOSE_MESSAGE in _st_msg(res_close, slug_, "item1")
+               for slug_ in _close_slugs], [True] * 3)
+        check("...while its issues: span stays issues-malformed, never an "
+              "unparseable item-1 line",
+              [("item2/issues-malformed" in _st_keys(res_close, slug_),
+                "unparseable" in _st_msg(res_close, slug_, "item1"))
+               for slug_ in _close_slugs], [(True, False)] * 3)
+        check("a body that opens with ## Flashcards after a closed "
+              "frontmatter is not a lost fence",
+              FLASHCARDS_CLOSE_MESSAGE in _st_msg(res_close, "flash-only",
+                                                  "item1"), False)
         # Restore readable metadata before asserting absence/alias-dependent
         # link results; the malformed-fence cases above suppress those results.
         for name in ("four-dash", "fence-text"):
@@ -8772,6 +9470,12 @@ def run_self_test():
         check("unknown review states route report-only, never read-type",
               [sorted(k for k in _st_keys(res, "unknown-%d" % i) if k.startswith("item2/read"))
                for i in range(4)], [["item2/read-unknown"]] * 4)
+        check("a read-unknown message names the user-issue and merge-survivor "
+              "exceptions",
+              [("user_issues" in _st_msg(res, "unknown-%d" % i, "item2/read-unknown"),
+                "merge's survivor" in _st_msg(res, "unknown-%d" % i,
+                                              "item2/read-unknown"))
+               for i in range(4)], [(True, True)] * 4)
         check("known review answers retain the spelling-only fix",
               ["item2/read-type" in _st_keys(res, "known-%d" % i) for i in range(4)], [True] * 4)
         check("resolving self-parent spellings are still self-parents",
@@ -8867,6 +9571,19 @@ def run_self_test():
             'Detached', '**Detached** is a worked example.')
         _st_write(v, 'detached.md', detached
                   + '\n<!--SR:detached-after-blank-->\n')
+        _st_write(v, 'detached-callout.md', _st_entry(
+            'Detached callout', '**Detached callout** is a worked example.')
+                  + '\n> [!sr|card-metadata]\n>\n'
+                    '> <!--SR:!2026-03-01,12,270--> ^detached-card\n')
+        for name, trailing in (
+                ('schedule-block-id', '^bid3\n'),
+                ('schedule-user-lines',
+                 'User line a.\nUser line b\nUser line c\n')):
+            _st_write(v, name + '.md', _st_entry(
+                name.replace('-', ' ').capitalize(),
+                '**%s** is a worked example.'
+                % name.replace('-', ' ').capitalize()).rstrip('\n')
+                + '\n<!--SR:!2026-03-01,12,270-->\n' + trailing)
         unterminated = _st_entry(
             'Unterminated', '**Unterminated** is a worked example.').rstrip('\n')
         _st_write(v, 'unterminated.md', unterminated
@@ -8898,6 +9615,22 @@ def run_self_test():
         check("detached or unterminated SR comments remain reportable content",
               ['item19' in _st_keys(res, name)
                for name in ('detached', 'unterminated')], [True, True])
+        check("a detached schedule is a block to report, never a card",
+              [(_st_keys(res, name),
+                'Spaced Repetition schedule that a blank line separates'
+                in _st_msg(res, name, 'item19'),
+                any(word in _st_msg(res, name, 'item19')
+                    for word in ('holds 2 cards', 'extra card',
+                                 'contiguous lines')))
+               for name in ('detached', 'detached-callout')],
+              [(['item19'], True, False)] * 2)
+        check("content after an attached schedule stays on the card",
+              [('visible lines' in _st_msg(res, name, 'item19'),
+                any(word in _st_msg(res, name, 'item19')
+                    for word in ('holds 2 cards', 'extra card',
+                                 'contiguous lines')))
+               for name in ('schedule-block-id', 'schedule-user-lines')],
+              [(True, False)] * 2)
         check("a fence with trailing text cannot end the listing or hide the real flashcard",
               [k for name in ('backticks', 'tildes', 'indented-closer', 'nested-fence') for k in _st_keys(res, name)
                if k in ('item10/dangling', 'item19')], [])
@@ -9040,6 +9773,13 @@ def run_self_test():
             "issues-flow-mapping": "issues: {note: fix it}\n",
             "issues-nested": "issues:\n  -\n    - Wrong parent\n",
             "issues-collection": "issues:\n  - [Add an example, Wrong parent]\n",
+            # An unquoted '#' comment cuts the user's text off; quoted, or
+            # with no space before it, the '#' is part of the text.
+            "issues-comment-start": "issues: #1 the card is wrong\n",
+            "issues-comment-plain": "issues: Fix the card # and add an example\n",
+            "issues-comment-item": "issues:\n  - Fix the #2 card\n",
+            "issues-quoted-hash": 'issues: "#1 the card is wrong"\n',
+            "issues-unspaced-hash": "issues: Fix the card#2\n",
             "issues-missing": "",
         }
         for _name, _value in _issue_values.items():
@@ -9065,8 +9805,9 @@ def run_self_test():
         check("a string or list issues: value is user text, never an item2 "
               "quoting finding",
               [_st_keys(res, slug_) for slug_ in
-               ("issues-string", "issues-plain", "issues-list")],
-              [[], [], []])
+               ("issues-string", "issues-plain", "issues-list",
+                "issues-quoted-hash", "issues-unspaced-hash")],
+              [[]] * 5)
         check("user_issues lists each non-blank entry's form and decoded "
               "issues, sorted by slug",
               res["user_issues"],
@@ -9076,8 +9817,12 @@ def run_self_test():
                 "issues": ["Add an example.", "Wrong parent"]},
                {"slug": "issues-plain", "form": "string",
                 "issues": ["Explain variance more simply"]},
+               {"slug": "issues-quoted-hash", "form": "string",
+                "issues": ["#1 the card is wrong"]},
                {"slug": "issues-string", "form": "string",
                 "issues": ["The opener repeats the title: rewrite it."]},
+               {"slug": "issues-unspaced-hash", "form": "string",
+                "issues": ["Fix the card#2"]},
                {"slug": "zeta-issue", "form": "string",
                 "issues": ["Wrong parent"]}])
         _malformed_issue_slugs = ("issues-mapping", "issues-flow-mapping",
@@ -9097,13 +9842,24 @@ def run_self_test():
               ["issues: holds a mapping",
                "issues: holds a mapping", "issues: holds a nested list",
                "issues: holds a list item that is not one string"])
+        check("an unquoted '#' comment that cuts issues: text off, even to "
+              "blank, is only the report-only issues-malformed and never a "
+              "short user_issues row",
+              [(_st_keys(res, slug_),
+                _st_msg(res, slug_, "item2/issues-malformed").split(",")[0],
+                slug_ in [row["slug"] for row in res["user_issues"]])
+               for slug_ in ("issues-comment-start", "issues-comment-plain",
+                             "issues-comment-item")],
+              [(["item2/issues-malformed"], "issues: holds " + ISSUES_COMMENT,
+                False)] * 3)
         check("a missing issues: key is the fixable issues-missing, not a "
               "generic missing-key finding",
               (_st_keys(res, "issues-missing"),
                _st_msg(res, "issues-missing", "item2/issues-missing")),
               (["item2/issues-missing"],
                "missing issues: key — the user's issue inbox. Insert "
-               '`issues: ""` directly after read:, keeping dates and read:'))
+               '`issues: ""` directly after read: (after the last schema key '
+               "before it when read: is absent too), keeping dates and read:"))
         check("issues: before read: is out of schema order",
               (_st_keys(res, "issues-first"),
                "fields out of schema order" in _st_msg(res, "issues-first", "item2")),
@@ -9201,6 +9957,36 @@ def run_self_test():
                {"slug": "twin", "form": "string", "issues": ["Fix two"],
                 "path": "two/twin.md"}])
 
+        # Every physical file whose title slug differs gets a rename row, and
+        # a basename that several files share adds the file's path.
+        v = os.path.join(tmp, "v18c-rename-twins")
+        for _rel, _title in (("a/x.md", "Mean"), ("b/x.md", "X"),
+                             ("c/y.md", "Median"), ("d/Y.md", "Median"),
+                             ("solo.md", "Solo entry")):
+            _st_write(v, _rel, _st_entry(
+                _title, "**%s** is a worked example." % _title))
+        check("rename rows for a shared basename carry their paths and "
+              "compete for one destination",
+              scan(v)["rename_candidates"],
+              [{"slug": "Y", "new_slug": "median", "inbound_links": 0,
+                "target_exists": True, "path": "d/Y.md"},
+               {"slug": "solo", "new_slug": "solo-entry", "inbound_links": 0,
+                "target_exists": False},
+               {"slug": "x", "new_slug": "mean", "inbound_links": 0,
+                "target_exists": False, "path": "a/x.md"},
+               {"slug": "y", "new_slug": "median", "inbound_links": 0,
+                "target_exists": True, "path": "c/y.md"}])
+        v = os.path.join(tmp, "v18c-rename-twins-reversed")
+        for _rel, _title in (("a/x.md", "X"), ("b/x.md", "Mean"),
+                             ("c/z.md", "Z"), ("d/Z.md", "z")):
+            _st_write(v, _rel, _st_entry(
+                _title, "**%s** is a worked example." % _title))
+        check("the second file of a shared basename gets its rename row, and "
+              "a twin occupies its case-only destination",
+              [(r["slug"], r["new_slug"], r["target_exists"], r["path"])
+               for r in scan(v)["rename_candidates"]],
+              [("Z", "z", True, "d/Z.md"), ("x", "mean", False, "b/x.md")])
+
         # Frontmatter, date, description, title and opener checks that no
         # other case pins, each in an otherwise schema-clean entry.
         v = os.path.join(tmp, "v18c-field-checks")
@@ -9276,6 +10062,14 @@ def run_self_test():
               [[key for key in _st_keys(res, slug_) if key.startswith("item2/read")]
                for slug_ in ("read-missing", "read-bare", "read-tilde")],
               [["item2/read-missing"], ["item2/read-null"], ["item2/read-null"]])
+        check("a report-only read: message names the user-issue and "
+              "merge-survivor exceptions",
+              [("user_issues" in _st_msg(res, slug_, key_),
+                "merge's survivor" in _st_msg(res, slug_, key_))
+               for slug_, key_ in (("read-missing", "item2/read-missing"),
+                                   ("read-bare", "item2/read-null"),
+                                   ("read-tilde", "item2/read-null"))],
+              [(True, True)] * 3)
         check("schema order, duplicate keys, an unquoted numeric title, a "
               "single-quoted description and quoted type/date values are "
               "item2",
@@ -9312,6 +10106,35 @@ def run_self_test():
               [(b["slug"], b["target"]) for b in res["backfill_candidates"]
                if b["target"] in ("data-set", "dataset")],
               [("plain-mention", "data-set")])
+
+        # A heading that repeats the title is deleted, never demoted, and
+        # item 16 reads the first prose paragraph as the opener.
+        v = os.path.join(tmp, "v19a-title-heading")
+        for _name, _prose in (
+                ("title-heading", "# Title heading\n\n**Title heading** is a "
+                                  "worked example."),
+                ("overview-first", "## Overview\n\n**Overview first** is a "
+                                   "worked example."),
+                ("heading-deleted", "**Heading deleted** is a worked "
+                                    "example.")):
+            _st_write(v, _name + ".md", _st_entry(
+                _name.replace("-", " ").capitalize(), _prose))
+        res = scan(v)
+        check("a leading title heading is one item9 finding and the real "
+              "opener is clean; a leading non-title heading is item9 only",
+              [[key for key in _st_keys(res, slug_)
+                if key.startswith(("item9", "item16"))]
+               for slug_ in ("title-heading", "overview-first",
+                             "heading-deleted")],
+              [["item9"], ["item9"], []])
+        check("a title heading is deleted, never demoted",
+              ("delete it, never demote it" in _st_msg(
+                  res, "title-heading", "item9"),
+               "level must be exactly" in _st_msg(
+                   res, "title-heading", "item9"),
+               "does not open with a prose sentence" in _st_msg(
+                   res, "overview-first", "item9")),
+              (True, False, True))
 
         v = os.path.join(tmp, "v19-backfill-ownership")
         _st_write(v, 'aaa-technique.md', _st_entry('AAA technique',
@@ -9362,6 +10185,138 @@ def run_self_test():
         check("the CLI exits 2 when WIKI holds .obsidian/ or Wiki/ or equals "
               "--vault, and scans <vault>/Wiki",
               _root_codes, [(2, True), (2, True), (2, True), 0])
+
+        # WIKI must lie inside the vault and be the wiki folder itself.
+        _other_vault = os.path.join(tmp, "v19c-other-vault")
+        os.makedirs(os.path.join(_other_vault, ".obsidian"))
+        os.makedirs(os.path.join(_other_vault, "Sources", "Images"))
+        _sub_vault = os.path.join(tmp, "v19c-subfolder")
+        os.makedirs(os.path.join(_sub_vault, ".obsidian"))
+        _st_write(_sub_vault, "Wiki/variance.md", _st_entry(
+            "Variance", "**Variance** is a worked example."))
+        _st_write(_sub_vault, "Wiki/sub/spread.md", _st_entry(
+            "Spread", "**Spread** uses [[variance]]."))
+        _sub_wiki = os.path.join(_sub_vault, "Wiki", "sub")
+        _place_codes = []
+        for _place_argv, _place_text in (
+                ([os.path.join(_root_vault, "Wiki"), "--vault", _other_vault],
+                 "is not inside the vault"),
+                ([os.path.join(_root_vault, "Wiki"), "--images",
+                  os.path.join(_other_vault, "Sources", "Images")],
+                 "is not inside the vault"),
+                ([_sub_wiki], "is a subfolder of the wiki folder"),
+                ([_sub_wiki, "--vault", _sub_vault],
+                 "is a subfolder of the wiki folder")):
+            _place_err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(_place_err):
+                try:
+                    _place_codes.append(main(_place_argv))
+                except SystemExit as exc:
+                    _place_codes.append(
+                        (exc.code, _place_text in _place_err.getvalue()))
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(io.StringIO()):
+            _place_codes.append(main([os.path.join(_root_vault, "Wiki"),
+                                      "--vault", _root_vault + os.sep]))
+        check("the CLI exits 2 when WIKI is outside the vault or inside its "
+              "wiki folder, and accepts a --vault with a trailing separator",
+              _place_codes, [(2, True), (2, True), (2, True), (2, True), 0])
+
+        # One vault reached under another spelling, a symlink alias or an
+        # NFD name, is read in WIKI's own spelling.
+        _spell_parent = os.path.join(tmp, "v19d-spelling")
+        _spell_vault = os.path.join(_spell_parent, "Café vault")
+        os.makedirs(os.path.join(_spell_vault, ".obsidian"))
+        _spell_wiki = os.path.join(_spell_vault, "Wiki")
+        _st_write(_spell_wiki, "statistics.md", _st_entry(
+            "Statistics", "**Statistics** is a worked example."))
+        _st_write(_spell_wiki, "leaf.md", _st_entry(
+            "Leaf", "**Leaf** is a worked example.",
+            parents=('"[[statistics]]"',)))
+        _st_write(_spell_vault, "MOCs/statistics-moc.md",
+                  "- [[Wiki/statistics|Statistics]]\n"
+                  "  - [[Wiki/leaf|Leaf]]\n")
+
+        def _spell_scan(vault_arg):
+            out = io.StringIO()
+            with contextlib.redirect_stdout(out), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                code = main([_spell_wiki, "--vault", vault_arg])
+            report = json.loads(out.getvalue())
+            return (code, report["vault_root"],
+                    report["hierarchy_diagnostic"]["moc_consistency_findings"],
+                    [p for p in report["problems"]
+                     if p["item"] == "item2/parents-form"])
+
+        _spell_aliases = []
+        _spell_link = os.path.join(_spell_parent, "vault-alias")
+        try:
+            os.symlink(_spell_vault, _spell_link, target_is_directory=True)
+            _spell_aliases.append(_spell_link)
+        except (OSError, NotImplementedError):
+            pass  # no symlinks on this host
+        _spell_nfd = unicodedata.normalize("NFD", _spell_vault)
+        if os.path.isdir(_spell_nfd):
+            _spell_aliases.append(_spell_nfd)
+        check("a --vault spelled through a symlink or an NFD name scans as "
+              "WIKI's own spelling (where the host supports it)",
+              [_spell_scan(alias) for alias in [_spell_vault] + _spell_aliases],
+              [(0, _spell_vault, [], [])] * (1 + len(_spell_aliases)))
+
+        # Where the host folds case, `<vault>/wiki` opens `<vault>/Wiki`: the
+        # note index still skips that folder, and the CLI spells it `Wiki`.
+        _fold_vault = os.path.join(tmp, "v19d-case-variant")
+        os.makedirs(os.path.join(_fold_vault, ".obsidian"))
+        _fold_wiki = os.path.join(_fold_vault, "Wiki")
+        _st_write(_fold_wiki, "mean.md", _st_entry(
+            "Mean", "**Mean** is a worked example.",
+            aliases=('"average"',)))
+        _st_write(_fold_wiki, "variance.md", _st_entry(
+            "Variance", "**Variance** is a worked example."))
+        _st_write(_fold_vault, "Articles/variance.md", "An outside note.\n")
+        _st_write(_fold_wiki, "reader.md", _st_entry(
+            "Reader", "**Reader** uses [[Wiki/mean|mean]], the [[average]] "
+            "and [[Wiki/variance|variance]]."))
+        _fold_variant = os.path.join(_fold_vault, "wiki")
+        if os.path.isdir(_fold_variant):
+            def _fold_cli(wiki_arg):
+                out = io.StringIO()
+                with contextlib.redirect_stdout(out), \
+                        contextlib.redirect_stderr(io.StringIO()):
+                    main([wiki_arg, "--vault", _fold_vault])
+                return json.loads(out.getvalue())["problems"]
+            check("a case-variant WIKI is skipped by the note index and "
+                  "spelled as on disk",
+                  ('"[[mean|average]]"' in _st_msg(
+                      scan(_fold_variant, vault=_fold_vault), "reader",
+                      "item10/alias"),
+                   _fold_cli(_fold_variant) == _fold_cli(_fold_wiki)),
+                  (True, True))
+
+        # A filename that is not valid UTF-8 (a lone surrogate on Linux)
+        # reaches --out as a JSON escape, as it reaches stdout.
+        _bad_vault = os.path.join(tmp, "v19e-undecodable-name")
+        _st_write(_bad_vault, "anchor.md", _st_entry(
+            "Anchor", "**Anchor** is a worked example."))
+        _bad_out = os.path.join(tmp, "v19e-scan.json")
+        _bad_real_walk = os.walk
+
+        def _surrogate_walk(root, *args, **kwargs):
+            for dirpath, dirnames, filenames in _bad_real_walk(
+                    root, *args, **kwargs):
+                if os.path.normpath(dirpath) == os.path.normpath(_bad_vault):
+                    filenames = list(filenames) + ["caf\udce9.md"]
+                yield dirpath, dirnames, filenames
+
+        with patch.object(os, "walk", _surrogate_walk), \
+                contextlib.redirect_stderr(io.StringIO()):
+            _bad_rc = main([_bad_vault, "--out", _bad_out])
+        with open(_bad_out, encoding="utf-8") as fh:
+            _bad_slugs = [p["slug"] for p in json.load(fh)["problems"]]
+        check("--out writes a filename that is not valid UTF-8 as a JSON "
+              "escape instead of crashing",
+              (_bad_rc, "caf\udce9" in _bad_slugs), (0, True))
 
         v = os.path.join(tmp, "v20-bare-target-plurals")
         for name, title in (('entropy', 'Entropy'), ('information-entropy', 'Information entropy')):
@@ -9507,6 +10462,14 @@ def run_self_test():
         _st_write(v, "related-wrong-label.md", _st_entry(
             "Related wrong label", "**Related wrong label** is a worked example.",
             related="[[canonical-target#Details|target]]"))
+        _st_write(v, "related-foreign-label.md", _st_entry(
+            "Related foreign label",
+            "**Related foreign label** is a worked example.",
+            related="[[canonical-target|Zebra]]"))
+        _st_write(v, "related-marked-label.md", _st_entry(
+            "Related marked label",
+            "**Related marked label** is a worked example.",
+            related="[[canonical-target|*Canonical* target]]"))
         _st_write(v, "related-piped.md", _st_entry(
             "Related piped", "**Related piped** is a worked example.",
             related="[[arxiv|arxiv]] · [[Wiki/canonical-target#Details|Canonical target]]"))
@@ -9851,6 +10814,10 @@ def run_self_test():
         check("a Related display label must equal the target's canonical title",
               "canonical title"
               in _st_msg(res, "related-wrong-label", "item11"), True)
+        check("a Related label's wording is item 11 alone; its markup is item 18",
+              [("item11" in _st_keys(res, name), "item18" in _st_keys(res, name))
+               for name in ("related-foreign-label", "related-marked-label")],
+              [(True, False), (True, True)])
         check("fully piped Related links are the valid near miss",
               "item11" in _st_keys(res, "related-piped"), False)
         check("an exact body display alias is redundant in the whole-vault linter",
@@ -9927,6 +10894,9 @@ def run_self_test():
         _st_write(v, "dated-person.md", _st_entry(
             "Dated person", "**Dated person** (1901–1980) was a researcher.",
             type_="Person"))
+        _st_write(v, "active-person.md", _st_entry(
+            "Active person", "**Active person** (fl. since 2020) is a researcher.",
+            type_="Person"))
         _st_write(v, "misplaced-person-date.md", _st_entry(
             "Misplaced person date",
             "**Misplaced person date** received a 2020 prize (born 1980).",
@@ -9956,12 +10926,12 @@ def run_self_test():
         res = scan(v)
         check("Person/Event dates pass only in the parenthetical after the bold subject",
               ["item9" in _st_keys(res, name) for name in
-               ("dated-person", "misplaced-person-date",
+               ("dated-person", "active-person", "misplaced-person-date",
                 "dated-event", "missing-event-date",
                 "malformed-person-date", "unspaced-person-date",
                 "malformed-event-date",
                 "impossible-event-date")],
-              [False, True, False, True, True, True, True, True])
+              [False, False, True, False, True, True, True, True, True])
         check("malformed and missing date messages stay distinguishable",
               ("exact forms" in _st_msg(res, "malformed-person-date", "item9"),
                "exact forms" in _st_msg(res, "unspaced-person-date", "item9"),
@@ -10101,6 +11071,20 @@ def run_self_test():
             "measure. It is the square root of the variance:\n\n$$\n"
             "\\sigma = \\sqrt{\\operatorname{Var}(X)}, \\qquad "
             "\\mu = \\operatorname{E}[X]\n$$"))
+        _st_write(v, "equation-shared-open.md", _st_entry(
+            "Equation shared open", "**Equation shared open** is a measure. It "
+            "is the square root of the variance:\n\n"
+            "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$"))
+        _st_write(v, "equation-bare-alignment.md", _st_entry(
+            "Equation bare alignment", "**Equation bare alignment** is a "
+            "measure. It is the square root of the variance:\n\n$$\n"
+            "\\sigma &= \\sqrt{\\operatorname{Var}(X)} \\\\\n"
+            "&= \\sqrt{\\operatorname{E}[(X - \\mu)^2]}\n$$"))
+        _st_write(v, "equation-two-physical.md", _st_entry(
+            "Equation two physical", "**Equation two physical** is a measure. "
+            "It is the square root of the variance:\n\n$$\n"
+            "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n"
+            "\\mu = \\operatorname{E}[X]\n$$"))
         _st_write(v, "negated-equation.md", _st_entry(
             "Negated equation", "**Negated equation** is a measure. It is not "
             "the square root of variance."))
@@ -10150,6 +11134,22 @@ def run_self_test():
                _st_keys(res, "equation-present"),
                "item12/equation-format" in
                _st_keys(res, "equation-two-relations")), (True, False, False))
+        check("an opening $$ on the equation's line is a form finding, not a "
+              "missing-equation finding",
+              ("item12/equation-format" in
+               _st_keys(res, "equation-shared-open"),
+               "item12/equation-coverage-candidate" in
+               _st_keys(res, "equation-shared-open")), (True, False))
+        check("a bare &= display is a form finding that names aligned",
+              ("item12/equation-format" in
+               _st_keys(res, "equation-bare-alignment"),
+               "aligned" in _st_msg(res, "equation-bare-alignment",
+                                    "item12/equation-format")), (True, True))
+        check("two equations on separate source lines are a split candidate",
+              ("item12/equation-split-candidate" in
+               _st_keys(res, "equation-two-physical"),
+               "item12/equation-format" in
+               _st_keys(res, "equation-two-physical")), (True, False))
         check("negated wording does not become an equation-coverage candidate",
               "item12/equation-coverage-candidate" in
               _st_keys(res, "negated-equation"), False)
@@ -10373,6 +11373,7 @@ def run_self_test():
                 ("meta-source-text", "The source text states the result."),
                 ("meta-later", "As discussed later, the result holds."),
                 ("meta-section", "In the previous section, the case was introduced."),
+                ("meta-bare-section", "The previous section introduced the case."),
                 ("meta-saw", "As we saw, the case is representative."),
                 ("meta-figure", "The figure above gives the result.")):
             _title = _slug.replace("-", " ").title()
@@ -10456,7 +11457,7 @@ def run_self_test():
         check("every previously omitted exact source-meta phrase is item14",
               ["item14" in _st_keys(res, slug_) for slug_ in
                ("meta-source", "meta-source-text", "meta-later", "meta-section",
-                "meta-saw", "meta-figure")], [True] * 6)
+                "meta-bare-section", "meta-saw", "meta-figure")], [True] * 7)
         check("named-work, technical source compounds, temporal-later, and "
               "geometric-above uses stay clean",
               "item14" in _st_keys(res, "meta-near-misses"), False)
@@ -10880,6 +11881,15 @@ def run_self_test():
             "Hedge cue", "**Hedge cue** is a worked example.").replace(
                 "The idea this entry is about, stated once.",
                 "The idea this entry is usually about, stated once."))
+        _st_write(v, "hedge-description.md", _st_entry(
+            "Hedge description", "**Hedge description** is a worked example.",
+            description="Hedge description is a worked example, often used "
+                        "by the self-test."))
+        _st_write(v, "measured-description.md", _st_entry(
+            "Measured description",
+            "**Measured description** is a worked example.",
+            description="Measured description counts how often a normally "
+                        "distributed value is used."))
         _st_write(v, "simplified-pair.md", _with_cards(
             "Simplified pair", _why).replace(
                 "\n??\nSimplified pair\n", "\n?\nSimplified pair\n"))
@@ -11014,6 +12024,16 @@ def run_self_test():
               ([k for k in _st_keys(res, "hedge-cue") if k.startswith("item19")],
                '"usually"' in _st_msg(res, "hedge-cue", "item19/hedge-candidate")),
               (["item19/hedge-candidate"], True))
+        check("a frequency hedge in the description is an advisory item7 "
+              "candidate; a measured frequency and normally distributed are "
+              "not",
+              ([k for k in _st_keys(res, "hedge-description")
+                if k.startswith("item7")],
+               '"often"' in _st_msg(res, "hedge-description",
+                                    "item7/hedge-candidate"),
+               [k for k in _st_keys(res, "measured-description")
+                if k.startswith("item7")]),
+              (["item7/hedge-candidate"], True, []))
         check("brevity candidates are advisory and never item19 errors",
               ([k for k in _st_keys(res, "long-cue") if k.startswith("item19")],
                "glossary" in _st_msg(res, "glossary-cue",
@@ -11397,7 +12417,8 @@ def run_self_test():
               (res0["settled"], _bf_key, _hub_key),
               ({"path": _ledger, "backfill_suppressed": 0,
                 "hub_footer_suppressed": 0,
-                "stale": {"backfill": [], "hub_footer": []}, "error": None},
+                "stale": {"backfill": [], "hub_footer": []}, "upgrade": [],
+                "error": None},
                {"entry": "settle-reader", "target": "hub-term",
                 "surface": "hub term",
                 "context": settle_context("**Settle reader** names a hub "
@@ -11408,7 +12429,7 @@ def run_self_test():
         _gone = {"entry": "gone", "target": "hub-term", "surface": "hub term",
                  "context": "0" * 40}
         with open(_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 1, "backfill": [_bf_key, _gone],
+            json.dump({"version": 2, "backfill": [_bf_key, _gone],
                        "hub_footer": [_hub_key]}, fh)
         res1 = scan(_settle_wiki, settled=_ledger)
 
@@ -11450,9 +12471,9 @@ def run_self_test():
         _st_write(_settle_wiki, "settle-reader.md", _st_entry(
             "Settle reader", "**Settle reader** names a hub term twice. It "
             "also names a topic."))
-        for _bad in ("{not json", '{"version": 2}', '{"version": 1, '
+        for _bad in ("{not json", '{"version": 3}', '{"version": 2, '
                      '"backfill": [{"entry": "x"}]}', '{"version": true}',
-                     '{"version": 1, "hub_footers": []}'):
+                     '{"version": 2, "hub_footers": []}'):
             with open(_ledger, "w", encoding="utf-8") as fh:
                 fh.write(_bad)
             _view = _settle_view(scan(_settle_wiki, settled=_ledger))
@@ -11462,11 +12483,119 @@ def run_self_test():
         _all_keys = [key for key in scan(_settle_wiki)["hub_footer"][0]
                      ["settle_keys"]]
         with open(_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 1, "hub_footer": _all_keys}, fh)
+            json.dump({"version": 2, "hub_footer": _all_keys}, fh)
         res = scan(_settle_wiki, settled=_ledger)
         check("a hub target left with no item is omitted",
               (res["hub_footer"], res["settled"]["hub_footer_suppressed"]),
               ([], len(_all_keys)))
+        # A settled occurrence yields to the target's next sentence, so a
+        # rejected first mention in another sense never hides a later one.
+        # Two mentions in one sentence are one occurrence.
+        _later = os.path.join(tmp, "v-settle-later")
+        _st_write(_later, "topic.md", _st_entry(
+            "Topic", "**Topic** is a worked example."))
+        _st_write(_later, "settle-later.md", _st_entry(
+            "Settle later", "**Settle later** names a topic and a topic "
+            "again.\n\nIt names a topic once more."))
+        _later_ledger = os.path.join(tmp, "settled-later.json")
+        _later_contexts = [settle_context(sentence) for sentence in (
+            "**Settle later** names a topic and a topic again.",
+            "It names a topic once more.")]
+
+        def _later_view(res, slug="settle-later"):
+            return ([(row["line"], row["settle_key"]["context"],
+                      [key["context"] for key in row["settle_keys"]])
+                     for row in res["backfill_candidates"]
+                     if row["slug"] == slug],
+                    res["settled"]["backfill_suppressed"],
+                    res["settled"]["stale"]["backfill"])
+        _later_views = [_later_view(scan(_later))]
+        for _count in range(3):
+            with open(_later_ledger, "w", encoding="utf-8") as fh:
+                json.dump({"version": 2, "backfill": [
+                    {"entry": "settle-later", "target": "topic",
+                     "surface": "topic", "context": _context}
+                    for _context in _later_contexts[:_count]]}, fh)
+            _later_views.append(_later_view(scan(_later,
+                                                 settled=_later_ledger)))
+        check("a settled occurrence yields to the target's next sentence",
+              _later_views,
+              [([(1, _later_contexts[0], _later_contexts)], 0, []),
+               ([(1, _later_contexts[0], _later_contexts)], 0, []),
+               ([(3, _later_contexts[1], _later_contexts[1:])], 1, []),
+               ([], 2, [])])
+        # A rejection stores the row's settle_keys, so a target the entry
+        # mentions in three sentences stays settled on the next scan.
+        _st_write(_later, "settle-three.md", _st_entry(
+            "Settle three", "**Settle three** names a topic. It names a "
+            "topic again. A third sentence names a topic."))
+        _three = next(row for row in scan(_later)["backfill_candidates"]
+                      if row["slug"] == "settle-three")
+        with open(_later_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "backfill": _three["settle_keys"]}, fh)
+        check("a rejection's settle_keys settle every sentence of its target",
+              (len(_three["settle_keys"]),
+               _later_view(scan(_later, settled=_later_ledger),
+                           "settle-three")),
+              (3, ([], 3, [])))
+        # A version-1 record settles its entry and target while it matches
+        # the target's first sentence; `upgrade` lists the others.
+        with open(_later_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 1, "backfill": [_three["settle_key"]]}, fh)
+        res = scan(_later, settled=_later_ledger)
+        check("a version-1 record settles its target's later sentences",
+              (_later_view(res, "settle-three"), res["settled"]["upgrade"]),
+              (([], 3, []), _three["settle_keys"][1:]))
+        with open(_later_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "backfill": [_three["settle_key"]]
+                       + res["settled"]["upgrade"]}, fh)
+        res = scan(_later, settled=_later_ledger)
+        check("its version-2 rewrite with the upgrade keeps them settled",
+              (_later_view(res, "settle-three"), res["settled"]["upgrade"]),
+              (([], 3, []), []))
+        # Body line numbers count from the line after the closing fence,
+        # including blank lines left there (an item-9 defect).
+        _gap_lines = os.path.join(tmp, "v-gap-lines")
+        _st_write(_gap_lines, "topic.md", _st_entry(
+            "Topic", "**Topic** is a worked example."))
+        _st_write(_gap_lines, "gap-lines.md", _st_entry(
+            "Gap lines", "**Gap lines** is a worked example.\n\n"
+            "It names a topic.\n\n| Case | Note |\n| --- | --- |\n"
+            "| one | [[topic]] |").replace("\n---\n", "\n---\n\n\n", 1))
+        res = scan(_gap_lines)
+        check("body line numbers count blank lines after the fence",
+              ([row["line"] for row in res["backfill_candidates"]
+                if row["slug"] == "gap-lines"],
+               "blank line immediately after frontmatter" in _st_msg(
+                   res, "gap-lines", "item9"),
+               "on body line 9 " in _st_msg(res, "gap-lines", "item10/table")),
+              ([5], True, True))
+        # A compound that is another entry's title names that entry: its head
+        # word is no mention of its own entry for backfill or a late link.
+        _compound = os.path.join(tmp, "v-compound-entry")
+        _st_write(_compound, "rna.md", _st_entry(
+            "RNA", "**RNA** (ribonucleic acid) is a worked example.",
+            aliases=('"ribonucleic acid"',)))
+        _st_write(_compound, "messenger-rna.md", _st_entry(
+            "Messenger RNA", "**Messenger RNA** (mRNA) is a worked example.",
+            aliases=('"mRNA"',)))
+        _st_write(_compound, "compound-bare.md", _st_entry(
+            "Compound bare", "**Compound bare** holds messenger RNAs."))
+        _st_write(_compound, "compound-linked.md", _st_entry(
+            "Compound linked", "**Compound linked** holds messenger RNAs "
+            "([[messenger-rna|mRNAs]]). Later the [[rna|RNA]] decays."))
+        _st_write(_compound, "compound-early.md", _st_entry(
+            "Compound early", "**Compound early** studies RNA. It holds "
+            "messenger RNAs ([[messenger-rna|mRNAs]]). Later the "
+            "[[rna|RNA]] decays."))
+        res = scan(_compound)
+        check("a compound naming an entry is that entry's mention, never its "
+              "head word's",
+              ([(row["slug"], row["target"]) for row in
+                res["backfill_candidates"] if row["slug"].startswith("compound")],
+               ["item10/late-link" in _st_keys(res, name)
+                for name in ("compound-linked", "compound-early")]),
+              ([("compound-bare", "messenger-rna")], [False, True]))
         # One unreadable file hides whatever aliases it holds, so the
         # alias-dependent worklists stay empty until a clean rescan.
         _gap_hub = _hub_vault("v-hub-alias-gap")
@@ -11487,6 +12616,12 @@ def run_self_test():
         check("an alias-inventory gap reports no ledger record as stale",
               [len(scan(_gap_hub, settled=_ledger)["settled"]["stale"][kind])
                for kind in ("backfill", "hub_footer")], [0, 0])
+        with open(_later_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 1}, fh)
+        check("an alias-inventory gap leaves a version-1 upgrade unknown",
+              [scan(_gap_hub, settled=path)["settled"]["upgrade"]
+               for path in (_ledger, _later_ledger)],
+              [[], None])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -11507,6 +12642,66 @@ def _looks_like_vault_root(wiki, vault=None):
             and os.path.realpath(wiki) == os.path.realpath(vault))
 
 
+def _vault_spelling(wiki, vault):
+    """The ancestor of WIKI that is the vault folder, spelled as in WIKI.
+
+    Folders are compared by identity, so a symlink alias, ``/tmp`` beside
+    ``/private/tmp``, or an NFC beside an NFD name finds the same folder.
+    Returns None when no ancestor of WIKI is the vault.
+    """
+    current = os.path.dirname(os.path.abspath(wiki))
+    while True:
+        try:
+            if os.path.samefile(current, vault):
+                return current
+        except OSError:
+            pass
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
+
+def _wiki_spelling(wiki, base):
+    """WIKI with each folder below ``base`` spelled as its directory entry.
+
+    A case-folding host opens ``<vault>/wiki`` for ``<vault>/Wiki``, but the
+    scan spells qualified links from WIKI's path, so each folder takes the
+    name its parent lists for it: the entry that names the same folder under
+    the portable case/Unicode identity.
+    """
+    current = base
+    for part in os.path.relpath(os.path.abspath(wiki), base).split(os.sep):
+        if part == os.curdir:
+            continue
+        try:
+            names = sorted(os.listdir(current))
+        except OSError:
+            names = [part]
+        if part not in names:
+            for name in names:
+                try:
+                    if (fold_name(name) == fold_name(part)
+                            and os.path.samefile(os.path.join(current, name),
+                                                 os.path.join(current, part))):
+                        part = name
+                        break
+                except OSError:
+                    pass
+        current = os.path.join(current, part)
+    return current
+
+
+def _enclosing_wiki_folder(wiki, vault):
+    """A folder named ``Wiki`` between the vault and WIKI, or None."""
+    current = os.path.dirname(os.path.abspath(wiki))
+    while current != vault and os.path.dirname(current) != current:
+        if fold_name(os.path.basename(current)) == "wiki":
+            return current
+        current = os.path.dirname(current)
+    return None
+
+
 def main(argv=None):
     if hasattr(sys.stdout, "reconfigure"):
         try:
@@ -11521,7 +12716,8 @@ def main(argv=None):
                          "entries in subfolders are scanned too)")
     ap.add_argument("--vault", metavar="DIR",
                     help="selected vault root for qualified links, parents, "
-                         "backfill targets, and MOC diagnostics; when omitted, "
+                         "backfill targets, and MOC diagnostics; WIKI must lie "
+                         "inside it; when omitted, "
                          "infer it from --images, a .obsidian ancestor, or "
                          "the Wiki folder's parent")
     ap.add_argument("--images", metavar="DIR",
@@ -11533,8 +12729,10 @@ def main(argv=None):
     ap.add_argument("--settled", metavar="FILE",
                     help="the settled-decisions ledger "
                          "(<vault>/Reviews/.wiki-lint-settled.json): omit the "
-                         "backfill_candidates rows and hub_footer items it "
-                         "records; a missing file is an empty ledger, an "
+                         "backfill_candidates occurrences and hub_footer "
+                         "items it records (a settled occurrence yields to "
+                         "the target's next sentence); a missing file is an "
+                         "empty ledger, an "
                          "unreadable or malformed one suppresses nothing and "
                          "is reported in settled.error. Never written here")
     ap.add_argument("--out", metavar="FILE",
@@ -11569,16 +12767,36 @@ def main(argv=None):
     if args.images is not None and not os.path.isdir(args.images):
         ap.error("--images is not a directory: %s. No embed was checked; this is "
                  "not a vault with no images." % args.images)
+    # Every vault-relative target is a path from WIKI to the vault. WIKI must
+    # lie inside the vault, be read under WIKI's own spelling of it, and be
+    # the wiki folder itself: a subfolder turns working links into danglers.
+    vault, vault_known = _vault_root_for(args.wiki, args.images, args.vault)
+    if vault_known:
+        spelled = _vault_spelling(args.wiki, vault)
+        if spelled is None:
+            ap.error("WIKI is not inside the vault %s; pass <vault>/Wiki "
+                     "with --vault <vault>" % vault)
+        enclosing = _enclosing_wiki_folder(args.wiki, spelled)
+        if enclosing is not None:
+            ap.error("WIKI is a subfolder of the wiki folder %s; pass that "
+                     "folder and narrow the run to its entries" % enclosing)
+        vault = spelled
+    else:
+        vault = None
+    wiki = _wiki_spelling(args.wiki, vault or os.path.dirname(
+        os.path.abspath(args.wiki)))
     try:
-        report = scan(args.wiki, args.images, vault=args.vault,
-                      settled=args.settled)
+        report = scan(wiki, args.images, vault=vault, settled=args.settled)
     except IncompleteWikiInventoryError as exc:
         print("scan blocked: %s" % exc, file=sys.stderr)
         return 1
     text = json.dumps(report, ensure_ascii=False,
                       indent=(args.indent or None))
     if args.out:
-        with open(args.out, "w", encoding="utf-8") as fh:
+        # Write what stdout mode writes: a filename that is not valid UTF-8
+        # (a lone surrogate on Linux) becomes a JSON escape, not a crash.
+        with open(args.out, "w", encoding="utf-8",
+                  errors="backslashreplace") as fh:
             fh.write(text + "\n")
         print("wrote %s" % args.out, file=sys.stderr)
     else:

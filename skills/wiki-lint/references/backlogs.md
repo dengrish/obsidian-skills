@@ -19,12 +19,13 @@ End every run with a single consolidated response in the conversation, not a dat
 - **User issues** — for each entry in `user_issues` and each of its issues ([User issues](../SKILL.md#user-issues)): the change made, or the evidence that the reported problem does not hold, or the blocker that keeps it in the field; then the entry's `issues:` result (blanked, or the unresolved text kept) and its `read:` result. A report-only run gives what it would do.
 - **Task 1 — tags fixed / unresolved:** tag *format* fixes applied (added `#`/quotes, de-duplicated, abbreviation expanded to an enum slug, wikilink-form converted to a `#`-tag). Include genuine blank/empty tags assigned a specific home or `#misc`, and misc/specific conflicts resolved. The executing agent applies clear disciplinary-home corrections from the published calibration; cases lacking enough evidence are left unchanged and reported as unresolved, without blocking the run.
 - **Task 1 — QC fixes**, grouped by checklist item: per fixed entry, the item and a one-line description of the fix, including every claim-preserving local prose repair and its kind. Under item 19, give each card edit's old and new line 1, and quote each [removed card](flashcards.md#card-set) verbatim, attachments included, with each link to its block ID that the removal rewrote. Duplicate spellings inside one alias list remain ordinary format fixes. Also report **`Software` reclassifications** (item 6, corrected artifact type plus the selective API-scope result) and any **ambiguous code-content/type calls left unchanged and reported with the missing evidence**.
-- **Task 1 — duplicate-entry candidates:** item-5 collision-probe matches and synonym/near-duplicate candidates found by the agent, each with the outcome of Task 1b's merge check: merged (itemized under Task 1b), stopped by a refactor blocker (Task 1b's not-applied list), distinct entities with the evidence that separates them, or a close call (under *Notes for the user*). The agent performs the semantic comparison; probe matches and similar wording never activate a merge on their own. Consolidating a duplicated explanation is not a merge: both entries stay, and Task 1b itemizes it as a consolidation.
+- **Task 1 — duplicate-entry candidates:** item-5 collision-probe matches and synonym/near-duplicate candidates found by the agent, each with the outcome of Task 1b's merge check: merged (itemized under Task 1b), stopped by a refactor blocker (Task 1b's not-applied list), distinct entities with the evidence that separates them, a close call (under *Notes for the user*), or, in a run that skips Task 1b, left for Task 1b. The agent performs the semantic comparison; probe matches and similar wording never activate a merge on their own. Consolidating a duplicated explanation is not a merge: both entries stay, and Task 1b itemizes it as a consolidation.
+- **Task 1 — left for Task 1b** (only in a run that skips Task 1b): each finding Task 1 handed over, with its entry, item and the source or content choice it needs, as work for the next Task 1b run. It is not logged, since an ordinary run [repairs it](#proposing-note-improvements).
 - **Task 1b — Content repair:**
   - **Per changed entry:** each repair and its kind (correction,
     simplification, deepening, conflict resolution, consolidation, notation
-    normalization); the cited source with its page, or the URL read with its
-    date and section, or that 5(h) background supports it; any standard
+    normalization, citation for an empty `sources:`); the cited source with
+    its page, or the URL read with its date and section, or that 5(h) background supports it; any standard
     reference read or derivation that settled a conflict; and the date and
     `read:` decision.
   - **Merges and splits applied**, as `old-a + old-b → survivor` or
@@ -51,7 +52,7 @@ End every run with a single consolidated response in the conversation, not a dat
     [Delete an entry](refactors.md#delete-an-entry)): the removed path, each
     inbound reference retargeted to the named successor or unlinked, by
     surface, any untouched historical record with its now-unresolved links,
-    the entry's card quoted with its attachments and its non-blank `issues:`
+    any discipline MOC the deletion left inactive, the entry's card quoted with its attachments and its non-blank `issues:`
     text, and the clean re-scan.
   - **Not applied**, each with its blocker:
     - a merge or split that a
@@ -130,8 +131,9 @@ can also merit an item; no recurrence quota or proposal quota is required.
 Use evidence already obtained within the requested maintenance scope. Logging
 an issue does not authorize an unrelated audit, research beyond Task 1b's
 [evidence rule](../SKILL.md#task-1b--content-repair) (cited sources, accurate
-background, uncited standard references read as data, and missing-entry
-research), a deletion, a split or merge without Task 1b's own
+background, uncited standard references read as data, missing-entry
+research, and [item 4](qc-items.md#4-sources)'s citation for an empty
+`sources:`), a deletion, a split or merge without Task 1b's own
 [proof](refactors.md#establish-evidence-and-complete-scope), or editing a
 skill's source. Ordinary runs propose tooling changes;
 an explicit plugin-development review can implement them under repository
@@ -139,16 +141,29 @@ instructions. Preserve unresolved items and unknown content.
 
 ## Proposing note improvements
 
-Close out the note-content log `Reviews/wiki-notes-suggestions.md` under the shared format, deduplication, and open-to-fixed rules. Move an Open item, or a portion of one, to Fixed with `Fixed in: wiki-lint run, <run timestamp>` and a **Verified** line only when each instance it names is repaired, verified already absent, or re-verified as conforming to the current rules; the Verified line names the check, and for a conforming instance the rule that keeps it. A portion only an unbuilt source would fill conforms, since it is expected and temporary (below): it moves with its item and is never kept open. So does a split or merge portion Task 1b leaves unapplied as a close call or for a refactor blocker, which the run reports instead. Keep any other unresolved portion open as its own item, and only with a concrete blocker listed below, such as a conflict no evidence settles or a deletion that needs an explicit request in chat; the fixed item's Verified line names that portion by its `[id]`, never by its state or position, since a later run may fix it; never keep one open merely because the run disagrees with its wording. This content backlog is separate from the per-skill tooling logs. A [user issue](../SKILL.md#user-issues) is never logged: a blocked one stays in its entry's `issues:` field.
+Close out the note-content log `Reviews/wiki-notes-suggestions.md` under the shared format, deduplication, and open-to-fixed rules. Move an Open item, or a portion of one, to Fixed with `Fixed in: wiki-lint run, <run timestamp>` and a **Verified** line only when each instance it names is repaired, verified already absent, or re-verified as conforming to the current rules; the Verified line names the check, and for a conforming instance the rule that keeps it. These portions conform, so they move with their item and are never kept open:
+
+- a portion only an unbuilt source would fill, since it is expected and temporary (below);
+- a split or merge portion Task 1b leaves unapplied as a close call, which the run reports instead;
+- a missing-entry portion whose concept fails the [missing-entry rule](refactors.md#create-a-missing-entry)'s identity, substance or atomicity test; its Verified line names that test.
+
+Keep any other unresolved portion open as its own item, naming its concrete blocker. The blocker is one of these:
+
+- a kind listed under *What belongs here* below, such as a conflict no evidence settles or a deletion that needs an explicit request in chat;
+- a [refactor blocker](refactors.md#establish-evidence-and-complete-scope) that stopped a split, merge, retitle or alias removal (an `Investments/` dependency, an unresolved inbound reference, an unreadable source);
+- an indeterminate title, or an occupied or ambiguous destination slug;
+- evidence a missing entry needs that the run could not reach.
+
+When a portion stays open, the fixed item's Verified line names it by its `[id]`, never by its state or position, since a later run may fix it; never keep one open merely because the run disagrees with its wording. This content backlog is separate from the per-skill tooling logs. A [user issue](../SKILL.md#user-issues) is never logged: a blocked one stays in its entry's `issues:` field.
 
 **What belongs here — only what an ordinary run cannot repair:**
 
-- **Organization** — a deletion, which needs an explicit request in chat: an entry that should not exist, named with the reason. Never log a split or merge: Task 1b applies it when its [proof](refactors.md#establish-evidence-and-complete-scope) holds and reports any other outcome in the run.
+- **Organization** — a deletion, which needs an explicit request in chat: an entry that should not exist, named with the reason. Never log a split or merge: Task 1b applies it when its [proof](refactors.md#establish-evidence-and-complete-scope) holds and reports any other outcome in the run. An existing split or merge item that a refactor blocker stops stays open under the closeout above.
 - **Unsettled conflicts** — a conflict between entries, between an entry and its cited source, or between a cited source's figure or reason and standard references, that neither the cited source nor a direct derivation settles, and that stays open because the standard references consulted disagree or none is reachable. Name the surfaces, both claims with their source pages, and the references consulted.
 - **Missing evidence** — a repair whose only evidence is a cited page that no longer answers, now serves another document, or lost the supporting section, when accurate background cannot carry the repair. Name the address and the claim.
 - **User-owned state decisions** — a change only the user's own state can decide, such as conflicting user-owned metadata, named with its surfaces and the decision needed.
 
-Everything else is Task 1b's work and is repaired, not logged: a depth or core-facet gap the entry's cited sources or accurate background can fill, a missing entry, over-qualification, an unexplained statement, a self-containment or acronym gap, a conflict the evidence settles, own-field framing, off-subject scaffolding or catalogs, a duplicated explanation, notation drift, a synonym-duplicate entry, an entry that fails the atomicity test, a wrong title and an invalid alias. An entry thin only because the chapter or document that teaches it has not been built yet is expected and temporary: never propose filling it from that unbuilt source, whose later build as a whole (a wiki-build request naming it) fills the entry in, under [*Deepening*](source-backed-corrections.md).
+Everything else is Task 1b's work and is repaired, not logged: a depth or core-facet gap the entry's cited sources or accurate background can fill, a missing entry, over-qualification, an unexplained statement, a self-containment or acronym gap, a conflict the evidence settles, own-field framing, off-subject scaffolding or catalogs, a duplicated explanation, notation drift, a synonym-duplicate entry, an entry that fails the atomicity test, a wrong title the [retitle protocol](refactors.md#retitle-an-entry) decides and an invalid alias. An entry thin only because the chapter or document that teaches it has not been built yet is expected and temporary: never propose filling it from that unbuilt source, whose later build as a whole (a wiki-build request naming it) fills the entry in, under [*Deepening*](source-backed-corrections.md).
 
 **The gate — each item is:** (1) a **genuine** improvement worth the user's time, not a nitpick; (2) **specific and located** — which entry or entries, and what to do; (3) **not already handled** — never log what this run repaired or could repair under Task 1b (that is in the report), and never log something whose right fix is a *skill* change (a content **pattern a known or rule-owning producer keeps generating** belongs in that producer's skill log; this log is for improving the **specific notes as they stand**); (4) **real** — if nothing this run is worth noting, write nothing; never invent filler.
 

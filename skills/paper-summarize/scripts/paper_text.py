@@ -25,7 +25,10 @@ Four modes, all over one page-indexed extraction:
                   excluded from the note (references/note-format.md).
                   A heading is a short line that is
                   *only* a heading; prose that merely opens with a section
-                  word is not one.
+                  word is not one, and neither is a running head repeated
+                  at the top or bottom of many pages (`Nature Methods`).
+                  A head that is the section's own name (`1 Introduction`)
+                  still starts the section on its first page.
 
 Matching is deliberately forgiving, because a PDF's text layer is not the
 page: Unicode is NFKC-folded, the six dash characters and the curly quotes are
@@ -94,10 +97,20 @@ _TRANSLATE = {
 #: is that `Supplementary`, `Suppl.`, `Supp.` and `Extended Data` all land in
 #: `S`.  Without the marker group `Supplementary Figure 1` counted toward
 #: figure 1, which is a different figure.
+#:
+#: A marker word may be broken across a line by a hyphen (`Supplemen-` /
+#: `tary Fig. 14`, common in two-column journals).  Each marker is matched in
+#: that broken form too, or the reference counts as main-text Figure 14: a
+#: hyphen and spaces may sit between any two of its characters.
+_FIG_MARKER = "|".join(
+    r"\s+".join(r"(?:-\s*)?".join(re.escape(ch) for ch in word)
+                for word in marker)
+    for marker in (("supplementary",), ("supplemental",), ("suppl.",),
+                   ("supp.",), ("extended", "data")))
 _FIG_ENDPOINT = r"(?:si|ed|[a-z][.-]?)?\d+(?:\.\d+)*"
 _FIG_LABEL = _FIG_ENDPOINT + r"(?:-" + _FIG_ENDPOINT + r")*"
 _FIG_REF = re.compile(
-    r"(?:\b(?P<marker>supplementary|supplemental|suppl\.|supp\.|extended\s+data)\s+)?"
+    r"(?:\b(?P<marker>" + _FIG_MARKER + r")\s+)?"
     r"\bfig(?:ure)?(?P<plural>s)?\.?\s*"
     # A hierarchical label is `1.2` or `1-2`; a *range* is `1-3` after a plural.
     # Reading "Figures 1-3" as one label `1-3` scores a figure no run can write
@@ -143,7 +156,11 @@ _ED_MARKER = "extended data"
 #: prefixes of a normalised line so `Conflicts of Interest Statement` and
 #: `Conflict of interest:` both land in one bucket.
 _SECTIONS = [
-    ("abstract", ("abstract", "summary")),
+    ("abstract", ("abstract", "summary", "executive summary", "author summary",
+                  "lay summary", "plain language summary", "editor's summary",
+                  "technical summary", "non-technical summary",
+                  "plain english summary", "scientific summary",
+                  "research summary", "structured summary")),
     ("introduction", ("introduction", "background")),
     ("methods", ("methods", "materials and methods", "method",
                  "experimental procedures", "study design")),
@@ -163,6 +180,15 @@ _SECTIONS = [
                       "pre-registration")),
     ("references", ("references", "bibliography", "literature cited")),
 ]
+
+#: Section words that start a heading only as the whole part.  A form heading
+#: such as `Reporting summary` ends in `summary` and is not an abstract; the
+#: summaries that are abstracts are listed above in full.
+_WHOLE_ONLY = {"summary"}
+
+#: How many lines at the top and at the bottom of a page can hold a running
+#: head or footer.
+_EDGE_LINES = 3
 
 
 def normalize(text, fold_case=True):
@@ -389,10 +415,57 @@ def cites(pages, ed_prefix="S"):
                 label = re.sub(r"\A(si|ed|[a-z])", lambda x: x.group(1).upper(),
                                label, flags=re.I)
                 if marker and not label[0].isalpha():
-                    clean_marker = re.sub(r"\s+", " ", marker).lower().rstrip(".")
+                    clean_marker = re.sub(r"\s+", " ", re.sub(r"-\s*", "", marker)
+                                          ).lower().rstrip(".")
                     label = (ed_prefix if clean_marker == _ED_MARKER else "S") + label
                 counts[label] = counts.get(label, 0) + 1
     return counts
+
+
+def _page_lines(raw):
+    """A page's non-blank lines, normalized."""
+    return [norm for norm in (normalize(line) for line in raw.splitlines()) if norm]
+
+
+def _at_edge(k, count):
+    """True when line `k` of `count` is among a page's top or bottom lines."""
+    return k < _EDGE_LINES or k >= count - _EDGE_LINES
+
+
+def _furniture(page_lines):
+    """Lines repeated at the top or bottom of many pages: running heads.
+
+    A journal's running head (`Nature Methods`) ends in a section word, and
+    read as a heading it put Methods on every page it heads.  A line counts
+    when it is among the edge lines of at least max(3, a quarter of the
+    pages with text) pages.
+    """
+    pages = [lines for lines in page_lines if lines]
+    need = max(3, len(pages) // 4)
+    counts = {}
+    for lines in pages:
+        for line in {line for k, line in enumerate(lines)
+                     if _at_edge(k, len(lines))}:
+            counts[line] = counts.get(line, 0) + 1
+    return {line for line, count in counts.items() if count >= need}
+
+
+#: Leading section numbering: `1 `, `2.3 `, `IV. `.
+_NUMBERING = re.compile(r"\A[\s#*]*(?:[0-9]+(?:\.[0-9]+)*|[IVXLC]+)[.)]?\s+")
+
+
+def _only_section_names(norm):
+    """True when a line, numbering aside, is nothing but section names.
+
+    `1 Introduction` and `Discussion and conclusions` are; a qualified
+    line such as `Nature Methods` is not.
+    """
+    norm = _NUMBERING.sub("", norm).casefold().strip(" :\u2014\u2013-*#.")
+    parts = [part.strip(" .:-")
+             for part in re.split(r"[,/&]| and (?=\w)", norm)]
+    return bool(norm) and all(
+        any(part == s for _name, starts in _SECTIONS for s in starts)
+        for part in parts)
 
 
 def sections(pages):
@@ -409,14 +482,24 @@ def sections(pages):
 
     So: strip any leading numbering, reject anything punctuated like a sentence,
     split the rest on the separators a compound heading uses, and require each
-    part to be a handful of words ending in a section name.
+    part to be a handful of words ending in a section name.  A line repeated
+    at the top or bottom of many pages is a running head (`_furniture`), and
+    it is skipped in those places.  A book or thesis may head its pages with
+    the section's own name (`1 Introduction`); that line still starts the
+    section on the first page it appears.
     """
     out = {}
-    for i, raw in enumerate(pages, start=1):
-        for line in raw.splitlines():
-            norm = normalize(line).strip()
-            norm = re.sub(r"\A[\s#*]*(?:[0-9]+(?:\.[0-9]+)*|[IVXLC]+)[.)]?\s+",
-                          "", norm)
+    page_lines = [_page_lines(raw) for raw in pages]
+    furniture = _furniture(page_lines)
+    seen = set()
+    for i, lines in enumerate(page_lines, start=1):
+        for k, norm in enumerate(lines):
+            if norm in furniture:
+                if _at_edge(k, len(lines)) and (
+                        norm in seen or not _only_section_names(norm)):
+                    continue                  # a running head, not a heading
+                seen.add(norm)
+            norm = _NUMBERING.sub("", norm)
             # "Funding: supported by Acme Pharma." is a heading with its
             # content on the same line, which is how most journals set the
             # statements this looks for.  Take what precedes the first colon
@@ -436,7 +519,9 @@ def sections(pages):
                     if not part or len(part.split()) > 4:
                         continue
                     for name, starts in _SECTIONS:
-                        if any(part == s or part.endswith(" " + s) for s in starts):
+                        if any(part == s or (s not in _WHOLE_ONLY
+                                             and part.endswith(" " + s))
+                               for s in starts):
                             out.setdefault(name, [])
                             if i not in out[name]:
                                 out[name].append(i)
@@ -620,6 +705,18 @@ def run_self_test():
     case("extended data folds to S by default", sorted(cites(ed)), ["S1"])
     case("extended data honours --ed-prefix ED",
          sorted(cites(ed, "ED")), ["ED1"])
+    # A marker word hyphen-broken across a line is still a marker; read
+    # without it, `Supplemen-/tary Fig. 14` counted as main Figure 14.
+    case("a hyphen-broken supplementary marker keeps its namespace",
+         [cites([text]) for text in (
+             "Results are robust (Supplemen-\ntary Fig. 14).",
+             "(Sup-\nplementary Fig. 1a)",
+             "(Sup- plementary Fig. 17)")],
+         [{"S14": 1}, {"S1": 1}, {"S17": 1}])
+    case("a hyphen-broken extended data marker honours --ed-prefix ED",
+         cites(["(Ex-\ntended Data Fig. 2)"], "ED"), {"ED2": 1})
+    case("a hyphen-broken word that is not a marker is not one",
+         cites(["see Fig. 2 and the sup-\nplement"]), {"2": 1})
 
     # Prose that merely begins with a section word is not a heading: the old
     # rule fired on every one of these, and step 10 uses the results page range
@@ -646,6 +743,44 @@ def run_self_test():
          sections(["Funding: This research was supported by the Example Research "
                    "Council through its investigator grant programme."]),
          {"funding": [1]})
+    # A journal's running head ends in a section word; read as a heading, it
+    # put Methods on every page it heads.  The one real heading stays.
+    _heads = ["Nature Methods\nArticle\nWe report a method.\n1",
+              "Nature Methods\nArticle\nMethods\nWe did this.\n2",
+              "Nature Methods\nArticle\nMore text.\n3",
+              "Nature Methods\nArticle\nThe end.\n4"]
+    case("a repeated running head is not a heading", sections(_heads),
+         {"methods": [2]})
+    case("a repeated running footer is not a heading",
+         sections(["Text one.\nNature Methods", "Text two.\nNature Methods",
+                   "Methods\nText three.\nNature Methods"]),
+         {"methods": [3]})
+    # A book or thesis heads its pages with the section's own name.  The
+    # section starts on the first page it heads, and only there.
+    case("a section-named running head starts its section once",
+         sections(["Abstract\nWe study x.\n1"]
+                  + ["1 Introduction\nText %d.\n%d" % (p, p) for p in (2, 3, 4)]
+                  + ["2 Methods\nText %d.\n%d" % (p, p) for p in (5, 6, 7)]
+                  + ["Results\nText %d.\n%d" % (p, p) for p in (8, 9, 10)]),
+         {"abstract": [1], "introduction": [2], "methods": [5],
+          "results": [8]})
+    # `Summary` is an abstract only as the whole heading: the Nature
+    # Portfolio form heading `Reporting summary` is not one.
+    case("a reporting summary is not an abstract",
+         sections(["Reporting summary"]), {})
+    case("the abstract-like summaries are still abstracts",
+         [sections([text]).get("abstract")
+          for text in ("Executive summary", "Author summary", "Summary")],
+         [[1], [1], [1]])
+    case("technical and plain-English summaries are abstracts",
+         [sections([text]).get("abstract")
+          for text in ("Technical summary", "Non-technical summary",
+                       "Plain English summary", "Scientific summary")],
+         [[1], [1], [1], [1]])
+    case("qualified methods headings still count",
+         [sections([text]).get("methods")
+          for text in ("Patients and methods", "Statistical methods")],
+         [[1], [1]])
     # A range after a plural is a range, not a hierarchical label. Every
     # implied member and every label in a compact list contributes to the
     # tiebreak; otherwise a figure mentioned only in a list reads as uncited.

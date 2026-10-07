@@ -25,12 +25,14 @@ while it fails, extract nothing. The shipped scripts are the implementation;
 do not copy their caption detection or crop logic into a separate script.
 
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
-entries. An unspecified “process this PDF” request needs a stated
+entries. It edits a note only to move links during an Extended Data switch
+(step 2). An unspecified “process this PDF” request needs a stated
 deliverable before selecting a workflow. Only captioned, numbered figures are
 extracted; unnumbered exhibits are reported, not cropped. A request for one
-specific figure runs the normal batch on that PDF: it adds that PDF's missing
-crops and leaves existing ones in place, and the report names the requested
-label's outcome. A request to re-crop a bad figure uses the repair in
+specific figure runs the normal batch on that PDF (for a split book, on its
+chapter folder; see step 1): it adds that PDF's missing crops and leaves
+existing ones in place, and the report names the requested label's outcome.
+A request to re-crop a bad figure uses the repair in
 [step 3](#3-inspect-the-summary-and-verify-crops).
 
 Normally read `Sources/PDFs/` recursively and write to the **flat**, shared
@@ -47,9 +49,14 @@ Run `pdf-organize` first if the sources do not have canonical filenames;
 Inbox PDFs need organizing and filing before ordinary vault extraction.
 Every crop uses the source's exact on-disk stem, so a later rename requires
 the organizer's guarded repair. The batch helper refuses unorganized names.
+`--adopt-legacy` is not extraction: it
+[records existing crops](references/review-and-repair.md#adopt-legacy-crops)
+under the current name, which pdf-organize needs before renaming that PDF.
 Use `--allow-unorganized` only for a deliberate one-off exception, including
 an explicit user instruction not to rename or import, and explain that
-downstream source identity will depend on the current name. The shared
+downstream source identity will depend on the current name. Even then, a
+stem that starts with `#` or has surrounding whitespace, a tab, a slash or a
+backslash is refused, because the figure sidecars cannot record it. The shared
 rule is [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first).
 
 Folder sweeps skip [feed-owned attachments](../../shared/CONVENTIONS.md#1c-feed-owned-attachments)
@@ -77,10 +84,17 @@ shares a PDF basename, report both paths and give the user the
 
 **In a recursive run containing both a book and its chapters, extract the
 chapters and skip the whole book.** The skip is scoped to this run, not a
-standing fact about the vault. Naming the book PDF directly selects it;
-`--include-split-books` deliberately selects both representations and may
-produce duplicate figures. Existing whole-book figures are reported, never
-automatically deleted.
+standing fact about the vault. A split book's figures are its chapters'
+figures: a request that names a split book, or one of its figures, runs on
+its chapter folder and reports the requested figures from the chapter crops.
+The batch refuses a named book whose chapters are in the vault and names that
+folder; a run that only [adopts](references/review-and-repair.md#adopt-legacy-crops)
+the book's legacy crops records them and extracts nothing.
+Only `--include-split-books` deliberately selects both representations
+and may produce duplicate figures. Pass it only when the user explicitly asks
+for the book's duplicate figures, never for a request that names a split book
+or one of its figures. Existing whole-book figures are reported,
+never automatically deleted.
 
 ### 2. Extract with the shipped batch command
 
@@ -125,6 +139,9 @@ yet whose captions (the `raw` column of `auto_fig_bbox.py`) number Extended
 Data figures separately; otherwise switch a PDF only through the rerun its
 summary prints, following
 [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
+In a vault, the switch relinks notes and canvases in the same run, as a
+rename does
+([details](references/review-and-repair.md#extended-data-and-supplementary-figures)).
 
 Output is `[pdf_stem]_fig_<label>.png`, with the exact PDF stem including
 `_src` and disambiguators. The label comes from the caption, **not extraction
@@ -137,7 +154,8 @@ never rename legacy output to match new examples.
 
 **Read the complete summary before reporting success.** Check written and
 verified-skipped counts separately from refused PDFs, blank crops, failed
-writes, occupied names, and PDFs that could not be read. A detected caption is
+writes, existing crops `--overwrite` kept, occupied names, and PDFs that could
+not be read or were not processed. A detected caption is
 not proof that an image reached disk.
 
 Use [review and repair](references/review-and-repair.md) for any flagged crop,
@@ -180,7 +198,9 @@ Give the source scope, output folder, figures written, verified skips, and any
 legacy adoptions. For a one-figure request, state the requested label's
 outcome. Name skipped whole books and feed-owned attachments, unnumbered
 exhibits, refused sources, conflicting occupants, failed PDFs, remaining
-warnings, and explicit crop repairs. State what visual review was completed,
+warnings, and explicit crop repairs. After an Extended Data switch, name the
+relinked notes, each S crop kept because a link could not move, and each
+leftover S crop. State what visual review was completed,
 the review marks recorded, and the unviewed or doubtful crops left unmarked. After a
 nonzero run, report the PDFs that succeeded without calling the whole request
 complete. Preserve originals, legacy panels, and all unrelated images.

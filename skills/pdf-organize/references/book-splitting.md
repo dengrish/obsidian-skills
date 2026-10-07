@@ -14,8 +14,11 @@ that folder goes beside the book. Either way, pass its absolute path as
 removes it again if the split fails. **The original book stays where it is;
 chapters are additions, not replacements.**
 
-If the folder already contains chapter-pattern PDFs, stop and report that the
-book was split before. Those filenames are authoritative. Never re-abbreviate
+If that folder, or the chapter folder of the book's other copy (the same
+stem with or without `_src`, such as `Kuhn_StructSciRev_2012_src/`), already
+contains chapter-pattern PDFs of this book, stop and report that the book was
+split before. The two copies share one chapter set. Those filenames are
+authoritative. Never re-abbreviate
 an existing set: a future explicitly requested re-split must reuse those
 names or not proceed. The helper refuses occupied targets; an existing set
 is not permission to overwrite or delete it.
@@ -171,9 +174,12 @@ book in increasing chapter order, remain under 200 bytes, and have an
 unoccupied destination both locally and vault-wide. With a vault, a new
 chapter stem must not already name any `Articles/` note or `_fig*` image, even
 one left by an earlier split of this book, because the helper cannot tell who
-derived it. Resolve that blocker as the helper's message directs; otherwise
-choose another chapter name. Occupied symlinks and case-equivalent names also
-block.
+derived it. Such a stem follows the SKILL's
+[target-stem rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
+for each chapter: for figure-extract crops or a reading note of this same
+chapter, keep the book unsplit and ask that rule's question; for any other
+occupant, re-plan now under another chapter name and split.
+Occupied symlinks and case-equivalent names also block.
 A refused split lists every unresolved problem and exits nonzero; do not
 bypass one by extracting just the chapters that passed.
 
@@ -185,8 +191,9 @@ claiming success.
 ## 5. Verify and report
 
 Report created filenames and physical page ranges, any adjusted start/end
-pages, uncovered pages, and unresolved boundaries. Say explicitly that the
-original book was kept. A refused or unreadable book is a per-file batch
+pages, uncovered pages, and unresolved boundaries. For a chapter named around
+another source's files, also report its natural name, those occupants and the
+question for the user. Say explicitly that the original book was kept. A refused or unreadable book is a per-file batch
 outcome; report its message in plain language and continue other independent
 files.
 
@@ -208,7 +215,8 @@ checking. This skill does not extract or delete figures.
   open error. This needs a valid source, not OCR.
 - **Encrypted input that cannot be unlocked:** report and stop that file.
 - **Already a single chapter or an existing split:** leave the chapter set
-  intact; a chapter may be renamed through the normal guard, not split again.
+  intact; a chapter may be renamed through the normal guard within its
+  `<book core>_NN_Name` form, not split again.
 - **Parser check fails (including missing or outdated `pypdf`):** follow
   runtime dependency guidance, and run neither `pages` nor `split` in that
   interpreter. The stdlib rename helper remains available.

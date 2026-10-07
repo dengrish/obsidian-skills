@@ -177,7 +177,10 @@ apply-capable run has one of these:
   the run consumed;
 - a note-content item the active workflow routes to a content log;
 - an existing open or fixed item, in a log its workflow names, that this run
-  fixed, verified or saw recur (search that log for the run's outputs);
+  fixed, verified while it had no **Verified** line, or saw recur (search
+  that log for the run's outputs); rechecking a fixed item that already has a
+  **Verified** line and did not recur counts only when the user asked to
+  re-verify it;
 - a missing canonical log for this plugin's skills.
 
 When the run only adds or updates open items, the rules'

@@ -28,6 +28,7 @@ VERDICTS
 
 Candidate-to-candidate matches carry ``matched_via: "candidate"`` and also
 appear in ``candidate_collisions``. Review them before writing either entry.
+A title listed twice is two candidates claiming one slug, so list each once.
 Probes (f) and (g) are enabled by default and can be disabled independently.
 The token-superset probe is deliberately absent from wiki-lint's whole-vault
 sweep, where qualified terms alongside broader concepts are often intentional.
@@ -536,8 +537,6 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
             result["matches"].append(match)
 
     for peer_title, peer_slug in (peers or []):
-        if peer_title == title:
-            continue
         for probe in _probe_pair(keys, peer_slug, use_stem=use_stem,
                                  use_superset=use_superset):
             implied = _implies(probe)
@@ -627,14 +626,17 @@ def check_candidates(titles, index, use_stem=True, use_superset=True,
         except SlugError:
             prepared.append((title, None))
 
-    peers = [(t, s) for t, s in prepared if s] if include_peers else []
-
     targets = build_targets(index)          # once, not once per candidate
     blockers = _creation_blockers(index)
+    # Each candidate's peers leave out only its own position: a title listed
+    # twice is two candidates claiming one slug.
     results = [check_candidate(t, index, use_stem=use_stem,
-                               use_superset=use_superset, peers=peers,
+                               use_superset=use_superset,
+                               peers=([(pt, ps) for j, (pt, ps)
+                                       in enumerate(prepared) if j != i and ps]
+                                      if include_peers else []),
                                targets=targets, creation_blockers=blockers)
-               for t in titles]
+               for i, t in enumerate(titles)]
 
     seen_pairs, pairwise = set(), []
     for res in results:
@@ -793,7 +795,15 @@ def run_self_test():
                 ("an indented-key parse error",
                  {"existing-entry.md": existing.replace(
                      "type: Concept", "type: Concept\n  nested: x")},
-                 "adjudicate")):
+                 "adjudicate"),
+                ("an empty plain note",
+                 {"existing-entry.md": existing, "Untitled.md": ""}, "create"),
+                ("a plain note without frontmatter",
+                 {"existing-entry.md": existing, "readme.md": "# Notes\n"},
+                 "create"),
+                ("an unclosed frontmatter fence",
+                 {"existing-entry.md": existing,
+                  "broken.md": '---\ntitle: "Broken"\n'}, "adjudicate")):
             metadata_wiki = os.path.join(tmp, "metadata-" + label.replace(" ", "-"))
             for rel, text in files.items():
                 dest = os.path.join(metadata_wiki, rel)
@@ -806,6 +816,48 @@ def run_self_test():
                   % (label, "allows" if want == "create" else "blocks"),
                   (rep["results"][0]["verdict"], bool(rep["index_problems"])),
                   (want, True))
+        rep = check_candidates(["Untitled"], _vault_index.build_index(
+            os.path.join(tmp, "metadata-an-empty-plain-note")))
+        check("...but the plain note's own filename is no merge destination",
+              (rep["results"][0]["verdict"],
+               [m["entry_path"] for m in rep["results"][0]["matches"]]),
+              ("adjudicate", ["Untitled.md"]))
+        # The user's issues text is item 2's, never an index problem.
+        issues_wiki = os.path.join(tmp, "zero-indent-issues")
+        os.makedirs(issues_wiki)
+        with open(os.path.join(issues_wiki, "existing-entry.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(existing.replace(
+                'issues: ""',
+                'issues:\n- "The opener is wrong"\n- the card is unclear'))
+        rep = check_candidates(["Existing entry", "A new unmatched term"],
+                               _vault_index.build_index(issues_wiki),
+                               include_peers=False)
+        check("an entry whose issues list has no indent is a clean merge "
+              "destination and blocks no create",
+              ([r["verdict"] for r in rep["results"]], rep["index_problems"]),
+              (["merge", "create"], []))
+        # A lost, `----` or `--- text` closing fence leaves the separator
+        # above `## Flashcards` to close the frontmatter: no safe destination.
+        lost_verdicts = []
+        for n, fence in enumerate(("", "----\n", "--- closed\n")):
+            lost_wiki = os.path.join(tmp, "lost-fence-%d" % n)
+            os.makedirs(lost_wiki)
+            with open(os.path.join(lost_wiki, "roc-curve.md"), "w",
+                      encoding="utf-8") as fh:
+                fh.write(_st_entry_text("ROC curve", aliases=["auroc"]).replace(
+                    'issues: ""\n---\n', 'issues: ""\n' + fence)
+                    + "\n---\n\n## Flashcards\n\nWhat does a ROC curve plot?"
+                    "\n??\nROC curve\n")
+            rep = check_candidates(["ROC curve", "AUROC", "A new unmatched term"],
+                                   _vault_index.build_index(lost_wiki),
+                                   include_peers=False)
+            lost_verdicts.append(([r["verdict"] for r in rep["results"]],
+                                  [p.endswith("closes it")
+                                   for p in rep["index_problems"]]))
+        check("a frontmatter that only the Flashcards separator closes is "
+              "reported and blocks merges and creates",
+              lost_verdicts, [(["adjudicate"] * 3, [True])] * 3)
 
         # An online page's URL is valid provenance (CONVENTIONS section 7): it
         # is no index problem and leaves its entry a safe merge destination.
@@ -968,8 +1020,8 @@ def run_self_test():
               [(r.get("naming"), r["verdict"]) for r in (
                   probe("Entropy"), probe("Entropies"),
                   probe("Entropy (information theory)"))],
-              [(["bare-common-noun"], "create"), (None, "create"),
-               (None, "create")])
+              [(["bare-common-noun"], "create"),
+               (["bare-common-noun"], "create"), (None, "create")])
         check("a bare cross-domain phrase slug is flagged too; its qualified "
               "title is not",
               [r.get("naming") for r in (
@@ -1018,6 +1070,14 @@ def run_self_test():
         check("a candidate never collides with itself",
               [c for c in rep["candidate_collisions"]
                if c["candidates"][0] == c["candidates"][1]], [])
+        rep = check_candidates(["Principal component analysis"] * 2, empty)
+        check("a title listed twice is two candidates claiming one slug",
+              (rep["summary"],
+               [(c["candidates"], c["probe"], c["implies"])
+                for c in rep["candidate_collisions"]]),
+              ({"create": 0, "merge": 0, "adjudicate": 2},
+               [(["Principal component analysis"] * 2, "a-slug-equality",
+                 "adjudicate")]))
 
         # Distinct physical destinations cannot be reduced to one decisive
         # merge merely because they claim the same filename or alias.

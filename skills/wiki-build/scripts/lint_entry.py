@@ -14,10 +14,16 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               with replacement characters), read, or linted
   1   1-valid-yaml            frontmatter fenced by ---, parses (a key's colon
                               is followed by a space), no dupe keys; the
-                              issues: value's lines are left to item 2
+                              issues: value's lines are left to item 2, but
+                              a frontmatter that only the separator above
+                              ## Flashcards closes is reported here
   2   2-field-order           schema order; mandatory keys present
                               (parents: present, `[]` when empty; read:
                               then issues: last)
+  2   2-parents-form          parents: is `[]` or a block list of distinct
+                              canonical wikilinks (no label, heading, block
+                              anchor or `.md`), never a MOC; a discipline
+                              root's parents: is `[]`
   2   2-obsidian-key          an Obsidian-owned appearance/publish key; info,
                               report only, preserved on merge
   2   2-provenance            a legacy skill-provenance footer that does not
@@ -36,20 +42,24 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               carry `issues: ""` after read:
   2   2-issues-malformed      issues: is a mapping, a nested list, a list
                               item that is a collection, a duplicate key,
-                              or a value the line parser cannot read;
-                              warning, report only, preserved
+                              a value a YAML comment cuts off, or a value
+                              the line parser cannot read; warning, report
+                              only, preserved
   2   2-user-issues           issues: holds the user's issue text (a string or
                               a list of strings); info, preserved
                               byte-for-byte for wiki-lint
   3   3-dates                 created/updated are YYYY-MM-DD; created <= updated
-  4   4-sources               sources: is a list of PDF wikilinks with positive
-                              page anchors, unanchored markdown wikilinks or
-                              online pages' full http(s) URLs
+  4   4-sources               sources: is a list of at least one item: PDF
+                              wikilinks with positive page anchors,
+                              unanchored markdown wikilinks or online pages'
+                              full http(s) URLs
   4   4-duplicate-source      review a same-stem PDF/Markdown source pair;
                               provenance must establish whether the note is
                               about the PDF or is an independent clipping
                               (stems compared case- and
-                              NFC-insensitively, anchor and folder stripped)
+                              NFC-insensitively, anchor and folder stripped);
+                              also a chapter PDF beside its whole-book PDF
+                              (review only)
   5   5-slug                  re-run slugify on title:; must equal the filename
   5   5-bare-common-noun      the filename is a bare term from
                               special-titles.md's cross-domain corpus (shared
@@ -59,14 +69,21 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   6   6-api-surface           non-Software entry: fenced code or any
                               backticked identifier (error); a
                               code-identifier title or a library/how-to
-                              failure string (warning, author test decides)
+                              failure string (warning, review-only: a
+                              recorded author-test decision that it is no
+                              API use resolves it)
   7   7-description           one sentence, <= 110 chars (count reported),
                               plain text, no LaTeX/Markdown/HTML,
                               capitalised, ends "."
+      7-hedge-candidate       advisory: a frequency hedge in the description,
+                              the same words and exclusions as
+                              19-hedge-candidate
   8   8-tags                  exactly one #-prefixed, double-quoted enum slug
                               in block form; #misc is the sole fallback
   9   9-body-structure        body starts immediately with prose; body headings
-                              use plain-text ATX `##`, never Setext
+                              use plain-text ATX `##`, never Setext; a
+                              heading that repeats the title is deleted,
+                              never demoted
   9   9-person-event-date     Person/Event opener has a date parenthetical in
                               a documented form immediately after its bold
                               subject
@@ -108,9 +125,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               plain-text caption
       12-equation-coverage-candidate
                               corpus-backed defining prose or inline formula
-                              lacks canonical nearby display form; agent reviews
-      12-equation-format       an existing display has content on the same line
-                              as its `$$` delimiters
+                              lacks a nearby display equation; agent reviews
+      12-equation-format       an existing display is not in canonical block
+                              form (each `$$` alone on its line, a blank line
+                              above and below) or uses `&` or a row break
+                              outside an aligned or gathered environment
       12-equation-split-candidate
                               a display line holds more than one equation;
                               agent reviews
@@ -140,9 +159,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               entry's own subject -- an italicized also-called
                               synonym, or the opener's acronym/expansion
                               parenthetical -- whose slug is missing from
-                              aliases: (warning: the same-entity test and the
-                              cross-domain carve-out stay with the executing agent;
-                              a single-word candidate of a qualified or
+                              aliases: (warning, review-only: the same-entity
+                              test and the alias rule's carve-outs stay with
+                              the executing agent, and a recorded decision
+                              that the name stays out resolves it; a
+                              single-word candidate of a qualified or
                               common-noun subject carries the scanner's hint)
   19  19-flashcards          `## Flashcards` present on every entry except a
                               discipline root (`<discipline>.md` whose sole
@@ -255,10 +276,10 @@ Output: {root, entries:[{file, findings:[{item, severity, message,
 evidence}], title, aliases, description_chars}], alias_collisions[],
 summary{..., clean}, problems[]}.
 
-A populated ``parents:`` is deliberately NOT flagged -- wiki-lint writes
-that field on every entry, so a value there is the expected steady
-state.  Its quoting is covered by ``2-quoting`` and its presence by
-``2-field-order``.
+A populated, well-formed ``parents:`` is deliberately NOT flagged --
+wiki-lint writes that field on every entry, so a value there is the
+expected steady state.  Its form is covered by ``2-parents-form``, its
+quoting by ``2-quoting`` and its presence by ``2-field-order``.
 
 ``read: true`` is likewise NOT flagged: the value is the user's, and this
 script checks that the key is present (``2-field-order``), sits just
@@ -309,6 +330,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'equation_coverage',
     'introduced_aliases',
     'markdown_tables',
+    'naming',
     'note_provenance',
     'organism_names',
     'plurals',
@@ -390,12 +412,15 @@ from entry_structure import (  # noqa: E402
     flashcard_hedge_hints,
     flashcard_line1_markup,
     flashcard_line1_faults,
+    first_prose_paragraph,
+    heading_repeats_title,
+    is_review_metadata_block,
     math_title_plain_text,
     normalized_answer_surface,
-    opening_paragraph,
     opener_subject_date_status,
     parse_flashcard_blocks,
     title_display_form,
+    without_leading_title_heading,
 )
 from markdown_tables import (  # noqa: E402
     caption_faults as _caption_faults,
@@ -403,6 +428,7 @@ from markdown_tables import (  # noqa: E402
     markdown_table_spans,
     mask_line_spans,
 )
+from naming import chapter_book_stem, core_stem  # noqa: E402
 # Per-entry checks shared with wiki-lint's scanner (one copy).
 from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
@@ -448,8 +474,11 @@ from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
     _KEY_RE,
     extract_wikilinks,
+    flashcards_close_error,
     fold_name,
+    issues_spans,
     iter_markdown_files,
+    outside_issues,
     parse_frontmatter,
     split_sections,
     unquote_scalar,
@@ -747,20 +776,33 @@ def _issues_collection(raw):
         or (text[0] not in "\"'" and bool(re.search(r":(?:[ \t]|$)", text))))
 
 
+def _cuts_comment(raw):
+    """Whether YAML reads part of one raw ``issues:`` value or item as a comment.
+
+    An unquoted ``#`` at its start or after a space or tab cuts the user's
+    text off, even to blank, so the value is malformed rather than read short.
+    """
+    return strip_comment(raw).strip() != raw.strip()
+
+
 def _issues_value(fm, lines):
     """Classify ``issues:`` as ``(state, form, texts)``.
 
     ``state`` is ``missing``, ``blank``, ``user`` or ``malformed``; ``form``
     is ``string`` or ``list`` for user text, else None.  Every blank spelling
     (``""``, a bare key, ``null``, ``~``, ``''``, ``[]``) is ``blank``.  A
-    value this line parser cannot read is ``malformed``, as in scan_vault.
+    value this line parser cannot read, or one a YAML comment cuts off, is
+    ``malformed``, as in scan_vault.
     """
     field = fm.get("issues")
     if field is None:
         return "missing", None, []
-    spans = _issues_spans(fm, lines)
+    spans = issues_spans(fm, lines)
     if len(spans) != 1:
         return "malformed", None, []        # a duplicate issues: key
+    # The parsed raw_value is already comment-stripped: test the raw line.
+    if _cuts_comment(_KEY_RE.match(lines[spans[0][0]]).group("rest")):
+        return "malformed", None, []
     indents = []
     for line in lines[spans[0][0] + 1:spans[0][1]]:
         if not line.strip() or line.lstrip().startswith("#"):
@@ -769,6 +811,8 @@ def _issues_value(fm, lines):
         if not item:
             # A block mapping, a block scalar's body, a wrapped scalar or
             # stray text: never guess the user's text from it.
+            return "malformed", None, []
+        if _cuts_comment(line[item.end():]):
             return "malformed", None, []
         indents.append(len(item.group("indent")))
     if len(set(indents)) > 1 or (indents and field.kind != "block_list"):
@@ -795,35 +839,28 @@ def _issues_value(fm, lines):
     return "user", "list" if field.is_list else "string", texts
 
 
-def _issues_spans(fm, lines):
-    """``(key, end)`` 0-based line spans owned by each ``issues:`` key.
-
-    A span runs from the key line to the line before the next column-0 key
-    or the closing fence, as in scan_vault's ``issues_spans``.
-    """
-    close = fm.body_start_line - 2          # the closing fence, 0-based
-    keys = [i for i in range(1, close) if _KEY_RE.match(lines[i])]
-    return [(i, (keys[k + 1:] or [close])[0]) for k, i in enumerate(keys)
-            if _KEY_RE.match(lines[i]).group("key") == "issues"]
-
-
 def _drop_issues_errors(fm, lines):
     """Leave the ``issues:`` value's lines to item 2, as scan_vault does.
 
     ``2-issues-malformed`` or ``2-user-issues`` is the only finding on them:
     their parser errors are neither ``1-valid-yaml`` findings, which a
     builder would repair by re-quoting the user's text, nor an unreadable
-    line that voids a discipline root.
+    line that voids a discipline root.  vault_index's ``outside_issues``
+    drops the same lines from its index.
     """
-    if not fm.found:
-        return
-    owned = {str(i + 1) for start, end in _issues_spans(fm, lines)
-             for i in range(start, end)}
+    fm.errors[:] = outside_issues(fm, lines)
 
-    def on_issues(error):
-        hit = re.match(r"line (\d+): ", error)
-        return bool(hit) and hit.group(1) in owned
-    fm.errors[:] = [error for error in fm.errors if not on_issues(error)]
+
+def _flashcards_close_error(fm, lines):
+    """Report a frontmatter that only the separator above ``## Flashcards`` closes.
+
+    vault_index's ``flashcards_close_error`` detects it and keeps the same
+    error in its index; here the fence line becomes a ``1-valid-yaml``
+    error, as scan_vault reports it under item1.
+    """
+    error = flashcards_close_error(fm, lines)
+    if error:
+        fm.errors.append(error)
 
 
 def _check_issues(fm, lines, findings):
@@ -834,8 +871,9 @@ def _check_issues(fm, lines, findings):
         findings.append(_f(
             "2-issues-malformed", "warning",
             "issues: is a mapping, a nested list, a list item that is a "
-            "collection, a duplicate key, or a value the line parser cannot "
-            "read -- REPORT ONLY; preserve the user's text exactly",
+            "collection, a duplicate key, a value a YAML comment cuts off, or "
+            "a value the line parser cannot read -- REPORT ONLY; preserve the "
+            "user's text exactly",
             {"line": field.line, "report_only": True}))
     elif state == "user":
         findings.append(_f(
@@ -855,8 +893,9 @@ def _check_sources(fm, findings):
         return  # The mandatory-key check already reports a missing field.
     if not any(value not in (None, "") for value in field.values):
         findings.append(_f(
-            "2-field-order", "error",
-            "sources: is empty; it must hold at least one item"))
+            "4-sources", "error",
+            "sources: is empty; every entry, a discipline root included, "
+            "needs at least one source"))
     if not field.values:
         return
     if not field.is_list:
@@ -996,6 +1035,17 @@ def _check_description(fm, findings, title=None):
         findings.append(_f("7-description", "error",
                            "description does not end with a period",
                            {"description": desc}))
+    # The hedge sweep covers the description as well as the card. The card's
+    # frequency-hedge word list applies here unchanged; it is a review
+    # candidate, never a fault.
+    hedge_words = flashcard_hedge_hints(desc)
+    if hedge_words:
+        findings.append(_f(
+            "7-hedge-candidate", "warning",
+            "description hedges its claim with a frequency word; state the "
+            "ordinary case plainly when the note establishes it",
+            {"words": hedge_words, "description": desc,
+             "agent_review": True}))
 
 
 def _check_body_structure(fm, sections, findings):
@@ -1011,7 +1061,10 @@ def _check_body_structure(fm, sections, findings):
             "body must begin immediately after frontmatter with no blank line"))
 
     prose = "\n".join(sections["prose_lines"])
-    if not body_opens_with_prose(prose):
+    title = fm.scalar("title") or ""
+    # A leading heading that repeats the title gets its own delete finding
+    # below; the body then opens at the line after it.
+    if not body_opens_with_prose(without_leading_title_heading(prose, title)):
         findings.append(_f(
             "9-body-structure", "error",
             "body must open with a prose sentence that states the entry's main claim"))
@@ -1030,7 +1083,13 @@ def _check_body_structure(fm, sections, findings):
         if line_i in table_rows:
             continue
         heading = re.match(r"^ {0,3}(#{1,6})[ \t]+(.+?)\s*$", line)
-        if heading:
+        if heading and heading_repeats_title(heading.group(2), title):
+            findings.append(_f(
+                "9-body-structure", "error",
+                "body heading repeats the entry title -- delete it, never "
+                "demote it; Obsidian shows the filename as the inline title",
+                {"body_line": line_i + 1, "text": line.strip()[:160]}))
+        elif heading:
             faults = []
             if heading.group(1) != "##":
                 faults.append("level must be exactly ##")
@@ -1325,11 +1384,16 @@ def _check_alias_completeness(fm, sections, findings, filename):
     """Item 17's completeness half: body-introduced names must be aliases.
 
     Warning, never error: the same-entity test ("*dummy attributes* names the
-    produced attributes, not the encoding") and the cross-domain bare-term
-    carve-out are judgment, so the finding hands the executing agent a candidate, not a
-    verdict.  The three mechanical exclusions ARE applied: a form that slugs
-    identically to the filename, a singular/plural form already covered by the filename or ``aliases:``,
-    and a word from the designated cross-domain set, which never becomes an alias.
+    produced attributes, not the encoding") and the alias rule's carve-outs (a
+    cross-domain bare term, an acronym that spells an ordinary English word
+    such as MAD, an organism common name unsafe as a global alias) are
+    judgment, so the finding hands the executing agent a candidate, not a
+    verdict.  It is ``review_only``: a recorded decision that the name stays
+    out resolves it, and a run never adds an unsafe alias to silence it.  The
+    three mechanical exclusions ARE applied: a form that slugs identically to
+    the filename, a singular/plural form already covered by the filename or
+    ``aliases:``, and a word from the designated cross-domain set, which
+    never becomes an alias.
     """
     title = fm.scalar("title") or ""
     aliases = fm.values("aliases")
@@ -1344,9 +1408,13 @@ def _check_alias_completeness(fm, sections, findings, filename):
             "17-alias-completeness", "warning",
             "the body introduces %r (%s) as a name for the subject, but "
             "aliases: does not carry %r -- add it if it names this same "
-            "entity; a cross-domain bare term or a wrong-entity name stays "
-            "out (checklist item 17)%s" % (cand, where, cslug, hint),
-            {"candidate": cand, "where": where, "expected_alias": cslug}))
+            "entity; a cross-domain bare term, an acronym that spells an "
+            "ordinary English word, an organism common name unsafe as a "
+            "global alias or a wrong-entity name stays out; review-only: a "
+            "recorded decision that it stays out resolves it (checklist "
+            "item 17)%s" % (cand, where, cslug, hint),
+            {"candidate": cand, "where": where, "expected_alias": cslug,
+             "review_only": True}))
 
 
 # NOTE: there is deliberately no _check_importance either.  The field was
@@ -1359,12 +1427,75 @@ def _check_alias_completeness(fm, sections, findings, filename):
 # reporting a legacy `importance:` as an unknown or misplaced key.
 
 
-# NOTE: there is deliberately no _check_parents.  A populated `parents:` is the
-# expected steady state -- wiki-lint's Task 3 writes that field on every
-# entry -- so flagging it fired on the whole vault after a single lint pass.  It
-# was redundant anyway: `parents` is in QUOTED_LIST_FIELDS, so _check_quoting
-# already reports an unquoted item, and it is in MANDATORY_KEYS, so
-# _check_field_order already reports a missing key.
+# A populated, well-formed `parents:` is the expected steady state --
+# wiki-lint's Task 3 writes that field on every entry -- so _check_parents
+# never flags a value as such.  It checks only the value's form, as the
+# scanner's item2/parents-form does (with its moc-parent and
+# root-parent-mismatch hierarchy findings).  A missing or bare key is
+# _check_field_order's, an item's quote style is _check_quoting's, and an
+# item that does not parse is item 1's.
+_PARENT_LINK_RE = re.compile(r"\[\[([^\\\[\]\|#^]+)\]\]")
+
+
+def _check_parents(fm, findings, filename):
+    field = fm.get("parents")
+    if field is None or field.kind == "blank":
+        return
+    if field.kind == "scalar":
+        findings.append(_f(
+            "2-parents-form", "error",
+            "parents: must be a list -- `parents: []` when empty, else a "
+            "block-form list of double-quoted canonical wikilinks",
+            {"line": field.line}))
+        return
+    if field.kind == "flow_list" and field.values:
+        findings.append(_f(
+            "2-parents-form", "error",
+            "a populated parents: value uses block form, one double-quoted "
+            "canonical wikilink per line", {"line": field.line}))
+    elif field.kind == "flow_list" and field.raw_value != "[]":
+        findings.append(_f(
+            "2-parents-form", "error",
+            "an empty parents: list is spelled exactly `parents: []`",
+            {"line": field.line, "raw": field.raw_value}))
+    # A bare discipline MOC stem names the MOC, as in the scanner.
+    moc_stems = {fold_name(tag + "-moc") for tag in TAG_ENUM}
+    seen = set()
+    for value, line in zip(field.values, field.item_lines):
+        if not isinstance(value, str):
+            continue
+        match = _PARENT_LINK_RE.fullmatch(value.strip())
+        if not match:
+            findings.append(_f(
+                "2-parents-form", "error",
+                "parents: item %r must be one canonical wikilink with no "
+                "display label, heading, block anchor or `.md` suffix" % value,
+                {"line": line, "parent": value}))
+            continue
+        target = match.group(1)
+        key = fold_name(target)
+        if key.startswith("mocs/") or key in moc_stems:
+            findings.append(_f(
+                "2-parents-form", "error",
+                "parents: item %r names a MOC; a MOC is never a parent -- "
+                "use the discipline root or the nearest Wiki ancestor" % value,
+                {"line": line, "parent": value}))
+        elif key.endswith(".md"):
+            findings.append(_f(
+                "2-parents-form", "error",
+                "parent targets omit the `.md` suffix",
+                {"line": line, "parent": value}))
+        if key in seen:
+            findings.append(_f(
+                "2-parents-form", "error",
+                "parent %r is listed more than once" % value,
+                {"line": line, "parent": value}))
+        seen.add(key)
+    if field.values and _is_root_entry(fm, filename):
+        findings.append(_f(
+            "2-parents-form", "error",
+            "a discipline root must have `parents: []`",
+            {"line": field.line}))
 
 
 _OBSIDIAN_IMAGE_EMBED_LINE_RE = re.compile(
@@ -1467,10 +1598,24 @@ def _check_equation_coverage_candidates(fm, sections, findings,
     for candidate in form_candidates:
         candidate["line"] += fm.body_start_line - 1
     if form_candidates:
+        form_kinds = {candidate["kind"] for candidate in form_candidates}
+        repairs = []
+        if form_kinds - {"bare-alignment"}:
+            repairs.append(
+                "display math is not in canonical block form (a `$$` shares "
+                "a line with the equation or with prose, or a blank line is "
+                "missing above or below); put each `$$` alone on its line "
+                "with a blank line above and below")
+        if "bare-alignment" in form_kinds:
+            repairs.append(
+                "display math uses `&` or `\\\\` outside an aligned or "
+                "gathered environment, which fails to render; wrap its rows "
+                "in `\\begin{aligned}...\\end{aligned}`, or `gathered` when "
+                "nothing aligns")
         findings.append(_f(
             "12-equation-format", "error",
-            "display math has content on the same line as its `$$` delimiters; "
-            "keep the existing equation and put each delimiter on its own line",
+            "; ".join(repairs) + "; keep the existing equation and do not "
+            "add a second display",
             {"matches": form_candidates}))
     split_candidates = find_multi_relation_display_candidates(
         masked, table_spans)
@@ -1529,7 +1674,7 @@ def _check_literal_dollars(body, findings):
             "12-literal-dollar", "error",
             "%d unescaped literal dollar sign%s in body prose; escape each "
             "currency or other literal sign as `\\$`" %
-            (count, "" if count == 1 else "s")))
+            (count, "" if count == 1 else "s"), {"count": count}))
 
 
 def _check_unicode_math(fm, sections, findings, extras=frozenset()):
@@ -1712,8 +1857,7 @@ def _check_person_event_date(fm, sections, findings):
     entry_type = fm.scalar("type") or ""
     if entry_type not in ("Person", "Event"):
         return
-    prose = "\n".join(sections["prose_lines"]).strip()
-    opener = opening_paragraph(prose)
+    opener = first_prose_paragraph("\n".join(sections["prose_lines"]))
     status = opener_subject_date_status(opener, entry_type)
     if status == "missing":
         findings.append(_f(
@@ -1815,6 +1959,8 @@ def _check_api_surface(fm, sections, findings):
     code-identifier title and the library/how-to failure strings are
     warnings: a name such as ``Amazon.com`` and a framing sentence may be a
     legitimate non-API use, so the author test in api-surface.md decides.
+    They are ``review_only``: a recorded author-test decision that the title
+    or sentence is no API use resolves them without an edit.
     """
     prose, _first_line = _shared_prose(fm, sections)
     for finding in api_surface_findings(
@@ -1825,8 +1971,12 @@ def _check_api_surface(fm, sections, findings):
         for key in ("label", "identifiers"):
             if key in finding:
                 evidence[key] = finding[key]
-        findings.append(_f("6-api-surface", severity,
-                           finding["message"], evidence))
+        message = finding["message"]
+        if severity == "warning":
+            evidence["review_only"] = True
+            message += ("; review-only: a recorded author-test decision "
+                        "that it is no API use resolves it (api-surface.md)")
+        findings.append(_f("6-api-surface", severity, message, evidence))
 
 
 def _check_merge_scars(fm, sections, findings):
@@ -1870,7 +2020,7 @@ def _check_emphasis(fm, sections, findings):
     title = fm.scalar("title") or ""
     running_title = base_term(title) if has_parenthetical(title) else title
     opener_markup = pure_math_opener_markup(
-        running_title, opening_paragraph(prose.lstrip()))
+        running_title, first_prose_paragraph(prose))
     for finding in emphasis_span_findings(
             prose, sections["related_line"] or "", tables,
             opener_markup=opener_markup):
@@ -1960,14 +2110,12 @@ def _check_bold_opener(fm, sections, findings):
     # The opener is the first PARAGRAPH, not the first line: reading one line
     # made a hard-wrapped opening sentence whose bold lands on line 2 report
     # "the opening sentence has no bolded span".  (wiki-lint's scanner has
-    # always compared against `prose.split("\n\n", 1)[0]`.)
-    block = []
-    for line in sections["prose_lines"]:
-        if line.strip():
-            block.append(line.strip())
-        elif block:
-            break
-    opening = " ".join(block)
+    # always compared against `prose.split("\n\n", 1)[0]`.)  It is the first
+    # PROSE paragraph: a leading heading or display block is item 9's
+    # finding, and the title bold in the real opener still counts.
+    opening = " ".join(
+        line.strip() for line in first_prose_paragraph(
+            "\n".join(sections["prose_lines"])).splitlines())
     if not opening:
         findings.append(_f("16-bold-opener", "error", "entry has no body prose"))
         return
@@ -2048,13 +2196,13 @@ def _primary_answer_inputs(fm, sections):
     """``(title, aliases, opener, type)`` for the shared item-19 contract.
 
     Only a list ``aliases:`` field can bind a counterpart; a malformed scalar
-    keeps its own item-18 finding. A masked leading comment is blank, so the
-    opener starts at visible text.
+    keeps its own item-18 finding. The opener is the first prose paragraph:
+    a masked leading comment is blank, and a leading heading is skipped.
     """
     alias_field = fm.get("aliases")
     aliases = (alias_field.values
                if alias_field is not None and alias_field.is_list else [])
-    opener = opening_paragraph("\n".join(sections["prose_lines"]).lstrip())
+    opener = first_prose_paragraph("\n".join(sections["prose_lines"]))
     return fm.scalar("title") or "", aliases, opener, fm.scalar("type") or ""
 
 
@@ -2099,7 +2247,8 @@ def _extra_cards(fm, sections):
     complete card after the first is an extra: the no-primary finding asks
     to rewrite the first card into the definition card and remove the rest.
     With fewer than two complete cards, no title or no primary answer, no
-    card is an extra and per-card findings stay ordinary.
+    card is an extra and per-card findings stay ordinary. A block of only
+    schedule state is never a card.
     """
     if sections["flashcards_index"] is None or not fm.scalar("title"):
         return frozenset()
@@ -2107,7 +2256,7 @@ def _extra_cards(fm, sections):
              _flashcard_line3_fault(card[2].strip(), fm, sections))
             for card_no, card in enumerate(
                 parse_flashcards(sections["flashcard_lines"]), 1)
-            if len(card) >= 3]
+            if len(card) >= 3 and not is_review_metadata_block(card)]
     if len(rows) < 2:
         return frozenset()
     primary = kept_card_label(rows, *_flashcard_primary_answer(fm, sections))
@@ -2187,14 +2336,19 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 "line 1",
                 {"line": fm.body_start_line + flashcards_index}))
     cards = parse_flashcards(sections["flashcard_lines"])
-    if not cards and not root:
+    # A block of only schedule state, which a blank line separates from its
+    # card, is neither a card nor an attachment; block numbers stay as parsed.
+    schedules = {card_no for card_no, card in enumerate(cards, 1)
+                 if is_review_metadata_block(card)}
+    if len(cards) == len(schedules) and not root:
         findings.append(_f(
             "19-flashcards", "error",
             "the `## Flashcards` section holds no card -- item 19 requires "
             "the `??` definition card"))
     # The card count comes from the complete cards only; a malformed block
     # keeps its own finding below. The scanner shares this helper.
-    complete = sum(1 for card in cards if len(card) >= 3)
+    complete = sum(1 for card_no, card in enumerate(cards, 1)
+                   if len(card) >= 3 and card_no not in schedules)
     for message in flashcard_set_faults(complete):
         findings.append(_f("19-flashcards", "error",
                            "the `## Flashcards` section holds " + message,
@@ -2211,6 +2365,17 @@ def _check_flashcards_present(fm, sections, findings, filename,
     title = fm.scalar("title")
     line3_checks, brevity, hedges = [], [], []
     for card_no, card in enumerate(cards, 1):
+        if card_no in schedules:
+            # Report only: the user's schedule stays where it is (scan_vault
+            # reports the same; the two tools must agree).
+            findings.append(_f(
+                "19-flashcards", "warning",
+                "flashcard block %d is a Spaced Repetition schedule that a "
+                "blank line separates from the card -- it is neither a card "
+                "nor an attachment; preserve it byte-for-byte, never delete, "
+                "move or reattach it, and report it" % card_no,
+                {"block": card_no, "report_only": True}))
+            continue
         if len(card) < 3:
             # A 1- or 2-line block is not a card at all (canon: cue /
             # separator / answer, contiguous).  The length-gated checks below
@@ -2335,6 +2500,8 @@ def _check_flashcard_leak(fm, sections, findings, extras=frozenset()):
     expected_term, _counterpart = _flashcard_primary_answer(fm, sections)
     aliases = [alias for alias in fm.values("aliases") if alias]
     for card_no, card in enumerate(parse_flashcards(sections["flashcard_lines"]), 1):
+        if is_review_metadata_block(card):
+            continue
         line1 = card[0]
         term_main, paren = line3_parts(card[2] if len(card) >= 3 else "")
         paren_is_discipline = False
@@ -2401,19 +2568,46 @@ def _check_source_duplicates(fm, findings):
     may legitimately cite several distinct PDFs and several distinct markdown
     clippings, so a ``.md`` source
     is only suspect when a ``.pdf`` source of the same stem sits beside it.
+
+    A split book and its chapters are one document too, so a chapter PDF
+    cited beside its whole-book PDF is a review candidate.  The book's core
+    stem (``_src`` removed, ``_N`` kept) is what a chapter names.
     """
     field = fm.get("sources")
     if field is None:
         return
-    pdfs, mds = {}, []
+    pdfs, mds, books, chapters = {}, [], {}, []
     for value, line in zip(field.values, field.item_lines):
         stem, ext = source_stem(value)
         if not stem:
             continue
         if ext == "pdf":
             pdfs.setdefault(stem, (value, line))   # keep the first spelling
+            # naming.py needs the unfolded filename: its `_src` rule reads
+            # the canonical capitals that source_stem folds away.
+            name = value.strip()
+            if name.startswith("[[") and name.endswith("]]"):
+                name = name[2:-2]
+            name = name.split("|", 1)[0].split("#", 1)[0]
+            name = name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+            books.setdefault(fold_name(core_stem(name)), (value, line))
+            book = chapter_book_stem(name)
+            if book:
+                chapters.append((fold_name(book), value, line))
         elif ext == "md":
             mds.append((stem, value, line))
+    for book, chapter_value, chapter_line in chapters:
+        if book in books:
+            book_value, book_line = books[book]
+            findings.append(_f(
+                "4-duplicate-source", "warning",
+                "%s is a chapter of %s; a split book is cited in one form, "
+                "never both its whole-book PDF and its chapter PDFs. Review "
+                "which citation the entry keeps"
+                % (chapter_value, book_value),
+                {"kind": "book-and-chapter", "book": book_value,
+                 "book_line": book_line, "chapter": chapter_value,
+                 "chapter_line": chapter_line, "review_only": True}))
     for stem, md_value, md_line in mds:
         if stem not in pdfs:
             continue
@@ -2453,6 +2647,7 @@ def lint_text(text, filename):
     fm = parse_frontmatter(text)
     lines = text.split("\n")
     _drop_issues_errors(fm, lines)
+    _flashcards_close_error(fm, lines)
     if not _check_structure(fm, findings):
         return result
 
@@ -2476,6 +2671,7 @@ def lint_text(text, filename):
     _check_bare_common_noun(findings, filename)
     _check_description(fm, findings, title=result["title"])
     _check_tags(fm, findings)
+    _check_parents(fm, findings, filename)
     _check_aliases(fm, findings, filename)
     _check_alias_completeness(fm, sections, findings, filename)
     _check_body_structure(fm, sections, findings)
@@ -3115,6 +3311,7 @@ def run_self_test():
     import contextlib
     import shutil
     import tempfile
+    import time
     cases = []
 
     def check(label, got, want):
@@ -3168,12 +3365,20 @@ def run_self_test():
               items(duplicated), [])
     check("CRLF and LF entries have the same lint result",
           items(good.replace("\n", "\r\n")), [])
+    started = time.perf_counter()
+    check("an opener bold with 40 math spans after it lints clean in "
+          "linear time",
+          (items(mutate("two error rates as", "two error rates "
+                        + ", ".join("$x_{%d}$" % i for i in range(40))
+                        + " as")),
+           time.perf_counter() - started < 2.0),
+          ([], True))
     check("the complete second entry passes ordinary validation",
           items(precision, "precision.md"), [])
-    check("empty source lists retain their mandatory-provenance finding",
+    check("an empty source list is an item-4 finding, as in the scanner",
           [items(mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n', replacement))
            for replacement in ("sources:\n", "sources: []\n")],
-          [["2-field-order"], ["2-field-order"]])
+          [["4-sources"], ["4-sources"]])
     check("plain placeholder provenance fails the ordinary source rule",
           items(mutate("[[Doe_X_2025.pdf#page=2]]", "placeholder")),
           ["4-sources"])
@@ -3238,9 +3443,9 @@ def run_self_test():
         "decision threshold moves.\n",
         "decision threshold moves. It costs $20 to $30.\n")
     check("a complete entry reports both literal currency signs",
-          [(f["item"], f["message"].startswith("2 unescaped"))
+          [(f["item"], f["message"].startswith("2 unescaped"), f["evidence"])
            for f in lint_text(currency_pair, "roc-curve.md")["findings"]],
-          [("12-literal-dollar", True)])
+          [("12-literal-dollar", True, {"count": 2})])
     writing_path = os.path.join(
         os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
         "references", "writing.md")
@@ -3371,15 +3576,56 @@ def run_self_test():
         check("checking %s state on an extra card preserves every "
               "source byte" % storage_form,
               studied.encode('utf-8'), before_bytes)
-    check("a blank detaches next-line state from an extra card too",
-          any(f['evidence'].get('card') == 3 and 'malformed' in f['message']
-              for f in lint_text(
-                  review_why + '\n<!--SR:detached-after-blank-->\n',
-                  'roc-curve.md')['findings']), True)
+    detached_after_extra = lint_text(
+        review_why + '\n<!--SR:detached-after-blank-->\n',
+        'roc-curve.md')['findings']
+    check("a blank detaches next-line state from an extra card too, which "
+          "stays removable",
+          ([(f['severity'], f['evidence'].get('report_only'))
+            for f in detached_after_extra
+            if f['evidence'].get('block') == 3],
+           [f['evidence'].get('cards') for f in detached_after_extra
+            if f['evidence'].get('cards')],
+           any(f['evidence'].get('extra_card') for f in detached_after_extra)),
+          ([('warning', True)], [2], True))
     detached = review_base + '\n<!--SR:detached-after-blank-->\n'
     check("a blank detaches next-line state so item 19 can report it",
           "19-flashcards" in _st_items(
               lint_text(detached, 'roc-curve.md')), True)
+    for detached_form, detached_block in (
+            ("comment", '<!--SR:!2026-03-01,12,270-->\n'),
+            ("callout", '> [!sr|card-metadata]\n>\n'
+                        '> <!--SR:!2026-03-01,12,270--> ^roc-card\n')):
+        detached_findings = lint_text(
+            review_base + '\n' + detached_block,
+            'roc-curve.md')['findings']
+        check("a detached schedule %s is a report-only block, not a card"
+              % detached_form,
+              [(f['item'], f['severity'], f['evidence'])
+               for f in detached_findings],
+              [('19-flashcards', 'warning',
+                {'block': 2, 'report_only': True})])
+    broken = lint_text(review_base.replace('\n!!\nROC curve\n',
+                                           '\n!!\n\nROC curve\n'),
+                       'roc-curve.md')['findings']
+    check("a blank inside a card still breaks it",
+          [(f['evidence'].get('card'), f['evidence'].get('report_only'))
+           for f in broken if 'is malformed' in f['message']],
+          [(1, None), (2, None)])
+    for trailing_form, trailing in (
+            ("a block ID", '^roc-card\n'),
+            ("three user lines", 'User line a.\nUser line b\nUser line c\n')):
+        trailing_findings = lint_text(
+            review_base.rstrip('\n') + '\n<!--SR:!2026-03-01,12,270-->\n'
+            + trailing, 'roc-curve.md')['findings']
+        check("%s after an attached schedule stays on the card" % trailing_form,
+              ([f['evidence'].get('lines') for f in trailing_findings
+                if 'visible lines' in f['message']],
+               any('contiguous lines' in f['message']
+                   or 'holds 2 cards' in f['message']
+                   or f['evidence'].get('extra_card')
+                   for f in trailing_findings)),
+              ([4 if trailing_form == "a block ID" else 6], False))
     unterminated = (review_base.rstrip('\n')
                     + '\n<!--SR:unterminated-state\n')
     check("an unterminated attached SR comment remains reportable content",
@@ -3501,6 +3747,21 @@ def run_self_test():
                        " [a]\n  - y", " [a,, b]", " Note: x",
                        "\n  - Fix it\n    and more")],
           [["2-issues-malformed"]] * 8)
+    check("an unquoted '#' comment that cuts issues: text off, even to "
+          "blank, is malformed; a quoted or unspaced '#' is the user's text",
+          [[(f["item"], f["evidence"].get("issues"))
+            for f in lint_text(mutate('issues: ""', "issues:" + raw),
+                               "roc-curve.md")["findings"]
+            if f["item"].startswith("2-")]
+           for raw in (" #1 the card is wrong",
+                       " Fix the card # and add an example",
+                       ' "Fix it" # note', "\n  - Fix the #2 card",
+                       "\n  - #wrong parent", ' "#1 the card is wrong"',
+                       " Fix the card#2", "\n  # a note\n  - Fix card")],
+          [[("2-issues-malformed", None)]] * 5
+          + [[("2-user-issues", ["#1 the card is wrong"])],
+             [("2-user-issues", ["Fix the card#2"])],
+             [("2-user-issues", ["Fix card"])]])
     check("a null list item is skipped, not read as an issue",
           [f["evidence"]["issues"]
            for f in lint_text(mutate('issues: ""',
@@ -3525,6 +3786,20 @@ def run_self_test():
     check("no frontmatter at all", items("just prose\n"), ["1-valid-yaml"])
     check("an unterminated fence",
           items('---\ntitle: "ROC curve"\nnever closed\n'), ["1-valid-yaml"])
+    # A lost, `----` or `--- text` closing fence leaves the separator above
+    # `## Flashcards` to close the frontmatter, so issues: owns the body.
+    check("a frontmatter that only the Flashcards separator closes",
+          [("1-valid-yaml" in items(mutate('issues: ""\n---\n', fence)),
+            "2-issues-malformed" in items(mutate('issues: ""\n---\n', fence)))
+           for fence in ('issues: ""\n', 'issues: ""\n----\n',
+                         'issues: ""\n--- closed\n')],
+          [(True, True)] * 3)
+    check("a body that opens with ## Flashcards after a closed frontmatter "
+          "is not a lost fence",
+          "1-valid-yaml" in items(mutate(
+              'A **ROC curve** plots the trade-off between two error rates as '
+              'a decision threshold moves.\n\n**Related:** '
+              '[[precision|Precision]]\n\n---\n\n', '')), False)
     check("a duplicate frontmatter key",
           items(mutate('type: Concept\n', 'type: Concept\ntype: Concept\n')),
           ["1-valid-yaml"])
@@ -3563,12 +3838,47 @@ def run_self_test():
           items(mutate("parents: []\n", "importance: high\nparents: []\n")), [])
     check("a bare `parents:` (YAML null) is a 2-field-order error",
           items(mutate("parents: []\n", "parents:\n")), ["2-field-order"])
+
+    def parented(*parents):
+        return mutate("parents: []\n", "parents:\n" + "".join(
+            '  - "%s"\n' % parent for parent in parents))
+
+    # parents: form mirrors the scanner's item2/parents-form, moc-parent and
+    # root-parent-mismatch.
+    check("a populated flow-form parents: is a 2-parents-form error",
+          items(mutate("parents: []\n", 'parents: ["[[statistics]]"]\n')),
+          ["2-parents-form"])
+    check("a scalar parents: is a 2-parents-form error",
+          items(mutate("parents: []\n", 'parents: "[[statistics]]"\n')),
+          ["2-parents-form"])
+    check("an empty parents: list spelled other than `[]` is a "
+          "2-parents-form error",
+          items(mutate("parents: []\n", "parents: [ ]\n")), ["2-parents-form"])
+    check("each unlinked, labeled, anchored, .md, MOC or repeated parent is "
+          "one 2-parents-form error",
+          [[f["item"] for f in lint_text(parented(*parents),
+                                         "roc-curve.md")["findings"]]
+           for parents in (("statistics",), ("[[statistics|Statistics]]",),
+                           ("[[statistics#History]]",), ("[[statistics.md]]",),
+                           ("[[statistics]]", "[[statistics]]"),
+                           ("[[MOCs/statistics-moc]]",), ("[[statistics-moc]]",))],
+          [["2-parents-form"]] * 7)
+    check("canonical block-form parents are clean, bare or Wiki/-qualified",
+          [items(parented("[[statistics]]")),
+           items(parented("[[Wiki/statistics]]")),
+           items(parented("[[statistics]]", "[[decision-theory]]"))],
+          [[], [], []])
+    check("an unquoted parent item is a quoting fault, not a form fault",
+          items(mutate("parents: []\n", "parents:\n  - [[statistics]]\n")),
+          ["1-valid-yaml", "2-quoting"])
     # the LIST of items, not the deduped set: one fault must be ONE finding
     check("a missing sources: key is one finding, not two",
-          [f["item"] for f in lint_text(
+          [(f["item"], f["message"].startswith(
+              "mandatory key 'sources' is missing"))
+           for f in lint_text(
               mutate('sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n', ""),
               "roc-curve.md")["findings"]],
-          ["2-field-order"])
+          [("2-field-order", True)])
     check("an exact duplicate source citation is rejected",
           items(mutate(
               'sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n',
@@ -3644,6 +3954,27 @@ def run_self_test():
                        '  - "https://example.org/Doe_X_2025.pdf"\n'
                        '  - "[[Doe_X_2025.md]]"\n')),
           [])
+    # A split book and its chapter are one document: review-only.
+    book_and_chapter = lint_text(mutate(
+        '  - "[[Doe_X_2025.pdf#page=2]]"\n',
+        '  - "[[Doe_Book_2020_src.pdf#page=5]]"\n'
+        '  - "[[Sources/PDFs/Doe_Book_2020/Doe_Book_2020_01_Intro.pdf#page=2]]"\n'),
+        "roc-curve.md")["findings"]
+    check("a chapter PDF beside its whole-book PDF, `_src` and folder aside",
+          [(f["item"], f["evidence"].get("kind"),
+            f["evidence"].get("review_only"))
+           for f in book_and_chapter],
+          [("4-duplicate-source", "book-and-chapter", True)])
+    check("two chapters of one book are not a duplicate",
+          items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"\n',
+                       '  - "[[Doe_Book_2020_01_Intro.pdf#page=2]]"\n'
+                       '  - "[[Doe_Book_2020_02_Methods.pdf#page=4]]"\n')),
+          [])
+    check("a `_2` book is another document than the chapters of its namesake",
+          items(mutate('  - "[[Doe_X_2025.pdf#page=2]]"\n',
+                       '  - "[[Doe_Book_2020_2.pdf#page=5]]"\n'
+                       '  - "[[Doe_Book_2020_01_Intro.pdf#page=2]]"\n')),
+          [])
     check("source_stem folds case/NFC and strips wrapper, pipe, anchor, folder",
           [source_stem(s) for s in ('"placeholder"', "[[Sources/PDFs/Doe_X_2025.pdf#page=2]]",
                                     "[[doe_x_2025.md|label]]",
@@ -3697,6 +4028,20 @@ def run_self_test():
            for f in lint_text(mutate("false positive rate.", "false positive rate"),
                               "roc-curve.md")["findings"]],
           [("7-description", "error")])
+    check("a frequency hedge in the description is an advisory candidate; "
+          "a measured frequency and normally distributed are not",
+          ([(f["item"], f["severity"], f["evidence"].get("words"),
+             f["evidence"].get("agent_review"))
+            for f in lint_text(mutate(
+                "A ROC curve plots true", "A ROC curve often plots true"),
+                "roc-curve.md")["findings"]],
+           items(mutate("A ROC curve plots true positive rate against",
+                        "A ROC curve shows how often true positive rate "
+                        "beats")),
+           items(mutate("against false positive rate.",
+                        "against normally distributed false positive "
+                        "rate."))),
+          ([("7-hedge-candidate", "warning", ["often"], True)], [], []))
     check("two declarative or question-ended description sentences are rejected",
           (items(mutate(
               'description: "A ROC curve plots true positive rate against '
@@ -4606,13 +4951,20 @@ def run_self_test():
                          "**Misc** holds entries outside every discipline."),
                 "misc.md"), [])
 
+    check("a discipline root with a parent is a 2-parents-form error, as in "
+          "the scanner",
+          items(stats_root.replace(
+              "parents: []\n", 'parents:\n  - "[[mathematics]]"\n'),
+              "statistics.md"), ["2-parents-form"])
+
     # -- item 4: a discipline root cites a source like every entry ---------
     sourceless = stats_root.replace(
         'sources:\n  - "[[Doe_X_2025.pdf#page=2]]"\n', "sources: []\n")
     check("a discipline root needs a source too",
           [f["message"] for f in lint_text(sourceless, "statistics.md")["findings"]
-           if f["item"] == "2-field-order"],
-          ["sources: is empty; it must hold at least one item"])
+           if f["item"] == "4-sources"],
+          ["sources: is empty; every entry, a discipline root included, "
+           "needs at least one source"])
     check("a root may cite the online page it is derived from",
           items(stats_root.replace("[[Doe_X_2025.pdf#page=2]]",
                                    "https://en.wikipedia.org/wiki/Statistics"),
@@ -4686,6 +5038,26 @@ def run_self_test():
           items(mutate("\n**Related:**",
                        "\n\n## Details\n\nA narrower claim.\n\n**Related:**")),
           [])
+    title_h1 = lint_text(mutate('issues: ""\n---\nA **ROC curve**',
+                                'issues: ""\n---\n# ROC curve\n\nA **ROC curve**'),
+                         "roc-curve.md")["findings"]
+    check("a leading H1 that repeats the title is one delete finding; the "
+          "real opener keeps its title bold",
+          [(f["item"], "repeats the entry title -- delete it, never demote"
+            in f["message"]) for f in title_h1],
+          [("9-body-structure", True)])
+    check("a leading non-title heading moves only item 9's opener check; "
+          "item 16 reads the first prose paragraph",
+          [items(mutate('issues: ""\n---\nA **ROC curve**',
+                        'issues: ""\n---\n%s\n\nA **ROC curve**' % heading))
+           for heading in ("## Overview", "# Overview")],
+          [["9-body-structure"], ["9-body-structure"]])
+    check("a later heading that repeats the title is deleted too",
+          ["repeats the entry title" in f["message"] for f in lint_text(
+              mutate("\n**Related:**",
+                     "\n\n### ROC Curve\n\nA narrower claim.\n\n**Related:**"),
+              "roc-curve.md")["findings"]],
+          [True])
     dated_person = retitled(
         "Ada Lovelace", "augusta-ada-king",
         "Ada Lovelace was an English mathematician.",
@@ -4698,7 +5070,9 @@ def run_self_test():
         "Trinity test", type_="Event")
     check("valid Person and Event opener dates pass builder lint",
           (items(dated_person, "ada-lovelace.md"),
-           items(dated_event, "trinity-test.md")), ([], []))
+           items(dated_person.replace("(1815–1852)", "(fl. since 2020)"),
+                 "ada-lovelace.md"),
+           items(dated_event, "trinity-test.md")), ([], [], []))
     check("a date before an acronym expansion keeps the card counterpart",
           items(retitled(
               "ILSVRC", "imagenet-large-scale-visual-recognition-challenge",
@@ -4778,6 +5152,33 @@ def run_self_test():
           one_line_finding["evidence"]["matches"][0]["line"],
           one_line_display.splitlines().index(
               "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}$$") + 1)
+    check("an opening $$ on the equation's line is a form finding, not a "
+          "missing-equation finding",
+          items(equationless.replace(
+              "variance.\n", "variance:\n\n"
+              "$$\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n", 1)),
+          ["12-equation-format"])
+    check("a display with no blank line above is a form finding, not a "
+          "missing-equation finding",
+          items(equationless.replace(
+              "variance.\n", "variance:\n$$\n"
+              "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n", 1)),
+          ["12-equation-format"])
+    bare_alignment = lint_text(equationless.replace(
+        "variance.\n", "variance:\n\n$$\n"
+        "\\sigma &= \\sqrt{\\operatorname{Var}(X)} \\\\\n"
+        "&= \\sqrt{\\operatorname{E}[(X - \\mu)^2]}\n$$\n", 1),
+        "roc-curve.md")["findings"]
+    check("a bare &= display is a form finding that names aligned",
+          [(finding["item"], "aligned" in finding["message"])
+           for finding in bare_alignment],
+          [("12-equation-format", True)])
+    check("two equations on separate source lines are a split candidate",
+          items(equationless.replace(
+              "variance.\n", "variance:\n\n$$\n"
+              "\\sigma = \\sqrt{\\operatorname{Var}(X)}\n"
+              "\\mu = \\operatorname{E}[X]\n$$\n", 1)),
+          ["12-equation-split-candidate"])
     two_relation_display = equationless.replace(
         "variance.\n", "variance:\n\n$$\n"
         "\\sigma = \\sqrt{\\operatorname{Var}(X)}, \\qquad "
@@ -5038,6 +5439,26 @@ def run_self_test():
                          "A **ROC curve**, also called the *operating "
                          "characteristic*, plots the trade-off")),
           [])
+    check("an alias candidate the alias rule keeps out (an acronym that is an "
+          "ordinary word, an unsafe organism common name) is review-only",
+          [[(f["item"], f["evidence"]["expected_alias"],
+             f["evidence"].get("review_only"),
+             "ordinary English word" in f["message"]) for f in lint_text(
+              retitled(title, alias, title + " is a fixture subject.",
+                       opener, title, type_=type_), stem + ".md")["findings"]]
+           for title, alias, opener, type_, stem in (
+               ("Positron emission tomography", "pet-imaging",
+                "**Positron emission tomography** (PET) is a fixture "
+                "subject.", "Concept", "positron-emission-tomography"),
+               ("Median absolute deviation", "median-deviation",
+                "The **median absolute deviation** (MAD) is a fixture "
+                "subject.", "Concept", "median-absolute-deviation"),
+               ("Mus musculus", "house-mouse",
+                "***Mus musculus***, also called the *mouse*, is a fixture "
+                "subject.", "Organism", "mus-musculus"))],
+          [[("17-alias-completeness", "pet", True, True)],
+           [("17-alias-completeness", "mad", True, True)],
+           [("17-alias-completeness", "mouse", True, True)]])
     check("a Person opener's date parenthetical is not an alias candidate",
           items(mutate('title: "Precision"', 'title: "A. M. Turing"', base=precision)
                 .replace("type: Concept", "type: Person")
@@ -5125,8 +5546,8 @@ def run_self_test():
           [[(f["item"], f["severity"])
             for f in lint_text(mutate('  - "auroc"', '  - "%s"' % alias),
                                "roc-curve.md")["findings"]]
-           for alias in ("entropy", "tree-of-life")],
-          [[("18-alias-form", "error")]] * 2)
+           for alias in ("entropy", "tree-of-life", "entropies", "targets")],
+          [[("18-alias-form", "error")]] * 4)
 
     # -- checks shared with wiki-lint's scanner (shared/entry_checks.py) ----
     def with_paragraph(paragraph, base=None):
@@ -5272,22 +5693,36 @@ def run_self_test():
                           "**MLOps** applies DevOps practice to machine "
                           "learning.", "MLOps"), "9-", "mlops.md")),
           ([], []))
-    check("item 6: identifiers and fences are errors, framing is a warning",
-          sorted((f["evidence"]["check"], f["severity"])
+    check("item 6: identifiers and fences are errors, framing is a "
+          "review-only warning",
+          sorted((f["evidence"]["check"], f["severity"],
+                  f["evidence"].get("review_only"))
                  for f in lint_text(with_paragraph(
                      "In NumPy the curve is kept as `roc_points`.\n\n"
                      "```python\nx = 1\n```"), "roc-curve.md")["findings"]
                  if f["item"] == "6-api-surface"),
-          [("api-string", "warning"), ("backticked-identifiers", "error"),
-           ("fenced-code", "error")])
-    check("item 6: a code-identifier title is a warning; Software keeps its API",
-          ([(f["evidence"]["check"], f["severity"]) for f in lint_text(
+          [("api-string", "warning", True),
+           ("backticked-identifiers", "error", None),
+           ("fenced-code", "error", None)])
+    check("item 6: a code-identifier title is a review-only warning; "
+          "Software keeps its API",
+          ([(f["evidence"]["check"], f["severity"],
+             f["evidence"].get("review_only")) for f in lint_text(
               mutate('title: "ROC curve"', 'title: "numpy.linalg"'),
               "numpy-linalg.md")["findings"] if f["item"] == "6-api-surface"],
            found(with_paragraph("In NumPy use `np.dot` to multiply.",
                                 mutate("type: Concept", "type: Software")),
                  "6-")),
-          ([("code-identifier-title", "warning")], []))
+          ([("code-identifier-title", "warning", True)], []))
+    check("item 6: a non-API name such as Amazon.com gets only a review-only "
+          "warning that names its recorded resolution",
+          [(f["severity"], f["evidence"], "review-only" in f["message"])
+           for f in lint_text(retitled(
+               "Amazon.com", "amazon", "Amazon.com is an online retailer.",
+               "**Amazon.com** is an online retailer.", "Amazon.com",
+               type_="Organization"), "amazon-com.md")["findings"]],
+          [("warning", {"check": "code-identifier-title", "review_only": True},
+            True)])
     scarred = with_paragraph("importance: high")
     check("item 13: a merge scar is an error reported at its file line",
           [(f["severity"], f["evidence"]["line"])

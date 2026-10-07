@@ -14,7 +14,7 @@ format](note-format.md) owns the complete note shape and body modes.
 
 ## What is eligible
 
-Only files that are already in `Sources/Images/` under this PDF's stem. The selected PDF's `--json` scan row lists them in `figures[].file`; nothing else is embeddable.
+Only files that are already in `Sources/Images/` under this PDF's stem or, for a split book, under its chapters' stems. The selected PDF's `--json` scan row lists them in `figures[].file` and, for a split book, `chapter_figures[].file`; nothing else is embeddable.
 
 - **Never invent a filename.** An embed of a file that does not exist renders in Obsidian as ordinary text — no broken-image marker, no error, nothing. It is the most silently-wrong thing this skill can write.
 - **Extraction and crop repair happen only at [intake's figure preparation](../SKILL.md#prepare-the-figure-inventory).** Follow `figure-extract` there; do not implement another cropper or rename images inside this skill (`CONVENTIONS.md` §8b). An unresolved extraction gap is reported; carry the supported claim in prose.

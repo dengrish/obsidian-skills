@@ -827,6 +827,7 @@ ADVERSARIAL = [
     "トランスフォーマー",
     "---", "", "   ", "***", "+++",                  # empty-slug family
     "X-ray", "T-cell receptor", "mRNA-seq", "RNA-",  # anion negative controls
+    "N- and C-terminal domains", "Spin-½",
     "Cross-validation", "Smith–Waterman", "DALL·E",
     "5'-UTR", "Schrödinger equation", "Straße", "Søren Kierkegaard",
     "Feature (machine learning)", "Information entropy",
@@ -2083,6 +2084,10 @@ def _check_adversarial_canonical(rep, check, canon):
     # (title_a, title_b, must_be_equal, why)
     pairs = [("Ca2+", "Ca²⁺", True, "ASCII and typeset cation (FIX-A)"),
              ("Cl-", "Cl⁻", True, "ASCII and typeset anion (FIX-A)"),
+             ("Cl- and Br- ions", "Cl⁻ and Br⁻ ions", True,
+              "ASCII and typeset anion list (FIX-A)"),
+             ("Spin-½", "Spin-1/2", True,
+              "vulgar fraction vs ASCII fraction"),
              ("µm", "μm", False, "micro sign U+00B5 vs Greek mu U+03BC")]
     for a, b, same, why in pairs:
         sa, sb = _stem_of(canon.slug_stem, a), _stem_of(canon.slug_stem, b)
@@ -3519,7 +3524,7 @@ def check_figure_naming(rep, conv):
                      "%s pins an extension onto the consumer glob (`%s`). "
                      "CONVENTIONS.md §8a: match `%s` and accept ANY extension "
                      "-- PDFs give .png, and clipping-clean can emit "
-                     ".png/.jpg/.gif/.webp/.svg/.avif/.bmp/.tiff/.ico, "
+                     ".png/.jpg/.gif/.webp/.svg/.avif/.bmp, "
                      "and a pinned extension drops every one of the others "
                      "silently."
                      % (rel(path), text[m.start():m.end()], canonical_glob),
@@ -6037,34 +6042,87 @@ SELFTEST_MIN_CASES = {
     # mirror duty of the "lowering is a deliberate, reviewable statement" rule
     # below: new regression cases must not disappear with the harness green.
     "shared/scripts/atomic_move.py": 32,
-    "shared/scripts/check_parsers.py": 22,
-    "shared/scripts/code_typography.py": 20,
-    "shared/scripts/entry_checks.py": 107,
+    # 2026-10-06 (knowledge 1.22.0): separated and alternative prerelease
+    # spellings of a floor release.
+    "shared/scripts/check_parsers.py": 28,
+    # 2026-10-06 (knowledge 1.22.0): an ellipsis or range dot is not an
+    # extension.
+    "shared/scripts/code_typography.py": 23,
+    # 2026-10-06 (knowledge 1.22.0): bold readers stay linear on math spans.
+    # 2026-10-06 (knowledge 1.22.0): plural floor words, and the opener is
+    # the first prose paragraph.
+    "shared/scripts/entry_checks.py": 115,
     # 2026-10-02: the cases for the removed prose-calculation cues
     # (averaged probability, majority vote, regression average) went with
     # them; the new cue and denominator cases still raise the floor net.
-    "shared/scripts/equation_coverage.py": 198,
-    "shared/scripts/figure_state.py": 14,
-    "shared/scripts/introduced_aliases.py": 39,
+    # 2026-10-06 (knowledge 1.22.0): $$ pairing and display-form kinds, bare
+    # alignment, row breaks, source lines and comma, clause and column splits.
+    # 2026-10-06 (knowledge 1.22.0): display spans as the finders pair them.
+    # 2026-10-07 (knowledge 1.22.0): a comma-opened list of values is an
+    # index range.
+    "shared/scripts/equation_coverage.py": 225,
+    # 2026-10-06 (knowledge 1.22.0): a BOM on line 1, unstorable stems, and
+    # records that would read back as comments.
+    "shared/scripts/figure_state.py": 17,
+    # 2026-10-06 (knowledge 1.22.0): B., C., D. and R. genus abbreviations
+    # stay alias candidates; marker dates stay excluded.
+    # 2026-10-07 (knowledge 1.22.0): a person's initials and surname are no
+    # alias candidate.
+    "shared/scripts/introduced_aliases.py": 42,
     "shared/scripts/markdown_tables.py": 42,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
-    "shared/scripts/organism_names.py": 34,
-    "shared/scripts/entry_structure.py": 175,
+    # 2026-10-06 (knowledge 1.22.0): the bold reader stays linear on math.
+    "shared/scripts/organism_names.py": 35,
+    # 2026-10-06 (knowledge 1.22.0): CRLF and CR comment masking, linear
+    # bold, hidden attachments in a block and detached schedule blocks.
+    # 2026-10-06 (knowledge 1.22.0): the first prose paragraph and a heading
+    # that repeats the title.
+    # 2026-10-07 (knowledge 1.22.0): the open floruit Person form.
+    # 2026-10-07 (knowledge 1.22.0): an opener after a same-line comment.
+    "shared/scripts/entry_structure.py": 197,
     "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
-    "shared/scripts/publish_files.py": 30,
+    # 2026-10-06 (knowledge 1.22.0): `move` respelling and `--owned-dir` cases.
+    "shared/scripts/publish_files.py": 39,
     "shared/scripts/plurals.py": 265,
-    "shared/scripts/slugify.py": 81,  # device-name restrictions removed
-    "shared/scripts/vault_artifacts.py": 72,
-    "shared/scripts/yaml_scalars.py": 16,
+    # 2026-10-06 (knowledge 1.22.0): suspended hyphens, fraction slashes and
+    # dash titles such as "-ase".
+    # 2026-10-07 (knowledge 1.22.0): a lone ion before a hyphen compound.
+    "shared/scripts/slugify.py": 95,  # device-name restrictions removed
+    # 2026-10-06 (knowledge 1.22.0): the stored spelling of a typed variant.
+    # 2026-10-07 (knowledge 1.22.0): an unlistable folder raises its own
+    # error, so a caller can keep the typed name.
+    "shared/scripts/vault_artifacts.py": 78,
+    # 2026-10-06 (knowledge 1.22.0): YAML-only line breaks, open values that
+    # run into a root key, and the origin reader's problem detail.
+    "shared/scripts/yaml_scalars.py": 19,
     # 2026-10-06: item 17 (split links) cases.
-    "skills/clipping-clean/scripts/body_checks.py": 84,
-    "skills/clipping-clean/scripts/dedup_index.py": 180,
-    # 2026-10-06 (knowledge 1.21.0): `rename --phase publish-note` cases.
-    "skills/clipping-clean/scripts/fetch_images.py": 638,
+    # 2026-10-06 (knowledge 1.22.0): list-nested fences, BOM frontmatter,
+    # spaced rules and screen-reader-only headings.
+    "skills/clipping-clean/scripts/body_checks.py": 97,
+    # 2026-10-06 (knowledge 1.22.0): U+2028, U+2029 and NEL in frontmatter.
+    "skills/clipping-clean/scripts/dedup_index.py": 183,
+    # 2026-10-06 (knowledge 1.22.0): publish-note's legacy-origin and
+    # image-plan gate, new-note withdrawal and the finalized-handoff resume.
+    # 2026-10-06 (knowledge 1.22.0): publish-note refuses a respelling; the
+    # kept-spelling and overwrite-origin doc pins.
+    # 2026-10-06 (knowledge 1.22.0): dotted slugs, escaped-pipe ownership,
+    # linked-folder repair, inline math, missing anchors and canonical citations.
+    # 2026-10-06 (knowledge 1.22.0): repair drops a sources: copy of a twin.
+    # 2026-10-06 (knowledge 1.22.0): SVG without its namespace refused; TIFF
+    # and ICO staged for PNG conversion and refused by place.
+    # 2026-10-06 (knowledge 1.22.0): an old copy deleted after prepare asks
+    # for a restore from its new copy, not a finalized handoff.
+    # 2026-10-07 (knowledge 1.22.0): changed-slug repair follows Canvas file
+    # cards, group backgrounds and text cards.
+    "skills/clipping-clean/scripts/fetch_images.py": 672,
     "skills/clipping-clean/scripts/lottie_to_gif.py": 42,
-    "skills/clipping-clean/scripts/slug.py": 157,  # device-name guards removed
+    # 2026-10-06 (knowledge 1.22.0): --title drops modal verbs and "not".
+    # 2026-10-06 (knowledge 1.22.0): an all-capitals CAN stays an acronym, and
+    # --topic still flags a modal.
+    # 2026-10-07 (knowledge 1.22.0): a modal-spelled noun or name stays.
+    "skills/clipping-clean/scripts/slug.py": 165,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
     "skills/feed-collect/scripts/feed_media.py": 4,
     "skills/feed-collect/scripts/rss_source.py": 4,
@@ -6095,23 +6153,139 @@ SELFTEST_MIN_CASES = {
     "skills/stock-research/scripts/market_prices.py": 34,
     "skills/stock-research/scripts/market_public.py": 140,
     "skills/stock-research/scripts/market_screen.py": 25,
-    "skills/paper-summarize/scripts/note_lint.py": 276,
-    "skills/paper-summarize/scripts/paper_scan.py": 183,
-    "skills/paper-summarize/scripts/paper_text.py": 87,
-    "skills/figure-extract/scripts/auto_fig_bbox.py": 370,
-    "skills/figure-extract/scripts/batch_extract.py": 439,
-    "skills/figure-extract/scripts/extract_figures.py": 223,
+    # 2026-10-06 (knowledge 1.22.0): chapter crops in a split book's note,
+    # chapter dates, and front matter that YAML or the origin reader rejects.
+    # 2026-10-06 (knowledge 1.22.0): display math is not a table, and one
+    # equation per display line.
+    # 2026-10-06 (knowledge 1.22.0): displays paired by the shared reader,
+    # so a `$$` on the math's line or in inline code hides nothing.
+    # 2026-10-07 (knowledge 1.22.0): per-item bullets sit under their
+    # introducing sentence, and a Wiki entry link in body prose is clean.
+    "skills/paper-summarize/scripts/note_lint.py": 306,
+    # 2026-10-06 (knowledge 1.22.0): a named split book lists its chapters' figures.
+    # 2026-10-06 (knowledge 1.22.0): named inventory gaps, --vault previews,
+    # stored stem spellings and the unorganized remedy's rename cost.
+    # 2026-10-06 (knowledge 1.22.0): an external copy spelled another way.
+    # 2026-10-06 (knowledge 1.22.0): a malformed own note's origin problem,
+    # and U+2028 and NEL in an embed-note's title.
+    "skills/paper-summarize/scripts/paper_scan.py": 201,
+    # 2026-10-06 (knowledge 1.22.0): hyphen-broken marker words, running heads
+    # and the reporting summary in --sections.
+    # 2026-10-06 (knowledge 1.22.0): a section-named running head starts its
+    # section once.
+    # 2026-10-07 (knowledge 1.22.0): technical and plain-English summaries.
+    "skills/paper-summarize/scripts/paper_text.py": 97,
+    # 2026-10-06 (knowledge 1.22.0): stacked-figure regions and panel-title rows.
+    # 2026-10-06 (knowledge 1.22.0): hyphen-broken marker words in references.
+    # 2026-10-06 (knowledge 1.22.0): scanned pages, lowercase-symbol caption
+    # titles and body-size figure labels.
+    # 2026-10-06 (knowledge 1.22.0): another column's caption in a panel gap.
+    "skills/figure-extract/scripts/auto_fig_bbox.py": 413,
+    # 2026-10-06 (knowledge 1.22.0): an OCR'd scan's flagged crop.
+    # 2026-10-06 (knowledge 1.22.0): a typed variant's stored spelling, and
+    # variant-spelled crops adopted and skipped as the exact path.
+    # 2026-10-06 (knowledge 1.22.0): a stopped sweep's summary, crops
+    # --overwrite kept, and a bad --mark-reviewed label.
+    # 2026-10-06 (knowledge 1.22.0): legacy adoption for an unorganized PDF,
+    # the rename remedy, and a named feed attachment's refusal.
+    # 2026-10-06 (knowledge 1.22.0): a named split book is refused for its
+    # chapter folder.
+    # 2026-10-06 (knowledge 1.22.0): the Extended Data switch moves an S
+    # crop's vault links to its ED name, or keeps the crop when it cannot.
+    # 2026-10-06 (knowledge 1.22.0): stems the figure sidecars cannot store.
+    # 2026-10-06 (knowledge 1.22.0): a whole-book run's review command keeps
+    # --include-split-books.
+    # 2026-10-07 (knowledge 1.22.0): a named split book's refusal never
+    # offers a whole-book run.
+    # 2026-10-07 (knowledge 1.22.0): a split book's legacy crop is adopted
+    # without extraction, named or in a sweep.
+    # 2026-10-07 (knowledge 1.22.0): an unlistable --src folder keeps the
+    # typed name.
+    "skills/figure-extract/scripts/batch_extract.py": 493,
+    # 2026-10-06 (knowledge 1.22.0): a typed variant's stored spelling and a
+    # variant-named readable copy.
+    # 2026-10-06 (knowledge 1.22.0): a named feed attachment's crop refusal.
+    # 2026-10-06 (knowledge 1.22.0): stems the figure sidecars cannot store.
+    # 2026-10-07 (knowledge 1.22.0): an unlistable PDF folder keeps the
+    # typed name.
+    "skills/figure-extract/scripts/extract_figures.py": 231,
     "skills/figure-extract/scripts/render_page.py": 68,
     # 2026-10-06 (knowledge 1.21.0): the read-only `pages` subcommand.
-    "skills/pdf-organize/scripts/organize.py": 433,
-    "skills/wiki-add/scripts/backlog.py": 54,
-    "skills/wiki-build/scripts/find_collisions.py": 79,
-    # 2026-09-30: lowered after the discipline-root empty-sources exemption
-    # and its cases were removed (roots now cite a source like every entry).
-    "skills/wiki-build/scripts/lint_entry.py": 465,
-    "skills/wiki-build/scripts/review_tree.py": 40,
-    "skills/wiki-build/scripts/vault_index.py": 90,
-    "skills/wiki-lint/scripts/scan_vault.py": 667,
+    # 2026-10-06 (knowledge 1.22.0): chapter-folder keying, carried files,
+    # `_src` siblings, external chapter folders and direct chapter renames.
+    # 2026-10-06 (knowledge 1.22.0): encoded, callout and HTML link repair,
+    # generic names in prose, and a sentence-ending period after a name.
+    # 2026-10-06 (knowledge 1.22.0): Canvas file cards, group backgrounds
+    # and text cards are checked, repaired and verified.
+    # 2026-10-06 (knowledge 1.22.0): a generic name after a folder path to
+    # the file follows it.
+    # 2026-10-06 (knowledge 1.22.0): U+2028 and NEL in a source note's title.
+    # 2026-10-07 (knowledge 1.22.0): another source's occupants of a target
+    # stem get a distinguishing name now; this document's own crops wait.
+    # 2026-10-07 (knowledge 1.22.0): filing under an unchanged stem checks
+    # it, --foreign-image, a chapter's occupied stem and the stated question.
+    # 2026-10-07 (knowledge 1.22.0): --foreign-image refuses a recorded crop
+    # whose bytes changed.
+    "skills/pdf-organize/scripts/organize.py": 493,
+    # 2026-10-06 (knowledge 1.22.0): stray-text and nested-task reports;
+    # completion keeps the backlog's listed spelling and Wiki containment
+    # compares folder identity.
+    # 2026-10-06 (knowledge 1.22.0): a nested open task in a quote or callout.
+    # 2026-10-06 (knowledge 1.22.0): a stray tick in a CRLF or CR queue.
+    "skills/wiki-add/scripts/backlog.py": 64,
+    # 2026-10-06 (knowledge 1.22.0): plain notes, issues text and a repeated
+    # candidate title.
+    # 2026-10-06 (knowledge 1.22.0): a frontmatter only the Flashcards
+    # separator closes.
+    "skills/wiki-build/scripts/find_collisions.py": 86,
+    # 2026-10-06 (knowledge 1.22.0): an issues: comment that cuts text off.
+    # 2026-10-06 (knowledge 1.22.0): review-only alias and API-surface warnings.
+    # 2026-10-06 (knowledge 1.22.0): display-form and source-line equations.
+    # 2026-10-06 (knowledge 1.22.0): a chapter cited beside its whole book.
+    # 2026-10-06 (knowledge 1.22.0): detached schedule blocks, content after
+    # an attached schedule, and an opener bold before 40 math spans.
+    # 2026-10-06 (knowledge 1.22.0): a frontmatter only the Flashcards
+    # separator closes.
+    # 2026-10-06 (knowledge 1.22.0): parents: form, as the scanner checks it.
+    # 2026-10-06 (knowledge 1.22.0): a heading that repeats the title, a
+    # leading non-title heading, and plural cross-domain aliases.
+    # 2026-10-06 (knowledge 1.22.0): a frequency hedge in the description.
+    "skills/wiki-build/scripts/lint_entry.py": 494,
+    # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
+    # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
+    # `.md` or path, and keep one another vault file needs.
+    # 2026-10-07 (knowledge 1.22.0): links to a note outside the Wiki are
+    # non_entry, never dangling or an alias.
+    # 2026-10-07 (knowledge 1.22.0): a note in a symlinked outside folder.
+    "skills/wiki-build/scripts/review_tree.py": 48,
+    # 2026-10-06 (knowledge 1.22.0): plain-note identity and issues-line errors.
+    # 2026-10-06 (knowledge 1.22.0): a symlinked folder back into the wiki.
+    # 2026-10-06 (knowledge 1.22.0): a frontmatter only the Flashcards
+    # separator closes.
+    "skills/wiki-build/scripts/vault_index.py": 95,
+    # 2026-10-06 (knowledge 1.22.0): an issues: comment that cuts text off.
+    # 2026-10-06 (knowledge 1.22.0): vault notes outside Wiki/, unneeded link
+    # paths and .md suffixes, a symlinked folder back into Wiki/, NFD names.
+    # 2026-10-06 (knowledge 1.22.0): display-form and source-line equations.
+    # 2026-10-06 (knowledge 1.22.0): WIKI outside or below the vault, a vault
+    # alias, --out encoding, rename twins, images elsewhere in the vault.
+    # 2026-10-06 (knowledge 1.22.0): a settled occurrence yields to the next
+    # sentence, fence-relative body lines, footer labels left to item 11, and
+    # a compound that names an entry.
+    # 2026-10-06 (knowledge 1.22.0): detached schedule blocks and content
+    # after an attached schedule.
+    # 2026-10-06 (knowledge 1.22.0): read: messages that name the user-issue
+    # and merge-survivor exceptions, and a frontmatter only the Flashcards
+    # separator closes.
+    # 2026-10-06 (knowledge 1.22.0): a heading that repeats the title and a
+    # leading non-title heading.
+    # 2026-10-06 (knowledge 1.22.0): a frequency hedge in the description.
+    # 2026-10-06 (knowledge 1.22.0): a link to a missing root is dangling and
+    # pairs with that root's missing-discipline-root row.
+    # 2026-10-06 (knowledge 1.22.0): settle_keys and version-1 ledgers, a
+    # case-variant WIKI, and qualified targets beside an outside twin.
+    # 2026-10-07 (knowledge 1.22.0): a note in a symlinked outside folder.
+    "skills/wiki-lint/scripts/scan_vault.py": 707,
 }
 
 
@@ -7063,6 +7237,7 @@ def check_equation_policy(rep, conv):
     and linter scanner also import one conservative candidate detector, whose
     public finding key is documented by the scanner contract. The one live
     contradiction the 2026-08-20 review found was exactly in this policy seam.
+    paper-summarize's note lint imports the same one-equation-per-line floor.
     """
     check = "equation-policy"
     eq_path = os.path.join(SKILLS_DIR, "wiki-build", "references",
@@ -7075,11 +7250,14 @@ def check_equation_policy(rep, conv):
         SKILLS_DIR, "wiki-lint", "scripts", "scan_vault.py")
     scanner_ref_path = os.path.join(
         SKILLS_DIR, "wiki-lint", "references", "scanner.md")
+    note_lint_path = os.path.join(
+        SKILLS_DIR, "paper-summarize", "scripts", "note_lint.py")
     try:
         eq, qc = read(eq_path), read(qc_path)
         builder_lint = read(builder_lint_path)
         scanner = read(scanner_path)
         scanner_ref = read(scanner_ref_path)
+        note_lint = read(note_lint_path)
     except OSError as exc:
         rep.fail(check, "cannot read a policy home: %s" % exc)
         return
@@ -7170,6 +7348,11 @@ def check_equation_policy(rep, conv):
          r"from equation_coverage import \([^)]*\bfind_boilerplate_candidates\b",
          "wiki-lint scanner no longer imports the shared boilerplate "
          "candidate detector"),
+        (note_lint_path, note_lint,
+         r"from equation_coverage import \(?[^)]*"
+         r"\bfind_multi_relation_display_candidates\b",
+         "paper-summarize note lint no longer imports the shared "
+         "one-equation-per-line candidate detector"),
     ]
     n = 0
     for path, text, pat, msg in pins:
@@ -7219,6 +7402,8 @@ def check_user_issues_policy(rep, conv):
          "changed", "no longer keeps `updated:` when only `issues:` changes"),
         (CONVENTIONS, "A report-only run blanks and resets nothing",
          "no longer keeps a report-only run from writing `issues:` or `read:`"),
+        (CONVENTIONS, "This reset alone does not advance `updated:`",
+         "no longer says the user-issue `read:` reset alone keeps `updated:`"),
         (skill, "it resets no `read:`",
          "no longer keeps a blocked issue from resetting `read:`"),
         (skill, "never for blanking `issues:` or resetting `read:` alone",
@@ -7230,6 +7415,37 @@ def check_user_issues_policy(rep, conv):
         (qc_items, 'insert `issues: ""` directly after `read:`',
          "no longer inserts a missing key as the canonical blank after "
          "`read:`"),
+        # 2026-10-06 (knowledge 1.22.0): item 2 names both `read:` writes,
+        # a resolved user issue and a merge's survivor.
+        (qc_items, "Two exceptions set `read: false` from any prior state",
+         "no longer names both cases that write a missing, null or unknown "
+         "`read:`"),
+        # 2026-10-06 (knowledge 1.22.0): "fix the issues I flagged" runs on the
+        # `user_issues` entries and authorizes the Task 3 closures they need.
+        (skill, "A request to fix the flagged issues",
+         "no longer defines the run scope of a request to fix the flagged "
+         "issues"),
+        (CONVENTIONS, "a request to fix the flagged issues takes the scope",
+         "no longer points the flagged-issues request to wiki-lint's scope "
+         "rule"),
+        # 2026-10-06 (knowledge 1.22.0): a card issue goes to Task 1's card
+        # review, so a QC-only run owns it.
+        (skill, "A card issue goes to Task 1's",
+         "no longer routes a card-only user issue to Task 1's card review, so "
+         "a QC-only run would leave it in the field"),
+        (os.path.join(lint_dir, "references", "flashcards.md"),
+         "about the card is a request for this review",
+         "no longer lets the Task 1 card review resolve a user issue about "
+         "the card"),
+        # 2026-10-06 (knowledge 1.22.0): an issue asking for a source on an
+        # entry with an empty `sources:` is resolved by item 4, not blocked.
+        (CONVENTIONS, "a verified citation for an entry whose `sources:` is "
+         "empty is not one",
+         "no longer keeps an empty `sources:` out of the uncited-source "
+         "blocker"),
+        (skill, "an empty `sources:` is not one",
+         "no longer keeps an empty `sources:` out of the uncited-source "
+         "blocker"),
     )
     held = 0
     for path, marker, why in pins:
@@ -7244,8 +7460,16 @@ def check_user_issues_policy(rep, conv):
         else:
             rep.fail(check, "%s %s (missing %r)"
                      % (os.path.basename(path), why, marker), rel(path))
+    # A universal "every reset implies an `updated:` bump" contradicts the
+    # user-issue reset, which keeps `updated:` (§2a).
+    universal = re.search(r"every\s+reset\s+implies\s+an\s+`updated:`", conv)
+    if universal:
+        rep.fail(check, "CONVENTIONS.md says every `read:` reset implies an "
+                        "`updated:` bump, but a resolved user issue resets "
+                        "`read:` without one (§2a)",
+                 at(CONVENTIONS, universal.start(), conv))
     rep.saw(check, "user-issues policy pins held", held)
-    if held == len(pins):
+    if held == len(pins) and not universal:
         rep.ok(check, "%d user-issues policy statements held at their homes"
                % held, rel(CONVENTIONS))
 
@@ -7322,6 +7546,16 @@ def check_link_rules(rep, conv):
                         "(§6's rule)", rel(wb))
     else:
         rep.ok(check, "writing.md states §6's footer-pipe rule", rel(wb))
+    # 2026-10-06 (knowledge 1.22.0): a Related-footer label is the canonical
+    # title verbatim, so a lowercase title is never Sentence-cased there.
+    if re.search(r"Sentence case[^.\n]*Related footer", wtext):
+        rep.fail(check, "writing.md asks for Sentence case in the Related "
+                        "footer -- a footer label is the target's canonical "
+                        "title verbatim (11-related-display, item11)",
+                 rel(wb))
+    else:
+        rep.ok(check, "writing.md keeps Related-footer labels equal to the "
+               "canonical title", rel(wb))
     wl = os.path.join(
         SKILLS_DIR, "wiki-lint", "references", "link-hygiene.md")
     try:
@@ -7550,6 +7784,9 @@ def check_autonomous_wiki_lint(rep, conv):
         "duplicate/disambiguation proposal",
         "split candidate, which stays a proposal",
         "without a separate refactor request",
+        # A merge's survivor also writes `read: false`, so a resolved user
+        # issue is not the only exception.
+        "is the one exception: it sets `read: false`",
     )
     # Ordinary English that implied a gate only in wiki-lint's contract.
     gate_phrases = (
@@ -7627,6 +7864,15 @@ def check_review_before_publication(rep, conv):
         (builder_path, None,
          "it never creates `Wiki/` or a publication stage inside the"),
         (review_path, None, "private combined-view index"),
+        # Step 7.1 stops on what the dispositions keep: an inherited
+        # ambiguous link (step 7.2) and a link kept for an unmirrored target.
+        (builder_path, None,
+         "an inherited `ambiguous` link in a merged entry or an "
+         "ownership-handoff neighbor that the prose leaves open"),
+        (builder_path, None, "`dangling` links kept under the"),
+        # The judgment warnings a recorded decision resolves.
+        (review_path, None, "(`17-alias-completeness`)"),
+        (review_path, None, "(`6-api-surface` warnings)"),
     ]
     scanned = 0
     texts = {}
@@ -7819,6 +8065,9 @@ def check_safe_write_programmatic_api(rep, _conv):
         # Reviewed regular files go through the publish_files CLI; only an
         # operation it cannot express keeps a documented atomic_move driver.
         ("builder", "shared/scripts/publish_files.py' publish --vault"),
+        # An entry read before its record is re-read after it: `verify`
+        # cannot detect an edit made before the snapshot.
+        ("builder", "then re-read in full; draft only from that re-read"),
         ("linter", "shared/scripts/publish_files.py' snapshot --vault"),
         ("linter", "shared/scripts/publish_files.py' publish --vault"),
         ("linter", "shared/scripts/publish_files.py' remove --vault"),
@@ -7836,6 +8085,16 @@ def check_safe_write_programmatic_api(rep, _conv):
          "'<plugin>/shared/scripts/publish_files.py' snapshot --vault"),
         ("suggestions",
          "'<plugin>/shared/scripts/publish_files.py' publish --vault"),
+        # 2026-10-06 (knowledge 1.22.0): the helper, not the agent, refuses a
+        # symlinked or case-variant Reviews/ in both log commands.
+        ("suggestions", "snapshot --vault '<vault>' \\ --owned-dir Reviews"),
+        ("suggestions", "publish --vault '<vault>' \\ --owned-dir Reviews"),
+        # 2026-10-06 (knowledge 1.22.0): the settled ledger shares that
+        # Reviews/ guard, so a symlinked Reviews/ never receives it.
+        ("linter", "The settled ledger's `snapshot` and `publish` pass "
+                   "`--owned-dir Reviews`"),
+        # A case-only retitle respells the same file through `move`.
+        ("linter", "`move` also respells a retitled entry"),
     )
     found = 0
     for owner, marker in markers:
@@ -8006,6 +8265,23 @@ CARD_REWRITE_STALE_PHRASES = (
 )
 
 
+#: Phrasing of the retired rule that wiki-lint writes no date.  It dates what
+#: it changes or creates under its SKILL.md#dates; only an item-3 finding is
+#: report-only.  Case-insensitive.
+LINT_DATE_STALE_PHRASES = (
+    "The linter writes neither field",
+    "wiki-lint never writes created:/updated:",
+)
+
+
+#: Phrasing that sends a removed card's distinct entity to a suggestion log.
+#: Both skills report it as a missing-entry candidate instead.
+#: Case-insensitive.
+REMOVED_CARD_LOG_STALE_PHRASES = (
+    "missing-entry candidate for the [closeout]",
+)
+
+
 def check_card_set_contract(rep, _conv):
     """The card set, its separator and attachment rules, and deck setup.
 
@@ -8055,9 +8331,20 @@ def check_card_set_contract(rep, _conv):
          "no longer forbids adding a second card"),
         (wl_path, "A removal advances `updated:` and keeps `read:`",
          "no longer states the date rule for removing an extra card"),
+        # 2026-10-06 (knowledge 1.22.0): item 3 is report-only, and the dates
+        # wiki-lint writes follow its Dates section.
+        (os.path.join(SKILLS_DIR, "wiki-lint", "references", "qc-items.md"),
+         "Every date wiki-lint does write",
+         "no longer defers the dates wiki-lint writes to SKILL.md#dates"),
         (os.path.join(SKILLS_DIR, "wiki-build", "references", "merge.md"),
          "remove every card other than the primary card",
          "no longer removes an entry's extra cards on every merge"),
+        # 2026-10-06 (knowledge 1.22.0): a removed card's distinct entity is
+        # reported, not logged, in both skills.
+        (os.path.join(SKILLS_DIR, "wiki-build", "references", "merge.md"),
+         "missing-entry candidate with the [missing-entry routes]",
+         "no longer reports a removed card's distinct entity as a "
+         "missing-entry candidate, as wiki-lint's card set does"),
         (CONVENTIONS, "Removing an extra card, part of every wiki-lint run "
          "and wiki-build merge",
          "no longer states, as the date rule of record, that every wiki-lint "
@@ -8108,6 +8395,14 @@ def check_card_set_contract(rep, _conv):
          "the retired rewrite bars or report-only legacy extras",
          "a card is improved whenever the result is clearer and every extra "
          "card is removed"),
+        (LINT_DATE_STALE_PHRASES, "the retired rule that wiki-lint writes no "
+         "date",
+         "wiki-lint dates what it changes or creates under SKILL.md#dates and "
+         "CONVENTIONS §2a; only an item-3 finding is report-only"),
+        (REMOVED_CARD_LOG_STALE_PHRASES,
+         "the rule that logs a removed card's entity",
+         "a removed card's distinct entity is reported as a missing-entry "
+         "candidate in both skills, never logged"),
     )
     stale = [(phrase, _phrase_re(phrase, re.I), what, rule)
              for phrases, what, rule in retired for phrase in phrases]
@@ -8147,6 +8442,8 @@ ONLINE_SOURCE_STALE_PHRASES = (
     "writes new research extracts",
     "produces new research images",
     "new entries and research extracts",
+    # 2026-10-06 (knowledge 1.22.0): wiki-build never clips a page to cite it.
+    "must first become a durable clipping",
 )
 
 
@@ -8154,8 +8451,11 @@ def check_online_source_contract(rep, _conv):
     """Online pages are cited by URL; legacy research extracts stay protected.
 
     CONVENTIONS §7 owns the URL item form, wiki-add's research guide the
-    citing step and the legacy marker, wiki-build's merge rule its
-    preservation, wiki-lint's correction mode how a cited page is read, and
+    local-source search before it, the citing step (which address to cite)
+    and the legacy marker, wiki-build's merge rule its
+    preservation, wiki-build's evidence and intake rules the ban on clipping
+    a page just to cite it, wiki-lint's correction mode how a cited page is
+    read, and
     clipping-clean the protection of existing extracts. The retired
     extract-creation workflow must not come back in any canonical source.
     """
@@ -8175,6 +8475,15 @@ def check_online_source_contract(rep, _conv):
          "no longer defines the legacy research-extract marker"),
         (research, "Never create, edit, extend or rename one.",
          "no longer keeps legacy research extracts read-only"),
+        (research, "else from its `og:url` when that does",
+         "no longer ranks the canonical link above og:url"),
+        (research, "only when the entry relies on that version",
+         "no longer drops an unneeded version suffix"),
+        (os.path.join(SHARED_DIR, "CONVENTIONS.md"),
+         "its `<link rel=\"canonical\">` over its `og:url`",
+         "no longer ranks the canonical link above og:url"),
+        (research, "Search an acronym in its own call with `--exact`",
+         "no longer keeps a short acronym from matching inside words"),
         (os.path.join(SKILLS_DIR, "wiki-build", "references", "merge.md"),
          "Keep every online page's",
          "no longer keeps an existing URL item on merge"),
@@ -8185,6 +8494,13 @@ def check_online_source_contract(rep, _conv):
         (os.path.join(SKILLS_DIR, "clipping-clean", "SKILL.md"),
          "<!-- obsidian:wiki-add-research-source -->",
          "no longer protects legacy research extracts"),
+        (os.path.join(SKILLS_DIR, "wiki-build", "SKILL.md"),
+         "never clip a page just to cite it",
+         "no longer forbids clipping a page just to cite it"),
+        (os.path.join(SKILLS_DIR, "wiki-build", "references",
+                      "source-intake.md"),
+         "never clipped to cite it",
+         "no longer keeps a page named beside a source unclipped"),
     )
     held = 0
     for path, marker, why in pins:
@@ -8233,6 +8549,388 @@ def check_online_source_contract(rep, _conv):
                % held, rel(research))
 
 
+def _check_rule_phrases(rep, check, pins, stale_phrases, label, home):
+    """Pin each (path, phrase, why) and fail any retired phrase in a source.
+
+    ``stale_phrases`` holds (phrase, rule) pairs, matched case-insensitively
+    across `canonical_rule_sources()`.
+    """
+    held = 0
+    for path, marker, why in pins:
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a %s home: %s" % (label, exc),
+                     rel(path))
+            continue
+        if _phrase_re(marker).search(text):
+            held += 1
+        else:
+            rep.fail(check, "%s %s (missing %r)"
+                     % (os.path.basename(path), why, marker), rel(path))
+    stale = [(_phrase_re(phrase, re.I), rule) for phrase, rule in stale_phrases]
+    retired = 0
+    for path, text in canonical_rule_sources():
+        for rx, rule in stale:
+            for m in rx.finditer(text):
+                retired += 1
+                rep.fail(check, "%s restates a retired %s rule (%r) -- %s"
+                         % (rel(path), label, " ".join(m.group(0).split()),
+                            rule), at(path, m.start(), text))
+    rep.saw(check, "%s pins held" % label, held)
+    if held == len(pins) and not retired:
+        rep.ok(check, "%d %s statements held at their owners; no canonical "
+               "source restates a retired one" % (held, label), rel(home))
+
+
+def check_lint_run_scope(rep, _conv):
+    """wiki-lint's run scope: per-closure Task 3 and Task 1's hand-offs.
+
+    SKILL.md and hierarchy.md run Task 3 on each connected closure the
+    request covers, and a user-issue entry seeds a closure only when its issue
+    needs Task 3. A run that skips Task 1b reports Task 1's hand-offs as left
+    for Task 1b, so they never vanish unreported.
+    """
+    lint_dir = os.path.join(SKILLS_DIR, "wiki-lint")
+    skill = os.path.join(lint_dir, "SKILL.md")
+    hierarchy = os.path.join(lint_dir, "references", "hierarchy.md")
+    backlogs = os.path.join(lint_dir, "references", "backlogs.md")
+    qc_items = os.path.join(lint_dir, "references", "qc-items.md")
+    # 2026-10-06 (knowledge 1.22.0): Task 3 runs per connected closure, and
+    # Task 1's hand-offs in a run without Task 1b are reported.
+    pins = (
+        (skill, "Run it on each connected closure the request covers",
+         "no longer runs Task 3 on each covered closure, so one uncovered "
+         "group would skip Task 3 everywhere"),
+        (hierarchy, "Run Task 3 on each closure the request covers in full",
+         "no longer runs Task 3 on each covered closure"),
+        (hierarchy, "Groups that share no entry, root or MOC are separate "
+         "closures", "no longer separates disjoint groups into their own "
+         "closures"),
+        (hierarchy, "is a seed only when one of its issues routes to item 8 "
+         "or Task 3", "no longer limits which user-issue entries seed "
+         "Task 3's closure"),
+        (skill, "In a run that skips Task 1b, the run report names each "
+         "handed-over finding", "no longer reports Task 1's hand-offs in a "
+         "run that skips Task 1b"),
+        (backlogs, "**Task 1 — left for Task 1b**",
+         "lost the run-report section for Task 1's hand-offs"),
+        (qc_items, "the run report names each hand-off as",
+         "no longer reports an itemN hand-off in a run that skips Task 1b"),
+        # 2026-10-07 (knowledge 1.22.0): a missing entry created for a user
+        # issue seeds its closure, so a fix-flagged-issues run places it.
+        (skill, "and of each missing entry it creates to resolve an issue",
+         "no longer authorizes Task 3 for a missing entry a user issue "
+         "creates"),
+        (hierarchy, "created to resolve a user issue is a seed",
+         "no longer seeds the closure of a missing entry a user issue "
+         "creates"),
+    )
+    stale = (
+        ("Run Task 3 only when the request covers that complete set",
+         "Task 3 runs on each connected closure the request covers"),
+    )
+    _check_rule_phrases(rep, "lint-run-scope", pins, stale, "run-scope",
+                        skill)
+
+
+def check_refactor_protocol(rep, _conv):
+    """wiki-lint's refactor protocol and the note-content closeout agree.
+
+    A note-content item Task 1b could not finish stays open with its blocker;
+    a merge rewrites links to a removed card's block ID to the survivor; the
+    rewrite scope retargets links inside `Articles/` claims and log items; a
+    split's misnamed original is retitled; a half-published retitle is
+    finished, not merged; and deleting a discipline's last member unlinks
+    its MOC link, since Task 3 preserves that MOC as inactive.
+    """
+    lint_dir = os.path.join(SKILLS_DIR, "wiki-lint")
+    refs = os.path.join(lint_dir, "references")
+    refactors = os.path.join(refs, "refactors.md")
+    backlogs = os.path.join(refs, "backlogs.md")
+    # 2026-10-06 (knowledge 1.22.0): blocked note-content items stay open;
+    # merges, retitles and deletions finish their link repairs.
+    pins = (
+        (backlogs, "Keep any other unresolved portion open as its own item, "
+         "naming its concrete blocker",
+         "no longer keeps an unfinished note-content item open with its "
+         "blocker"),
+        (backlogs, "evidence a missing entry needs that the run could not "
+         "reach", "no longer lists a missing entry's unreachable evidence as "
+         "a blocker that keeps its item open"),
+        (backlogs, "An existing split or merge item that a refactor blocker "
+         "stops stays open", "no longer keeps a blocked split or merge item "
+         "open"),
+        (refactors, "becomes a plain link to the survivor",
+         "no longer rewrites a link to a merged-away card's block ID to the "
+         "survivor"),
+        (os.path.join(refs, "flashcards.md"), "or in a merge to the survivor",
+         "no longer sends a removed card's block-ID link to a merge's "
+         "survivor"),
+        (refactors, "even inside a claim sentence or a log item's heading",
+         "no longer retargets links inside `Articles/` claims and log items"),
+        (refactors, "A suggestion log, its Fixed section included, is not a "
+         "historical record", "no longer rewrites links in a suggestion "
+         "log's Fixed section"),
+        (CONVENTIONS, "including one inside a claim",
+         "no longer retargets a link inside an `Articles/` claim"),
+        (refactors, "the title of a split's retained original does not name "
+         "exactly its one remaining subject",
+         "no longer retitles a split's misnamed original"),
+        (refactors, "retitles it to the subject's canonical title",
+         "no longer retitles a split's misnamed original in the same run"),
+        # 2026-10-07 (knowledge 1.22.0): wiki-lint applies the builder's
+        # acronym-or-full-form title choice to retitles and merge survivors.
+        (refactors, "the title's acronym-or-full-form choice breaks the "
+         "builder's", "no longer retitles a title that breaks the "
+         "acronym-or-full-form rule"),
+        (refactors, "its acronym-or-full-form choice included",
+         "no longer titles a merge's survivor by the builder's title rule"),
+        (os.path.join(refs, "qc-items.md"), "A title whose "
+         "acronym-or-full-form choice breaks the", "item 5 no longer "
+         "retitles a title that breaks the acronym-or-full-form rule"),
+        (CONVENTIONS, "retitles a split's retained original",
+         "§4b no longer lists the retitle of a split's original"),
+        (refactors, "### Finish an interrupted retitle",
+         "lost the section that finishes a half-published retitle"),
+        (refactors, "Finish that retitle; do not merge",
+         "no longer finishes a half-published retitle instead of merging"),
+        (os.path.join(lint_dir, "SKILL.md"),
+         "(references/refactors.md#finish-an-interrupted-retitle)",
+         "no longer routes recovery of a half-published retitle"),
+        (os.path.join(refs, "qc-items.md"),
+         "(refactors.md#finish-an-interrupted-retitle)",
+         "no longer keeps a half-published retitle out of the merge check"),
+        (refactors, "carrying a text that several merged entries hold "
+         "identically once", "no longer carries identical issue text once "
+         "in a merge"),
+        (refactors, "deletion that leaves the entry's discipline with no "
+         "member", "no longer unlinks an emptied discipline's MOC link "
+         "before a deletion"),
+    )
+    stale = (
+        ("as a close call or for a refactor blocker",
+         "a split or merge item a refactor blocker stops stays open"),
+        ("only with a concrete blocker listed below",
+         "an unfinished item stays open with the blocker that stopped it"),
+        ("cannot keep its anchor",
+         "a merge rewrites a link to a removed card's block ID as a plain "
+         "link to the survivor"),
+        ("navigation links of `Articles/` notes and `Reviews/` logs",
+         "a refactor retargets every link to the retired name"),
+        ("(never their claims, issue text",
+         "a refactor retargets links inside claims and issue text"),
+        ("rewrites only navigation links",
+         "a refactor retargets every link to the retired name"),
+        ("repair a log's navigation links",
+         "a rename retargets every link in a log, issue text included"),
+    )
+    _check_rule_phrases(rep, "refactor-protocol", pins, stale, "refactor",
+                        refactors)
+
+
+def check_empty_sources_route(rep, _conv):
+    """An empty `sources:` is filled with a verified citation; plain URLs pass.
+
+    wiki-lint's item 4 sends an empty `sources:` to Task 1b, which cites the
+    page or document it verified the entry against; SKILL.md,
+    source-backed-corrections.md and CONVENTIONS §2d and §7 agree. A plain
+    `http(s)://` URL item conforms on lint (§2a), wherever item 4 and §7
+    restate the URL form.
+    """
+    lint_dir = os.path.join(SKILLS_DIR, "wiki-lint")
+    refs = os.path.join(lint_dir, "references")
+    qc_items = os.path.join(refs, "qc-items.md")
+    # 2026-10-06 (knowledge 1.22.0): Task 1b fills an empty `sources:`; a
+    # plain URL item conforms in every lint-side restatement.
+    pins = (
+        (qc_items, "Task 1 hands an empty `sources:` to Task 1b",
+         "no longer routes an empty `sources:` to Task 1b"),
+        (os.path.join(lint_dir, "SKILL.md"),
+         "The one exception is an entry whose `sources:` is empty",
+         "no longer lets Task 1b cite a source for an empty `sources:`"),
+        (os.path.join(refs, "source-backed-corrections.md"),
+         "the one exception is an entry whose `sources:` is empty",
+         "no longer lets a correction cite a source for an empty `sources:`"),
+        (CONVENTIONS, "An entry whose `sources:` is empty cites the page or "
+         "document Task 1b verified", "no longer gives an empty `sources:` "
+         "its citation scope"),
+        (qc_items, "keep a plain URL as found and never re-quote it",
+         "no longer accepts a plain URL item, so lint would re-quote it"),
+        (os.path.join(refs, "scanner.md"),
+         "A full http(s) URL is a valid source, double-quoted or plain",
+         "no longer accepts a plain URL item"),
+        (CONVENTIONS, "on lint a plain `http(s)://` URL item also conforms",
+         "§7 no longer accepts a plain URL item on lint"),
+    )
+    stale = (
+        ("an empty `sources:` is reported, never filled",
+         "Task 1b fills an empty `sources:` with a verified citation"),
+        ("valid as a quoted, full http(s) address",
+         "a plain URL item conforms on lint (§2a)"),
+        ("A quoted full http(s) URL is a valid source",
+         "a plain URL item conforms on lint (§2a)"),
+        ("Each item is double-quoted and takes one of three forms",
+         "a plain URL item conforms on lint (§2a)"),
+    )
+    _check_rule_phrases(rep, "empty-sources-route", pins, stale,
+                        "source-item", qc_items)
+
+
+def check_rename_link_repair(rep, _conv):
+    """A skill that renames a vault file repairs every link to it in that run.
+
+    The request that leads to the rename authorizes the repair: pdf-organize
+    applies its verified plan without asking, and clipping-clean never hands a
+    changed slug's repair to another skill. The retired approval gate for a
+    referenced PDF and wiki-lint's producer-mapped repair mode stay gone,
+    from the root README too.
+    """
+    # 2026-10-06 (knowledge 1.22.0): the same-run rename repair and its
+    # retired approval gate.
+    check = "rename-link-repair"
+    organize = os.path.join(SKILLS_DIR, "pdf-organize")
+    organize_skill = os.path.join(organize, "SKILL.md")
+    readme = os.path.join(ROOT, "README.md")
+    pins = (
+        (organize_skill, "authorizes the helper's verified reference repair",
+         "no longer lets the rename request authorize the reference repair"),
+        (organize_skill, "apply it without asking",
+         "no longer applies a verified reference repair without asking"),
+        (os.path.join(organize, "references", "rename-repair.md"),
+         "authorizes the repair", "no longer lets the rename request "
+         "authorize the repair"),
+        (os.path.join(SKILLS_DIR, "clipping-clean", "SKILL.md"),
+         "never ask separately or hand it to another skill",
+         "no longer keeps a changed slug's link repair in its own run"),
+        (CONVENTIONS, "the skill that renames a file repairs them in the "
+         "same run", "no longer gives link repair to the renaming skill"),
+        (readme, "it rewrites every link to that file in the same run",
+         "no longer states that a rename repairs its links in the same run"),
+        (KNOWLEDGE_README, "it repairs every link to that file in the same "
+         "run", "no longer states that a rename repairs its links in the "
+         "same run"),
+    )
+    same_run = ("the request that leads to a rename authorizes its link "
+                "repair, applied in the same run")
+    no_mode = ("the renaming skill repairs the links; wiki-lint has no "
+               "producer-mapped repair mode")
+    stale = (
+        ("References require the user's authorization before applying the "
+         "rename", same_run),
+        ("If the file is referenced and approval is absent", same_run),
+        ("any required authorization is established", same_run),
+        ("When approval is still needed", same_run),
+        ("producer-mapped", no_mode),
+        ("external-artifact-repair", no_mode),
+    )
+    # The root README restates the rule but is no canonical rule source.
+    readme_text = read(readme)
+    for phrase, rule in stale:
+        for m in _phrase_re(phrase, re.I).finditer(readme_text):
+            rep.fail(check, "%s restates a retired rename-repair rule (%r) "
+                     "-- %s" % (rel(readme), " ".join(m.group(0).split()),
+                                rule), at(readme, m.start(), readme_text))
+    _check_rule_phrases(rep, check, pins, stale, "rename-repair",
+                        organize_skill)
+
+
+def check_dangler_hand_off(rep, _conv):
+    """Task 1b glosses a dangling term, and a missing root's link waits.
+
+    Task 1b settles each `item10/dangling` target before Task 2 drops a link:
+    it creates the entries the missing-entry rule allows and glosses each
+    term a sentence needs. A link to a missing discipline root waits for
+    Task 3, which creates that root; closeout drops it when the run did not.
+    """
+    lint_dir = os.path.join(SKILLS_DIR, "wiki-lint")
+    skill = os.path.join(lint_dir, "SKILL.md")
+    hygiene = os.path.join(lint_dir, "references", "link-hygiene.md")
+    refactors = os.path.join(lint_dir, "references", "refactors.md")
+    # 2026-10-06 (knowledge 1.22.0): the dangler gloss and the missing-root
+    # hold.
+    pins = (
+        (hygiene, "**A link to a missing root waits for Task 3.**",
+         "no longer holds a link to a missing root for Task 3, so Task 2 "
+         "would drop links to a root the run creates"),
+        (hygiene, "closeout drops the link under this protocol",
+         "no longer drops a held root link when the run does not create "
+         "the root"),
+        (hygiene, "When Task 1b runs, it settles each dangler first",
+         "no longer settles a dangler in Task 1b before Task 2 drops it"),
+        (refactors, "### Dangling-link hand-off",
+         "lost the dangler hand-off section"),
+        (refactors, "gets a one-clause gloss at that mention",
+         "no longer glosses a dangling term whose sentence needs its "
+         "meaning"),
+        (refactors, "[waits for Task 3](link-hygiene.md#dangling-links-"
+         "target-missing)", "no longer leaves a missing root's link to "
+         "Task 3"),
+        (skill, "a link to such a root [waits for Task 3]",
+         "no longer keeps a link to a missing root out of Task 2's drops"),
+        (skill, "A link Task 2 left for a missing root the run did not "
+         "create is dropped now", "no longer drops a held root link at "
+         "closeout"),
+        (CONVENTIONS, "Task 1b first glosses each dangling term whose "
+         "sentence needs its meaning", "no longer glosses a dangling term "
+         "before wiki-lint drops the link"),
+        (CONVENTIONS, "a link to a missing discipline root that Task 3 "
+         "creates is held for that root", "no longer holds a link to a "
+         "missing root for Task 3"),
+    )
+    stale = (
+        ("and ambiguous targets are not genuine danglers",
+         "a missing root Task 3 creates is not a genuine dangler either"),
+        ("Task 1b has already created every gap that meets",
+         "Task 1b's dangler hand-off also glosses each term a sentence "
+         "needs"),
+    )
+    _check_rule_phrases(rep, "dangler-hand-off", pins, stale, "dangler",
+                        hygiene)
+
+
+#: Release-history narration in runtime guidance: "Before knowledge 1.4.0
+#: ...", "Earlier wiki-add versions wrote ...", "an older version of this
+#: skill stopped ...", "No skill creates one any more".  A rule states
+#: current behavior; a legacy artifact is named for what it is ("a legacy
+#: research extract", "a previous-layout MOC").  Case-insensitive.
+VERSION_HISTORY_PATTERNS = (
+    r"\b(?:before|since|until|as of|prior to)\s+knowledge\s+\d+\.\d+",
+    r"\bearlier\s+(?:(?:`?[\w-]+`?|\[[^\]]*\]\([^)]*\))\s+)?versions?\b",
+    # 2026-10-06 (knowledge 1.22.0): an older or previous release of a skill.
+    r"\b(?:older|previous|prior)\s+versions?\s+of\s+(?:this|the|that)\s+"
+    r"(?:skill|workflow|plugin|scanner|script|helper|linter)\b",
+    r"\bany\s+more\b(?!\s+than)",
+)
+
+
+def check_no_version_history_wording(rep, _conv):
+    """No canonical source narrates what an earlier release did.
+
+    Runtime guidance and script comments state the current rule.  A legacy
+    artifact keeps its name and definition, without a history of the release
+    that made it.
+    """
+    check = "no-version-history-wording"
+    patterns = [re.compile(p, re.I) for p in VERSION_HISTORY_PATTERNS]
+    scanned = 0
+    for path, text in canonical_rule_sources():
+        scanned += 1
+        for rx in patterns:
+            for m in rx.finditer(text):
+                rep.fail(check, "%s narrates release history (%r) -- state "
+                         "the current rule instead"
+                         % (rel(path), " ".join(m.group(0).split())),
+                         at(path, m.start(), text))
+    rep.saw(check, "canonical sources scanned for release-history wording",
+            scanned)
+    if scanned and not any(status == "FAIL" and name == check
+                           for name, status, _where, _message in rep.results):
+        rep.ok(check, "%d canonical sources state current rules without "
+               "release-history narration" % scanned,
+               rel(os.path.join(SHARED_DIR, "CONVENTIONS.md")))
+
+
 #: (file under skills/, phrases) for the writing rules this check pins.
 WRITING_RULE_PINS = (
     (("wiki-build", "references", "writing.md"), (
@@ -8245,6 +8943,39 @@ WRITING_RULE_PINS = (
         "Link, don't re-explain",
         "leave no open question",
         "one self-contained bullet per item",
+        # 2026-10-06 (knowledge 1.22.0): a named-entity request leaves an
+        # unnamed neighbor glossed, never built.
+        "a named-entity request builds only the entities it names",
+        # 2026-10-06 (knowledge 1.22.0): only the listed acronyms override a
+        # full form with textbook usage; staged facts take one bullet each.
+        "only these listed acronyms override that usage",
+        "Time order alone does not make a chain",
+        "one bullet per stage",
+    )),
+    # 2026-10-06 (knowledge 1.22.0): citing another vault source for a date
+    # or a version claim never marks an unbuilt source as built.
+    (("wiki-build", "references", "rare-types.md"), (
+        "a Wiki entry already cites",
+    )),
+    # 2026-10-07 (knowledge 1.22.0): a living Person with no stated birth
+    # year takes the open floruit form; a birth year stays preferred and is
+    # never estimated.
+    (("wiki-build", "references", "rare-types.md"), (
+        "use the open floruit form `(fl. since YYYY)`",
+        "stays preferred whenever a route supplies the birth year",
+        "never estimate a birth year",
+        "When neither a route nor the open floruit form supplies the date",
+    )),
+    (("wiki-build", "references", "api-surface.md"), (
+        "a Wiki entry already cites",
+    )),
+    # 2026-10-06 (knowledge 1.22.0): wiki-lint's missing-entry rule alone
+    # defines what counts as a use of a load-bearing term.
+    (("wiki-build", "SKILL.md"), (
+        "counting each use as wiki-lint's",
+    )),
+    (("wiki-lint", "references", "refactors.md"), (
+        "A use is a sentence that needs the term's meaning to make its point",
     )),
     (("wiki-build", "references", "equations.md"), (
         "Start from the defining relation",
@@ -8252,6 +8983,11 @@ WRITING_RULE_PINS = (
         "always say in one sentence why it has that form",
         "One equation per line",
         "General form first",
+        # 2026-10-06 (knowledge 1.22.0): statistics is the notation table's
+        # only departure, and an assumption a derivation uses is content.
+        "are the table's one sanctioned departure",
+        "entries under every other tag keep the table's symbol",
+        "makes the bias–variance decomposition's cross terms vanish",
     )),
     (("wiki-build", "references", "merge.md"), (
         "Preservation protects claims, not arrangement",
@@ -8268,6 +9004,33 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "qc-items.md"), (
         "A gap that only an unbuilt source would fill",
     )),
+    # 2026-10-06 (knowledge 1.22.0): an entry that conflates two concepts
+    # still has exactly one discipline tag, split or not.
+    (("wiki-lint", "references", "qc-items.md"), (
+        "An entry that conflates two concepts still gets one tag",
+    )),
+    # 2026-10-06 (knowledge 1.22.0): time-ordered stages that each carry
+    # their own facts stay bullets.
+    (("wiki-lint", "references", "qc-items.md"), (
+        "never time-ordered stages whose bullets each stand alone",
+    )),
+    # Reading notes explain each equation and bound, and check equations on
+    # the page image, never the text capture.
+    (("paper-summarize", "references", "note-format.md"), (
+        "where the relation comes from",
+        "practical takeaway",
+        "Never invent a reason or a derivation",
+        "Transcribe each equation from its page image",
+        # 2026-10-07 (knowledge 1.22.0): reading notes put per-item facts in
+        # bullets, give every bound a reason, and link a concept that has
+        # its own Wiki entry instead of explaining it again.
+        "one self-contained bullet per item",
+        "Give every such bound a one-sentence intuitive reason",
+        "A concept that has its own Wiki entry is linked to that entry",
+    )),
+    (("paper-summarize", "references", "review-checklist.md"), (
+        "symbol by symbol on its source page image",
+    )),
 )
 
 #: Retired writing rules: the default against examples, the hedge repair
@@ -8278,6 +9041,31 @@ WRITING_RULE_RETIRED = (
     "narrowing its own wording",
     "wiki-build on an unprocessed source",
     "overview-chapter-only citation",
+    # 2026-10-06 (knowledge 1.22.0): an uncited vault source is unbuilt and
+    # never cited for a date or a version claim; a use is counted as
+    # wiki-lint's missing-entry rule defines it.
+    "durable source already in the vault",
+    "process an existing capture through `clipping-clean` first",
+    "use without a resolving link (a one-clause inline gloss still counts "
+    "as a use) is load-bearing",
+    # 2026-10-06 (knowledge 1.22.0): no entry keeps several discipline tags.
+    "Leave multiple tags only when",
+    # 2026-10-06 (knowledge 1.22.0): no field but statistics departs from the
+    # notation table; a derivation's assumptions are content; staged facts
+    # are bullets; only listed acronyms override a full form; a bound
+    # counterpart is required on card line 3.
+    "field wins for that discipline's entries",
+    "noise or independence assumptions behind a textbook decomposition",
+    "Bullets are parallel, not sequential",
+    "Use the literature's frequent, distinctive form",
+    "Append one counterpart in parentheses only when",
+    # 2026-10-06 (knowledge 1.22.0): a merged duplicate keeps the title
+    # rule's form, not the literature's most frequent one.
+    "usually the literature's most common form",
+    # 2026-10-07 (knowledge 1.22.0): every bound a reading note keeps has a
+    # reason, and reading notes link Wiki entries instead of glossing them.
+    "give the takeaway alone",
+    "The note is self-contained",
 )
 
 
@@ -8287,8 +9075,9 @@ def check_writing_rules(rep, _conv):
     writing.md, equations.md and merge.md own the rules; wiki-lint's
     source-backed-corrections.md routes deepen requests, and backlogs.md and
     qc-items.md leave a note thin only for want of an unbuilt source to that
-    source's build.  The retired rules must not return in any canonical
-    source.
+    source's build.  paper-summarize's note-format.md and review-checklist.md
+    own the reading-note equation rules.  The retired rules must not return
+    in any canonical source.
     """
     check = "writing-rules"
     held = total = 0
@@ -8329,6 +9118,332 @@ def check_writing_rules(rep, _conv):
                                 "writing.md")))
 
 
+#: (file under shared/, phrases) for the suggestion-log rules this check pins.
+SUGGESTION_LOG_PINS = (
+    # A fixed item keeps one Verified line; a passing recheck leaves it alone.
+    (("SUGGESTIONS.md",), (
+        "An item keeps one **Verified** line",
+        "a run never appends a second one",
+        "only a user request to re-verify that item replaces the line",
+    )),
+    # The closeout gate follows the item's current Verified line, and a
+    # user's re-verify request still opens it.
+    (("RUNTIME.md",), (
+        "verified while it had no **Verified** line",
+        "rechecking a fixed item that already has a **Verified** line and did "
+        "not recur counts only when the user asked to re-verify it",
+    )),
+)
+
+
+def check_suggestion_log_rules(rep, _conv):
+    """The suggestion-log rules stay at their shared owners.
+
+    SUGGESTIONS.md owns the item lifecycle and RUNTIME.md the closeout gate.
+    An already-verified fixed item keeps its one Verified line when a later
+    check passes, and that recheck alone opens the gate only on the user's
+    re-verify request, so ordinary runs neither churn nor duplicate Verified
+    lines.
+    """
+    check = "suggestion-log-rules"
+    held = total = 0
+    for parts, phrases in SUGGESTION_LOG_PINS:
+        path = os.path.join(SHARED_DIR, *parts)
+        total += len(phrases)
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a suggestion-log rule home: %s"
+                     % exc, rel(path))
+            continue
+        for phrase in phrases:
+            if _phrase_re(phrase).search(text):
+                held += 1
+            else:
+                rep.fail(check, "%s no longer states %r"
+                         % (os.path.basename(path), phrase), rel(path))
+    rep.saw(check, "suggestion-log rule pins held", held)
+    if held == total:
+        rep.ok(check, "%d suggestion-log statements held at their owners"
+               % held, rel(os.path.join(SHARED_DIR, "SUGGESTIONS.md")))
+
+
+#: (file under skills/, phrases) for the wiki-build source-intake rules.
+#: 2026-10-06 (knowledge 1.22.0): a source named informally, the same-URL
+#: clipping twin, book/chapter pairing by path and core stem, one citation
+#: form per document, and nested folders that `--create-dir` cannot create.
+SOURCE_INTAKE_PINS = (
+    (("wiki-build", "references", "source-intake.md"), (
+        "named by title, nickname or description",
+        "A filename match alone never decides",
+        "list the candidates and ask",
+        "--url '<origin URL>'",
+        "a confirmed citation of either note is coverage",
+        "Pass each inventoried path unchanged, never a stem",
+        "the stem without a `_src` marker",
+        "never both its whole-book PDF and its chapter PDFs",
+        "`--create-dir` creates only an absent direct child of the vault",
+        # 2026-10-06 (knowledge 1.22.0): only a problem that can hide a
+        # citation makes coverage uncertain; a plain note never does.
+        "any problem that can hide a citation",
+        "it is reported but never makes coverage uncertain",
+        # 2026-10-07 (knowledge 1.22.0): a request naming one chapter of an
+        # unsplit book has pdf-organize split it, then builds the chapter
+        # PDF; a block builds nothing, and no chapter cites the whole book.
+        "processes that chapter's PDF alone",
+        "When only chapter PDFs exist, find it by its `_NN_` number or title",
+        "to split that one book, keeping the original",
+        "If pdf-organize finds no chapter structure",
+        "A preview or no-apply run splits nothing and reports the proposed "
+        "split.",
+        "build nothing from the book and report the blocker and the "
+        "proposed split",
+        "Never build a chapter from the whole-book PDF",
+    )),
+    (("wiki-build", "references", "merge.md"), (
+        "A document is cited in one form",
+    )),
+    # 2026-10-07 (knowledge 1.22.0): a split book processed as one file
+    # takes its figures from its chapters' crops, never a whole-book run.
+    (("wiki-build", "references", "media.md"), (
+        "its inventory is the step-1 inventory of each chapter's stem",
+        "Never extract from the whole-book PDF or pass "
+        "`--include-split-books`",
+    )),
+    (("wiki-build", "SKILL.md"), (
+        "it creates only a direct child of the vault",
+        "create each missing level with a plain `mkdir`",
+        # 2026-10-07 (knowledge 1.22.0): step 1 routes a chapter request.
+        "A request naming one chapter of a book processes that chapter's PDF",
+        "for an unsplit book first has pdf-organize split it",
+    )),
+)
+
+
+def check_source_intake_rules(rep, _conv):
+    """wiki-build's source-intake rules stay at their owners.
+
+    source-intake.md resolves an informally named source, counts a same-URL
+    clipping twin as coverage, pairs a split book with its chapters by
+    inventoried path and core stem, builds a requested chapter from its
+    chapter PDF after pdf-organize splits an unsplit book, and saves pasted
+    text into a nested folder level by level; merge.md cites each document in
+    one form; step 7 of SKILL.md creates a nested entry folder the same way.
+    """
+    check = "source-intake-rules"
+    held = total = 0
+    for parts, phrases in SOURCE_INTAKE_PINS:
+        path = os.path.join(SKILLS_DIR, *parts)
+        total += len(phrases)
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a source-intake rule home: %s"
+                     % exc, rel(path))
+            continue
+        for phrase in phrases:
+            if _phrase_re(phrase).search(text):
+                held += 1
+            else:
+                rep.fail(check, "%s no longer states %r"
+                         % (os.path.basename(path), phrase), rel(path))
+    rep.saw(check, "source-intake rule pins held", held)
+    if held == total:
+        rep.ok(check, "%d source-intake statements held at their owners"
+               % held, rel(os.path.join(SKILLS_DIR, "wiki-build", "references",
+                                        "source-intake.md")))
+
+
+#: pdf-organize classifies split authorization by the requested action, for
+#: one PDF or several: organizing or filing is broad, renaming or
+#: identifying alone is narrow. A chapter request for an unsplit book,
+#: handed off by wiki-build or paper-summarize, authorizes splitting that
+#: book. Its year rule names a preprint by the year
+#: this version was posted, as paper-summarize dates it by this version, so
+#: the stem year and the summary's `published` year agree.
+PDF_ORGANIZE_PINS = (
+    (("pdf-organize", "SKILL.md"), (
+        "asks to organize or file PDFs",
+        "rename or identify PDFs, one or several",
+        "for a preprint, the year this version was posted",
+        "not the date inside its DOI",
+        # 2026-10-07 (knowledge 1.22.0): a chapter request handed off by
+        # wiki-build or paper-summarize authorizes splitting that one book.
+        "counts as a request to split that one book",
+        "or a hand-off asks for one of its chapters",
+        # 2026-10-07 (knowledge 1.22.0): another source's files on the
+        # natural name, unchanged stem included, get a distinguishing name
+        # now; this PDF's own crops or reading note do not.
+        "are no reason for another name",
+        "re-plan the PDF now under a distinguishing abbreviated title",
+        "is no refusal",
+        "Filing a PDF under its unchanged stem checks that stem too.",
+        "pass `--foreign-image '<name>'` for each in that re-plan",
+    )),
+    (("pdf-organize", "references", "book-splitting.md"), (
+        "re-plan now under another chapter name and split",
+    )),
+    (("pdf-organize", "references", "rename-repair.md"), (
+        "pass `--foreign-image '<name>'` for it",
+    )),
+    (("paper-summarize", "references", "edge-cases.md"), (
+        "Use the date printed on this version.",
+    )),
+    (("paper-summarize", "SKILL.md"), (
+        # 2026-10-07 (knowledge 1.22.0): a chapter request summarizes the
+        # chapter PDF, found without a book PDF too; a preview or a block
+        # summarizes nothing, and step 7 reports the split or its blocker.
+        "unless the request asks for one chapter of it",
+        "selects that chapter's PDF",
+        "When only chapter PDFs exist, find it by its `_NN_` number or title",
+        "to split that one book, keeping the original; then summarize the "
+        "chapter PDF",
+        "splits nothing and reports the proposed split",
+        "If pdf-organize finds no chapter structure",
+        "**Chapter request:** the chapter PDFs pdf-organize split from the "
+        "book",
+        "write nothing from the book and report the blocker and the "
+        "proposed split",
+        "Never write a chapter-only note under the book's stem",
+    )),
+)
+
+#: The retired narrow-request wording that left a multi-PDF request unclassified.
+PDF_ORGANIZE_RETIRED = (
+    (("pdf-organize", "SKILL.md"),
+     "A narrow request to rename or identify one PDF"),
+    # 2026-10-07 (knowledge 1.22.0): an occupied target stem states its
+    # two-way rule instead of deferring to the helper's remedy.
+    (("pdf-organize", "SKILL.md"),
+     "the notes citing them, and relay the helper's remedy"),
+)
+
+
+def check_pdf_organize_rules(rep, _conv):
+    """pdf-organize's split authorization and preprint year stay stated."""
+    check = "pdf-organize-rules"
+    held = total = 0
+    for parts, phrases in PDF_ORGANIZE_PINS:
+        path = os.path.join(SKILLS_DIR, *parts)
+        total += len(phrases)
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a pdf-organize rule home: %s"
+                     % exc, rel(path))
+            continue
+        for phrase in phrases:
+            if _phrase_re(phrase).search(text):
+                held += 1
+            else:
+                rep.fail(check, "%s no longer states %r"
+                         % (os.path.basename(path), phrase), rel(path))
+    for parts, phrase in PDF_ORGANIZE_RETIRED:
+        path = os.path.join(SKILLS_DIR, *parts)
+        total += 1
+        try:
+            text = read(path)
+        except OSError:
+            continue
+        if _phrase_re(phrase).search(text):
+            rep.fail(check, "%s restates the retired %r"
+                     % (os.path.basename(path), phrase), rel(path))
+        else:
+            held += 1
+    rep.saw(check, "pdf-organize rule pins held", held)
+    if held == total:
+        rep.ok(check, "%d pdf-organize statements held" % held,
+               rel(os.path.join(SKILLS_DIR, "pdf-organize", "SKILL.md")))
+
+
+def check_rename_carries_figures(rep, _conv):
+    """pdf-organize's rename carries recorded figures; adoption comes first.
+
+    A later rename through pdf-organize moves the manifest-recorded figures,
+    the owned note and every embed in the same run, so no message may say a
+    later rename orphans them. An unrecorded legacy crop of a PDF whose name
+    pdf-organize has not produced is adopted under the current stem first.
+    """
+    # 2026-10-06 (knowledge 1.22.0): adoption before an unorganized PDF's
+    # rename, and the retired claim that a later rename orphans figures.
+    fe_dir = os.path.join(SKILLS_DIR, "figure-extract")
+    rename_repair = os.path.join(SKILLS_DIR, "pdf-organize", "references",
+                                 "rename-repair.md")
+    pins = (
+        (rename_repair, "--adopt-legacy '<current stem>:<label>'",
+         "no longer names the adoption command that clears an unrecorded "
+         "legacy crop before a rename"),
+        (os.path.join(fe_dir, "references", "review-and-repair.md"),
+         "Adoption also works for a PDF whose name pdf-organize has not "
+         "produced yet", "no longer lets adoption run before pdf-organize's "
+         "rename"),
+        (os.path.join(fe_dir, "SKILL.md"), "`--adopt-legacy` is not "
+         "extraction", "no longer separates adoption from the "
+         "unorganized-name refusal"),
+    )
+    carried = ("a later rename goes through pdf-organize, which carries the "
+               "recorded figures, the owned note and their references")
+    stale = (
+        ("later rename orphans", carried),
+        ("rename afterwards orphans", carried),
+        ("rename does not orphan", carried),
+        ("orphans the whole set", carried),
+        ("embed is rewritten to the new stem",
+         "pdf-organize's rename rewrites embeds in its own run, so a missing "
+         "embed is reported, never hand-patched"),
+        ("legacy-adoption procedure against the named PDF",
+         "name the --adopt-legacy command under the PDF's current stem"),
+    )
+    _check_rule_phrases(rep, "rename-carries-figures", pins, stale,
+                        "rename-carry", rename_repair)
+
+
+#: clipping-clean credits a thesis to whoever argues it, so an interview's
+#: claims go to the interviewee, not the byline writer; and it strips a site
+#: suffix from whichever title source it uses, og:title included.
+CLIPPING_METADATA_PINS = (
+    (("clipping-clean", "SKILL.md"), (
+        "name whoever argues it in the thesis",
+        "the interviewee or quoted subject",
+    )),
+    (("clipping-clean", "references", "metadata-verification.md"), (
+        "to whoever argues it",
+        "the interviewee or quoted subject",
+        "From whichever value is used, remove a trailing separator",
+        "A difference that is only a site-name suffix is not a correction.",
+    )),
+    (("clipping-clean", "references", "review-checklist.md"), (
+        "to whoever argues it",
+        "the interviewee or quoted subject",
+    )),
+)
+
+
+def check_clipping_metadata_rules(rep, _conv):
+    """clipping-clean's thesis attribution and title-suffix rules stay stated."""
+    check = "clipping-metadata-rules"
+    held = total = 0
+    for parts, phrases in CLIPPING_METADATA_PINS:
+        path = os.path.join(SKILLS_DIR, *parts)
+        total += len(phrases)
+        try:
+            text = read(path)
+        except OSError as exc:
+            rep.fail(check, "cannot read a clipping metadata rule home: %s"
+                     % exc, rel(path))
+            continue
+        for phrase in phrases:
+            if _phrase_re(phrase).search(text):
+                held += 1
+            else:
+                rep.fail(check, "%s no longer states %r"
+                         % (os.path.basename(path), phrase), rel(path))
+    rep.saw(check, "clipping metadata rule pins held", held)
+    if held == total:
+        rep.ok(check, "%d clipping metadata statements held" % held,
+               rel(os.path.join(SKILLS_DIR, "clipping-clean", "SKILL.md")))
+
+
 CHECKS = [
     check_readability,
     check_note_headings,
@@ -8360,7 +9475,18 @@ CHECKS = [
     check_linter_finding_routes,
     check_card_set_contract,
     check_online_source_contract,
+    check_lint_run_scope,
+    check_refactor_protocol,
+    check_empty_sources_route,
+    check_rename_link_repair,
+    check_dangler_hand_off,
+    check_no_version_history_wording,
     check_writing_rules,
+    check_suggestion_log_rules,
+    check_source_intake_rules,
+    check_pdf_organize_rules,
+    check_rename_carries_figures,
+    check_clipping_metadata_rules,
 ]
 
 

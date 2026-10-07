@@ -83,20 +83,23 @@ unchanged snapshot:
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
-    -o '<scratch>/log-snapshots.json' 'Reviews/<current-skill>-suggestions.md'
+    --owned-dir Reviews -o '<scratch>/log-snapshots.json' \
+    'Reviews/<current-skill>-suggestions.md'
 python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
-    --snapshots '<scratch>/log-snapshots.json' \
+    --owned-dir Reviews --snapshots '<scratch>/log-snapshots.json' \
     --manifest '<scratch>/log-manifest.json'
 ```
 
 The manifest lists each log written, as
 `[{"path": "Reviews/<current-skill>-suggestions.md", "draft": "<absolute draft path>"}]`.
-`Reviews/` must have a unique, readable real directory owner; reject directory
-or leaf symlinks, non-regular occupants, and case/Unicode-equivalent ownership
-collisions. Create a missing `Reviews/` directory only after checking its name
-has no other owner, by adding `--create-dir Reviews` to `publish`. If its path
-or a log cannot be used safely, preserve the occupant and report the blocked
-log update; complete other independent authorized work. When `snapshot` or
+`Reviews/` must have a unique, readable real directory owner. `--owned-dir
+Reviews` refuses the logs when `Reviews/` is a symlink, is not a directory, is
+unreadable, or has a case/Unicode variant on disk, such as `reviews/`;
+`snapshot` and `publish` also refuse a leaf symlink or a non-regular occupant.
+When `Reviews/` is absent, add `--create-dir Reviews` to `publish`; it refuses
+to create a case/Unicode variant of an existing folder. If its path or a log
+cannot be used safely, preserve the occupant and report the blocked log
+update; complete other independent authorized work. When `snapshot` or
 `publish` reports that a log changed since its snapshot, preserve that change:
 rerun the snapshot with `--replace`, re-read and redo the update before
 retrying; never overwrite newer content or blindly append. Scope is limited
@@ -142,7 +145,10 @@ lines, and add **Fixed in**. A planned or unreleased skill-source change
 leaves the item open. Keep an unresolved portion as its own open item.
 
 **Verifying.** A run that checks a fixed item's behavior or content, with the
-relevant validation, adds **Verified**; no confirmation is required. A version
+relevant validation, adds **Verified**; no confirmation is required. An item
+keeps one **Verified** line. When a later run's check of an already-verified
+fixed item passes, the item stays unchanged; only a user request to re-verify
+that item replaces the line, and a run never appends a second one. A version
 bump, nonrecurrence alone, or a finding absent from an incomplete scan is not
 verification. A run that verifies an open item's fix moves it with both lines,
 naming the installed version when the fixing release is unknown. When the

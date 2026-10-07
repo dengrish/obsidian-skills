@@ -29,10 +29,10 @@ def load(name, path):
     return module
 
 
-def worked_example_note():
+def worked_example_note(name="worked-example.md"):
     """The first untagged fence after the worked example's output heading."""
     doc = (ROOT / "skills" / "paper-summarize" / "references"
-           / "worked-example.md").read_text(encoding="utf-8")
+           / name).read_text(encoding="utf-8")
     lines = doc.split("\n")
     i = lines.index("## The output note") + 1
     while i < len(lines):
@@ -202,6 +202,16 @@ class SummaryPublicationGateTests(unittest.TestCase):
         advisories = []
         self.assertEqual(
             note_lint.lint(text, mode="empirical", advisories=advisories), [])
+        self.assertEqual(advisories, [])
+
+    def test_argument_worked_example_note_lints_clean_in_argument_mode(self):
+        text = worked_example_note("worked-example-argument.md")
+        self.assertIsNotNone(text, "no untagged fence follows '## The output note'")
+        self.assertTrue(text.startswith("---\n"), text[:80])
+        note_lint = load("reading_review_note_lint", READING / "note_lint.py")
+        advisories = []
+        self.assertEqual(
+            note_lint.lint(text, mode="argument", advisories=advisories), [])
         self.assertEqual(advisories, [])
 
 

@@ -112,7 +112,7 @@ A reader outside the field cannot tell whether a hazard ratio of 0.62, a fold ch
 Give underlying counts only when the paper reports them; never back-calculate
 them from a ratio.
 
-This is not a substitute for the absolute numbers of rule 2 — it sits beside them. And it is done **once per quantity**: a note that re-explains the same statistic at every mention is as tiring as one that never explains it.
+This is not a substitute for the absolute numbers of rule 2 — it sits beside them. And it is done **once per quantity**: a note that re-explains the same statistic at every mention is as tiring as one that never explains it. Saying what this value means is not defining its measure: a measure with its own Wiki entry is [linked](note-format.md#links-to-wiki-entries), not defined again, and the sentence still says what the number means here.
 
 **Keep the measures distinct.** A hazard ratio is not a cumulative risk ratio or a ratio of event counts, and an odds ratio is not a risk ratio. Absolute risk also needs a population and a time horizon. Use the paper's reported absolute figures; if they are absent, name the gap rather than converting the ratio by intuition. See [Cochrane Handbook, effect measures](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-06) and [time-to-event outcomes](https://www.cochrane.org/authors/handbooks-and-manuals/handbook/current/chapter-14#section-14-1-5-2).
 
