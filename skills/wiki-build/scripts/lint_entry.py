@@ -2,11 +2,10 @@
 # -*- coding: utf-8 -*-
 """lint_entry.py -- mechanical Quality Checklist checks for wiki entries.
 
-Runs only the objectively checkable items of SKILL.md's Quality Checklist --
-the ones the skill itself labels "mechanical".  Everything requiring
-judgement (prose quality, tag calibration, alias semantics, merge integrity,
-example discipline) is deliberately NOT checked here; those stay with the
-model.
+Runs only the objectively checkable parts of the Quality Checklist in
+references/quality-checklist.md.  Everything requiring judgement (prose
+quality, tag calibration, alias semantics, merge integrity, example
+discipline) is deliberately NOT checked here; those stay with the model.
 
 Implemented checks (Quality Checklist item -> finding ``item`` slug):
 
@@ -26,7 +25,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   2   2-type-enum             type: is one of the 15 enum values
   2   2-quoting               Quoting Policy: lossless plain or double-quoted
                               title/description/aliases; sources/tags/parents
-                              items double-quoted;
+                              items double-quoted, except that a lossless
+                              plain http(s) URL under sources conforms;
                               type/created/updated/read never quoted;
                               double quotes, never single; issues: is user
                               text, outside the policy

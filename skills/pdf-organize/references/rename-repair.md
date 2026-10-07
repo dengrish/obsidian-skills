@@ -21,18 +21,23 @@ unrelated notes or images. Resolve each blocker at its cause, then re-plan:
   entire rename: keep the source's current name and location. The rename's
   reference repair never makes these historical records editable. Unrelated
   records and literal examples do not block.
-- **Source note.** An `Articles/` note follows only when its first `sources:`
-  item identifies this PDF; legacy `source:` counts only when `sources:` is
-  absent. A bare `"[[Name.pdf]]"` origin identifies it by its vault-unique
-  basename. A folder-qualified origin (vault-relative, note-relative or
-  unique shortest-suffix) must resolve to this PDF's actual location; one
-  that names another folder never moves the note or changes its `published`
-  date. A foreign, missing, malformed, or unreadable origin establishes no
-  ownership, and the note stays put; duplicate keys or a malformed `sources:`
-  list never fall back to `source:`. Publisher URLs remain external sources.
-  The only metadata-free exception is a legacy note whose entire body is an
-  embed of this PDF. An unquoted source wikilink naming this PDF is a
-  blocker: quote the complete wikilink scalar and re-plan.
+- **Source note.** An `Articles/` note follows only when its origin
+  identifies this PDF:
+  - The origin is the note's first `sources:` item; legacy `source:` counts
+    only when `sources:` is absent. Duplicate keys or a malformed `sources:`
+    list never fall back to `source:`.
+  - A bare `"[[Name.pdf]]"` origin identifies the PDF by its vault-unique
+    basename. A folder-qualified origin (vault-relative, note-relative or
+    unique shortest-suffix) must resolve to this PDF's actual location; one
+    that names another folder never moves the note or changes its
+    `published` date.
+  - A foreign, missing, malformed, or unreadable origin establishes no
+    ownership, and the note stays put. Publisher URLs remain external
+    sources.
+  - The only metadata-free exception is a legacy note whose entire body is
+    an embed of this PDF.
+  - An unquoted source wikilink naming this PDF is a blocker: quote the
+    complete wikilink scalar and re-plan.
 - **Figures.** A `_fig*` candidate moves only when the figure manifest
   records its exact current digest; any other candidate blocks the rename. A
   same-stem clipping, a deleted note, or no visible rival does not prove
@@ -94,11 +99,13 @@ apply once nothing below blocks it.
   stale-file guard and rollback. A target `nd` uses `null`. A valid date
   already in the numeric target year is the document's own date and is kept
   unchanged, so it is not listed. A null or a date from another year becomes
-  `<year>-01-01`, which you report as padding. Only the document's own
-  evidence, through a paper-summarize correction, may supply a more precise
-  date, never the old note's month/day. Missing, duplicate, quoted, invalid,
-  multiline, or contradictory date metadata is a blocker; correct that field
-  from the document before re-planning. A frontmatter fence shape also blocks:
+  `<year>-01-01`, which the
+  [run report](../SKILL.md#6-report-outcomes-and-remaining-work) calls
+  padding. Only the document's own evidence, through a paper-summarize
+  correction, may supply a more precise date, never the old note's
+  month/day. Missing, duplicate, quoted, invalid, multiline, or
+  contradictory date metadata is a blocker; correct that field from the
+  document before re-planning. A frontmatter fence shape also blocks:
   a UTF-8 byte-order mark, blank lines or indentation before the opening
   `---`, or trailing spaces or tabs on either fence. The blocker names the
   cause; fix those bytes in the note itself, since the date is not at fault.

@@ -5,7 +5,7 @@ Every check here finds *candidates*: a match is a place to inspect against the
 source, never permission to rewrite. The rules that decide what a match means
 are in references/review-checklist.md and references/nested-lists.md.
 
-  sweep PATH      the review checklist's numbered mechanical sweep (1-16,
+  sweep PATH      the review checklist's numbered mechanical sweep (1-17,
                   including 12b), each with its expectation and the matching
                   lines. The leading YAML block and fenced code are skipped;
                   an unclosed fence is reported and its lines are scanned.
@@ -54,6 +54,7 @@ import os
 import re
 import sys
 import tempfile
+import unicodedata
 import urllib.parse
 
 
@@ -106,6 +107,23 @@ ABBREVIATION_RE = re.compile(
     r"|No\.|Fig\.|Inc\.|Ltd\.|Co\.|Jr\.|Sr\.|al\.|Jan\.|Feb\.|Mar\.|Apr\."
     r"|Jun\.|Jul\.|Aug\.|Sept?\.|Oct\.|Nov\.|Dec\.|approx\.|ca\.|cf\.|pp?\."
     r"|vol\.|ch\.)$")
+#: An inline code span: a backtick run closed by a run of the same length.
+CODE_SPAN_RE = re.compile(r"(?<!`)(`+)(?!`).+?(?<!`)\1(?!`)")
+#: An inline Markdown link, not an image: its text (escapes and one level of
+#: brackets allowed), then its destination (one level of parentheses) and an
+#: optional title.
+INLINE_LINK_RE = re.compile(
+    r"(?<![!\\])\[((?:[^\[\]\\]|\\.|\[[^\[\]]*\])*)\]"
+    r"\(\s*(<[^<>\n]*>|[^\s()]*(?:\([^\s()]*\)[^\s()]*)*)"
+    r"(?:\s+(?:\"[^\"]*\"|'[^']*'|\([^()]*\)))?\s*\)")
+#: Sentence punctuation a split link's text may hold besides the quote,
+#: bracket and dash categories.
+SPLIT_TEXT_PUNCT = frozenset("\"'.,:;!?…")
+SPLIT_TEXT_CATEGORIES = ("Pi", "Pf", "Ps", "Pe", "Pd")
+#: The longest gap between two links that still counts as near-adjacent.
+SPLIT_GAP_MAX = 8
+#: Emphasis markers, quotes and punctuation shown around a reported split.
+SPLIT_EDGE = frozenset("*_~=“”„‟‘’‚‛«»‹›") | SPLIT_TEXT_PUNCT
 
 #: The quote prefix the sibling scan and the repairs peel off and re-attach.
 QUOTE_PREFIX_RE = re.compile(r"^((?:>\s?)*)")
@@ -317,6 +335,59 @@ def summary_size(body):
     return out
 
 
+def punctuation_only(text):
+    """Is a link's text, emphasis and escapes aside, only punctuation?"""
+    core = re.sub(r"[\s*_~=\\]", "", text)
+    return bool(core) and all(
+        c in SPLIT_TEXT_PUNCT
+        or unicodedata.category(c) in SPLIT_TEXT_CATEGORIES for c in core)
+
+
+def split_links(body):
+    """Sweep item 17: one linked title split into adjacent links.
+
+    Two consecutive inline links are a candidate when the gap between them
+    holds only whitespace, emphasis markers or punctuation (no table pipe) and
+    either link's text is only punctuation or both share one URL. A run of
+    such links is one entry, widened over the emphasis, quotes and
+    punctuation around it.
+    Inline code is masked first, so a code span neither matches nor joins.
+    """
+    out = []
+    for n, line in body:
+        masked = CODE_SPAN_RE.sub(lambda m: "x" * len(m.group(0)), line)
+        links = list(INLINE_LINK_RE.finditer(masked))
+        runs, run = [], None
+        for a, b in zip(links, links[1:]):
+            gap = masked[a.end():b.start()]
+            reasons = []
+            if len(gap) <= SPLIT_GAP_MAX and not any(
+                    c.isalnum() or c == "|" for c in gap):
+                if (punctuation_only(a.group(1))
+                        or punctuation_only(b.group(1))):
+                    reasons.append("punctuation-only link text")
+                if a.group(2).strip("<>") == b.group(2).strip("<>"):
+                    reasons.append("same URL")
+            if not reasons:
+                run = None
+                continue
+            if run is None:
+                run = [a.start(), b.end(), []]
+                runs.append(run)
+            run[1] = b.end()
+            run[2] += [r for r in reasons if r not in run[2]]
+        for start, end, reasons in runs:
+            while start and line[start - 1] in SPLIT_EDGE:
+                start -= 1
+            while end < len(line) and line[end] in SPLIT_EDGE:
+                end += 1
+            text = line[start:end]
+            if len(text) > 2 * SNIPPET:
+                text = text[:SNIPPET] + "…" + text[-SNIPPET // 2:]
+            out.append("L%d: %s: %s" % (n, ", ".join(reasons), text))
+    return out
+
+
 def sweep_report(text):
     """The numbered sweep as ``[(header, [result lines])]`` plus notes."""
     lines = text.split("\n")
@@ -371,6 +442,8 @@ def sweep_report(text):
          decorative_rules(body)),
         ("16 Summary size — candidates, judge against SKILL.md step 4",
          summary_size(body)),
+        ("17 split links: adjacent links with punctuation-only text or one "
+         "URL — candidate, check the source", split_links(body)),
     ]
     return report, notes
 
@@ -973,7 +1046,7 @@ def run_self_test():
     check("every numbered sweep item is present, 12b included",
           [h.split()[0] for h, _r in sweep_report("")[0]],
           ["1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11", "12",
-           "12b", "13", "14", "15", "16"])
+           "12b", "13", "14", "15", "16", "17"])
 
     long_bullet = " ".join(["word"] * 50) + "."
     summary = "\n".join([
@@ -1020,6 +1093,38 @@ def run_self_test():
     check("item 16 without a Summary counts the whole body",
           items("One two three.\n")["16"][0].split(" (")[0],
           "bullets: 0, body words: 3")
+    doi = "https://x.test/doi/10.1126/sageke.2002.21.pe7"
+    check("item 17 finds a quote-only link split from its title, the "
+          "emphasis and closing quote around it shown, on a long line",
+          items(" ".join(["Prose"] * 60) + " published **[“](%s)**[A New "
+                "Record](%s)” for the naked mole rat." % (doi, doi))["17"],
+          ["L1: punctuation-only link text, same URL: **[“](%s)**[A New "
+           "Record](%s)”" % (doi, doi)])
+    check("item 17 finds one title split across two links to one URL",
+          items("See [A New](https://x.test/r) [Record](https://x.test/r).")
+          ["17"],
+          ["L1: same URL: [A New](https://x.test/r) "
+           "[Record](https://x.test/r)."])
+    check("item 17 reports a run of split pieces once, a dash piece to a "
+          "related URL included",
+          items("[“](https://x.test/a)[Title](https://x.test/a)[”]"
+                "(https://x.test/a) and [—](https://x.test/b)"
+                "[Next](https://x.test/b?ref=1)")["17"],
+          ["L1: punctuation-only link text, same URL: [“](https://x.test/a)"
+           "[Title](https://x.test/a)[”](https://x.test/a)",
+           "L1: punctuation-only link text: [—](https://x.test/b)"
+           "[Next](https://x.test/b?ref=1)"])
+    check("item 17 leaves different links apart, separated by text, a table "
+          "pipe or an image, alone",
+          items("[Smith](https://a.test) and [Jones](https://b.test), "
+                "[Paper](https://c.test) · [Code](https://d.test).\n"
+                "| [“](https://e.test) | [Title](https://e.test/t) |\n"
+                "[A](https://f.test)![“](g.png)[B](https://h.test)")["17"], [])
+    check("item 17 skips links in a code span or fenced code, and a code "
+          "span between two links breaks them apart",
+          items("Write `**[“](https://x.test)**[T](https://x.test)` "
+                "literally.\n[“](https://x.test)`**`[T](https://x.test)\n"
+                "```\n[“](https://x.test)[T](https://x.test)\n```")["17"], [])
     long_line = "a" * 400 + " subscribe " + "b" * 400
     check("a long line is windowed around its match",
           "subscribe" in grep([(1, long_line)], CHROME_RE)[0]

@@ -22,15 +22,15 @@ not an error. `--dpi 72` makes pixels and points the same number.
 Usage:
     python3 render_page.py input.pdf 16
     python3 render_page.py input.pdf 16,17,18
-    python3 render_page.py input.pdf 16 --out '<scratch>' --dpi 150
+    python3 render_page.py input.pdf 16 --out '<scratch>/page-preview-1' --dpi 150
     python3 render_page.py input.pdf 16 --dpi 72     # 1 px == 1 pt
 
     # The adversarial fixtures this module is held to.
     python3 render_page.py --test
 
 An occupied preview name is refused before any requested page is rendered.
-Use a fresh scratch directory for a re-render; symlinks, regular files and
-other occupants are all preserved.
+Use another fresh child of `<scratch>` for a re-render; symlinks, regular
+files and other occupants are all preserved.
 """
 import argparse
 import math

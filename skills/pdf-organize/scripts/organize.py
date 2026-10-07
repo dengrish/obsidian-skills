@@ -8,7 +8,8 @@ halves, both importable and both runnable from the command line:
     chapter folder and chapters), find every `.md` in the vault that cites any
     of them, and move the lot while rewriting every reference in one pass.
   * **Split.**  `split_book` — cut a book PDF into chapter PDFs, resolving
-    every chapter before writing any of them.
+    every chapter before writing any of them.  The read-only `pages` command
+    prints the same per-page text the split verifies headings against.
 
 Everything at module scope is stdlib.  `pypdf` is imported *inside*
 `split_book`, so the rename half works in an environment that has no PDF
@@ -44,12 +45,20 @@ Usage:
     # feed attachment prints "feed-owned, skipped" and does not count as no.
     python3 organize.py canonical Prince_UDL_2026_02_SupLearn_src.pdf
 
+    # Read a book's pages as the split verifies headings (writes nothing):
+    # one line per physical page with its start_idx, or, with --find, the
+    # pages carrying each heading and whether the split could verify it.
+    python3 organize.py pages \\
+        '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012.pdf' --range 1-12
+    python3 organize.py pages '<book>' --find '<heading>' --find '<next>'
+
     # Plan a book split (writes nothing), then repeat with --apply.
     # chapters.json is a list of the chapter dicts described in
-    # `references/book-splitting.md`; <run-temp> is unique to this run.
+    # `references/book-splitting.md`; <scratch> is this run's private
+    # temporary directory (shared/RUNTIME.md).
     python3 organize.py split --vault '<vault>' \\
         '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012.pdf' \\
-        --chapters '<run-temp>/chapters.json' \\
+        --chapters '<scratch>/chapters.json' \\
         --out '<vault>/Sources/PDFs/Kuhn_StructSciRev_2012' [--apply]
 
     # The adversarial fixtures this module is held to.
@@ -2828,6 +2837,11 @@ def rename_all(vault, path, new_basename, apply=False, dest=None):
 # splitting
 # ---------------------------------------------------------------------------
 
+#: A `heading_text` found on more pages than this outside the contents pages
+#: is refused as a likely running header: it cannot verify a start page.
+MAX_HEADING_PAGES = 2
+
+
 def _norm(s):
     """Whitespace-collapsed, lowercased.
 
@@ -2835,6 +2849,23 @@ def _norm(s):
     comparing raw strings makes a correct mapping look wrong.
     """
     return re.sub(r"\s+", " ", (s or "")).strip().lower()
+
+
+def _page_text(reader):
+    """Every page's text as the heading verifier compares it, in page order.
+
+    `split_book` and the read-only `pages` command both read pages through
+    this one function, so a `heading_text` copied from `pages` output is
+    exactly the text the split verifies against. A page whose extraction
+    raises is empty text rather than a crash.
+    """
+    text = []
+    for p in reader.pages:
+        try:
+            text.append(_norm(p.extract_text()))
+        except Exception:
+            text.append("")                  # a damaged page is not a crash
+    return text
 
 
 def _reader(pdf_path):
@@ -2976,7 +3007,7 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
             continue
         heading_pages = [index for index in range(n_pages)
                          if carries(index, needle)]
-        if len(heading_pages) > 2:
+        if len(heading_pages) > MAX_HEADING_PAGES:
             problems.append(
                 "%s: heading_text %r appears on %d pages besides the contents, "
                 "so it may be a running header and cannot verify the start "
@@ -3320,12 +3351,7 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
     if n_pages == 0:
         raise SplitRefused("%s: zero pages — nothing to split." % pdf_path)
 
-    text = []
-    for p in reader.pages:
-        try:
-            text.append(_norm(p.extract_text()))
-        except Exception:
-            text.append("")                  # a damaged page is not a crash
+    text = _page_text(reader)
     if not any(text):
         raise SplitRefused("%s: no extractable text layer (a scan?), so "
                            "chapter headings cannot be verified. Nothing was "
@@ -3647,6 +3673,120 @@ def _cmd_split(args):
         print(str(exc), file=sys.stderr)
         return 1
     return 0
+
+
+def _page_range(value):
+    """`--range A-B` (or `A`): one-based physical pages, inclusive."""
+    match = re.fullmatch(r"\s*(\d+)\s*(?:-\s*(\d+)\s*)?", value or "")
+    if not match:
+        raise argparse.ArgumentTypeError(
+            "expected A-B in one-based physical pages, got %r" % value)
+    first = int(match.group(1))
+    last = int(match.group(2)) if match.group(2) else first
+    if first < 1 or last < first:
+        raise argparse.ArgumentTypeError(
+            "expected 1 <= A <= B in one-based physical pages, got %r" % value)
+    return first, last
+
+
+#: How many matching pages `pages --find` prints per heading; the count is
+#: always complete.
+_FIND_SHOWN = 10
+#: How much text after a match `pages --find` prints, so a heading that is
+#: also a running header can be extended with the line that follows it.
+_FIND_CONTEXT = 100
+
+
+def _cmd_pages(args):
+    """Print page text exactly as `split` verifies headings.  Writes nothing.
+
+    Each line gives the physical page's one-based number, its zero-based
+    `start_idx`, and its `_page_text` text.  `--find` (repeatable) applies the
+    split's own heading tests to whole-book text: the contents pages are
+    those listing two or more of the given headings, as `_resolve` counts
+    them when given the same headings, and a heading that is too short,
+    absent outside the contents, or on more than MAX_HEADING_PAGES other pages
+    is one `split` refuses (exit 1).
+    """
+    pdf = os.path.expanduser(args.pdf)
+    if not os.path.isfile(pdf):
+        print("%s is not a file; give the book PDF's path." % pdf,
+              file=sys.stderr)
+        return 1
+    try:
+        text = _page_text(_reader(pdf))
+    except SplitRefused as exc:
+        print(str(exc), file=sys.stderr)
+        return 1
+    n_pages = len(text)
+    if n_pages == 0:
+        print("%s: zero pages — nothing to split." % pdf, file=sys.stderr)
+        return 1
+    if not any(text):
+        print("%s: %d page(s) and no extractable text layer (a scan?), so "
+              "`split` cannot verify chapter headings in it." % (pdf, n_pages),
+              file=sys.stderr)
+        return 1
+    if args.range or not args.find:
+        first, last = args.range or (1, n_pages)
+        if first > n_pages:
+            print("--range starts at page %d, but %s has %d page(s)."
+                  % (first, os.path.basename(pdf), n_pages), file=sys.stderr)
+            return 1
+        last = min(last, n_pages)
+        print("%s: %d page(s). One line per physical page: its number, its "
+              "start_idx, and its text as `split` verifies headings "
+              "(lowercased, whitespace collapsed)." % (pdf, n_pages))
+        for index in range(first - 1, last):
+            print("page %d (start_idx %d): %s"
+                  % (index + 1, index, text[index] or "(no text)"))
+    if not args.find:
+        return 0
+    contents = _contents_pages([{"heading_text": h} for h in args.find], text)
+    if contents:
+        print("Contents pages (each lists two or more of these headings, so "
+              "no chapter starts there): %s"
+              % ", ".join(str(i + 1) for i in sorted(contents)))
+    elif len({_norm(h) for h in args.find if len(_norm(h)) >= 3}) == 1:
+        # Counted as `_contents_pages` counts them: a repeated heading, or two
+        # that normalize alike, is one heading and finds no contents page.
+        print("One distinct --find heading: no page counts as contents. Pass "
+              "every planned heading to see the contents pages `split` "
+              "excludes.")
+    refused = 0
+    for heading in args.find:
+        needle = _norm(heading)
+        if len(needle) < 3:
+            refused += 1
+            print("%r: too short to verify a start page; `split` refuses it."
+                  % heading)
+            continue
+        found = [i for i in range(n_pages)
+                 if i not in contents and needle in text[i]]
+        listed = [i + 1 for i in sorted(contents) if needle in text[i]]
+        also = ("; also on contents page(s) %s" % ", ".join(map(str, listed))
+                if listed else "")
+        if not found:
+            refused += 1
+            verdict = ("not found outside the contents pages, so `split` "
+                       "cannot verify it. Copy the heading from this "
+                       "command's page text")
+        elif len(found) > MAX_HEADING_PAGES:
+            refused += 1
+            verdict = ("on %d pages outside the contents, so `split` refuses "
+                       "it as a likely running header. Extend it with the "
+                       "text the opening page prints after it" % len(found))
+        else:
+            verdict = "on %d page(s) outside the contents" % len(found)
+        print("%r: %s%s." % (heading, verdict, also))
+        for index in found[:_FIND_SHOWN]:
+            at = text[index].find(needle)
+            print("  page %d (start_idx %d): %s"
+                  % (index + 1, index,
+                     text[index][at:at + len(needle) + _FIND_CONTEXT]))
+        if len(found) > _FIND_SHOWN:
+            print("  ... and %d more page(s)" % (len(found) - _FIND_SHOWN))
+    return 1 if refused else 0
 
 
 def _cmd_canonical(args):
@@ -5829,6 +5969,135 @@ def _selftest():
               (_code, sorted(os.listdir(_out)) if os.path.isdir(_out) else None),
               (0, ["Kuhn_S_2012_01_Intro.pdf"]))
 
+    # `pages` prints the text the split verifies headings against, page by
+    # page, so a heading copied from it is one the split can verify. It
+    # writes nothing, and its --find applies the split's own heading tests.
+    with _tf.TemporaryDirectory(prefix="org-pages-test-") as _v:
+        from pypdf import PdfReader as _TestPdfReader
+        from pypdf import PdfWriter as _TestPdfWriter
+
+        def _blank_book(path, n_pages):
+            _writer = _TestPdfWriter()
+            for _ in range(n_pages):
+                _writer.add_blank_page(width=100, height=100)
+            with open(path, "wb") as _fh:
+                _writer.write(_fh)
+            return _TestPdfReader(path)
+
+        def _damaged_page():
+            raise ValueError("injected damaged page")
+
+        _book = os.path.join(_v, "Kuhn_S_2012.pdf")
+        _reader_object = _blank_book(_book, 6)
+        _page_texts = (
+            "Contents\nChapter 1 Alpha ..... 2\nChapter 2 Beta ..... 4",
+            "Chapter 1\n   Alpha\nThe   First Line" + " body" * 60,
+            "alpha continued" + " body" * 40,
+            "Chapter 2 Beta\nSecond opening" + " body" * 60,
+            None,
+            "beta afterword")
+        for _page, _text in zip(_reader_object.pages, _page_texts):
+            _page.extract_text = (_damaged_page if _text is None
+                                  else (lambda _t=_text: _t))
+        _before = sorted(os.listdir(_v))
+        with patch.dict(globals(), _reader=lambda _path: _reader_object):
+            _code, _stdout, _ = _run_cli(["pages", _book])
+            _lines = [_l for _l in _stdout.splitlines()
+                      if _l.startswith("page ")]
+            check("pages lists every physical page with its start_idx and "
+                  "the split's normalized text",
+                  (_code, len(_lines),
+                   "page 2 (start_idx 1): " + _norm(_page_texts[1]) in _lines,
+                   "page 5 (start_idx 4): (no text)" in _lines),
+                  (0, 6, True, True))
+            _code, _stdout, _ = _run_cli(["pages", _book, "--range", "2-3"])
+            check("pages --range lists only the requested physical pages",
+                  (_code, [_l.split(":")[0] for _l in _stdout.splitlines()
+                           if _l.startswith("page ")]),
+                  (0, ["page 2 (start_idx 1)", "page 3 (start_idx 2)"]))
+            _code, _stdout, _ = _run_cli(["pages", _book, "--range", "9-10"])
+            check("pages --range past the last page is refused",
+                  _code, 1)
+            _code, _stdout, _ = _run_cli([
+                "pages", _book, "--find", "Chapter 1 Alpha",
+                "--find", "Chapter 2 Beta"])
+            check("pages --find marks the contents page and finds each "
+                  "opening page outside it",
+                  (_code, "no chapter starts there): 1\n" in _stdout,
+                   "'Chapter 1 Alpha': on 1 page(s) outside the contents; "
+                   "also on contents page(s) 1." in _stdout,
+                   "  page 2 (start_idx 1): chapter 1 alpha the first line"
+                   in _stdout,
+                   "  page 4 (start_idx 3): chapter 2 beta second opening"
+                   in _stdout),
+                  (0, True, True, True, True))
+            _code, _stdout, _ = _run_cli(["pages", _book, "--find", "alpha"])
+            check("pages --find flags a heading on more than two pages as a "
+                  "running header the split refuses",
+                  (_code, "likely running header" in _stdout,
+                   "One distinct --find heading" in _stdout), (1, True, True))
+            _code, _stdout, _ = _run_cli([
+                "pages", _book, "--find", "Chapter 2 Beta",
+                "--find", "CHAPTER 2   beta "])
+            check("pages --find counts headings that normalize alike as one, "
+                  "and says no page counts as contents",
+                  (_code, "One distinct --find heading" in _stdout,
+                   "Contents pages" in _stdout), (0, True, False))
+            _code, _stdout, _ = _run_cli(["pages", _book, "--find", "ab"])
+            check("pages --find refuses a heading too short to verify",
+                  (_code, "too short" in _stdout), (1, True))
+            _code, _stdout, _ = _run_cli([
+                "pages", _book, "--find", "Chapter 9 Omega"])
+            check("pages --find reports a heading found on no page",
+                  (_code, "not found outside the contents" in _stdout),
+                  (1, True))
+            # The heading an agent copies from the listing passes the split's
+            # own verification at the listed start_idx, uncorrected.
+            _chapters = _put(_v, "chapters.json", json.dumps([
+                {"heading_text": "chapter 1 alpha the first line",
+                 "filename": "Kuhn_S_2012_01_Alpha.pdf",
+                 "start_idx": 1, "end_idx": 3},
+                {"heading_text": "chapter 2 beta second opening",
+                 "filename": "Kuhn_S_2012_02_Beta.pdf",
+                 "start_idx": 3, "end_idx": 6}]))
+            _out = os.path.join(_v, "Kuhn_S_2012")
+            _code, _stdout, _stderr = _run_cli([
+                "split", _book, "--chapters", _chapters, "--out", _out])
+            check("headings copied from pages output verify in a split plan",
+                  (_code, "Plan only" in _stdout, "corrected" in _stdout,
+                   os.path.lexists(_out), _stderr), (0, True, False, False, ""))
+        os.remove(_chapters)
+        check("pages writes nothing", sorted(os.listdir(_v)), _before)
+        _code, _, _stderr = _run_cli([
+            "pages", os.path.join(_v, "missing.pdf")])
+        check("pages refuses a missing book",
+              (_code, "is not a file" in _stderr), (1, True))
+        _scan = os.path.join(_v, "Scan_S_2012.pdf")
+        _scan_reader = _blank_book(_scan, 2)
+        for _page in _scan_reader.pages:
+            _page.extract_text = lambda: ""
+        with patch.dict(globals(), _reader=lambda _path: _scan_reader):
+            _code, _, _stderr = _run_cli(["pages", _scan])
+        check("pages reports a book with no text layer as unverifiable",
+              (_code, "no extractable text layer" in _stderr), (1, True))
+        _empty = os.path.join(_v, "Empty_S_2012.pdf")
+        with open(_empty, "wb") as _fh:
+            _TestPdfWriter().write(_fh)
+        _code, _, _stderr = _run_cli(["pages", _empty])
+        check("pages reports a zero-page PDF as having nothing to split, "
+              "not as a scan",
+              (_code, "zero pages" in _stderr, "a scan?" in _stderr),
+              (1, True, False))
+
+    _parsed_ranges = []
+    for _value in ("2-3", "4", " 5 - 7 ", "3-1", "0-2", "x", "2-"):
+        try:
+            _parsed_ranges.append(_page_range(_value))
+        except argparse.ArgumentTypeError:
+            _parsed_ranges.append(None)
+    check("--range parses one-based inclusive pages and rejects others",
+          _parsed_ranges, [(2, 3), (4, 4), (5, 7), None, None, None, None])
+
     # Markdown percent-encoding and angle wrappers must not turn a relative
     # path into an Obsidian shortest-suffix wikilink. Otherwise the same path
     # gains ownership solely from how its characters were escaped.
@@ -7177,6 +7446,17 @@ def main(argv=None):
                    help="write the chapters. Without this, only the resolved "
                         "ranges and notes are printed.")
     s.set_defaults(fn=_cmd_split)
+
+    g = sub.add_parser("pages", help="print each page's text as `split` "
+                       "verifies headings (read-only)")
+    g.add_argument("pdf")
+    g.add_argument("--find", action="append", default=[], metavar="HEADING",
+                   help="list the pages carrying this heading and say whether "
+                        "`split` could verify it; repeat it with every "
+                        "planned heading so contents pages are recognized")
+    g.add_argument("--range", type=_page_range, default=None, metavar="A-B",
+                   help="list only physical pages A to B (one-based)")
+    g.set_defaults(fn=_cmd_pages)
 
     k = sub.add_parser("canonical", help="is a name already in output form? "
                        "Feed-owned attachments are reported and skipped.")

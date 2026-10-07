@@ -65,7 +65,15 @@ a publication year, pass `--undated`: the segment is `nd` and frontmatter is
 
 Other punctuation (`:`, `,`, `?`, `'`, `"`, `—`, `–`) is removed, not replaced.
 
-The **image filename slug is the same string as the note filename** (case preserved), with `_fig_<N>.<ext>` appended: `Teslo_Pancreatic_Cancer_2026.md` → `Teslo_Pancreatic_Cancer_2026_fig_<N>.<ext>`. Keeping the casing consistent makes the note ↔ image relationship visually obvious when scanning the Sources/Images folder — and it is also exactly the `[source_stem]_fig_<N>` pattern `wiki-build` looks up in `Sources/Images/` when the cleaned note is later processed as a source, since the note's filename stem *is* the source stem. Don't diverge from it.
+The **image filename slug is the same string as the note filename** (case
+preserved), with `_fig_<N>.<ext>` appended: `Teslo_Pancreatic_Cancer_2026.md`
+→ `Teslo_Pancreatic_Cancer_2026_fig_<N>.<ext>`. Keeping the casing consistent
+makes the note ↔ image relationship visually obvious when scanning the
+Sources/Images folder. Since the note's filename stem *is* the source stem,
+`wiki-build` finds these images by the shared
+[consumer rule](../../../shared/CONVENTIONS.md#8a-the-consumer-rule-the-one-that-matters),
+`[source_stem]_fig*` with any extension, when the cleaned note is later
+processed as a source. Don't diverge from it.
 
 Use the author and title retained by [metadata verification](metadata-verification.md):
 corrected live evidence when available, otherwise supported capture values

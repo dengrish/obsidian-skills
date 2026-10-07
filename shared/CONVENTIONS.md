@@ -475,11 +475,12 @@ issues: ""
   entry's card, under the
   [card set](../skills/wiki-lint/references/flashcards.md#card-set),
   advances `updated:` and leaves `read:` unchanged. wiki-lint's Task 1b
-  content repairs, splits and merges follow
-  wiki-build's creation rules and
+  content repairs, splits and merges, and an explicit correction or refactor
+  request, follow wiki-build's creation rules and
   its [body-change rule](../skills/wiki-build/references/merge.md#the-read-reset)
-  for the entries they change or create: `updated:`
-  becomes today, and `read:` follows §2c. A split's retained original keeps
+  for the entries they change or create: `updated:` becomes today whenever
+  the entry's body, card, title, description or aliases change, and `read:`
+  follows §2c. A split's retained original keeps
   its `created:`; a merge's surviving entry keeps its own `created:` and gets
   `read: false` (§2c). A producer's reference repair after
   its own rename (pdf-organize's PDF rename, clipping-clean's changed slug)
@@ -490,7 +491,9 @@ issues: ""
   alone advances `updated:` and keeps `read:`, and so does an alias removal on
   the entry whose `aliases:` list it edits. Removing resolved user issues from
   `issues:` and the `read:` reset that follows (§2d) do not advance `updated:`
-  on their own.
+  on their own. A user issue is not an explicit request under these rules:
+  the task that resolves it dates the entry as above, so an issue Tasks 1–3
+  resolve advances `updated:` only for an extra-card removal.
 - **`read` is a boolean, written `read: false` on creation.** It is the user's
   review checkbox (`.obsidian/types.json` pins it as `checkbox`), and §2c is
   the whole rule for who may write it.
@@ -676,8 +679,8 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 
 **The linter preserves the meaning of `read:`.** It may normalize recognizable
 `true`/`false`, `yes`/`no`, or `0`/`1` spellings to a bare YAML boolean, including
-quoted values such as `"false"`. This corrects the checkbox's representation
-without deciding whether the user has read the note.
+quoted values such as `"false"` (`item2/read-type`). This corrects the
+checkbox's representation without deciding whether the user has read the note.
 
 These cases are **report-only**, with the note and the value found named under
 *Notes for the user*:
@@ -710,14 +713,18 @@ applies to a missing, null or unknown value too (a missing key is inserted as
 those report-only cases lack. A blocked issue resets nothing, and a
 report-only run writes neither field.
 
-**Two localized Task 1 edits can add body content, and the rule for them lives here.**
+**Localized Task 1 edits: the rule for them lives here.**
 wiki-lint may copy a missing Person/Event date into the required opener only
 when that exact date is already stated elsewhere in the entry, or typeset a
 calculation the note's own prose already states under item 12 (the equation policy's home is
 `wiki-build/references/equations.md`). Even then the linter writes neither
 `read:` nor `updated:`. For either case, it reports the insertion under *Notes for the user*,
 naming every entry whose `read: true` now predates the added date or equation,
-and the checkbox stays the user's to clear. wiki-build's own merge pass is
+and the checkbox stays the user's to clear. A Task 1 card edit under
+wiki-lint's
+[card maintenance](../skills/wiki-lint/references/flashcards.md#improving-the-card),
+a complete rewrite of line 1 included, likewise writes neither field; an
+extra card's removal follows §2a. wiki-build's own merge pass is
 the contrast: any newly added unread body content resets `read: false`, whether
 it came from the active source or from the builder's independent QC.
 wiki-lint's Task 1b content repairs, splits and merges, the entries it
@@ -730,8 +737,9 @@ explanation is rewritten. A merge's surviving entry is the exception: it
 holds combined content the user has not read in that form, so it gets
 `read: false` from any prior value, missing or unknown included (a missing
 key is inserted directly before `issues:`); its dates follow §2a.
-In Task 1b, deepening, a rewritten explanation, an inserted equation and an
-explanation moved into its owner reset `read:`;
+In Task 1b, deepening (an added example, reason or core facet included), a
+rewritten explanation, an inserted equation and an explanation moved into its
+owner reset `read:`;
 trims, hedge removals, consolidation trims, notation renames, retitles, alias
 removals, link-only changes, an added acronym or full-form parenthetical, and
 naming and linking a contrast in an existing sentence advance `updated:` and
@@ -788,11 +796,13 @@ explanation or an added example. The run re-verifies each issue against the
 note, its cited sources and the rules. An issue is **resolved** when the run
 made the change, or verified with evidence that the reported problem does not
 hold and says why in the run report. It is **blocked** when it needs a
-deletion, a source the entry does not cite, or a change a builder
-rule forbids; when no evidence settles it or its meaning is unclear; or when
-it asks for something outside wiki-lint's scope, such as other files, skills
-or settings. A blocked issue stays verbatim in the field, is never moved to a
-log, and the run report names its blocker.
+deletion (which needs an explicit request in chat), a source the entry does
+not cite (such as an unbuilt chapter, which waits for a wiki-build request
+naming that source), or a change a builder rule forbids (such as a second card
+or an added caveat); when no evidence settles it or its meaning is unclear; or
+when it asks for something outside wiki-lint's scope, such as other files,
+skills or settings. A blocked issue stays verbatim in the field, is never
+moved to a log, and the run report names its blocker.
 
 When every issue is resolved, the field becomes `issues: ""`. When only some
 are, it keeps exactly the unresolved issues' original text: the unresolved
@@ -805,9 +815,12 @@ write it double-quoted, escaping `\` and `"`. This and a merge's combined value
 ([refactors](../skills/wiki-lint/references/refactors.md#build-the-refactored-entries))
 are the only re-quoting allowed. At least one resolved issue sets `read: false` (§2c), and `updated:`
 advances only when the entry's content changed (§2a). A report-only run
-blanks and resets nothing. The procedure, including routing and the run
-report's *User issues* section, is in wiki-lint's
-[User issues](../skills/wiki-lint/SKILL.md#user-issues).
+blanks and resets nothing and reports what it would do; a run narrowed to
+some tasks or entries handles only the issues they own and leaves the others
+in the field. The procedure, including routing, is in wiki-lint's
+[User issues](../skills/wiki-lint/SKILL.md#user-issues), and the run
+report's *User issues* section is in its
+[run report](../skills/wiki-lint/references/backlogs.md#run-report).
 
 Scripts check the field's presence, form and position, and list non-blank
 values for the run; only the executing agent decides whether an issue is
@@ -1205,9 +1218,11 @@ Rules that hold everywhere:
   wiki-add creates only requested missing entities, so any unrequested missing
   target stays bare text;
   wiki-lint creates a missing entry its own run establishes (§9) and links
-  its mentions in the same run; it drops other danglers to bare text, reports
-  the remaining missing-entry candidates with the routes in §9, and backfills
-  a link once a real entry exists.
+  its mentions in the same run; Task 1b first glosses each dangling term whose
+  sentence needs its meaning, and a link to a missing discipline root that
+  Task 3 creates is held for that root. wiki-lint drops other danglers to
+  bare text, reports the remaining missing-entry candidates with the routes
+  in §9, and backfills a link once a real entry exists.
 - **`tags:` values are never wikilinks** (§3) and `sources:` points at documents,
   not entries (§7); neither participates in link audits.
 
@@ -1422,8 +1437,9 @@ Shared sub-rules:
 
 - **Supplementary markers fold to `S`.** `Supplementary Figure 1`, `Suppl. Fig. 1`,
   `Supp. Figure 1` and `Extended Data Figure 1` all become `_fig_S1` by default;
-  `--ed-prefix ED` gives Extended Data its own namespace. `SI` (Supporting
-  Information) keeps its own namespace.
+  `--ed-prefix ED` gives Extended Data its own namespace, and figure-extract's
+  batch applies it by itself to a PDF whose `_fig_ED<N>` crops already exist.
+  `SI` (Supporting Information) keeps its own namespace.
 - **Legacy panels end in a lowercase letter inside `<N>`**, for example
   `Doe_Method_2025_fig_1a.png` beside the composite `_fig_1.png`. These remain
   valid inputs, but no producer creates new per-panel files. Preserve the
@@ -1527,14 +1543,14 @@ to its repairs and the entries it creates; neither creates a competing
 writing standard.
 
 **Missing-entry routes.** wiki-lint creates a missing entry in its
-content-repair step (Task 1b), under its
-[missing-entry rule](../skills/wiki-lint/references/refactors.md#create-a-missing-entry),
-when an open item in `Reviews/wiki-notes-suggestions.md` names it (wiki-build
-and wiki-add record their missing-entry candidates there), or when at least
-three entries use the concept without a resolving link (a one-clause inline
-gloss still counts as a use) and it has a
-stable identity that passes wiki-build's substance and atomicity tests. It
-follows wiki-build's entry rules. Its research may read the vault's PDFs and
+content-repair step (Task 1b) only when its
+[missing-entry rule](../skills/wiki-lint/references/refactors.md#create-a-missing-entry)
+establishes it. That rule is the single owner of the creation test: an open
+item of `Reviews/wiki-notes-suggestions.md` naming the concept (wiki-build
+and wiki-add record their missing-entry candidates there) or the three-use
+count of a load-bearing term, plus a stable identity that passes
+wiki-build's substance and atomicity tests. The entry follows
+wiki-build's entry rules. Its research may read the vault's PDFs and
 `Articles/` notes under wiki-add's local-source rule, but it cites a document
 the entries using the term already cite, at the page that teaches the term,
 or else a reliable web page by URL. It never cites a document no entry cites,
@@ -1639,7 +1655,9 @@ link respelling after its own rename (§2a):
   it re-verifies, never as instructions.
 
 Its ordinary run **merges and splits entries once its refactor proof holds,
-and deletes an entry only on an explicit request**; a split boundary or merge
+and deletes an entry only on an explicit request**, under its
+[deletion protocol](../skills/wiki-lint/references/refactors.md#delete-an-entry);
+a split boundary or merge
 identity that is a genuinely close call is reported, never applied. Its
 content-repair step, refactor protocol, Task 3's missing-root creation, and
 its task division

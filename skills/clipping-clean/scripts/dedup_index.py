@@ -9,8 +9,9 @@ URL normalization on both sides, and (optionally) a verdict per raw — so the
 scan is a single pass rather than a quadratic one, and the normalization rules
 are applied the same way every run.
 
-The decisions stay with the model: what to do about a duplicate (skip in batch,
-ask in explicit-single-file mode) is in references/duplicates-and-reprocessing.md.
+The decisions stay with the model: what to do with each verdict (skip a
+duplicate in batch, ask in explicit-single-file mode) is in SKILL.md step 1;
+references/duplicates-and-reprocessing.md covers reprocessing and collisions.
 
 CLI
     python3 dedup_index.py '<cleaned_dir>' [--raw PATH ...] [--url URL ...]
@@ -459,8 +460,8 @@ def stem_mismatches(paths):
     A clipping files its images under its own note stem (CONVENTIONS §8), so
     a note renamed without its images is invisible to every stem-based figure
     inventory. Each row names the note, its other-stem embeds and their
-    stems; references/images.md says how to re-stem them on request. Code,
-    comments and path-qualified targets do not count.
+    stems; references/duplicates-and-reprocessing.md says how to re-stem them
+    on request. Code, comments and path-qualified targets do not count.
     """
     rows = []
     for path in sorted(set(paths)):

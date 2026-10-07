@@ -6,7 +6,10 @@ collisions, or ownership problems, or when a page needs an explicit crop. The
 visual-review scope. `<skill>` is the figure extractor's directory; use the
 same interpreter and source identity as the original run.
 
-For a specific problem, jump to [ownership records](#ownership-legacy-adoption-and-review-records),
+For a specific problem, jump to [ownership records](#ownership-legacy-adoption-and-review-records)
+([sidecars](#sidecars), [revised source PDFs](#revised-source-pdfs),
+[occupied slots](#occupied-slots), [legacy adoption](#adopt-legacy-crops),
+[changed recorded crops](#changed-recorded-crops)),
 [Extended Data figures](#extended-data-and-supplementary-figures),
 [caption labels](#caption-labels-when-diagnosing-collisions), or
 [explicit cropping](#set-and-verify-an-explicit-crop).
@@ -32,7 +35,7 @@ files, and review findings. Do not merge these into one extraction count.
 | No extractable text | Inspect the PDF; it may be a scan without OCR. Use available OCR on a [readable working copy](#readable-working-copies) if appropriate, following runtime tool guidance. |
 | Could not open or fully read PDF (including encrypted) | Report the file and error. An encrypted PDF needs a [readable working copy](#readable-working-copies). Corrupt downloads, HTML saved as PDF, or damaged pages need a valid source, not automatically OCR. Other PDFs continue and completed crops retain ownership records, but the run fails. |
 | Zero pages | Report an empty PDF separately; OCR cannot supply missing pages. |
-| Stem collisions | Neither colliding source is extracted or adopted, even with `--overwrite`. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check even when `--src` names one file or a smaller subtree; arbitrary external outputs use the explicit source scope. When another vault file shares the basename, report both paths and give the user the [shared-basename remedy](../../../shared/CONVENTIONS.md#shared-pdf-basenames). For two colliding sources outside the vault, give one a unique stem with `pdf-organize` run without `--vault`. |
+| Stem collisions | `--src` takes one PDF or a folder scanned recursively, following directory symlinks; an unreadable subtree or a symlink loop blocks the run. A canonical `<vault>/Sources/Images/` output makes this a whole-vault PDF-basename check, case and Unicode variants included, even when `--src` names one file or a smaller subtree, and nothing is written if the vault cannot be inventoried completely; arbitrary external outputs use the explicit source scope. Neither colliding source is extracted or adopted, even with `--overwrite`. Any refused PDF writes and adopts nothing; other PDFs continue and the run exits nonzero. When another vault file shares the basename, report both paths and give the user the [shared-basename remedy](../../../shared/CONVENTIONS.md#shared-pdf-basenames). For two colliding sources outside the vault, give one a unique stem with `pdf-organize` run without `--vault`. |
 
 The [visual-review scope defined in the main workflow](../SKILL.md#3-inspect-the-summary-and-verify-crops)
 still applies when no diagnostic fires. Top-of-page side-caption exceptions
@@ -53,10 +56,12 @@ keep protecting Supplementary repairs. Compare every PNG it lists under
 `wrote:` with its page. A `_fig_S<N>` that no Supplementary caption claims,
 such as one reported as identical to `_fig_ED<N>`, is a leftover Extended Data
 crop: report it as mislabelled and delete it only with authorization. Later
-runs, folder sweeps included, keep `--ed-prefix ED` for a PDF whose manifest
-records `_fig_ED<N>` crops or whose `Sources/Images/` holds an unrecorded
+batch runs, folder sweeps included, switch a PDF to `--ed-prefix ED` by
+themselves and print `Using --ed-prefix ED` when its manifest records
+`_fig_ED<N>` crops or its `Sources/Images/` holds an unrecorded
 `<stem>_fig_ED<N>.png`; adopt such a legacy crop only after comparing it with
-its page.
+its page. `auto_fig_bbox.py` does not read the manifest, so pass it that
+effective prefix explicitly.
 
 ## Readable working copies
 
@@ -69,8 +74,20 @@ once its crops are verified.
 
 ## Ownership, legacy adoption, and review records
 
-`Sources/Images/` is shared with clipping images. The default sidecars in
-`--out` have separate purposes:
+`Sources/Images/` is shared with clipping images. See
+[conventions §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)
+for the shared figure contract.
+
+The helpers apply the shared [safe-write protocol](../../../shared/SAFE_WRITES.md)
+to crops and sidecars: new names are exclusive, and replacements require the
+inspected file to remain unchanged. Crops also pass nonblank read-back before
+publication. On a concurrent-write or restoration failure, preserve the named
+staging/recovery directory and inspect both occupants before retrying; do not
+replace a newer file or discard displaced bytes to force success.
+
+### Sidecars
+
+The default sidecars in `--out` have separate purposes:
 
 - `.figure-manifest.tsv` records figure ownership and digests. A current
   matching record lets extraction skip or deliberately replace that output.
@@ -89,6 +106,13 @@ before retrying, rather than deleting the manifest to make output appear
 unowned. Completed crops retain their ownership records when another PDF fails
 or an ordinary interruption ends the run.
 
+Keep the default review ledger for canonical `Sources/Images/` output; if a
+custom `--review-file` is used, repeat it whenever adding or removing marks.
+It does not relax image ownership, and the organizer's rename never updates
+it: re-mark renamed figures in a normal run with that ledger.
+
+### Revised source PDFs
+
 The manifest verifies crop ownership and current PNG bytes, not the PDF revision
 that produced them. If a PDF was deliberately replaced or revised at the same
 path, an ordinary rerun can still skip its older crops, and review marks protect
@@ -101,6 +125,8 @@ the revised PDF and one `--unmark-reviewed` per affected reviewed figure, then
 review its outputs again. A verified skip alone does not establish that
 figures reflect a replaced PDF.
 
+### Occupied slots
+
 For both extraction commands, occupancy is semantic and portable, including
 with `--overwrite`: every inventoried `<stem>_fig_<label>.*` spelling shares
 one slot after case folding and Unicode normalization. Thus a clipping-owned
@@ -112,20 +138,15 @@ every occupant and reports its stored name. A conflicting different figure
 slot does not block a named crop; an incomplete inventory still blocks because
 the requested slot cannot be proved free.
 
-The helpers apply the shared [safe-write protocol](../../../shared/SAFE_WRITES.md)
-to crops and sidecars: new names are exclusive, and replacements require the
-inspected file to remain unchanged. Crops also pass nonblank read-back before
-publication. On a concurrent-write or restoration failure, preserve the named
-staging/recovery directory and inspect both occupants before retrying; do not
-replace a newer file or discard displaced bytes to force success.
+### Adopt legacy crops
 
 The default batch treats every occupied name without an ownership record as
 unclaimed. A matching canonical stem is not provenance: a URL-origin clipping
 can have the same stem and exact figure filename. After inspecting a confirmed
 historical extractor crop, select that exact file with a repeatable
 `--adopt-legacy '<pdf_stem>:<figure_label>'` option. The summary prints one
-such command per PDF for its unrecorded exact PNGs; drop every slot you have
-not compared with its page. Adoption is limited to complete PNGs for eligible,
+such command per PDF for its unrecorded exact PNGs; drop every slot not yet
+compared with its page. Adoption is limited to complete PNGs for eligible,
 uniquely identified PDFs in this run and is revalidated before the sidecar is
 saved. A missing, changed, truncated, symlinked, ambiguous, or differently
 formatted file is left unchanged and unclaimed. A manifest may already exist,
@@ -133,6 +154,13 @@ but the selected slot must not already have an ownership record. Adoption
 cannot be combined with `--overwrite`; migrate ownership first, then run any
 requested re-extraction separately. Readable figure PNGs still participate in
 duplicate detection independently of ownership.
+
+A new explicit crop records its digest, creating the manifest when necessary.
+Inspect legacy images and explicitly adopt each confirmed `STEM:FIG` before
+repairing an existing crop. An explicit repair of a recorded crop updates its
+digest so a later batch recognizes the repaired output.
+
+### Changed recorded crops
 
 A recorded crop whose bytes changed after extraction (an image optimizer or
 a hand edit) is never skipped, replaced or adopted; report it. With the
@@ -142,18 +170,6 @@ Change the manifest only as a guarded vault edit: record it with
 `<plugin>/shared/scripts/publish_files.py snapshot`, delete just that line in
 a `<scratch>` draft (keep the TAB separators), and `publish` the draft against
 that record.
-
-A new explicit crop records its digest, creating the manifest when necessary.
-Inspect legacy images and explicitly adopt each confirmed `STEM:FIG` before
-repairing an existing crop. An explicit repair of a recorded crop updates its
-digest so a later batch recognizes the repaired output.
-
-Keep the default review ledger for canonical `Sources/Images/` output; if a
-custom `--review-file` is used, repeat it whenever adding or removing marks.
-It does not relax image ownership, and the organizer's rename never updates
-it: re-mark renamed figures in a normal run with that ledger. See
-[conventions §8](../../../shared/CONVENTIONS.md#8-figure-naming-and-sourcesimages)
-for the shared figure contract.
 
 ## Caption labels when diagnosing collisions
 
@@ -192,10 +208,12 @@ unnumbered or colliding exhibit unextracted and report it.
 
 ## Set and verify an explicit crop
 
-1. Inspect detections and coverage for the affected PDF. Pass the same
-   `--ed-prefix` and `--keep-frame` used in the batch so labels and geometry
-   agree. The table gives each figure's output label (`Fig`), bbox, caption
-   rectangle, and raw caption label.
+1. Inspect detections and coverage for the affected PDF. Pass the batch's
+   effective `--ed-prefix`, including an `ED` the batch applied by itself
+   (its summary printed `Using --ed-prefix ED`), and the same `--keep-frame`,
+   so labels and geometry agree; `auto_fig_bbox.py` does not read the
+   manifest. The table gives each figure's output label (`Fig`), bbox,
+   caption rectangle, and raw caption label.
 
    ```bash
    python3 '<skill>/scripts/auto_fig_bbox.py' '<PDF path>' --coverage
@@ -260,9 +278,14 @@ unnumbered or colliding exhibit unextracted and report it.
    suppresses that diagnostic and does not permit captions in the delivered
    PNG.
 
-4. View the resulting PNG and compare it with the source page. Only then
-   record the review, including for a repair of a crop that was never
-   flagged, with that PDF as `--src` and the same output folder. Pass one
+4. View the resulting PNG and compare it with the source page. The crop is
+   trimmed of near-white margins; if the trim cut into a pale figure
+   background, repeat step 3 with `--no-trim` (keep `--overwrite`, because the
+   crop just written is now verified output). Only then record the review,
+   including for a repair of a crop that was never flagged, with that PDF as
+   `--src` and the same output folder. A flagged batch crop confirmed correct
+   as written after the same comparison takes the same mark; leave an
+   unviewed or doubtful crop unmarked and report it. Pass one
    `--mark-reviewed` per checked figure of that PDF in one run:
 
    ```bash
@@ -287,11 +310,20 @@ unnumbered or colliding exhibit unextracted and report it.
 For several bad crops, `auto_fig_bbox.py --emit extract` can print one
 explicit-extraction command with multiple `--crop` arguments. It includes the
 current interpreter and the script's absolute path. Supply the PDF path and
-matching detection options; edit the emitted coordinates and replace the
-deliberate `--out` placeholder `/EDIT-THIS/path/to/vault/Sources/Images`.
-The command covers every detected figure: delete the `--crop` lines for
-figures you are not repairing, and add `--overwrite` only to replace verified
-output (it also replaces reviewed crops). Repeat any `--allow-unorganized`
-used at intake. Collapsed rectangles are
-omitted and counted on stderr, so an emitted command is not evidence that all
-figures have usable crops.
+step 1's detection options (the batch's effective `--ed-prefix`, including an
+`ED` the batch applied by itself, and `--keep-frame`), then edit the emitted
+command:
+
+- Edit the emitted coordinates and replace the deliberate `--out`
+  placeholder `/EDIT-THIS/path/to/vault/Sources/Images`.
+- The command covers every detected figure: delete the `--crop` lines for
+  figures not being repaired. Every line but the last ends in a continuation
+  backslash; when the old last line is deleted, remove the trailing backslash
+  from the new last line, or the shell waits for more input.
+- Add the batch's non-default `--dpi`, which the emitted command omits, and
+  `--overwrite` only to replace verified output (it also replaces reviewed
+  crops).
+- Repeat any `--allow-unorganized` used at intake.
+
+Collapsed rectangles are omitted and counted on stderr, so an emitted command
+is not evidence that all figures have usable crops.

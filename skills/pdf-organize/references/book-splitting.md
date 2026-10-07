@@ -3,13 +3,15 @@
 Read this when the [organizer book test](../SKILL.md#5-test-for-a-book-and-split-only-when-justified)
 identifies a book, or when the user explicitly requests chapter PDFs. Finish
 any required guarded rename first; the selected book must have a stable
-canonical name. Use `scripts/organize.py split`.
+canonical name. Use `scripts/organize.py pages` and `split`.
 
 ## 1. Choose the chapter folder and check for an existing split
 
 Inside a vault, chapters go in a folder named after the book, directly under
 `Sources/PDFs/`: `Sources/PDFs/Kuhn_StructSciRev_2012/`. Outside a vault,
-create that folder beside the book. **The original book stays where it is;
+that folder goes beside the book. Either way, pass its absolute path as
+`--out` and do not create it beforehand: `split --apply` creates it and
+removes it again if the split fails. **The original book stays where it is;
 chapters are additions, not replacements.**
 
 If the folder already contains chapter-pattern PDFs, stop and report that the
@@ -30,8 +32,8 @@ Use two passes, preferring a table of contents:
    pages, such as `Chapter 1: Introduction ... 1`, `I. The Problem ... 23`, or
    an unnumbered chapter title. Distinguish roman-numbered front matter from
    arabic-numbered body pages. Map printed page numbers to physical PDF pages
-   by inspecting the page text; **do not assume a constant offset without
-   checking it**.
+   by inspecting the page text, which `pages` lists by physical page; **do
+   not assume a constant offset without checking it**.
 2. If there is no usable TOC, scan headings throughout the book. Look for
    `Chapter N`, recurring prominent headings on new pages, or standalone
    chapter title pages. Do not infer reliable boundaries from page count
@@ -52,11 +54,29 @@ These are not printed folio numbers or the one-based page numbers used by the
 figure-cropping tools. For example, physical pages 43–78 use `start_idx=42`
 and `end_idx=78`.
 
-`heading_text` is text from the chapter's opening page as pypdf extracts it
-(case and whitespace are ignored) and may appear on at most two pages outside
-the contents. If running headers repeat the title, extend it with the line
-the opening page prints after the title; include the chapter label only where
-that page prints it with the title, and never use a bare label (`Chapter 2`).
+Copy `heading_text` from the chapter's opening page in the output of the
+read-only `pages` command. It prints each physical page's text exactly as
+`split` verifies headings (lowercased, whitespace collapsed), beside the
+page's one-based number and its `start_idx`:
+
+```bash
+python3 '<skill>/scripts/organize.py' pages '<book PDF path>' --range 1-12
+python3 '<skill>/scripts/organize.py' pages '<book PDF path>' \
+    --find '<chapter 1 heading>' --find '<chapter 2 heading>'
+```
+
+`--range A-B` lists only those physical pages; without it, and without
+`--find`, every page is listed. Give `--find` once for every planned heading:
+it lists the pages carrying each one, treats a page that lists two or more of
+them as contents, and exits 1 when `split` would refuse a heading as too
+short, absent outside the contents, or a likely running header; the `split`
+plan still checks each start page.
+
+A heading must appear on no more than two non-contents pages; otherwise the
+helper refuses it as a likely running header. If running headers repeat the
+title, extend it with the line the opening page prints after the title;
+include the chapter label only where that page prints it with the title, and
+never use a bare label (`Chapter 2`).
 
 The helper moves a start whose page lacks the heading to the nearest page
 within ±2 that carries it, never a contents page (any page listing two or more
@@ -190,5 +210,5 @@ checking. This skill does not extract or delete figures.
 - **Already a single chapter or an existing split:** leave the chapter set
   intact; a chapter may be renamed through the normal guard, not split again.
 - **Parser check fails (including missing or outdated `pypdf`):** follow
-  runtime dependency guidance and split no PDF in that interpreter. The
-  stdlib rename helper remains available.
+  runtime dependency guidance, and run neither `pages` nor `split` in that
+  interpreter. The stdlib rename helper remains available.

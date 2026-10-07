@@ -65,6 +65,9 @@ existing notes only.
 Stage a new root under its own filename and lint it with
 `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`;
 resolve every finding before publication.
+A dangling link to a root this prerequisite creates was
+[left in place by Task 2](link-hygiene.md#dangling-links-target-missing);
+the completion rescan confirms it resolves.
 An existing root whose body lacks part of the root form above is repaired in
 [Task 1b](../SKILL.md#task-1b--content-repair) from the root's cited source,
 an overview page read online included, or accurate background: it replaces a
@@ -237,21 +240,29 @@ preservation rule to retain stale misc members.
 
 ### Migrate the previous MOC layout
 
-Before knowledge 1.4.0 a discipline MOC was `MOCs/<discipline-slug>.md`,
-sharing its basename with the Wiki root, so root links carried `Wiki/`. The
-scanner reports each such file as a `previous-layout` inventory finding and
+A previous-layout discipline MOC is `MOCs/<discipline-slug>.md`, which
+shares its basename with the Wiki root, so links to the root carry `Wiki/`.
+The scanner reports each such file as a `previous-layout` inventory finding and
 in `legacy_moc_states`; while it exists, root parents stay qualified and bare
 root links stay ambiguous. Task 3 migrates it instead of initializing a
 second MOC, within an authorized closure for that discipline:
 
 1. When the old file is readable and uniquely owned and the canonical path is
-   free, move it there with `publish_files.py move` under the shared
-   [safe-write protocol](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally).
-   Record both paths with `publish_files.py snapshot` before reading the old
-   file and move against that snapshot file; `move` refuses a changed old
-   file or an occupied canonical path. Then re-record the canonical path with
-   `snapshot --replace` before regenerating it, as
-   [publishing](../SKILL.md#publishing) describes.
+   free, move it there under the shared
+   [conditional move](../../../shared/SAFE_WRITES.md#remove-or-move-an-old-pathname-conditionally).
+   Record both paths with `publish_files.py snapshot`
+   ([publishing](../SKILL.md#publishing)) before reading the old file, then
+   move against that snapshot file:
+
+   ```bash
+   python3 '<plugin>/shared/scripts/publish_files.py' move --vault '<vault>' \
+       --snapshots '<scratch>/lint-snapshots.json' '<old path>' '<new path>'
+   ```
+
+   `move` refuses a changed old file or an occupied canonical path. Move
+   against the record taken before the bytes that decided the move were read;
+   never re-record the old file after that read. Then re-record the canonical
+   path with `snapshot --replace` before reading or regenerating it.
 2. Rewrite links that resolved to the old file, `[[MOCs/<discipline-slug>…]]`,
    to the new name, preserving anchors and labels. A bare
    `[[<discipline-slug>]]` could have meant either file; preserve and report it.
@@ -307,7 +318,7 @@ unresolved/invalid parent, self-parent, or cycle. Every active included MOC is
 readable (or empty misc with zero members), contains only the complete generated
 outline and has no consistency
 finding. Each included entry's parents exactly
-match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. No included parent remains in `unlinked_children`, and the final scan's `problems` holds no fixable finding on a file Task 3 wrote that the pre-Task-3 scan lacked. Re-scan to verify these conditions. After a
+match its nearest linked Wiki ancestors; discipline roots alone have `parents: []`. No included parent remains in `unlinked_children`, no link Task 2 left for a root this closure created still dangles, and the final scan's `problems` holds no fixable finding on a file Task 3 wrote that the pre-Task-3 scan lacked. Re-scan to verify these conditions. After a
 full-vault pass they hold for all active disciplines, misc, and requested entries;
 inactive discipline MOCs, legacy MOCs, and skipped closures remain explicitly
 reported and preserved, not described as repaired.

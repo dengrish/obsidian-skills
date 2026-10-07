@@ -1,7 +1,7 @@
 # QC items — enforcement and routing (Tasks 1 and 1b)
 
 **Read this before Task 1 or Task 1b fixes any entry.** The numbered acceptance rules
-come from wiki-build's [Quality Checklist](../../wiki-build/SKILL.md#quality-checklist)
+come from wiki-build's [Quality Checklist](../../wiki-build/references/quality-checklist.md)
 and the canonical guides it links. This file does not duplicate those guides in full. It
 owns wiki-lint's finding-to-action rules, source-independent review, the
 hand-off to Task 1b, and repair boundaries.
@@ -56,7 +56,7 @@ ownership.
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Report only: [item 10](#10-wikilinks); the target file's `item0` or `item1` governs repair. |
 | `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
-| `item10/dangling` | Task 1b first creates the missing entry when the target is a real knowledge gap that meets the [missing-entry rule](refactors.md#create-a-missing-entry); Task 2 resolves every other dangler under its [dangler protocol](link-hygiene.md#dangling-links-target-missing). |
+| `item10/dangling` | Task 1b first settles the target under its [dangler hand-off](refactors.md#dangling-link-hand-off): the entry the [missing-entry rule](refactors.md#create-a-missing-entry) allows, or a gloss for each mention that needs the term; Task 2 resolves the rest under its [dangler protocol](link-hygiene.md#dangling-links-target-missing), which leaves a link to a missing root for Task 3. |
 | `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
@@ -89,7 +89,7 @@ for its mechanical coverage; do not infer permission from a scanner message.
 
 ### 1. Valid YAML
 
-Apply builder [item 1](../../wiki-build/SKILL.md#quality-checklist) and the
+Apply builder [item 1](../../wiki-build/references/quality-checklist.md) and the
 [frontmatter guide](../../wiki-build/references/writing.md#1-frontmatter-fields).
 The opening fence is on file line 1; a BOM is tolerated, a leading blank is not.
 Flow lists may be empty only as `[]`. One trailing comma after the last item
@@ -138,7 +138,7 @@ Linter-specific routing:
 ### 3. Dates
 
 Require valid `YYYY-MM-DD` dates with `created <= updated`, as builder
-[item 3](../../wiki-build/SKILL.md#quality-checklist) and the
+[item 3](../../wiki-build/references/quality-checklist.md) and the
 [date fields](../../wiki-build/references/writing.md#created--updated) define. The linter
 writes neither field. Report invalid values, impossible ordering, and any
 history-dependent question; do not guess which date is wrong or try to make
@@ -183,9 +183,8 @@ merge candidates. Task 1b merges two or more entries through the
 and accurate background verify one entity under alternate names
 ([step 2](refactors.md#establish-evidence-and-complete-scope)). Related
 concepts, overlapping wording or a probe match alone never activate a merge.
-An identity that is a genuinely close call, or that the evidence does not
-settle, is not merged: report both options under *Notes for the user*, never
-in a log.
+A close call stays unapplied under
+[Task 1b's rule](../SKILL.md#task-1b--content-repair).
 
 A bare cross-domain title is retitled the same way. The scanner flags a slug
 that is a word or phrase of the builder's corpus (`tree-of-life`); the semantic
@@ -261,7 +260,7 @@ under these rules or report its blocker.
 
 ### 9. Body structure, coherence, flow, and scope
 
-Apply builder [item 9](../../wiki-build/SKILL.md#quality-checklist), the
+Apply builder [item 9](../../wiki-build/references/quality-checklist.md), the
 [body guide](../../wiki-build/references/writing.md#2-the-body), and the
 [Person/Event date forms](../../wiki-build/references/rare-types.md#dates-in-the-opener-person-and-event).
 There is no body sentence, paragraph, word, or heading-count target.
@@ -286,7 +285,7 @@ already states the prototype, Task 1 repairs the description under item 7 and
 the card under item 19; moving an opening-paragraph mention is Task 1b's,
 which folds it, with its link, into the later passage (Learning rate's
 boosting clause), applying builder
-[item 13](../../wiki-build/SKILL.md#quality-checklist)'s each-sense-once rule
+[item 13](../../wiki-build/references/quality-checklist.md)'s each-sense-once rule
 outside merges too. When the prototype is missing, Task 1b writes it from the
 cited source or accurate background and keeps the variant as one linked
 example. Task 1b likewise frames an entry in its
@@ -305,9 +304,8 @@ sources or accurate background
 ([step 2](refactors.md#establish-evidence-and-complete-scope)). A long note,
 several headings or several sources alone never activate a split; inherent
 mechanisms, stages, conditions and limitations stay with their subject. A
-boundary that is a genuinely close call, or that the evidence does not
-settle, is not split: report both options under *Notes for the user*, never
-in a log.
+close call stays unapplied under
+[Task 1b's rule](../SKILL.md#task-1b--content-repair).
 
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
@@ -356,17 +354,13 @@ Task 1b supplies each missing facet: a model's or ensemble's prediction step
 and how it trains, a display's verbal reading, a concrete case, a
 category's canonical members (at least three) that have entries, or a discipline
 root's form. For a Concept, it then applies the builder's
-[row-9 test](../../wiki-build/SKILL.md#quality-checklist) (could a reader
+[row-9 test](../../wiki-build/references/quality-checklist.md) (could a reader
 explain how it works from the note alone?) and supplies only what that test or
 principle 5's [term audit](../../wiki-build/references/writing.md#editorial-reread)
 names as missing. Both work under the source-backed
 [*Deepening*](source-backed-corrections.md) rules, from the entry's cited
 sources and accurate background. A gap that only an unbuilt source would fill
-(any source the entry does not cite, even one another entry cites) is expected
-until a wiki-build request naming that whole source fills it in, and is not
-proposed. Neither task fills it from that source. This governs deepening an
-existing entry; a new entry's source follows the
-[missing-entry rule](refactors.md#create-a-missing-entry).
+waits for that source's whole build under those rules and is not proposed.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -409,7 +403,7 @@ Compare protected content before and after the edit and apply the shared
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread)
 to the finished passage. Repair any regression and re-run the per-entry lint
 before publication. Leave conforming prose untouched and report the defect and
-repair for each changed entry; there is no shortening quota or human sign-off.
+repair for each changed entry; there is no shortening quota.
 
 If the change crosses a section, changes a fact, removes substantive content,
 chooses between claims, or redistributes material across entries, Task 1
@@ -543,7 +537,7 @@ run report.
 ### 13. Merge integrity
 
 In a source-independent run, apply only the structural floor of builder
-[item 13](../../wiki-build/SKILL.md#quality-checklist) and its
+[item 13](../../wiki-build/references/quality-checklist.md) and its
 [merge logic](../../wiki-build/references/merge.md#merge-logic): one opener and no
 stacked-body scars such as duplicated openings, stray frontmatter keys,
 unexpected `---` fences, or standalone digit lines. Listings are excluded; a
@@ -559,17 +553,12 @@ without changing claim, attribution, or certainty; otherwise Task 1b corrects
 it from the cited source. Task 1b completes the rest of principle 5 from the
 cited source or accurate background:
 
-- A term the entry uses with neither definition nor link is linked when its
-  entry exists, and otherwise gets a brief defining clause. A term at least
-  three entries use without a resolving link (a one-clause inline gloss still
-  counts as a use; count before adding any gloss), with a stable identity that passes wiki-build's
-  substance and atomicity tests, gets its own entry instead under the
-  [missing-entry rule](refactors.md#create-a-missing-entry), which Task 2 then
-  links. A use is a sentence that needs the term's meaning to make its point;
-  a word inside a dataset column or variable name ("median house value"), a
-  measurement ("135 million nucleotide pairs") or a list of examples is not a
-  use. Keep this count across the whole Task 1b sweep and adjudicate every
-  term that reaches three entries in the same run.
+- A term the entry uses with neither definition nor resolving link is linked
+  when its entry exists, and otherwise gets a brief defining clause; a
+  dangling link's term follows the
+  [dangler hand-off](refactors.md#dangling-link-hand-off). A term that meets
+  the [missing-entry rule](refactors.md#create-a-missing-entry) gets its own
+  entry instead, which Task 2 then links.
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.
@@ -582,7 +571,7 @@ authors” do not.
 
 ### 15. Example discipline
 
-Apply builder [item 15](../../wiki-build/SKILL.md#quality-checklist) and
+Apply builder [item 15](../../wiki-build/references/quality-checklist.md) and
 [prose principle 7](../../wiki-build/references/writing.md#prose-principles)
 during semantic review, judging an example by purpose, never by length.
 Trimming an unnecessary, tangential or repetitive example needs the source, so
@@ -628,7 +617,7 @@ reported.
 
 ### 18. Alias form, collisions, and display labels
 
-Apply builder [item 18](../../wiki-build/SKILL.md#quality-checklist) and the
+Apply builder [item 18](../../wiki-build/references/quality-checklist.md) and the
 [display-label rule](../../wiki-build/references/writing.md#display-label-casing),
 including its four carve-outs, which lint preserves. Normalize determinate
 alias form and duplicates; report cross-entry ownership conflicts. Never

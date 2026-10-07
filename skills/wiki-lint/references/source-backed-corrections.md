@@ -18,8 +18,8 @@ contribution and belongs to `wiki-build`. A retitle uses the
 [entry-retitle protocol](refactors.md#retitle-an-entry), and a consolidation,
 a passage moved to its owner, a merge or a split uses
 [source-backed refactors](refactors.md), all within the same Task 1b once
-the refactor's proof holds; only a deletion needs an explicit request, and
-then uses that protocol.
+the refactor's proof holds; a deletion needs an
+[explicit request](../SKILL.md#explicit-requests).
 
 **Deepening.** Task 1b's depth repairs, and a request to deepen, expand or
 enrich an entry, apply the builder's creation-time teaching rules to it: the
@@ -178,5 +178,4 @@ cited source provenance and applicable PDF page (for a URL source, the address,
 the date read and the supporting section, or that the page was unreachable or
 changed), corrected claim, dependent
 same-entry changes, date/review-state decision, and final scan result.
-An ordinary lint run, or the user's correction request, is sufficient
-authorization; do not ask for a second review.
+The ordinary run or the user's request is sufficient authorization.

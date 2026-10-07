@@ -1,6 +1,10 @@
 # Worked example — one raw clipping, start to finish
 
-**Read this when** you want to see the whole thing assembled before writing your first note of a session, or when a piece of the output shape is unclear — where the blank lines go, how a caption sits under an embed, what the report's correction lines look like. It is illustration, not rules: the rules are in the workflow steps and the other reference files.
+**Read this** before writing the first note of a session, or when a piece of
+the output shape is unclear — where the blank lines go, how a caption sits
+under an embed, what the report's correction and audit lines look like. It is
+illustration, not rules: the rules are in the workflow steps and the other
+reference files.
 
 ## Raw input
 
@@ -64,15 +68,20 @@ For most of the last half-century, a diagnosis of metastatic pancreatic cancer w
 - **Filename slug:** `Teslo_Pancreatic_Cancer_2026.md` — first author's lastname, two Title-Cased content words from the title (dropping "just met its match"), corrected published year.
 - **No blank line between the YAML closing `---` and the `> [!Summary]` callout** — the summary opens flush on the next line.
 - **First summary bullet is the central finding** (the trial result), not the lead anecdote — leading with the article's main claim, as [draft assembly](../SKILL.md#4-assemble-the-complete-draft) requires. The Ben Sasse anecdote is demoted to a supporting second bullet.
+- **Author wikilink unwrapped** — the raw's `"[[Ruxandra Teslo]]"` becomes
+  the plain block-list item `Ruxandra Teslo`: the
+  [source-note schema](../../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document)
+  writes `author` items without `[[…]]` wrappers.
 - **Headings normalized to `##` / `###`** — the raw's `####` top-level section becomes `##` and its sub-section `###`, regardless of what level Web Clipper used.
 - **Description is 107 characters** — under the 110-char cap, leading with the drug name and keeping the finding's hedge and trial scope.
 - **`read: false`, bare and last** — the user's review checkbox, written once here and never again: they tick it to `true` when they've read the note, and a later reprocess of this file leaves whatever value it finds. The quotes are absent on purpose (`read: "false"` is a string, which Obsidian's checkbox renders as permanently checked).
 - **Captions are rendered as a single italic line directly below the plain embed** (`![[file]]` on one line, `*caption.*` on the next); the original caption paragraphs are gone from the body and any internal `**bold**` / nested italics in them have been flattened.
-- **`published` was corrected** from the raw's `2022-09-05` to `2026-05-12` — the raw date was scraped wrong, source verification found the correct article date. The corrected year `2026` flows into the filename slug. The report flags the correction:
+- **`published` was corrected** from the raw's `2022-09-05` to `2026-05-12` — the raw date was scraped wrong, source verification found the correct article date. The corrected year `2026` flows into the filename slug. The report flags the correction and gives the capture's completeness verdict:
 
 ```
 Metadata corrections:
   published: 2022-09-05 → 2026-05-12 (source: article:published_time)
+Completeness audit: no gaps found
 ```
 
 Images saved to `Sources/Images/`:

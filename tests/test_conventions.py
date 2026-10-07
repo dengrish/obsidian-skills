@@ -4746,8 +4746,12 @@ SKILL_FRAME = re.compile(
     r"|(?:by|run|runs|invoke|via|through|hand(?:ed|s)? (?:it |them )?(?:off )?to)\s+`%s`")
 #: A vault-path-shaped token: at least one `Capitalised/` or `<placeholder>/`
 #: segment.  This is the shape of the original bug (`Clippings/Extracted/`).
+#: The tail is `(seg/)*seg?`, not `(seg/?)*`: the same language, but the
+#: optional slash made a long slash-free run backtrack exponentially when a
+#: long inline-code command failed to match.
 VAULT_PATH = re.compile(
-    r"`[^`\n]{0,40}?((?:[A-Z][A-Za-z0-9_.-]*|<[a-z-]+>)/(?:[A-Za-z0-9_.<>-]+/?)*)[^`\n]{0,40}?`")
+    r"`[^`\n]{0,40}?((?:[A-Z][A-Za-z0-9_.-]*|<[a-z-]+>)/"
+    r"(?:[A-Za-z0-9_.<>-]+/)*[A-Za-z0-9_.<>-]*)[^`\n]{0,40}?`")
 FIELD_CLAIM = re.compile(r"`([a-z_]+):\s*[^`\n]{0,40}`")
 PLUGIN_INTERNAL = re.compile(r"^(references|scripts|shared|skills|tests)/"
                              r"|/(references|scripts)/")
@@ -6054,9 +6058,11 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/slugify.py": 81,  # device-name restrictions removed
     "shared/scripts/vault_artifacts.py": 72,
     "shared/scripts/yaml_scalars.py": 16,
-    "skills/clipping-clean/scripts/body_checks.py": 79,
+    # 2026-10-06: item 17 (split links) cases.
+    "skills/clipping-clean/scripts/body_checks.py": 84,
     "skills/clipping-clean/scripts/dedup_index.py": 180,
-    "skills/clipping-clean/scripts/fetch_images.py": 623,
+    # 2026-10-06 (knowledge 1.21.0): `rename --phase publish-note` cases.
+    "skills/clipping-clean/scripts/fetch_images.py": 638,
     "skills/clipping-clean/scripts/lottie_to_gif.py": 42,
     "skills/clipping-clean/scripts/slug.py": 157,  # device-name guards removed
     "skills/feed-collect/scripts/feed_collect.py": 13,
@@ -6096,7 +6102,8 @@ SELFTEST_MIN_CASES = {
     "skills/figure-extract/scripts/batch_extract.py": 439,
     "skills/figure-extract/scripts/extract_figures.py": 223,
     "skills/figure-extract/scripts/render_page.py": 68,
-    "skills/pdf-organize/scripts/organize.py": 419,
+    # 2026-10-06 (knowledge 1.21.0): the read-only `pages` subcommand.
+    "skills/pdf-organize/scripts/organize.py": 433,
     "skills/wiki-add/scripts/backlog.py": 54,
     "skills/wiki-build/scripts/find_collisions.py": 79,
     # 2026-09-30: lowered after the discipline-root empty-sources exemption

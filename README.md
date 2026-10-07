@@ -25,7 +25,7 @@ Choose by the requested result, not just the input's file type.
 | Explain a paper, chapter, report, standard or publication notice | [knowledge:paper-summarize](skills/paper-summarize/SKILL.md) | PDF → reading note in `Articles/` |
 | Clean Web Clipper captures | [knowledge:clipping-clean](skills/clipping-clean/SKILL.md) | raw capture → cleaned note in `Articles/` |
 | Build or enrich wiki entries from new evidence | [knowledge:wiki-build](skills/wiki-build/SKILL.md) | organized PDF or cleaned source note → entries in `Wiki/` |
-| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md` or topics named in the request → new requested entries citing vault sources or web pages by URL, plus any newly filed PDFs |
+| Research and add missing requested topics | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | vault-root `add-to-wiki.md`, another selected backlog or topics named in the request → new requested entries citing vault sources or web pages by URL, plus any newly filed PDFs |
 | Audit, repair and refactor existing wiki entries | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | existing `Wiki/`, its cited sources, issues you flag in entries and open note suggestions → content repairs, merges, splits, retitles, missing entries, links, parents and MOCs |
 | Record selected X posts and RSS/Atom articles without interpretation | [investments:feed-collect](skills/feed-collect/SKILL.md) | `Investments/x-accounts.md` and `rss-feeds.md` → maintained X notes and RSS article notes in `Investments/Sources/` |
 | Analyze stock ideas from collected feeds | [investments:stock-research](skills/stock-research/SKILL.md) | saved posts + verified financial evidence → daily report and maintained stock notes |
@@ -366,9 +366,10 @@ No skill discards user content. A reprocess, retitle or refactor within its
 workflow's authorized scope may conditionally remove an obsolete path only
 after its replacement and dependent references are safely published and
 verified; a later occupant always survives.
-Content the user explicitly names for deletion, such as a wiki-lint deletion
-refactor, is removed only through that protocol, after its inbound references
-are resolved. Every wiki-lint card check (Task 1) and every wiki-build merge
+Content the user explicitly names for deletion, such as a wiki-lint
+[deletion refactor](skills/wiki-lint/references/refactors.md#delete-an-entry),
+is removed only through that protocol, after its inbound references are
+resolved. Every wiki-lint card check (Task 1) and every wiki-build merge
 keeps an entry's one definition card and removes any other card once no link
 targets its block ID, quoting it in the run report.
 pdf-organize may rename or move PDFs in its authorized scope but never

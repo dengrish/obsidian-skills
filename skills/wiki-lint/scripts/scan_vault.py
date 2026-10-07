@@ -27,7 +27,7 @@ Stdlib only, Python 3.10+ (the plugin runtime floor).
     python3 scripts/scan_vault.py /path/to/vault/Wiki \
         --vault /path/to/vault \
         --images /path/to/vault/Sources/Images \
-        --out '/tmp/wiki-scan-<run-id>.json'
+        --out '<scratch>/wiki-scan-1.json'
 
 `--images` is optional. It checks that every local image embed names a file in
 `Sources/Images/` and emits report-only `image_folder_findings` for nested

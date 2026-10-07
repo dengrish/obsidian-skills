@@ -48,7 +48,7 @@ ran last won, silently. Do not vendor a second copy — call this one.
 Usage:
     python3 auto_fig_bbox.py input.pdf
     python3 auto_fig_bbox.py input.pdf --pages 3,4,5
-    python3 auto_fig_bbox.py input.pdf --emit extract --stem MyBook_Ch12
+    python3 auto_fig_bbox.py input.pdf --emit extract
     python3 auto_fig_bbox.py input.pdf --keep-frame --ed-prefix ED
     python3 auto_fig_bbox.py input.pdf --coverage
 
@@ -4550,10 +4550,12 @@ def main(argv=None):
                 file=sys.stderr,
             )
         else:
-            # The current interpreter and a full path, because this text is pasted into a
-            # shell whose working directory is normally the vault: macOS ships
-            # no `python` binary at all, and a bare `extract_figures.py`
-            # resolves to nothing there (SKILL.md's own invocation rule). The
+            # The current interpreter and a full path, because this text is
+            # pasted into a shell whose working directory is normally the
+            # vault: macOS ships no `python` binary at all, and a bare
+            # `extract_figures.py` resolves to nothing there (shared/RUNTIME.md,
+            # "Resolve the paths before acting" and "Use one Python
+            # environment"). The
             # sibling script is found from this file, so a plugin installed
             # anywhere emits a command that runs.
             extract_py = os.path.join(
