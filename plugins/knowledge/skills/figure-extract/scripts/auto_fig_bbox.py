@@ -105,14 +105,15 @@ def _require_pymupdf():
 # shown in figure s1 above"). The `(?![.-]\d)\b` panel-letter check still
 # rejects "Figure 1A" / "Figure 1a" regardless of the keyword's case.
 #
-# Caption continuation: the lookahead recognizes five caption "shapes"
+# Caption continuation: the lookahead recognizes six caption "shapes"
 # after the figure number — period+space ("Figure 1. Title"), whitespace
-# then a non-lowercase char ("Figure 1 Title", "Figure 1 1D conv"), end of
-# line ("Figure 1"), colon ("Figure 1: Title" — common in Nature, Cell,
-# PNAS), and an em-/en-dash with or without surrounding whitespace
-# ("Figure 1—Title", "Figure 1 — Title"). Prose references like "Figure 1
-# shows..." still fail because the verb after the number starts with a
-# lowercase letter.
+# then a non-lowercase char ("Figure 1 Title", "Figure 1 1D conv"),
+# whitespace then a lowercase-led symbol with a capital or digit ("Fig. 1
+# mRNA levels", "Figure 4 t-SNE embedding"), end of line ("Figure 1"),
+# colon ("Figure 1: Title" — common in Nature, Cell, PNAS), and an
+# em-/en-dash with or without surrounding whitespace ("Figure 1—Title",
+# "Figure 1 — Title"). Prose references like "Figure 1 shows..." still fail
+# because the verb after the number is a plain lowercase word.
 #
 # A single label can mix dots and dashes (`1-5.3`) and the regex still
 # captures the whole thing — `[.-]\d+` covers either separator at each step.
@@ -161,7 +162,7 @@ CAP_RE = re.compile(
     r'|[A-Z]' + LABEL_SEP + r'?\d+(?:' + LABEL_SEP + r'\d+)*'   # A.1, A1, B-2 (appendix)
     r'|\d+(?:' + LABEL_SEP + r'\d+)*)'                      # plain numeric — group 2
     r'(?!' + LABEL_SEP + r'\d)\b'                           # not a truncated number
-    r'(?=\.\s|\s+[^\sa-z]|\s*$|\s*:|\s*[–—])',              # caption-shape lookahead
+    r'(?=\.\s|\s+[^\sa-z]|\s+[a-z][a-z-]*[A-Z0-9]|\s*$|\s*:|\s*[–—])',  # caption-shape lookahead
     re.MULTILINE,
 )
 # A narrative reference can inherit CAP_RE's line-start shape when a caption is
@@ -182,13 +183,20 @@ CONTINUED_FIGURE_REFERENCE_RE = re.compile(
 #   "Figure 1-23"                                       (label-only, end of line)
 #   "Figure 1: Title goes here"                         (Nature/Cell/PNAS — colon)
 #   "Figure 1—Title goes here"                          (some technical publishers — em-dash)
+#   "Figure 7–33 tRNA molecules are molecular adaptors" (Alberts — lowercase-led symbol)
+#   "Fig. 1 mRNA expression in liver tissue"            (Springer/BMC — lowercase-led symbol)
 # Prose paragraphs that start with a figure reference look like:
 #   "Figure 1-23 shows an example of..."                (verb after space)
 #   "Figure 1-24 illustrates the gradient..."           (verb after space)
-# The verb in a prose reference always starts with a LOWERCASE letter, so
+# The verb in a prose reference is a plain lowercase word, so
 # `\s+[^\sa-z]` (whitespace then a non-whitespace, non-lowercase character —
 # digits, capitals, parentheses, math symbols — all OK) rejects prose
-# references while accepting digit-led math captions. The `\s*:` and
+# references while accepting digit-led math captions. A lowercase-led
+# symbol with a capital or digit (tRNA, mRNA, pH, p53, t-SNE) starts a
+# caption title, which `\s+[a-z][a-z-]*[A-Z0-9]` accepts; a plain word
+# ("shows", "x-axis") does not. A label that ends its line with a period
+# ("Figure 5–4.") stays rejected: in a book that is a wrapped prose
+# reference ending its sentence, not a caption. The `\s*:` and
 # `\s*[–—]` alternatives add support for Nature-style colon captions and
 # em-/en-dash captions; neither appears at the start of a prose reference.
 # Excluding whitespace in the final class prevents backtracking from reading
@@ -527,6 +535,35 @@ def collect_content_rects(page):
     return rects
 
 
+def page_is_scan(page):
+    """True when one raster covers the page and the page has text.
+
+    That is an OCR'd scan: the page image under a text layer. The
+    page-covering raster stays content (see `PAGE_COVER_SHARE`), so the
+    figure region is the whole page. Every text block then sits inside it,
+    nothing raises the crop's top edge, and the crop carries the prose
+    above the figure. `suspicious` flags every crop on such a page.
+    """
+    def extract():
+        try:
+            pr = content_rect(page)
+            covered = False
+            for img in page.get_images(full=True):
+                for r in page.get_image_rects(img[0]):
+                    if (r.width >= pr.width * PAGE_COVER_SHARE
+                            and r.height >= pr.height * PAGE_COVER_SHARE):
+                        covered = True
+            if not covered:
+                return False
+            return any(sp.get("text", "").strip()
+                       for blk in _text_dict(page).get("blocks", [])
+                       for line in blk.get("lines", [])
+                       for sp in line.get("spans", []))
+        except Exception:
+            return False
+    return _memoized(page, "scan", extract)
+
+
 def collect_frame_lines(page):
     """Return (horizontal_lines, vertical_lines) inside the page body.
 
@@ -691,8 +728,12 @@ def normalize_label(label):
 
 
 def _normalize_marker(marker):
-    """Lowercase + single-space the marker text for dictionary lookup."""
-    return re.sub(r"\s+", " ", marker.strip()).lower()
+    """Lowercase + single-space the marker text for dictionary lookup.
+
+    A line-break hyphen inside the word (`Supplemen-\\ntary`, matched by
+    `REF_RE`) is dropped too; no marker key contains a hyphen.
+    """
+    return re.sub(r"\s+", " ", re.sub(r"[-\u2010]\s*", "", marker.strip())).lower()
 
 
 def configure_marker_prefix(marker, prefix):
@@ -1217,7 +1258,8 @@ def clip_content(content, top, bottom, left, right):
     return out
 
 
-def figure_content_span(content, anchor=None, cluster_gap=None):
+def figure_content_span(content, anchor=None, cluster_gap=None,
+                        separators=()):
     """Union one vertically contiguous content cluster.
 
     For a bottom caption, "the figure this caption belongs to" is the lowest
@@ -1227,6 +1269,17 @@ def figure_content_span(content, anchor=None, cluster_gap=None):
     cluster made a top-of-page side caption jump to a different figure lower
     on the page. Rects are swept once and split wherever the vertical gap
     exceeds ``cluster_gap`` (the general `CONTENT_CLUSTER_GAP` by default).
+
+    ``separators`` are the rects of captions above the caption being
+    cropped. A separator with content under it in its own column, that is
+    content overlapping it horizontally, ends the figure above it: the sweep
+    also splits at any gap that holds the separator, however small, when the
+    content below the gap lies under the separator. Two floats stacked on
+    one page are usually 30-60pt apart, less than `CONTENT_CLUSTER_GAP`. A
+    separator that content crosses, as a figure in the other column of a
+    two-column page crosses its band, is in no gap and splits nothing. Nor
+    does a separator split a figure in the other column whose panel gap
+    happens to hold it.
 
     Returns None when there is no content at all (raster-only figures whose
     image rects PyMuPDF does not report), which callers treat as "no
@@ -1240,11 +1293,21 @@ def figure_content_span(content, anchor=None, cluster_gap=None):
     if cluster_gap is None:
         cluster_gap = CONTENT_CLUSTER_GAP
     rects = sorted(content, key=lambda r: (r.y0, r.y1))
+    # A hairline overlap between a caption and the content next to it (a
+    # frame line 1-2pt from its caption) still leaves the caption in the gap.
+    slop = CAPTION_OVERLAP_EPS
+    separators = [
+        c for c in separators
+        if any(r.y0 >= c.y1 - slop and min(r.x1, c.x1) >= max(r.x0, c.x0)
+               for r in rects)]
     clusters = []
     cluster = [rects[0]]
     bottom = rects[0].y1
     for r in rects[1:]:
-        if r.y0 <= bottom + cluster_gap:
+        split = any(c.y0 >= bottom - slop and c.y1 <= r.y0 + slop
+                    and min(r.x1, c.x1) >= max(r.x0, c.x0)
+                    for c in separators)
+        if r.y0 <= bottom + cluster_gap and not split:
             cluster.append(r)
             bottom = max(bottom, r.y1)
         else:
@@ -1342,6 +1405,84 @@ def text_block_inside_figure(rect, span):
         return (gap <= ABOVE_FIGURE_TEXT_GAP
                 and rect.width <= span.width * ABOVE_FIGURE_TEXT_MAX_SHARE)
     return True
+
+
+def _label_block_lines(page):
+    """Line geometry per text block, and the page's body font size.
+
+    Returns ``({block_rect_tuple: [(line_rect, chars, size)]}, modal)``.
+    `chars` counts the line's characters, `size` is the font size that
+    carries most of them, and `modal` is the page's most common size by
+    characters, the body size `prose_chars_in` measures against. `modal` is
+    None on a page without text. Block keys match the rects
+    `collect_text_rects` builds from the same text dict.
+    """
+    sizes = {}
+    blocks = {}
+    for blk in _text_dict(page).get("blocks", []):
+        if blk.get("type", 0) != 0:
+            continue
+        lines = []
+        for line in blk.get("lines", []):
+            weight = {}
+            text = ""
+            for sp in line.get("spans", []):
+                txt = sp.get("text", "")
+                text += txt
+                if not txt.strip():
+                    continue
+                sz = round(float(sp.get("size", 0)), 1)
+                weight[sz] = weight.get(sz, 0) + len(txt)
+                sizes[sz] = sizes.get(sz, 0) + len(txt)
+            if weight and line.get("bbox"):
+                lines.append((fitz.Rect(line["bbox"]), len(text.strip()),
+                              max(weight, key=weight.get)))
+        blocks[tuple(fitz.Rect(blk["bbox"]))] = lines
+    modal = max(sizes, key=sizes.get) if sizes else None
+    return blocks, modal
+
+
+def _side_by_side_labels_above(rect, span, block_lines):
+    """True when a text block is a row of panel labels just above the figure.
+
+    Nature-style figures print a panel letter and panel titles in one row
+    above the first drawing. PyMuPDF can merge that row into one block
+    almost as wide as the figure, and `text_block_inside_figure` rejects a
+    block that wide as prose. Without this test the row raises the crop's
+    top edge and the PNG loses every panel title with no warning. The
+    coverage region is built from drawings alone, so the guard cannot see
+    the loss.
+
+    `block_lines` is `_label_block_lines(page)`. The block must end within
+    `ABOVE_FIGURE_TEXT_GAP` above the drawings and lie inside their x-span.
+    Every line must be shorter than the compact-block limit and set below
+    the body size; a one-glyph panel letter may be any size. At least two
+    lines must sit side by side, overlapping vertically with no horizontal
+    overlap. A row at body size, such as a running head, fails this test,
+    and so do stacked lines, such as prose or a code listing.
+    """
+    if span is None or not block_lines or rect.y1 > span.y0:
+        return False
+    if span.y0 - rect.y1 > ABOVE_FIGURE_TEXT_GAP:
+        return False
+    if (rect.x0 < span.x0 - INNER_SLOP_LEFT
+            or rect.x1 > span.x1 + INNER_SLOP_RIGHT):
+        return False
+    blocks, modal = block_lines
+    lines = blocks.get(tuple(rect))
+    if not lines or modal is None:
+        return False
+    max_width = span.width * ABOVE_FIGURE_TEXT_MAX_SHARE
+    for line_rect, chars, size in lines:
+        if line_rect.width > max_width:
+            return False
+        if chars > 1 and size >= modal - 0.3:
+            return False
+    return any(
+        min(a.y1, b.y1) > max(a.y0, b.y0)
+        and (a.x1 <= b.x0 or b.x1 <= a.x0)
+        for i, (a, _, _) in enumerate(lines)
+        for b, _, _ in lines[i + 1:])
 
 
 def _side_figure_text_rects(page, region, captions, left=None, right=None):
@@ -1629,21 +1770,38 @@ def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None
         # distinction, a bar chart's own value labels raise the top edge and
         # the crop keeps only what sits under the lowest label.
         #
-        # Measured from the UNRAISED top (`page_top`), not from `top`. The
-        # region is the yardstick the coverage guard holds the finished bbox
-        # against — "how much of the figure did the crop keep?" — and it was
-        # being clipped by the very raise it exists to detect, so `bbox.y0`
-        # could never precede `region.y0` and `cover` came out 1.00 however
-        # much had been cut off: a crop starting at y=330 on a figure starting
-        # at y=200 scored 100%. Clustering is what keeps the wider span from
-        # dragging in the PREVIOUS figure — a caption's worth of vertical gap
-        # is far more than CONTENT_CLUSTER_GAP.
+        # Clipped at the UNRAISED top (`page_top`), not at `top`. The region
+        # is the yardstick the coverage guard holds the finished bbox against
+        # — "how much of the figure did the crop keep?" — so a figure that
+        # crosses a previous caption or a prose block keeps its real top, and
+        # the cut stays visible to the guard. A crop starting at y=330 on a
+        # figure starting at y=200 must not score 100%.
+        #
+        # The captions above this one separate the clusters, so a previous
+        # figure stacked above this one stays out of the region. Clustering
+        # by gap alone cannot keep it out: two floats stacked on one page are
+        # usually 30-60pt apart, which is less than CONTENT_CLUSTER_GAP
+        # (72pt). A region joined to the upper figure turns its caption and
+        # any heading between the two figures into figure text, keeps a
+        # publisher frame the crop should strip, and flags correct crops as
+        # having lost half the figure.
+        caption_top = top
         region = figure_content_span(
-            clip_content(content, page_top, bottom, 0, pr.width))
+            clip_content(content, page_top, bottom, 0, pr.width),
+            separators=[r for _, r in all_captions
+                        if r is not caption_rect
+                        and r.y1 < caption_rect.y0])
         if diag is not None:
             diag["region"] = region
+        block_lines = _label_block_lines(page) if region is not None else None
         for r, _ in all_text_blocks:
             if r is caption_rect:
+                continue
+            # The previous caption, and anything above it, belongs to the
+            # figure above. As figure text it would also reach the frame
+            # guard below, which reads `inner_text` unclipped and would
+            # discard this figure's real frame.
+            if r.y1 <= caption_top:
                 continue
             # A block starting at or below the search region's bottom edge is
             # the caption itself (or something under it), and it is neither
@@ -1664,11 +1822,13 @@ def bbox_for_figure(page, caption_rect, all_captions, all_text_blocks, diag=None
             # stripping — was dead on every figure it was written for.
             if r.y0 >= bottom:
                 continue
-            if text_block_inside_figure(r, region):
+            if (text_block_inside_figure(r, region)
+                    or _side_by_side_labels_above(r, region, block_lines)):
                 # Part of the figure, so it also belongs in the crop. Axis
                 # tick rows and axis titles hang below the last drawing;
                 # BOTTOM_PAD_EXTRA alone guesses at them, and a rotated
-                # y-axis label sits outside the drawings on the left.
+                # y-axis label sits outside the drawings on the left. A row
+                # of panel titles sits just above the first drawing.
                 inner_text.append(r)
                 continue
             if (r.y1 < caption_rect.y0 - 5 and r.y1 > top
@@ -1821,11 +1981,19 @@ def degenerate(bbox):
 #: 47 for the worst clean one.
 MAX_PROSE_CHARS = 150
 
+#: Words a text line needs before `prose_chars_in` counts it as prose. Tick
+#: labels, axis and panel titles and table cells can share the body size. On
+#: a page that holds only a figure and its caption, they can also share the
+#: caption size that is modal there. Those lines carry a few words at most;
+#: prose lines carry several.
+PROSE_MIN_WORDS = 5
+
 
 def prose_chars_in(page, bbox):
-    """Characters of body-size text at least half inside `bbox`.
+    """Characters of body-size prose at least half inside `bbox`.
 
-    0 when it cannot tell.
+    Only lines of at least `PROSE_MIN_WORDS` words count; every line still
+    sets the body size. 0 when it cannot tell.
     """
     try:
         d = _text_dict(page)
@@ -1835,13 +2003,16 @@ def prose_chars_in(page, bbox):
     spans = []
     for blk in d.get("blocks", []):
         for line in blk.get("lines", []):
+            text = "".join(sp.get("text", "") for sp in line.get("spans", []))
+            prose = len(text.split()) >= PROSE_MIN_WORDS
             for sp in line.get("spans", []):
                 txt = sp.get("text", "")
                 if not txt.strip():
                     continue
                 sz = round(float(sp.get("size", 0)), 1)
                 sizes[sz] = sizes.get(sz, 0) + len(txt)
-                spans.append((sz, sp.get("bbox"), len(txt)))
+                if prose:
+                    spans.append((sz, sp.get("bbox"), len(txt)))
     if not sizes:
         return 0
     modal = max(sizes, key=sizes.get)
@@ -2000,6 +2171,11 @@ CAPTION_IN_CROP_TAG = "caption text inside the crop: "
 #: module has had was silent.
 CAPTION_AMBIGUOUS_TAG = "caption position ambiguous: "
 
+#: Tag on the reason for every crop on a scanned page (`page_is_scan`). OCR
+#: makes the captions readable, but the figure and the text around it are
+#: still one image, so the automatic crop cannot separate them.
+SCANNED_PAGE_TAG = "scanned page: "
+
 #: How much of the content a placement was based on the finished crop has to
 #: contain. A backstop independent of the classification: whichever reading
 #: won, a crop holding none of the content that reading was chosen for is
@@ -2068,6 +2244,10 @@ def suspicious(bbox, region=None, page=None, caption_rect=None, headers=None,
         return f"height {h:.0f} < {MIN_BBOX_HEIGHT}"
     if area < MIN_BBOX_AREA:
         return f"area {area:.0f} < {MIN_BBOX_AREA}"
+    if page is not None and page_is_scan(page):
+        return (f"{SCANNED_PAGE_TAG}one image covers the page, so the "
+                f"automatic crop cannot separate the figure from the text "
+                f"around it — render the page and set an explicit crop")
     if region is not None and region.height > 0:
         # Vertical coverage only, and measured against the region rather
         # than the crop: the crop is legitimately narrower than the region
@@ -2167,8 +2347,20 @@ def suspicious(bbox, region=None, page=None, caption_rect=None, headers=None,
 # scan would record `1-14` while this one recorded `1`, and every figure in
 # the document would appear in the PARTIAL bucket as "cited, no caption" —
 # noise on the one signal that has no other witness.
+#
+# A marker word in body text may be hyphen-broken across a line
+# (`Supplemen-` / `tary Fig. 14`, common in two-column journals). Read without
+# its marker, that reference cites main Figure 14, which has no caption, and
+# the PDF reads as PARTIAL. So each marker also matches in its broken form,
+# and `_normalize_marker` drops the hyphen. CAP_RE needs no such form: a
+# caption's marker starts its line.
+REF_MARKER = '|'.join(
+    r'\s+'.join(r'(?:[-\u2010]\s*)?'.join(re.escape(ch) for ch in word)
+                for word in marker)
+    for marker in (('Supplementary',), ('Supplemental',), ('Suppl.',),
+                   ('Supp.',), ('Extended', 'Data')))
 REF_RE = re.compile(
-    r'\b((?i:Supplementary|Supplemental|Suppl?\.|Extended\s+Data))?\s*'
+    r'\b((?i:' + REF_MARKER + r'))?\s*'
     r'(?i:Figures|Figure|Figs\.?|Fig\.?)\s+'
     r'(SI\d+(?:' + LABEL_SEP + r'\d+)*'
     r'|S\d+(?:' + LABEL_SEP + r'\d+)*'
@@ -2665,6 +2857,36 @@ def _st_wide_prose_doc():
     return doc
 
 
+def _st_labelled_figure_doc():
+    """Four labelled panels above a long caption, all text at 7 pt.
+
+    The shape of a Nature Extended Data page: the figure and its caption
+    fill the page, so the caption's size is the modal one, and the panel
+    titles, axis titles and tick labels share it.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for k in range(4):
+        x = 50 + 140 * k
+        page.insert_text((x, 92), "Residue-residue distance matrix",
+                         fontsize=7)
+        page.draw_rect(fitz.Rect(x, 100, x + 110, 210),
+                       fill=(0.2 + 0.15 * k, 0.4, 0.7))
+        for t in range(5):
+            page.insert_text((x + 22 * t, 222), str(10 * (t + 1)),
+                             fontsize=7)
+        page.insert_text((x + 30, 234), "Residue (key)", fontsize=7)
+    page.insert_text((50, 262), "Extended Data Fig. 1 | Four panels of "
+                     "labelled heat maps over the residues of one protein.",
+                     fontsize=7)
+    for k in range(7):
+        page.insert_text((50, 271 + 9 * k), "The caption goes on to "
+                         "describe every panel in turn, with the axes, the "
+                         "colour scales and the data behind them.",
+                         fontsize=7)
+    return doc
+
+
 def _st_wrapped_reference_doc():
     """Prose wrapping "...similar to that in / figure 1.", then Figure 1 overleaf."""
     doc = fitz.open()
@@ -2707,6 +2929,38 @@ def _st_bleed_doc():
     for k in range(8):
         page.insert_text((330, 210 + 14 * k),
                          "Body prose in the neighbouring column.", fontsize=10)
+    return doc
+
+
+def _st_ocr_scan_doc(scan=True):
+    """One prose line, a bar chart with labels, and a "Figure 1." caption.
+
+    With `scan`, the page is what OCR makes of a scan: one page-sized image
+    under an invisible text layer (render mode 3). Without it, the same page
+    is born digital, with vector bars and visible text.
+    """
+    lines = ((72, 90, 10, "A short prose line sits above the figure."),
+             (150, 415, 8, "A"), (215, 415, 8, "B"), (280, 415, 8, "C"),
+             (72, 445, 9, "Figure 1. Bar chart of five conditions."))
+    src = fitz.open()
+    page = src.new_page(width=612, height=792)
+    page.draw_line((110, 200), (110, 400))
+    page.draw_line((110, 400), (480, 400))
+    for k in range(5):
+        x = 140 + 65 * k
+        page.draw_rect(fitz.Rect(x, 360 - 30 * k, x + 40, 400),
+                       fill=(0.4, 0.4, 0.8))
+    for x, y, size, text in lines:
+        page.insert_text((x, y), text, fontsize=size)
+    if not scan:
+        return src
+    pix = page.get_pixmap(dpi=72)
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_image(page.rect, pixmap=pix)
+    for x, y, size, text in lines:
+        page.insert_text((x, y), text, fontsize=size, render_mode=3)
+    src.close()
     return doc
 
 
@@ -2773,6 +3027,14 @@ def run_self_test():
             ("Figure 1–2. With a period", None, "1–2"),
             ("Figure S1–3. Supplementary, en-dashed", None, "S1–3"),
             ("Figure 16−8. Unicode-minus chapter label", None, "16−8"),
+            # A title may start with a lowercase-led symbol that holds a
+            # capital or digit (Alberts, Springer/BMC).
+            ("Figure 7–33 tRNA molecules are molecular adaptors", None,
+             "7–33"),
+            ("Fig. 1 mRNA expression in liver tissue", None, "1"),
+            ("Fig. 2 pH dependence of activity", None, "2"),
+            ("Figure 4 t-SNE embedding of cells", None, "4"),
+            ("Fig. 5 p53 levels after treatment", None, "5"),
     ):
         m = CAP_RE.search(text)
         state["n"] += 1
@@ -2809,6 +3071,8 @@ def run_self_test():
             "Figure 1–2 shows the central dogma",             # prose
             "As shown in Figure 1–6B and Figure 1–7A",        # panel pointer
             "Figures 1–3 and 1–4 show the same thing",        # plural
+            "Figure 2 x-axis labels are omitted",             # plain word
+            "Figure 5–4.",                                    # wrapped reference
     ):
         state["n"] += 1
         if CAP_RE.search(text):
@@ -3158,6 +3422,20 @@ def run_self_test():
     ok("suspicious: body text the crop cuts through",
        "characters of body-size text" in suspicious(cut, None, wpage))
     wdoc.close()
+    # Panel titles, axis titles and tick labels at the modal size are figure
+    # text, not prose: a crop holding only them is not flagged.
+    ldoc = _st_labelled_figure_doc()
+    lpage = ldoc[0]
+    figure_only = fitz.Rect(40, 80, 580, 240)
+    check("prose_chars_in skips body-size figure labels",
+          prose_chars_in(lpage, figure_only), 0)
+    check("suspicious: a crop holding only body-size figure labels",
+          suspicious(figure_only, None, lpage), "")
+    ok("...but a crop reaching into the caption lines still counts them "
+       "(%d > %d)" % (prose_chars_in(lpage, fitz.Rect(40, 80, 580, 300)),
+                      MAX_PROSE_CHARS),
+       prose_chars_in(lpage, fitz.Rect(40, 80, 580, 300)) > MAX_PROSE_CHARS)
+    ldoc.close()
 
     # --- a page-sized bleed rect is the sheet, not a figure -----------------
     # Without the `PAGE_COVER_SHARE` filter this one rect decides everything:
@@ -3193,8 +3471,32 @@ def run_self_test():
     ipage.insert_image(fitz.Rect(0, 0, 612, 792), pixmap=ipix)
     ok("a full-page raster survives the filter",
        any(r.width > 612 * PAGE_COVER_SHARE for r in collect_content_rects(ipage)))
+    check("a full-page raster with no text is not a scanned page",
+          page_is_scan(ipage), False)
     idoc.close()
     bdoc.close()
+
+    # --- an OCR'd scan: every crop is flagged ------------------------------
+    # The page image is content, so the figure region is the whole page and
+    # the crop reaches the top margin. The one prose line is too short for the
+    # body-text check, so only the scanned-page check reports it.
+    sdoc = _st_ocr_scan_doc()
+    check("an OCR'd page is a scanned page", page_is_scan(sdoc[0]), True)
+    srows = list(detect_figures(sdoc))
+    check("the OCR'd page yields its one caption",
+          [row[1] for row in srows], ["1"])
+    ok("...and its crop is flagged as a scanned page (%r)"
+       % (srows[0][5] if srows else None,),
+       bool(srows) and srows[0][5].startswith(SCANNED_PAGE_TAG))
+    sdoc.close()
+    sdoc = _st_ocr_scan_doc(scan=False)
+    check("the born-digital page is not a scanned page",
+          page_is_scan(sdoc[0]), False)
+    srows = list(detect_figures(sdoc))
+    check("...and its crop carries no scanned-page reason",
+          [(row[1], row[5].startswith(SCANNED_PAGE_TAG)) for row in srows],
+          [("1", False)])
+    sdoc.close()
 
     # --- find_frame_rect: a publisher frame and a matplotlib axes box ------
     # The same four strokes. `find_frame_rect` cannot tell them apart and is
@@ -4028,6 +4330,217 @@ def run_self_test():
        "covers" in suspicious(bb, region))
     doc.close()
 
+    # Two floats stacked on one page sit 30-60pt apart, closer than
+    # CONTENT_CLUSTER_GAP. The region of the lower figure must still leave
+    # the upper one out. Joined to it, the region flags a correct crop as
+    # having lost half its figure, keeps a publisher frame, and lets a
+    # heading between the two figures into the lower crop.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(100, 120, 500, 300), fill=(0.2, 0.3, 0.7))
+    page.insert_text((100, 318), "Figure 1. The upper stacked figure.",
+                     fontsize=9)
+    page.draw_rect(fitz.Rect(100, 340, 500, 560), fill=(0.7, 0.3, 0.2))
+    page.insert_text((100, 578), "Figure 2. The lower stacked figure.",
+                     fontsize=9)
+    caps = find_caption_blocks(page)
+    by_num = {n: r for n, _, r in caps}
+    diag = {}
+    bbox_for_figure(page, by_num["2"], [(n, r) for n, _, r in caps],
+                    collect_text_rects(page), diag=diag)
+    region = diag.get("region")
+    ok("stacked figures 40pt apart: the lower region leaves the upper "
+       "figure out (y0=%.0f >= 339)" % (region.y0 if region else -1),
+       region is not None and region.y0 >= 339)
+    check("...and neither correct crop is flagged",
+          [g[5] for g in detect_figures(doc)], ["", ""])
+    doc.close()
+
+    def stacked_frames(width, height, first, second, captions):
+        doc = fitz.open()
+        page = doc.new_page(width=width, height=height)
+        for frame, caption in zip((first, second), captions):
+            _st_frame(page, *frame)
+            page.draw_rect(fitz.Rect(frame.x0 + 30, frame.y0 + 10,
+                                     frame.x1 - 34, frame.y1 - 10),
+                           fill=(0.3, 0.4, 0.7))
+            page.insert_text((frame.x0, frame.y1 + 14), caption, fontsize=9)
+        return doc
+
+    for name, doc, frame in (
+            ("framed figures with a 30pt caption-to-frame gap",
+             stacked_frames(612, 792, fitz.Rect(90, 110, 520, 290),
+                            fitz.Rect(90, 334, 520, 514),
+                            ("Figure 1-1. First framed figure.",
+                             "Figure 1-2. Second framed figure.")),
+             fitz.Rect(90, 334, 520, 514)),
+            ("framed figures 42pt apart on a 504x661.5 page",
+             stacked_frames(504, 661.5, fitz.Rect(70, 90, 434, 170),
+                            fitz.Rect(70, 212, 434, 560),
+                            ("Figure 4-1. A short framed figure.",
+                             "Figure 4-2. A tall framed figure.")),
+             fitz.Rect(70, 212, 434, 560))):
+        got = list(detect_figures(doc))
+        lower = got[-1] if len(got) == 2 else None
+        ok("%s: the lower crop strips its frame" % name,
+           lower is not None and lower[3].x0 > frame.x0
+           and lower[3].y0 > frame.y0 and lower[3].x1 < frame.x1
+           and lower[3].y1 < frame.y1)
+        check("...and is not flagged", lower and lower[5], "")
+        doc.close()
+
+    # A heading between two stacked figures, farther above the lower figure
+    # than ABOVE_FIGURE_TEXT_GAP, raises its top edge. In a region joined to
+    # the upper figure it would count as figure text and sit inside the crop.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(100, 110, 500, 200), fill=(0.2, 0.3, 0.7))
+    page.insert_text((100, 214), "Figure 1. The upper figure.", fontsize=9)
+    page.insert_text((72, 238), "2.3 Results on the second dataset",
+                     fontsize=11, fontname="hebo")
+    page.draw_rect(fitz.Rect(100, 266, 500, 600), fill=(0.7, 0.3, 0.2))
+    page.insert_text((100, 614), "Figure 2. The lower figure.", fontsize=9)
+    heading = [r for r, t in collect_text_rects(page) if "Results" in t]
+    lower = [g[3] for g in detect_figures(doc) if g[1] == "2"]
+    ok("a heading 25pt above the lower figure stays out of its crop",
+       bool(heading and lower) and not lower[0].intersects(heading[0]))
+    ok("...and the crop still holds the lower figure",
+       bool(lower) and lower[0].contains(fitz.Rect(100, 266, 500, 600)))
+    doc.close()
+
+    # Leaving the upper figure out must not hide a real cut. On a two-column
+    # page the left column's caption raises the top edge through the
+    # right-column figure, and the guard must still see the lost top.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(60, 130, 286, 300), fill=(0.2, 0.3, 0.7))
+    page.insert_text((50, 316), "Figure 1. Left column figure caption.",
+                     fontsize=8)
+    page.draw_rect(fitz.Rect(326, 200, 552, 470), fill=(0.7, 0.3, 0.2))
+    page.insert_text((316, 486), "Figure 2. Right column figure caption.",
+                     fontsize=8)
+    right = [g[5] for g in detect_figures(doc) if g[1] == "2"]
+    ok("a figure cut by the other column's caption is still flagged (%r)"
+       % (right[0][:40] if right else None),
+       bool(right) and right[0].startswith("covers"))
+    doc.close()
+
+    # The same cut when the other column's caption sits in a panel gap of
+    # the right-column figure. The caption must not split that figure, or
+    # the region drops its upper panel row and the cut crop goes unflagged.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(60, 100, 286, 300), fill=(0.2, 0.3, 0.7))
+    page.insert_text((50, 316), "Figure 1. Left column upper figure.",
+                     fontsize=8)
+    page.draw_rect(fitz.Rect(60, 340, 286, 640), fill=(0.3, 0.6, 0.3))
+    page.insert_text((50, 656), "Figure 3. Left column lower figure.",
+                     fontsize=8)
+    page.draw_rect(fitz.Rect(326, 100, 552, 304), fill=(0.7, 0.3, 0.2))
+    page.draw_rect(fitz.Rect(326, 326, 552, 600), fill=(0.7, 0.5, 0.2))
+    page.insert_text((316, 616), "Figure 2. Right column two-row figure.",
+                     fontsize=8)
+    right = [g[5] for g in detect_figures(doc) if g[1] == "2"]
+    ok("a figure cut at its panel gap by the other column's caption is "
+       "still flagged (%r)" % (right[0][:40] if right else None),
+       bool(right) and right[0].startswith("covers"))
+    doc.close()
+
+    # A row of panel titles above the first drawing is figure content even
+    # when PyMuPDF merges it into one block almost as wide as the figure.
+    # Raising the top edge past it loses every panel title with no warning.
+    # A row at body size and a wide code listing still raise the top edge.
+    def labelled_doc(row=None, listing=False):
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        for k in range(12):
+            page.insert_text((72, 460 + 14 * k), "Body prose under the "
+                             "caption, set at the page's body size.",
+                             fontsize=10)
+        page.draw_rect(fitz.Rect(80, 115, 530, 400), fill=(0.2, 0.4, 0.7))
+        page.insert_text((80, 420), "Figure 1. Panel titles above the "
+                         "drawings.", fontsize=9)
+        writer = fitz.TextWriter(page.rect)
+        font = fitz.Font("helv")
+        if row:
+            for (x, text), size in zip(
+                    ((80, "a"), (95, "Experimental sequence data"),
+                     (300, "PLM that integrates"),
+                     (460, "Biophysical prior")), row):
+                writer.append((x, 110), text, font=font, fontsize=size)
+        if listing:
+            mono = fitz.Font("cour")
+            for k, text in enumerate((
+                    "for step, batch in enumerate(batches):  loss = "
+                    "model(batch); loss.backward(); clip(model)",
+                    "    optimizer.step(); scheduler.step(); "
+                    "log_progress(step, loss, every=100, to=stdout)",
+                    "    if step % 1000 == 0: save_checkpoint(model, "
+                    "optimizer, scheduler, out_dir, step)")):
+                writer.append((80, 90 + 9 * k), text, font=mono,
+                              fontsize=6.5)
+        writer.write_text(page)
+        return doc
+
+    def label_block(doc):
+        return [r for r, _ in collect_text_rects(doc[0]) if r.y1 < 115]
+
+    doc = labelled_doc(row=(9, 6.5, 6.5, 6.5))
+    rows = label_block(doc)
+    got = list(detect_figures(doc))
+    ok("the panel-title row is one block wider than the compact limit",
+       len(rows) == 1 and rows[0].width > 450 * ABOVE_FIGURE_TEXT_MAX_SHARE)
+    ok("a merged panel-title row stays in the crop (y0=%.1f <= %.1f)"
+       % (got[0][3].y0 if got else -1, rows[0].y0 if rows else -1),
+       bool(got and rows) and got[0][3].y0 <= rows[0].y0)
+    check("...and the crop is not flagged", [g[5] for g in got], [""])
+    doc.close()
+    doc = labelled_doc(row=(10, 10, 10, 10))
+    rows = label_block(doc)
+    got = list(detect_figures(doc))
+    ok("a row at body size still raises the top edge past it",
+       bool(got and rows) and got[0][3].y0 >= rows[0].y1)
+    doc.close()
+    doc = labelled_doc(listing=True)
+    rows = label_block(doc)
+    got = list(detect_figures(doc))
+    ok("a wide small-font listing still raises the top edge past it",
+       len(rows) == 1 and bool(got) and got[0][3].y0 >= rows[0].y1)
+    doc.close()
+
+    # Each condition of the row test on its own, against a 450pt-wide span
+    # on a page whose body size is 10pt.
+    span = fitz.Rect(80, 115, 530, 400)
+    row = fitz.Rect(80, 100, 508, 112.7)
+    titles = [(fitz.Rect(95, 103, 177, 112), 26, 6.5),
+              (fitz.Rect(300, 103, 356, 112), 19, 6.5),
+              (fitz.Rect(460, 103, 508, 112), 17, 6.5)]
+    letter = (fitz.Rect(80, 100, 85, 112.7), 1, 9.0)
+    stacked = fitz.Rect(80, 90, 320, 107)
+
+    def labels_above(rect, lines, size=10.0):
+        return _side_by_side_labels_above(
+            rect, span, ({tuple(rect): lines}, size))
+
+    check("label row: a panel letter beside small titles",
+          labels_above(row, [letter] + titles), True)
+    check("label row: titles at body size",
+          labels_above(row, [letter] + [(r, n, 10.0) for r, n, _ in titles]),
+          False)
+    check("label row: small lines stacked, none side by side",
+          labels_above(stacked, [(fitz.Rect(80, 90, 300, 98), 40, 6.5),
+                                 (fitz.Rect(80, 99, 320, 107), 40, 6.5)]),
+          False)
+    check("label row: farther above than ABOVE_FIGURE_TEXT_GAP",
+          labels_above(fitz.Rect(80, 78, 508, 90.7),
+                       [(r - (0, 22, 0, 22), n, s)
+                        for r, n, s in [letter] + titles]), False)
+    check("label row: one line wider than the compact limit",
+          labels_above(row, [letter, (fitz.Rect(95, 103, 450, 112), 80, 6.5)]),
+          False)
+    check("label row: a block the text pass never saw",
+          _side_by_side_labels_above(row, span, ({}, 10.0)), False)
+
     # --- suspicious(): caption text inside the crop -------------------------
     # `caption_rect` was accepted and never read. The only caption-overlap
     # check in the plugin lived in `extract_figures.main()`, which
@@ -4065,6 +4578,32 @@ def run_self_test():
                                fitz.Rect(0, 150 + CONTENT_CLUSTER_GAP - 5,
                                          100, 300)]),
           fitz.Rect(0, 100, 100, 300))
+    stacked_pair = [fitz.Rect(100, 120, 500, 300),
+                    fitz.Rect(100, 340, 500, 560)]
+    check("figure_content_span: a caption in the gap ends the figure above",
+          figure_content_span(stacked_pair,
+                              separators=[fitz.Rect(100, 309, 300, 320)]),
+          fitz.Rect(100, 340, 500, 560))
+    check("figure_content_span: a caption the next figure crosses splits "
+          "nothing",
+          figure_content_span([fitz.Rect(60, 130, 286, 300),
+                               fitz.Rect(326, 200, 552, 470)],
+                              separators=[fitz.Rect(50, 308, 200, 320)]),
+          fitz.Rect(60, 130, 552, 470))
+    check("figure_content_span: a caption with no content under it in its "
+          "column splits nothing",
+          figure_content_span([fitz.Rect(60, 130, 286, 300),
+                               fitz.Rect(326, 330, 552, 470)],
+                              separators=[fitz.Rect(50, 308, 200, 320)]),
+          fitz.Rect(60, 130, 552, 470))
+    check("figure_content_span: a caption in the other column's panel gap "
+          "splits nothing",
+          figure_content_span([fitz.Rect(60, 100, 286, 300),
+                               fitz.Rect(326, 100, 552, 304),
+                               fitz.Rect(326, 326, 552, 600),
+                               fitz.Rect(60, 340, 286, 640)],
+                              separators=[fitz.Rect(50, 308, 200, 320)]),
+          fitz.Rect(60, 100, 552, 640))
     span = fitz.Rect(100, 200, 500, 400)
     check("text_block_inside_figure: prose above the figure",
           text_block_inside_figure(fitz.Rect(100, 100, 500, 180), span), False)
@@ -4284,6 +4823,23 @@ def run_self_test():
           sorted(find_figure_references(_TextDoc("Figures 8-5, 8-6 and 8-7"),
                                         caption_labels=["8-5"])),
           ["8-5", "8-6", "8-7"])
+    # A marker word hyphen-broken across a line is still a marker; read
+    # without it, `Supplemen-/tary Fig. 14` cited main Figure 14 and the
+    # PDF reported PARTIAL with no caption for a figure it does not have.
+    check("a hyphen-broken supplementary marker keeps its namespace",
+          [find_figure_references(_TextDoc(text), caption_labels=[])
+           for text in ("Results are robust (Supplemen-\ntary Fig. 14).",
+                        "(Sup-\nplementary Fig. 1a)")],
+          [{"S14": 1}, {"S1": 1}])
+    saved = dict(MARKER_TO_PREFIX)
+    try:
+        configure_marker_prefix("Extended Data", "ED")
+        check("a hyphen-broken extended data marker honours --ed-prefix ED",
+              find_figure_references(_TextDoc("(Ex-\ntended Data Fig. 2)"),
+                                     caption_labels=[]), {"ED2": 1})
+    finally:
+        MARKER_TO_PREFIX.clear()
+        MARKER_TO_PREFIX.update(saved)
     check("_uses_hyphen_labels", _uses_hyphen_labels(["1", "S2", "4-2"]), True)
     check("_uses_hyphen_labels on plain labels",
           _uses_hyphen_labels(["1", "S2", "A.1"]), False)

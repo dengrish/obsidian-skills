@@ -50,6 +50,45 @@ def strip_comment(raw):
     return raw.rstrip(" \t")
 
 
+def _open_value(raw, quote=None, depth=0):
+    """The (quote, depth) a value line leaves open; (None, 0) means closed.
+
+    It reads with ``strip_comment``'s token rules and starts from the state
+    the line before left open, so a quoted or flow value can be followed
+    across its indented continuation lines.
+    """
+    token_start = True
+    i = 0
+    while i < len(raw):
+        ch = raw[i]
+        if quote:
+            if quote == '"' and ch == "\\":
+                i += 2
+                continue
+            if ch == quote:
+                if quote == "'" and raw[i:i + 2] == "''":
+                    i += 2
+                    continue
+                quote, token_start = None, False
+            i += 1
+            continue
+        if ch == "#" and (i == 0 or raw[i - 1] in " \t"):
+            break
+        if token_start and ch in "\"'":
+            quote = ch
+        elif token_start and ch in "[{":
+            depth += 1
+        elif depth and ch in ",:":
+            token_start = True
+        elif depth and ch in "]}":
+            depth -= 1
+            token_start = False
+        elif ch not in " \t":
+            token_start = False
+        i += 1
+    return quote, depth
+
+
 def split_flow(inner):
     """Split a valid non-nested flow-list payload.
 
@@ -174,9 +213,12 @@ def parse_source_fields(frontmatter_lines):
     keys before checking duplicates and validate every current list member.
     This deliberately rejects unsupported root mapping forms; it is not a
     general YAML parser or a validator for unrelated metadata schemas.
+    A quoted or flow value of another key continues only on indented lines.
+    One that runs into an unindented line, or past the last line, is
+    malformed: its next line could otherwise pose as a ``sources:`` key.
     """
     result, active, item_indent, have_key = {}, None, None, False
-    other_block = False
+    other_block, pending = False, None
 
     def member(raw):
         value, _ = parse_scalar(raw)
@@ -214,6 +256,14 @@ def parse_source_fields(frontmatter_lines):
         if not isinstance(raw, str):
             raise ValueError("expected frontmatter text lines")
         line = raw.rstrip("\r\n")
+        if pending:
+            if line.strip(" \t") and line[0] not in " \t":
+                raise ValueError("an open quoted or flow value continues "
+                                 "on an unindented line")
+            pending = _open_value(line, *pending)
+            if pending == (None, 0):
+                pending = None
+            continue
         if not line.strip() or line.lstrip(" \t").startswith("#"):
             continue
         indent = len(line) - len(line.lstrip(" \t"))
@@ -242,6 +292,9 @@ def parse_source_fields(frontmatter_lines):
             raise ValueError("merged source ownership is unsupported")
         if key not in ("source", "sources"):
             other_block = not strip_comment(raw_value).strip(" \t")
+            pending = _open_value(raw_value)
+            if pending == (None, 0):
+                pending = None
             continue
         if key in result:
             raise ValueError("duplicate source field: " + key)
@@ -258,6 +311,8 @@ def parse_source_fields(frontmatter_lines):
             result[key], active = None, "sources-null"
         else:
             raise ValueError("sources must be a string list or null")
+    if pending:
+        raise ValueError("unterminated quoted or flow value")
     return result
 
 
@@ -288,6 +343,17 @@ def read_regular_text(path):
                 pass
 
 
+def yaml_lines(text, keepends=False):
+    """Split at YAML line breaks only: CRLF, CR and LF.
+
+    ``str.splitlines`` also splits at U+2028, U+2029, NEL and form feed.
+    YAML reads those as content, so a quoted title holding one would break
+    into two lines and hide the note's origin.
+    """
+    lines = re.findall(r"[^\r\n]*(?:\r\n|\r|\n)|[^\r\n]+\Z", text)
+    return lines if keepends else [line.rstrip("\r\n") for line in lines]
+
+
 def _origin_fence(line):
     """True for a column-zero ``---`` with only trailing spaces or tabs.
 
@@ -309,35 +375,48 @@ def read_note_origin(path):
 
     The tolerances are the ones an editor round-trip produces and Obsidian
     still reads as frontmatter: a BOM, CRLF line endings, leading blank lines
-    before the opening fence, and trailing spaces or tabs on a fence. The
-    whole note must decode strictly as UTF-8 before its metadata can establish
-    ownership, so invalid bytes in the body cannot hide behind a valid-looking
-    origin.
+    before the opening fence, and trailing spaces or tabs on a fence. Lines
+    break only where YAML breaks them (``yaml_lines``). The whole note must
+    decode strictly as UTF-8 before its metadata can establish ownership, so
+    invalid bytes in the body cannot hide behind a valid-looking origin.
 
     A CLOSING fence is required. An unterminated ``---`` is not frontmatter,
     and reading on into the body would take whatever ``source:`` the prose or
     a quoted block contains. Missing, non-regular, undecodable, unterminated
     and malformed notes all return None, which callers report rather than
-    guess.
+    guess. ``read_note_origin_detail`` also says which of these it was.
+    """
+    return read_note_origin_detail(path)[0]
+
+
+def read_note_origin_detail(path):
+    """(origin, problem): ``read_note_origin``'s origin, and why it is None.
+
+    ``problem`` is None when the origin was read, or when the note is
+    readable and has none: no frontmatter, no source field, or an empty or
+    null ``sources``. Otherwise it names what stopped the read: text that is
+    not readable UTF-8, an unterminated block, or malformed metadata. A
+    malformed note may still be the caller's own note, so the caller reports
+    the problem rather than calling the note foreign.
     """
     text = read_regular_text(path)
     if text is None:
-        return None
-    lines = text.splitlines()
+        return None, "not readable UTF-8 text"
+    lines = yaml_lines(text)
     opening = next((i for i, line in enumerate(lines) if line.strip()), None)
     if opening is None or not _origin_fence(lines[opening]):
-        return None
+        return None, None
     closing = next((i for i in range(opening + 1, len(lines))
                     if _origin_fence(lines[i])), None)
     if closing is None:
-        return None
+        return None, "unterminated frontmatter"
     try:
         fields = parse_source_fields(lines[opening + 1:closing])
-    except ValueError:
-        return None
+    except ValueError as exc:
+        return None, str(exc)
     if "sources" in fields:
-        return (fields["sources"] or [None])[0]
-    return fields.get("source") or None
+        return (fields["sources"] or [None])[0], None
+    return fields.get("source") or None, None
 
 
 #: Origin-ownership fixtures: the frontmatter text between the fences and the
@@ -366,6 +445,17 @@ ORIGIN_CASES = (
      None),
     ('<<: *other\nsource: "%s"' % ORIGIN_CASE_PDF, None),
     ('source: "%s"' % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+    # U+2028, U+2029 and NEL are content in YAML, not line breaks.
+    ('title: "A B"\nsources:\n  - "%s"' % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+    ('description: "A\x85B"\nsources: ["%s"]' % ORIGIN_CASE_URL, ORIGIN_CASE_URL),
+    ('title: "A B"\nsource: "%s"' % ORIGIN_CASE_PDF, ORIGIN_CASE_PDF),
+    # A quoted or flow value continues only on indented lines.
+    ("title: 'A long\n  wrapped title'\nsources:\n- '%s'" % ORIGIN_CASE_PDF,
+     ORIGIN_CASE_PDF),
+    ("title: 'Clipped\nsources: [\"%s\"] #'\nsource: %s"
+     % (ORIGIN_CASE_PDF, ORIGIN_CASE_URL), None),
+    ('tags: [a,\nsources: ["%s"]\nx: 1]\nsource: %s'
+     % (ORIGIN_CASE_PDF, ORIGIN_CASE_URL), None),
 )
 
 
@@ -500,6 +590,35 @@ def self_test():
                 with self.subTest(lines=lines), self.assertRaises(ValueError):
                     parse_source_fields(lines)
 
+        def test_source_fields_follow_open_values_to_their_end(self):
+            url = "https://example.invalid/right"
+            for lines in (
+                    ["title: 'A long", "  wrapped # title'", "sources:", "- " + url],
+                    ['title: "A \\"long\\"', '', '  title"', "sources: [" + url + "]"],
+                    ["tags: [a,", "  # comment", "  'b c']", "sources: [" + url + "]"],
+                    ["title: O'Reilly # it's", "aliases: [O'Reilly]",
+                     "sources: [" + url + "]"]):
+                with self.subTest(lines=lines):
+                    self.assertEqual(parse_source_fields(lines),
+                                     {"sources": [url]})
+            for lines in (
+                    ["title: 'Clipped", 'sources: ["[[Doe.pdf]]"] #\'',
+                     "source: " + url],
+                    ["title: \"Clipped", "#\"", "source: " + url],
+                    ["tags: {a: [b,", "  c]", "sources: [x]}", "source: " + url],
+                    ["source: " + url, "title: 'never closed"],
+                    ["source: " + url, "tags: [a,", "  b"]):
+                with self.subTest(lines=lines), self.assertRaises(ValueError):
+                    parse_source_fields(lines)
+
+        def test_yaml_lines_break_only_at_yaml_line_breaks(self):
+            text = "a b c\x85d\x0ce\r\nf\rg\nh"
+            self.assertEqual(yaml_lines(text),
+                             ["a b c\x85d\x0ce", "f", "g", "h"])
+            self.assertEqual("".join(yaml_lines(text, keepends=True)), text)
+            self.assertEqual(yaml_lines("x\n"), ["x"])
+            self.assertEqual(yaml_lines(""), [])
+
     class NoteOriginTests(unittest.TestCase):
         def setUp(self):
             self.tmp = tempfile.mkdtemp(prefix="yaml_scalars_selftest.")
@@ -552,6 +671,28 @@ def self_test():
                 with self.subTest(label=label):
                     path = self.note(label.replace(" ", "-") + ".md", body)
                     self.assertIsNone(read_note_origin(path))
+
+        def test_origin_detail_names_why_there_is_no_origin(self):
+            url = "https://example.com/a"
+            for label, body, want in (
+                    ("origin", "---\nsources:\n  - %s\n---\n" % url, (url, None)),
+                    ("no frontmatter", "just prose\n", (None, None)),
+                    ("no origin key", "---\ntitle: x\n---\n", (None, None)),
+                    ("empty sources", "---\nsources: []\n---\n", (None, None)),
+                    ("null sources", "---\nsources: null\n---\n", (None, None)),
+                    ("unterminated", "---\nsource: %s\n\nprose\n" % url,
+                     (None, "unterminated frontmatter")),
+                    ("duplicate", "---\nsources: [%s]\nsources: [%s]\n---\n"
+                     % (url, url), (None, "duplicate source field: sources")),
+                    ("null item", "---\nsources:\n  - %s\n  - null\n---\n" % url,
+                     (None, "sources contains an empty or null item")),
+                    ("invalid UTF-8",
+                     b"---\nsources:\n  - %s\n---\n\xff\n" % url.encode(),
+                     (None, "not readable UTF-8 text"))):
+                with self.subTest(label=label):
+                    path = self.note(label.replace(" ", "-") + ".md", body)
+                    self.assertEqual(read_note_origin_detail(path), want)
+                    self.assertEqual(read_note_origin(path), want[0])
 
         def test_unreadable_notes_establish_nothing(self):
             text = "﻿---\nsource: https://example.com/a\n---\n"

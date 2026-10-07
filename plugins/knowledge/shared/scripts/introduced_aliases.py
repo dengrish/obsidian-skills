@@ -47,8 +47,14 @@ _SYN_CUE_RE = re.compile(
     r"(?:often|commonly|usually)\s+called|"
     r"(?:many\s+)?people\s+call|some\s+call)\b|\ba\.k\.a\.?", re.IGNORECASE)
 
+# A date marker (b., c., d., fl., r.) excludes a parenthetical when it is
+# lowercase or a year or "?" follows it. A one-letter-genus abbreviation such
+# as *C. elegans* stays an alias candidate. Two or more initials before a
+# surname (C. S. Peirce) attribute a person and are excluded.
 _NON_NAME_PAREN_RE = re.compile(
-    r"^(?:b\.|c\.|d\.|fl\.|r\.|e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
+    r"^(?:(?-i:b|c|d|fl|r)\.|(?:b|c|d|fl|r)\.\s*[\d?]|"
+    r"(?-i:(?:[A-Z]\.\s*){2,}[A-Z][a-z])|"
+    r"e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
     r"annual|ongoing|born\b|died\b|founded\b|established\b|launched\b|"
     r"acquired\b|renamed\b|now\b|figure\s+[A-Za-z0-9])|\d{3,4}",
     re.IGNORECASE)
@@ -400,6 +406,41 @@ def run_self_test(verbose=False):
             ["***Escherichia coli*** (*E. coli*) is a bacterium."],
             ["Escherichia coli"]),
         [("E. coli", "opener parenthetical")])
+    add("a one-letter-genus abbreviation is retained whatever its initial",
+        [introduced_alias_candidates(
+            ["***%s*** (*%s*) is a model organism." % (title, abbr)], [title])
+         for title, abbr in (("Caenorhabditis elegans", "C. elegans"),
+                             ("Drosophila melanogaster", "D. melanogaster"),
+                             ("Bacillus subtilis", "B. subtilis"),
+                             ("Rattus norvegicus", "R. norvegicus"))],
+        [[("C. elegans", "opener parenthetical")],
+         [("D. melanogaster", "opener parenthetical")],
+         [("B. subtilis", "opener parenthetical")],
+         [("R. norvegicus", "opener parenthetical")]])
+    add("a person's initials and surname are no alias; a dotted acronym is",
+        [introduced_alias_candidates([line], [title])
+         for title, line in (
+             ("Pragmatism", "**Pragmatism** (C. S. Peirce) is a tradition."),
+             ("Operant conditioning",
+              "**Operant conditioning** (B. F. Skinner) is learning."),
+             ("Fisher's exact test",
+              "**Fisher's exact test** (R. A. Fisher) is a test."),
+             ("The Art of Computer Programming",
+              "***The Art of Computer Programming*** (D.E. Knuth) is a "
+              "book series."),
+             ("United States", "**United States** (U.S.) is a country."))],
+        [[], [], [], [], [("U.S", "opener parenthetical")]])
+    add("marker date parentheticals stay excluded",
+        [introduced_alias_candidates([line], [title])
+         for title, line in (
+             ("Turing", "**Turing** (b. 1950) worked."),
+             ("Fest", "**Fest** (c. 1200) was held."),
+             ("Scholar", "**Scholar** (c. 460 BCE – c. 370 BCE) wrote."),
+             ("Scholar", "**Scholar** (fl. 1200–1250) wrote."),
+             ("Writer", "**Writer** (c. 1600 – ?) wrote."),
+             ("Abbey", "**Abbey** (c. late 12th century) stands."),
+             ("Monk", "**Monk** (C. 1200) wrote."))],
+        [[]] * 7)
     add("case-insensitive duplicate candidates are collapsed",
         introduced_alias_candidates(
             ["**MNIST**, also called *benchmark set*, is common. It is also "

@@ -13,8 +13,10 @@ applies to every matching entry in that scope, not just named examples. A
 source the target does not cite never fills a gap only that source teaches;
 that gap waits for a wiki-build request naming it whole, as under *Deepening*
 below. Standard references read under *Conflicts* or to verify background are
-data, never cited, and are not such a source; a new source the user supplies is a new
-contribution and belongs to `wiki-build`. A retitle uses the
+data, never cited, and are not such a source; the one exception is an entry
+whose `sources:` is empty, which cites the page or document it was verified
+against under [item 4](qc-items.md#4-sources). A new source the user
+supplies is a new contribution and belongs to `wiki-build`. A retitle uses the
 [entry-retitle protocol](refactors.md#retitle-an-entry), and a consolidation,
 a passage moved to its owner, a merge or a split uses
 [source-backed refactors](refactors.md), all within the same Task 1b once
@@ -69,9 +71,9 @@ in place.
    cited sources, accurate background and the standard references *Conflicts*
    allows do not settle the correction, preserve the note and report what
    evidence is missing. Do not turn a correction into a search for new
-   sources to cite; reading standard references that are never cited is not
-   such a search. In a cleaned
-   clipping, locate passages in its captured body, not in its Summary callout
+   sources to cite, apart from item 4's citation for an empty `sources:`;
+   reading standard references that are never cited is not such a search.
+   In a cleaned clipping, locate passages in its captured body, not in its Summary callout
    or other clipping-clean annotations
    ([rule](../../wiki-build/references/source-intake.md#read-and-classify)).
 3. Plan a repair that spans entries once, across every entry that states the

@@ -22,9 +22,12 @@ That name is the interface `wiki-build` globs for (`Sources/Images/
 get no images and the unused-figure diagnostic stays quiet, because it walks
 the same pattern.
 
-pdf_stem is also why `pdf-organize` runs before this script and not after:
-renaming a source PDF later leaves every PNG filed under the old stem, on
-disk but invisible to every consumer.  See shared/CONVENTIONS.md 1a and 8.
+pdf_stem is also why `pdf-organize` runs before this script: every figure
+is keyed to the PDF's current stem. A later rename must go through
+pdf-organize, which carries the manifest-recorded figures in Sources/Images/,
+the owned note and every reference in the same run. A rename made any other
+way leaves the PNGs under the old stem, on disk but invisible to every
+consumer.  See shared/CONVENTIONS.md 1a and 8.
 
 Captions themselves are NOT included in the cropped PNGs — the bbox detector
 clips just above the caption text.
@@ -54,6 +57,12 @@ Behavior:
   - A PDF whose manifest records `_fig_ED<N>` crops, or whose `--out` holds
     an unrecorded legacy `<stem>_fig_ED<N>.png`, is always processed with
     `--ed-prefix ED`, so a default run cannot refold it into `_fig_S<N>`.
+  - In a vault, a PDF processed with `--ed-prefix ED` moves the links of a
+    `_fig_S<N>` crop that holds an Extended Data figure to `_fig_ED<N>`
+    before anything replaces that crop, as a rename does. It reuses
+    pdf-organize's reference scan and rewrite and changes only link targets.
+    A link it cannot move (an Investments/ record, a note it cannot read or
+    write) keeps the S crop unreplaced and fails the run.
   - Output is flat: the pdf_stem in each filename disambiguates across
     subfolders. When --out is a vault's canonical Sources/Images folder, every
     selected stem is checked against every PDF pathname in that vault, even for
@@ -69,7 +78,10 @@ Split books:
     the book, because the chapter stem is what everything downstream keys to
     (pdf-organize's book-splitting reference, §3 *Choose chapter names once*;
     CONVENTIONS.md 1a). Pass `--include-split-books` to extract from the book
-    as well; you then get both copies on purpose rather than by accident.
+    as well, only when the user explicitly asks for the book's duplicate
+    figures; you then get both copies on purpose rather than by accident.
+    A book named as --src whose chapters are in the vault is refused, with
+    its chapter folder named: a split book's figures are its chapters'.
 
 Usage:
     python3 batch_extract.py \\
@@ -179,6 +191,7 @@ def _require_pymupdf():
 
 from auto_fig_bbox import (
     CAPTION_IN_CROP_TAG,
+    SCANNED_PAGE_TAG,
     caption_coverage,
     configure_marker_prefix,
     configure_strip_frame,
@@ -206,9 +219,12 @@ from figure_state import (MANIFEST_FILE, MANIFEST_HEADER, REVIEW_FILE,
                           REVIEW_HEADER, write_manifest,
                           write_review, figure_identity, manifest_key,
                           check_manifest_writable, parse_reviewed, read_sidecar,
-                          read_manifest_snapshot, file_digest)  # noqa: E402
-from vault_artifacts import (inventory_pdfs, inventory_source_figures,
-                             output_vault_root, source_stem_groups,
+                          read_manifest_snapshot, file_digest,
+                          sidecar_stem_problem)  # noqa: E402
+from vault_artifacts import (UnlistedFolderError, inventory_pdfs,
+                             inventory_source_figures,
+                             on_disk_spelling, output_vault_root,
+                             source_stem_groups,
                              verify_selected_pdf)  # noqa: E402
 
 #: The review ledger (`REVIEW_FILE`) and ownership manifest (`MANIFEST_FILE`)
@@ -473,7 +489,11 @@ def mark_reviewed(path, entries, dry_run=False, allowed_stems=None):
     allowed_stems = None if allowed_stems is None else set(allowed_stems)
     recorded = _review_entries("--mark-reviewed", entries, allowed_stems)
     rows = "".join(f"{stem}\t{fig}\n" for stem, fig in recorded)
-    parse_reviewed(rows)
+    # Each mark must read back as given: a '#' stem would be a comment.
+    if parse_reviewed(rows) != set(recorded):
+        raise ValueError("the review ledger cannot store these marks as "
+                         "given: %s" % ", ".join(
+                             f"{stem}:{fig}" for stem, fig in recorded))
     previous, expected = read_sidecar(path)
     parse_reviewed(previous)
     if dry_run:
@@ -500,6 +520,13 @@ def _review_entries(flag, entries, allowed_stems):
             )
         stem = stem.strip()
         fig = fig.strip()
+        if flag == "--mark-reviewed":
+            # A bad label is this argument's error, not the ledger's. The
+            # stored label is the filename suffix (`1-2` for `1.2` or `1–2`).
+            try:
+                fig = validated_figure_suffix(fig)
+            except ValueError as exc:
+                sys.exit(f"{flag} {e!r}: {exc}; no review record was written")
         if allowed_stems is not None and stem not in allowed_stems:
             sys.exit(
                 f"{flag} {e!r}: {stem!r} is not the exact on-disk "
@@ -555,17 +582,30 @@ def load_manifest(path):
     return read_manifest_snapshot(path)
 
 
-def save_manifest(path, manifest, *, expected):
+def save_manifest(path, manifest, *, expected, kept=None):
     """Return the published snapshot, or False on a reported save failure.
 
     `expected` is the snapshot `load_manifest` returned for the records being
     extended; it is required so a concurrent update is detected, not adopted.
+    A failed save keeps its unpublished draft; the note names it, and `kept`
+    (a list), when given, receives the same location notes.
     """
     try:
         return write_manifest(path, manifest, expected=expected)
     except (OSError, ValueError) as e:
-        print(f"note: could not write {path} ({e}) — the next run cannot tell "
-              f"its own figures from another skill's", file=sys.stderr)
+        staged = getattr(e, "staging_path", None)
+        recovery = getattr(e, "recovery_path", None)
+        locations = []
+        if staged:
+            locations.append("unpublished draft kept at %s" % staged)
+        if recovery and recovery != staged:
+            locations.append("recovery state at %s" % recovery)
+        if kept is not None:
+            kept.extend(locations)
+        location_note = ("; " + "; ".join(locations)) if locations else ""
+        print(f"note: could not write {path} ({e}){location_note} — the next "
+              f"run cannot tell its own figures from another skill's",
+              file=sys.stderr)
         return False
 
 
@@ -677,10 +717,20 @@ def adopt_legacy_files(out_dir, entries, eligible_stems, manifest):
                 (entry, path))
         siblings = [candidate for candidate in Path(out_dir).iterdir()
                     if figure_identity(candidate.name) == identity]
-        if len(siblings) != 1 or siblings[0].name != filename:
+        same_entry = len(siblings) == 1 and siblings[0].name == filename
+        if len(siblings) == 1 and not same_entry:
+            # On a case- or normalization-insensitive filesystem the one
+            # stored variant spelling is this exact path, as it is for
+            # _figure_slot_conflict. Its record keeps the stored spelling.
+            try:
+                same_entry = os.path.samefile(siblings[0], path)
+            except OSError:
+                same_entry = False
+        if not same_entry:
             raise ValueError(
                 "--adopt-legacy %r is ambiguous under portable filename "
                 "identity; expected exactly %s" % (entry, path))
+        path = siblings[0]
         conflict = _figure_slot_conflict(out_dir, stem, suffix, path)
         if conflict is not None:
             raise ValueError("--adopt-legacy %r refused: %s" %
@@ -692,8 +742,8 @@ def adopt_legacy_files(out_dir, entries, eligible_stems, manifest):
                 "--adopt-legacy %r refused %s: %s" %
                 (entry, path, exc)) from exc
         planned.append((path, filename, snapshot))
-    for _path, filename, snapshot in planned:
-        manifest[filename] = snapshot[-1]
+    for path, _filename, snapshot in planned:
+        manifest[path.name] = snapshot[-1]
     return planned
 
 
@@ -760,7 +810,18 @@ def find_pdfs(src_dir):
     if src.is_file():
         if src.suffix.lower() != ".pdf":
             sys.exit(f"--src: {src} is a file but not a .pdf")
-        return [src]
+        # A case or Unicode variant opens the same file on an insensitive
+        # filesystem, but the figures take the stored spelling. A folder that
+        # cannot be listed keeps the typed name; canonical vault output still
+        # needs the vault owner's exact basename.
+        try:
+            stored = os.path.basename(on_disk_spelling(src))
+        except UnlistedFolderError as exc:
+            print(f"Note: --src: {exc}; using the typed name.")
+            stored = src.name
+        except ValueError as exc:
+            sys.exit(f"--src: {exc}")
+        return [src.with_name(stored)]
     if not src.is_dir():
         sys.exit(f"--src: {src} is not a directory or a PDF file")
     inventory = inventory_pdfs(src)
@@ -877,9 +938,20 @@ def _note_output(result, seen_hashes, out_path, fig_num, stem, manifest,
     if noted is not None:
         noted[out_path] = digest
     first = seen_hashes.setdefault(digest, out_path)
-    if os.path.basename(first) != os.path.basename(out_path):
-        same_stem = os.path.basename(first).startswith(stem + "_fig")
-        result["duplicates"].append((fig_num, first, same_stem))
+    first_name = os.path.basename(first)
+    if first_name == os.path.basename(out_path):
+        return
+    if figure_identity(first_name) == figure_identity(name):
+        # A stored case or Unicode variant of this path is the same entry on
+        # an insensitive filesystem, not a second copy.
+        try:
+            if os.path.samefile(first, out_path):
+                return
+        except OSError:
+            pass
+    same_stem = figure_identity(first_name).startswith(
+        figure_identity(stem + "_fig"))
+    result["duplicates"].append((fig_num, first, same_stem))
 
 
 def _caption_excerpt(doc, page_idx, rect, limit=40):
@@ -962,10 +1034,207 @@ def unrecorded_extended_data(out_dir, pdfs, manifest):
             if figure_identity(source.stem) in by_stem}
 
 
+def _default_s_label(label):
+    """The label a default-prefix run gives the caption labelled `label`.
+
+    `ED1` becomes `S1`, `EDA1` becomes `SA1` and `EDS1` becomes `S1`, the
+    pairs `_s_ed_twins` matches. A label outside the ED namespace is its own.
+    """
+    if not _ED_LABEL_RE.fullmatch(label.casefold()):
+        return label
+    rest = label[2:]
+    return rest if rest[:1].upper() == "S" else "S" + rest
+
+
+def _load_organize():
+    """pdf-organize's `organize` module, loaded once from this plugin.
+
+    `organize.py` sits beside this skill in the same plugin. Its reference
+    scan and rewrite are the plugin's one parser for every link form a note
+    or canvas can hold (CONVENTIONS.md §1a), so the Extended Data switch
+    repairs links with them rather than with a second copy.
+    """
+    module = sys.modules.get("_knowledge_organize")
+    if module is None:
+        import importlib.util
+        path = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.dirname(
+                os.path.realpath(__file__)))),
+            "pdf-organize", "scripts", "organize.py")
+        spec = importlib.util.spec_from_file_location(
+            "_knowledge_organize", path)
+        if spec is None or spec.loader is None:
+            raise ImportError("%s is not installed" % path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        sys.modules["_knowledge_organize"] = module
+    return module
+
+
+class _CropRelinker:
+    """Move every vault link from one crop name to another, as a rename does.
+
+    The Extended Data switch moves a figure from `_fig_S<N>` to `_fig_ED<N>`
+    and then gives the S name to the Supplementary figure. Each note or
+    canvas link to the S name is pointed at the ED name first, so no embed
+    silently starts to show a different figure. Only those link targets
+    change: a note keeps its `created:`, `updated:` and `read:`. A link that
+    cannot change (an Investments/ record, or a note that cannot be read or
+    written) blocks the move, and nothing is rewritten for that crop.
+    """
+
+    def __init__(self, vault, out_dir, dry_run=False):
+        self.vault = str(vault)
+        self.out_dir = str(out_dir)
+        self.dry_run = dry_run
+        self._cited = {}          # crop identity -> [holder paths]
+        self._failure = None      # why the vault scan could not run
+
+    def _scan(self, names):
+        """Find the holders of every name not scanned yet, in one pass."""
+        pending = sorted({name for name in names
+                          if figure_identity(name) not in self._cited})
+        if self._failure is not None or not pending:
+            return self._failure
+        try:
+            organize = _load_organize()
+            dirs = organize.keyed_dirs(self.vault, {
+                os.path.join(self.out_dir, name): name for name in pending})
+            hits = organize.references(self.vault, set(pending), dirs)
+        except (Exception, SystemExit) as exc:
+            self._failure = ("the vault's links to this PDF's _fig_S crops "
+                             "could not be scanned (%s: %s)"
+                             % (type(exc).__name__, exc))
+            return self._failure
+        for name in pending:
+            self._cited[figure_identity(name)] = []
+        for holder, found in hits.items():
+            for name in found:
+                self._cited.setdefault(figure_identity(name), []).append(holder)
+        return None
+
+    def _investments(self, holder):
+        """True for a holder under the vault's Investments/ folder."""
+        relative = os.path.relpath(holder, self.vault).split(os.sep)
+        if figure_identity(relative[0]) == "investments":
+            return True
+        try:
+            names = os.listdir(self.vault)
+        except OSError:
+            names = []
+        real = os.path.realpath(holder)
+        for name in names:
+            if figure_identity(name) == "investments":
+                root = os.path.realpath(os.path.join(self.vault, name))
+                if os.path.commonpath((real, root)) == root:
+                    return True
+        return False
+
+    def _rewrite(self, organize, holder, body, ren, dirs, path_map):
+        """`body` with its links to the old name pointed at the new one."""
+        note_dir = os.path.relpath(os.path.dirname(holder), self.vault)
+        if not holder.lower().endswith(".canvas"):
+            return organize.rewrite_text(body, ren, {}, dirs, note_dir)
+        changes = []
+        for match, value, field in organize._canvas_strings(body):
+            if field == "text":
+                changed = organize.rewrite_text(value, ren, {}, dirs, note_dir)
+            elif field:
+                changed = organize._moved_path(value, path_map)
+            else:
+                continue
+            if changed != value:
+                changes.append((match, changed))
+        return organize._splice_json_strings(body, changes) if changes else body
+
+    def move(self, old_path, new_path, candidates):
+        """Point every link to `old_path` at `new_path`.
+
+        `candidates` are all the crop names this PDF may move; the vault is
+        scanned for them once. `new_path` is None when no crop exists to
+        point at. Returns (moved, blockers): moved holds (vault-relative
+        holder, old name, new name) for each rewritten note or canvas
+        (planned only, in a dry run), and any blocker means nothing was
+        written.
+        """
+        old = os.path.basename(old_path)
+        failure = self._scan(list(candidates) + [old])
+        if failure is not None:
+            return [], [failure]
+        holders = sorted(self._cited.get(figure_identity(old), ()))
+        if not holders:
+            return [], []
+        if new_path is None:
+            return [], ["no _fig_ED crop was written for it, so the links in "
+                        "%s have nothing to point at" % ", ".join(holders)]
+        new = os.path.basename(new_path)
+        ren = {old: new}
+        try:
+            organize = _load_organize()
+            dirs = organize.keyed_dirs(self.vault, {old_path: old})
+            path_map = organize._path_map(self.vault, [(old_path, new_path)])
+        except Exception as exc:
+            return [], ["the links to %s could not be planned (%s: %s)"
+                        % (old, type(exc).__name__, exc)]
+        plans, blockers = [], []
+        for holder in holders:
+            if self._investments(holder):
+                blockers.append("%s is a protected Investments/ record, so "
+                                "its link cannot change" % holder)
+                continue
+            try:
+                body, identity = organize._read_snapshot(holder)
+                text = self._rewrite(organize, holder, body, ren, dirs,
+                                     path_map)
+            except Exception as exc:
+                blockers.append("%s could not be read for its links (%s: %s)"
+                                % (holder, type(exc).__name__, exc))
+                continue
+            if text == body:
+                blockers.append("%s cites %s in a form this run cannot "
+                                "rewrite" % (holder, old))
+            elif not (os.access(holder, os.W_OK)
+                      and os.access(os.path.dirname(holder), os.W_OK)):
+                blockers.append("%s is not writable" % holder)
+            else:
+                plans.append((holder, text, (body, identity)))
+        if blockers:
+            return [], blockers
+        moved = [(os.path.relpath(holder, self.vault), old, new)
+                 for holder, _text, _expected in plans]
+        if self.dry_run:
+            return moved, []
+        done = []
+        try:
+            for holder, text, expected in plans:
+                published = organize._write(holder, text, expected=expected)
+                done.append((holder, expected[0], published))
+        except Exception as exc:
+            preserved = [path for path in (getattr(exc, "staging_path", None),
+                                           getattr(exc, "recovery_path", None))
+                         if path]
+            unrestored = []
+            for holder, previous, published in reversed(done):
+                try:
+                    organize._write(holder, previous, expected=published)
+                except Exception as back:
+                    unrestored.append("%s (%s)" % (holder, back))
+            detail = "rewriting the links failed (%s: %s)" % (
+                type(exc).__name__, exc)
+            if preserved:
+                detail += "; preserved: " + ", ".join(preserved)
+            detail += ("; the rollback also failed, so preserve and reconcile "
+                       "these notes: " + "; ".join(unrestored)
+                       if unrestored else "; every note was restored")
+            return [], [detail]
+        self._cited[figure_identity(old)] = []
+        return moved, []
+
+
 def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 reviewed=(), seen_hashes=None, *, manifest,
                 chapter_pdfs=(), chapter_caption_cache=None,
-                manifest_commit=None, overwrite_s=False):
+                manifest_commit=None, overwrite_s=False, relinker=None):
     """Detect and extract every figure in one PDF.
 
     Args:
@@ -990,6 +1259,13 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         chapter_caption_cache: optional shared sibling-caption cache.
         overwrite_s: `--overwrite-supplementary`; `overwrite` limited to
             `_fig_S<N>` crops, so the switch to "ED" keeps other repairs.
+        relinker: a `_CropRelinker` for a PDF processed with `--ed-prefix ED`
+            into a vault's Sources/Images. A `_fig_S<N>` crop that holds the
+            Extended Data figure this run writes as `_fig_ED<N>` moves its vault
+            links to that name before anything replaces it. It holds it when
+            an Extended Data caption was the first to claim S<N> under the
+            default prefix, and either no `_fig_ED<N>` was recorded before
+            this run or the two crops have the same bytes.
 
     Returns a dict summarizing what happened — used by the caller to build
     the run-end report. Keys:
@@ -1042,6 +1318,24 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             written whose ownership record could not be
                             persisted. The image exists, but automatic
                             overwrite is unsafe until the sidecar is repaired.
+        stopped_after: str or None — the label of the crop whose ownership
+                            save failed. Detection stopped there, so later
+                            captions were not examined and no coverage
+                            (`missing`, `covered`) was computed.
+        kept:       list  — (fig_label, reason) for verified crops an
+                            `--overwrite` could not replace (degenerate or
+                            blank re-crop). The earlier PNG is unchanged.
+        relinked:   list  — (vault-relative note, old crop name, new crop name) for
+                            each note or canvas whose links moved from a
+                            `_fig_S<N>` crop to its `_fig_ED<N>` name
+                            (planned only, in a dry run).
+        relink_blocked: list — (S crop name, ED crop name, [reasons], kept)
+                            for links that could not move. `kept` is True
+                            when the S crop was therefore not replaced.
+        stale:      list  — (S crop name, ED crop name) for a `_fig_S<N>`
+                            crop that no caption claims under the ED prefix,
+                            which holds the `_fig_ED<N>` figure and which no
+                            note cites after this run.
         blank:      list  — (fig_label, page) for crops that rendered nothing
                             but white. Its own bucket because it is its own
                             failure: the bbox was plausible, the render
@@ -1094,6 +1388,11 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
         "referenced": 0,
         "failures": [],
         "ownership_failures": [],
+        "stopped_after": None,
+        "kept": [],
+        "relinked": [],
+        "relink_blocked": [],
+        "stale": [],
         "blank": [],
         "occupied": [],
         "caption_in": [],
@@ -1174,6 +1473,50 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
     dry_inventory = []
     # Zero-based pages of every written or flagged crop, for `multi_column`.
     crop_pages = set()
+    # The Extended Data switch. Under the default prefix the first caption
+    # to claim S<N> held `_fig_S<N>`: {default label: its ED label, or None
+    # for any other caption}. The labels this run's captions produce, the
+    # outputs a dry run would write, the ED crops recorded before this run,
+    # and this PDF's recorded `_fig_S<N>` crops, which are what may move.
+    default_claims = {}
+    claimed = set()
+    would_write = set()
+    recorded_before = {figure_identity(key) for key in manifest}
+    stem_prefix = figure_identity(stem + "_fig_")
+    s_crops = sorted(
+        key for key in manifest
+        if figure_identity(key).startswith(stem_prefix)
+        and figure_identity(key).endswith(".png")
+        and _S_LABEL_RE.fullmatch(
+            figure_identity(key)[len(stem_prefix):-len(".png")]))
+
+    def move_extended_data_links(s_path, s_label, digest, replacing):
+        """Move a `_fig_S<N>` crop's links to `_fig_ED<N>` if it holds that
+        figure. False when they could not move, so the crop must stay."""
+        ed_label = default_claims.get(s_label.casefold())
+        if relinker is None or not ed_label:
+            return True
+        ed_path = os.path.join(out_dir, f"{stem}_fig_{ed_label}.png")
+        ready = ed_path in noted or ed_path in would_write
+        switching = (figure_identity(os.path.basename(ed_path))
+                     not in recorded_before)
+        same_figure = ready and noted.get(ed_path) == digest
+        # A leftover with no ED crop beside it is still the figure's only
+        # copy, so its links stay.
+        if not (switching or same_figure) or not (ready or replacing):
+            return True
+        moved, blockers = relinker.move(s_path, ed_path if ready else None,
+                                        s_crops)
+        result["relinked"].extend(moved)
+        if blockers:
+            result["relink_blocked"].append((
+                os.path.basename(s_path), os.path.basename(ed_path),
+                blockers, replacing))
+            return False
+        if not replacing:
+            result["stale"].append((os.path.basename(s_path),
+                                    os.path.basename(ed_path)))
+        return True
 
     def slot_conflict_for(fig_suffix, out_path):
         if not dry_run or not os.path.lexists(out_dir):
@@ -1189,6 +1532,12 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             out_path = os.path.join(out_dir, f"{stem}_fig_{fig_suffix}.png")
             replace_digest = None
             result["figures"].append(fig_num)
+            claimed.add(fig_suffix.casefold())
+            ed_label = (fig_suffix if _EXTENDED_DATA_RE.match(raw_label or "")
+                        and _ED_LABEL_RE.fullmatch(fig_suffix.casefold())
+                        else None)
+            default_claims.setdefault(
+                _default_s_label(ed_label or fig_suffix).casefold(), ed_label)
 
             # Within-run collision: we already wrote this filename earlier in
             # the same PDF. Record the raw caption forms so the report tells
@@ -1292,9 +1641,31 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             # detection failure. Check that output first; rejecting the bbox first
             # made the documented repair remain "missing" on every later run.
             if degenerate(bbox):
+                if replace_digest is not None:
+                    # --overwrite cannot re-crop it, so the verified crop
+                    # stays. It is kept, not missing.
+                    result["kept"].append((
+                        fig_num, f"automatic re-crop failed: degenerate bbox "
+                                 f"on page {page_idx + 1}"))
+                    written_this_run[out_path] = (raw_label, page_idx + 1)
+                    _note_output(result, seen_hashes, out_path, fig_num, stem,
+                                 manifest, digest=replace_digest, noted=noted)
+                    continue
                 result["failures"].append(
                     (fig_num, f"degenerate bbox on page {page_idx + 1} — set an explicit crop")
                 )
+                continue
+
+            # Replacing a `_fig_S<N>` crop that holds an Extended Data figure
+            # would change what every embed of it shows. Its links move to
+            # `_fig_ED<N>` first; if they cannot, the S crop stays.
+            if (replace_digest is not None
+                    and _S_LABEL_RE.fullmatch(fig_suffix.casefold())
+                    and not move_extended_data_links(
+                        out_path, fig_suffix, replace_digest, True)):
+                written_this_run[out_path] = (raw_label, page_idx + 1)
+                _note_output(result, seen_hashes, out_path, fig_num, stem,
+                             manifest, digest=replace_digest, noted=noted)
                 continue
 
             written_name = os.path.basename(out_path) + (
@@ -1303,6 +1674,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 result["extracted"] += 1
                 result["written"].append(written_name)
                 written_this_run[out_path] = (raw_label, page_idx + 1)
+                would_write.add(out_path)
                 crop_pages.add(page_idx)
                 continue
 
@@ -1316,6 +1688,16 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     # Nothing was published: extract_one_figure discards a
                     # blank render instead of moving a picture of empty page
                     # into the vault, so this is not an extraction.
+                    if replace_digest is not None:
+                        # The verified crop it would have replaced stays.
+                        result["kept"].append((
+                            fig_num, f"automatic re-crop on page "
+                                     f"{page_idx + 1} was blank"))
+                        written_this_run[out_path] = (raw_label, page_idx + 1)
+                        _note_output(result, seen_hashes, out_path, fig_num,
+                                     stem, manifest, digest=replace_digest,
+                                     noted=noted)
+                        continue
                     result["blank"].append((fig_num, page_idx + 1))
                     continue
                 result["extracted"] += 1
@@ -1360,6 +1742,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             f"more crops are written.",
                             file=sys.stderr,
                         )
+                        result["stopped_after"] = fig_num
                         break
             except atomic_move.LinkUnavailable as e:
                 retained = getattr(e, "staging_path", None)
@@ -1418,6 +1801,24 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     f"(page {page_idx+1}): {e}{location_note}",
                     file=sys.stderr,
                 )
+
+        # Detection stopped at a failed ownership save, so the captions after
+        # it were never read. Coverage would call each of them missing.
+        if result["stopped_after"] is not None:
+            return result
+
+        # A `_fig_S<N>` crop no caption claims under the ED prefix is a
+        # leftover copy of an Extended Data figure. Nothing replaces it, but
+        # its links move to `_fig_ED<N>` so that no note depends on it.
+        if relinker is not None:
+            for name in s_crops:
+                label = figure_identity(name)[len(stem_prefix):-len(".png")]
+                if label in claimed or not default_claims.get(label):
+                    continue
+                s_path = os.path.join(out_dir, name)
+                why, digest = _foreign_occupant(manifest, s_path)
+                if not why:
+                    move_extended_data_links(s_path, label, digest, False)
 
         # Partial detection. Nothing else in the pipeline can see it: the summary
         # counts PDFs with ZERO captions, and downstream the figure glob and the
@@ -1535,13 +1936,15 @@ def _s_ed_twins(path, other):
 
 def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
                   dry_run=False, *, ed_prefix="S", keep_frame=False,
-                  allow_unorganized=False, dpi=250,
-                  refused=(), feed_skipped=()):
+                  include_split_books=False, allow_unorganized=False, dpi=250,
+                  refused=(), feed_skipped=(), not_processed=()):
     """Print a human-readable summary of the batch run.
 
     Sections, in order: header, counts, refused PDFs (not processed), skipped
     feed-owned PDFs, figures that failed to write, crops written whose
-    ownership record failed to persist, blank crops, caption text in crops,
+    ownership record failed to persist (with the PDFs the run then did not
+    reach), existing crops `--overwrite` kept, links the Extended Data switch
+    moved or could not move, blank crops, caption text in crops,
     occupied names, collisions (two captions in the same PDF mapping to the
     same filename), warnings (suspicious bboxes needing visual review),
     cross-chapter references, PARTIAL detection (figure numbers the text
@@ -1552,9 +1955,11 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
 
     `refused` holds (path, reason, remedy) for every PDF refused before
     processing; `feed_skipped` holds the feed-owned attachments a folder
-    sweep left alone.
+    sweep left alone; `not_processed` holds the PDFs a run stopped by an
+    ownership save failure never reached.
     """
     context = dict(ed_prefix=ed_prefix, keep_frame=keep_frame,
+                   include_split_books=include_split_books,
                    allow_unorganized=allow_unorganized,
                    review_file=review_file, dpi=dpi)
     total_extracted = sum(r["extracted"] for r in per_pdf.values())
@@ -1568,6 +1973,11 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     total_ownership_failures = sum(
         len(r.get("ownership_failures", ())) for r in per_pdf.values())
     total_dupes = sum(len(r["duplicates"]) for r in per_pdf.values())
+    total_kept = sum(len(r.get("kept", ())) for r in per_pdf.values())
+    total_relinked = sum(len(r.get("relinked", ())) for r in per_pdf.values())
+    total_relink_blocked = sum(
+        len(r.get("relink_blocked", ())) for r in per_pdf.values())
+    total_stale = sum(len(r.get("stale", ())) for r in per_pdf.values())
     total_blank = sum(len(r.get("blank", ())) for r in per_pdf.values())
     total_occupied = sum(len(r.get("occupied", ())) for r in per_pdf.values())
     total_caption_in = sum(len(r.get("caption_in", ())) for r in per_pdf.values())
@@ -1578,6 +1988,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     skipped_books = skipped_books or {}
     refused = list(refused)
     feed_skipped = list(feed_skipped)
+    not_processed = list(not_processed)
     n_pdfs = len(per_pdf)
     n_zero = sum(
         1 for r in per_pdf.values()
@@ -1596,8 +2007,13 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     print()
     print("=" * 72)
     destination = "preview for" if dry_run else "wrote to"
-    print(f"Summary: {n_pdfs} PDF(s) scanned, {destination} {out_dir}")
+    scanned = (f"{n_pdfs} of {n_pdfs + len(not_processed)}" if not_processed
+               else f"{n_pdfs}")
+    print(f"Summary: {scanned} PDF(s) scanned, {destination} {out_dir}")
     print("=" * 72)
+    if not_processed:
+        print(f"  PDFs not processed:   {len(not_processed)} (the run stopped "
+              "at an ownership save failure)")
     if refused:
         reasons = defaultdict(int)
         for _path, reason, _remedy in refused:
@@ -1631,6 +2047,13 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         print(f"  Duplicate figures:    {total_dupes} (byte-identical to a figure already written)")
     print(f"  Failed to write:      {total_failures} (detected but not extracted)")
     print(f"  Ownership save failed: {total_ownership_failures} (crop written; automatic overwrite unsafe)")
+    if total_kept:
+        print(f"  Existing crops kept:  {total_kept} (--overwrite could not "
+              "re-crop them; the earlier PNG is unchanged)")
+    if total_relinked or total_relink_blocked:
+        print(f"  Notes relinked:       {total_relinked} (links moved from "
+              f"_fig_S<N> to _fig_ED<N>; {total_relink_blocked} crop(s) "
+              "could not move)")
     print(f"  Blank crops:          {total_blank} (rendered nothing but white — not written)")
     print(f"  Caption text in crop: {total_caption_in} (the crop overlaps a caption)")
     print(f"  Occupied filenames:   {total_occupied} (a file with no matching ownership record is in the way)")
@@ -1651,7 +2074,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
     print()
 
     if refused:
-        print("PDFs refused before processing (nothing written or adopted for them):")
+        print("PDFs refused before processing (no figure extracted for them):")
         for path, reason, remedy in sorted(refused, key=lambda item: str(item[0])):
             print(f"  {path}  ({reason}) — {remedy}")
         print()
@@ -1678,6 +2101,62 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
                 print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
         print("  Preserve these crops and repair the ownership sidecar before any")
         print("  automatic overwrite. Do not re-extract them as if the PNGs were missing.")
+        print("  Preserve every draft or recovery path named above.")
+        for pdf_path, r in per_pdf.items():
+            if r.get("stopped_after") is not None:
+                print(f"  {pdf_path.name}: the run stopped after Fig "
+                      f"{r['stopped_after']}; its later figures were not examined.")
+        if not_processed:
+            print("  The run stopped there. PDFs NOT processed (once the sidecar is "
+                  "repaired, rerun them and the stopped PDF):")
+            for path in not_processed:
+                print(f"    {path}")
+        print()
+
+    if total_kept:
+        print("Existing crops kept — --overwrite could not re-crop them, so the "
+              "earlier PNG is unchanged:")
+        for pdf_path, r in per_pdf.items():
+            for fig_num, reason in r.get("kept", ()):
+                print(f"  {pdf_path.name}  Fig {fig_num}  ({reason})")
+        print("  Each is still in the output folder and may predate a revised PDF.")
+        print("  Compare it with its page. If it is right, --mark-reviewed that label;")
+        print("  if it is wrong, set an explicit crop with --overwrite (review-and-repair.md,")
+        print("  'Set and verify an explicit crop'), view it, then --mark-reviewed that label.")
+        print()
+
+    if total_relinked:
+        print("Extended Data switch — vault links moved from _fig_S<N> to _fig_ED<N>"
+              + (" (preview; nothing was rewritten):" if dry_run else ":"))
+        for pdf_path, r in per_pdf.items():
+            for holder, old, new in r.get("relinked", ()):
+                print(f"  {holder}  {old} → {new}")
+        print("  Only those link targets change; each note keeps its dates and read:.")
+        print("  View each relinked embed against its page.")
+        print()
+
+    if total_stale:
+        print("Leftover _fig_S<N> crops — copies of an Extended Data figure that no caption")
+        print("claims under --ed-prefix ED:")
+        for pdf_path, r in per_pdf.items():
+            for old, new in r.get("stale", ()):
+                print(f"  {old} (a copy of {new}); no note "
+                      + ("would link to it." if dry_run else "links to it now."))
+        print("  Report each as stale, and delete it only with the user's authorization.")
+        print()
+
+    if total_relink_blocked:
+        print("Links the Extended Data switch could not move (nothing was rewritten for them):")
+        for pdf_path, r in per_pdf.items():
+            for old, new, reasons, kept in r.get("relink_blocked", ()):
+                print(f"  {pdf_path.name}  {old} → {new}"
+                      + ("  (S crop kept, not replaced)" if kept else ""))
+                for reason in reasons:
+                    print(f"    {reason}")
+        print("  A kept S crop still shows the Extended Data figure, so its Supplementary")
+        print("  figure was not extracted. Resolve each blocker you can, then rerun the")
+        print("  same command. An Investments/ record keeps its link: report that S crop")
+        print("  as kept.")
         print()
 
     if total_blank:
@@ -1908,8 +2387,8 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
             if stale:
                 print(f"    NOTE: {len(stale)} figure(s) under the BOOK's stem are in "
                       f"{out_dir}")
-                print(f"    from a whole-book run (the book named directly, or "
-                      f"--include-split-books).")
+                print(f"    from a whole-book run (--include-split-books, or a "
+                      f"run before the split).")
                 print(f"    Remove exactly {book.stem}_fig* only when that cleanup is "
                       f"authorized and no note embeds them.")
         print()
@@ -1923,7 +2402,8 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
 
     if n_no_text:
         print("PDFs with no extractable text (scanned — OCR a same-basename scratch copy "
-              "outside the vault first):")
+              "outside the vault first; OCR makes the captions readable, but every "
+              "crop on a scanned page is flagged and needs an explicit crop):")
         for pdf_path, r in per_pdf.items():
             if not r["had_text"] and not r["open_error"] and not r["no_pages"]:
                 print(f"  {pdf_path.name}")
@@ -1992,6 +2472,27 @@ def _st_scan_pdf(path):
     doc = fitz.open()
     page = doc.new_page(width=612, height=792)
     page.draw_rect(fitz.Rect(50, 50, 500, 700), fill=(0.55, 0.55, 0.55))
+    doc.save(str(path))
+    doc.close()
+    return Path(path)
+
+
+def _st_ocr_scan_pdf(path):
+    """An OCR'd scan: one page image under an invisible text layer."""
+    src = fitz.open()
+    page = src.new_page(width=612, height=792)
+    page.draw_rect(fitz.Rect(100, 200, 500, 400), fill=(0.2, 0.3, 0.7))
+    lines = ((72, 90, 10, "A short prose line sits above the figure."),
+             (100, 430, 9, "Figure 1. A scanned figure."))
+    for x, y, size, text in lines:
+        page.insert_text((x, y), text, fontsize=size)
+    pix = page.get_pixmap(dpi=72)
+    src.close()
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    page.insert_image(page.rect, pixmap=pix)
+    for x, y, size, text in lines:
+        page.insert_text((x, y), text, fontsize=size, render_mode=3)
     doc.save(str(path))
     doc.close()
     return Path(path)
@@ -2221,7 +2722,8 @@ def run_self_test():
         check("appending after an unterminated last line preserves both marks",
               load_reviewed(hand), {("Doe_Figs_2025", "1"), ("Doe_Figs_2025", "2")})
 
-        for bad_entry in ("no-colon-at-all", ":1", "stem:", "  :  "):
+        for bad_entry in ("no-colon-at-all", ":1", "stem:", "  :  ",
+                          "Doe_Figs_2025:Figure 1-2", "Doe_Figs_2025:1 2"):
             state["n"] += 1
             try:
                 mark_reviewed(os.path.join(tmp, "unused.txt"), [bad_entry])
@@ -2231,6 +2733,22 @@ def run_self_test():
                 pass
         ok("a refused entry wrote no ledger",
            not os.path.exists(os.path.join(tmp, "unused.txt")))
+        # A '#' stem would be stored as a comment, so its mark is refused.
+        comment_ledger = os.path.join(tmp, "comment-stem", REVIEW_FILE)
+        comment_refused = False
+        try:
+            mark_reviewed(comment_ledger, ["#1 Notes:1"])
+        except ValueError:
+            comment_refused = True
+        check("mark_reviewed refuses a stem the ledger reads as a comment",
+              (comment_refused, os.path.lexists(comment_ledger)), (True, False))
+        # A printed en-dash label is stored as its filename suffix.
+        dash_ledger = os.path.join(tmp, "dash", REVIEW_FILE)
+        check("mark_reviewed stores an en-dash label as its suffix",
+              mark_reviewed(dash_ledger, ["Doe_Figs_2025:1–2"]),
+              [("Doe_Figs_2025", "1-2")])
+        check("...which load_reviewed reads back",
+              load_reviewed(dash_ledger), {("Doe_Figs_2025", "1-2")})
 
         # `--dry-run` validates and writes nothing -- not the ledger, and not
         # the `--out` directory `os.makedirs` would otherwise create.
@@ -2361,6 +2879,37 @@ def run_self_test():
               found, sorted([a, b, c, upper_ext]))
         ok("find_pdfs matches a .PDF extension too", upper_ext in found)
         check("find_pdfs on a single PDF", find_pdfs(str(a)), [a])
+        # A typed case variant opens the same file on an insensitive
+        # filesystem; the figures must take the stored spelling.
+        typed_variant = Path(src) / "doe_figs_2025.pdf"
+        if os.path.lexists(typed_variant):
+            check("find_pdfs on a typed case variant returns the stored name",
+                  find_pdfs(str(typed_variant)), [a])
+        else:
+            ok("case-variant find_pdfs regression skipped on this filesystem",
+               True)
+        # A folder that cannot be listed keeps the typed name with a note;
+        # two stored names for it still refuse.
+        unlisted_out = io.StringIO()
+        with mock.patch.object(os, "listdir",
+                               side_effect=PermissionError("injected")), \
+                contextlib.redirect_stdout(unlisted_out):
+            unlisted_found = find_pdfs(str(a))
+        check("find_pdfs keeps the typed name when its folder cannot be listed",
+              (unlisted_found, "using the typed name" in unlisted_out.getvalue()),
+              ([a], True))
+        typed_twice = Path(src) / "doe_figs_2025.PDF"
+        with mock.patch.object(os, "listdir", return_value=[
+                    "Doe_Figs_2025.pdf", "DOE_FIGS_2025.pdf"]), \
+                mock.patch.object(os.path, "samefile", return_value=True), \
+                mock.patch.object(Path, "is_file", return_value=True):
+            try:
+                find_pdfs(str(typed_twice))
+                two_names_refused = False
+            except SystemExit:
+                two_names_refused = True
+        ok("find_pdfs refuses a typed name two stored names match",
+           two_names_refused)
         linked_source = Path(tmp) / "linked-source"
         linked_source.mkdir()
         linked_pdf = _st_fig_pdf(linked_source / "Doe_Linked_2025.pdf")
@@ -2525,6 +3074,15 @@ def run_self_test():
         check("a scan has no text", scan["had_text"], False)
         check("a scan is not an open error", scan["open_error"], "")
         check("a scan has no zero-page flag", scan["no_pages"], False)
+        # After OCR the captions are readable, but the page is still one
+        # image: the crop is written and flagged for an explicit crop.
+        ocr = process_pdf(
+            _st_ocr_scan_pdf(os.path.join(tmp, "Doe_Ocr_2025.pdf")), out,
+            dpi=72, manifest=geometry_manifests[os.fspath(out)])
+        check("an OCR'd scan writes its crop", ocr["extracted"], 1)
+        ok("...and flags it as a scanned page (%r)" % (ocr["warnings"],),
+           [w[0] for w in ocr["warnings"]] == ["1"]
+           and ocr["warnings"][0][1].startswith(SCANNED_PAGE_TAG))
 
         html = process_pdf(_st_html_pdf(os.path.join(tmp, "Doe_Html_2025.pdf")),
                            out, dpi=72, manifest=geometry_manifests[os.fspath(out)])
@@ -2580,6 +3138,17 @@ def run_self_test():
                                    out, dpi=72, manifest=repaired_manifest)
         check("a manual repair of degenerate detection is an existing crop",
               (repaired_top["skipped"], repaired_top["failures"]), (1, []))
+        # --overwrite cannot re-crop that degenerate detection, so the
+        # verified repair is kept and reported as kept, not missing.
+        repaired_bytes = open(repaired_path, "rb").read()
+        kept_top = process_pdf(Path(os.path.join(tmp, "Doe_Top_2025.pdf")),
+                               out, dpi=72, overwrite=True,
+                               manifest=dict(repaired_manifest))
+        check("--overwrite keeps a repair its degenerate detection cannot "
+              "replace", (kept_top["failures"], [k[0] for k in kept_top["kept"]],
+                          kept_top["extracted"]), ([], ["3"], 0))
+        check("...and its bytes are unchanged",
+              open(repaired_path, "rb").read(), repaired_bytes)
 
         # A caption at the foot of a page whose figure is overleaf: the crop
         # is over empty page and renders pure white. It used to be written and
@@ -2598,6 +3167,21 @@ def run_self_test():
               (nxt["failures"], nxt["warnings"]), ([], []))
         ok("...and no white PNG reached the output folder",
            not os.path.exists(os.path.join(out, "Doe_Next_2025_fig_4.png")))
+        # An explicit repair of that figure survives a blank --overwrite
+        # re-crop, and is reported as kept, not as a blank crop.
+        next_repair = os.path.join(out, "Doe_Next_2025_fig_4.png")
+        shutil.copyfile(os.path.join(out, "Doe_Figs_2025_fig_1.png"), next_repair)
+        next_bytes = open(next_repair, "rb").read()
+        kept_next = process_pdf(
+            Path(os.path.join(tmp, "Doe_Next_2025.pdf")), out, dpi=72,
+            overwrite=True,
+            manifest={os.path.basename(next_repair): _sha256(next_repair)})
+        check("--overwrite keeps a repair whose re-crop is blank",
+              (kept_next["blank"], [k[0] for k in kept_next["kept"]],
+               kept_next["extracted"]), ([], ["4"], 0))
+        check("...and its bytes are unchanged",
+              open(next_repair, "rb").read(), next_bytes)
+        os.remove(next_repair)
 
         # Two side-by-side figures whose captions are a few points apart in
         # height: the left crop reaches over the right caption. The batch path
@@ -3130,15 +3714,43 @@ def run_self_test():
         aliases_one_entry = os.path.lexists(unicode_nfc)
         unicode_again = process_pdf(
             unicode_own_pdf, unicode_own_dir, dpi=72,
+            seen_hashes=seed_output_index(unicode_own_dir),
             manifest=unicode_own_manifest)
         if aliases_one_entry:
             check("an NFD directory spelling of our NFC PNG is the same output",
                   (unicode_first["extracted"], unicode_again["skipped"],
                    unicode_again["occupied"]), (1, 1, []))
+            check("...and not its own cross-stem duplicate",
+                  unicode_again["duplicates"], [])
         else:
             check("a distinct NFD PNG remains a portable-slot collision",
                   (unicode_again["skipped"], len(unicode_again["occupied"])),
                   (0, 1))
+        # The same holds for a recorded lowercase spelling of the crop.
+        case_own_dir = Path(tmp) / "CaseOwned"
+        case_own_dir.mkdir()
+        case_own_pdf = _st_fig_pdf(Path(tmp) / "Doe_CaseOwn_2025.pdf")
+        case_own_manifest = {}
+        process_pdf(case_own_pdf, case_own_dir, dpi=72,
+                    manifest=case_own_manifest)
+        case_exact = case_own_dir / "Doe_CaseOwn_2025_fig_1.png"
+        case_lower = case_own_dir / "doe_caseown_2025_fig_1.png"
+        case_bytes = case_exact.read_bytes()
+        case_exact.unlink()
+        case_lower.write_bytes(case_bytes)
+        case_own_manifest = {
+            case_lower.name: hashlib.sha256(case_bytes).hexdigest()}
+        if os.path.lexists(case_exact):
+            case_again = process_pdf(
+                case_own_pdf, case_own_dir, dpi=72,
+                seen_hashes=seed_output_index(case_own_dir),
+                manifest=case_own_manifest)
+            check("a recorded lowercase spelling is skipped, not a duplicate",
+                  (case_again["skipped"], case_again["occupied"],
+                   case_again["duplicates"]), (1, [], []))
+        else:
+            ok("case-alias duplicate regression skipped on this filesystem",
+               True)
 
         # Publication happens after the per-figure ownership check and render.
         # Exercise a new name and an approved overwrite being taken during
@@ -3564,6 +4176,9 @@ def run_self_test():
 
         ok("the summary counts the figures extracted",
            "Figures extracted:    2" in summary({a: r}))
+        ok("the no-text heading says an OCR'd copy's crops are flagged",
+           "every crop on a scanned page is flagged" in summary(
+               {Path(os.path.join(tmp, "Doe_Scan_2025.pdf")): scan}))
         text = summary({a: r, tiny_pdf: tiny, Path(partial_pdf): part,
                         Path(junk): bad_open})
         ok("the summary names the flagged bbox", "Doe_Tiny_2025.pdf" in text)
@@ -3601,6 +4216,16 @@ def run_self_test():
               "one detection failure for the whole PDF"
               in summary({Path(os.path.join(tmp, "Doe_Next_2025.pdf")): mixed}),
               False)
+        text = summary({Path(os.path.join(tmp, "Doe_Top_2025.pdf")): kept_top,
+                        Path(os.path.join(tmp, "Doe_Next_2025.pdf")): kept_next})
+        ok("crops --overwrite kept are neither missing nor an empty PDF",
+           "missing from Sources/Images/" not in text
+           and "produced no images at all" not in text)
+        ok("...and have their own count and section",
+           "Existing crops kept:  2" in text
+           and "Doe_Top_2025.pdf  Fig 3  (automatic re-crop failed" in text
+           and "Doe_Next_2025.pdf  Fig 4  (automatic re-crop on page 1 was "
+               "blank)" in text)
         text = summary({Path(os.path.join(tmp, "Doe_TwoCol_2025.pdf")): twocol})
         ok("the summary counts caption text inside a crop",
            "Caption text in crop: 1" in text)
@@ -3771,6 +4396,33 @@ def run_self_test():
             check("refused ambiguous adoption preserves files and prior ownership",
                   {path.name: path.read_bytes() for path in ambiguous_out.iterdir()}, before)
 
+        # On a case-insensitive filesystem a lone `.PNG` spelling is the exact
+        # PNG path: adoption records the stored spelling and a rerun skips it.
+        variant_out = Path(tmp) / "legacy-variant-spelling"
+        variant_out.mkdir()
+        variant_png = variant_out / "Doe_Legacy_2025_fig_1.PNG"
+        Image.new("RGB", (30, 20), (40, 90, 150)).save(variant_png, format="PNG")
+        variant_bytes = variant_png.read_bytes()
+        code, so, se = run([
+            "--src", str(legacy_pdf), "--out", str(variant_out),
+            "--dpi", "72", "--adopt-legacy", "Doe_Legacy_2025:1"])
+        if os.path.lexists(variant_out / "Doe_Legacy_2025_fig_1.png"):
+            check("a lone variant spelling of the exact PNG is adopted as stored",
+                  (code, variant_png.read_bytes(),
+                   load_manifest(variant_out / MANIFEST_FILE)[0]),
+                  (0, variant_bytes,
+                   {variant_png.name: _sha256(variant_png)}))
+            code, so, se = run(["--src", str(legacy_pdf), "--out",
+                                str(variant_out), "--dpi", "72"])
+            ok("an adopted variant spelling is skipped, not occupied or a duplicate",
+               code == 0 and "1 skipped (already exist)" in so
+               and "occupied by an unrecorded" not in so
+               and re.search(r"Duplicate figures:\s+0\b", so) is not None)
+        else:
+            check("a distinct variant spelling is refused and left unclaimed",
+                  (code, (variant_out / MANIFEST_FILE).exists(),
+                   variant_png.read_bytes()), (1, False, variant_bytes))
+
         late_out = Path(tmp) / "legacy-late-slot-conflict"
         late_out.mkdir()
         Image.new("RGB", (30, 20), (40, 90, 150)).save(
@@ -3846,6 +4498,75 @@ def run_self_test():
                             "--include-split-books"])
         ok("--include-split-books extracts the book too",
            os.path.exists(os.path.join(run_out, "Prince_UDL_2026_fig_1.png")))
+        # A request naming a split book uses its chapter PDFs: the named
+        # book is refused before any write, with its chapter folder named.
+        split_vault = Path(tmp) / "named-split-book"
+        split_pdfs = split_vault / "Sources" / "PDFs"
+        (split_pdfs / "Doe_Book_2025").mkdir(parents=True)
+        named_book = _st_fig_pdf(split_pdfs / "Doe_Book_2025.pdf")
+        _st_fig_pdf(split_pdfs / "Doe_Book_2025" / "Doe_Book_2025_01_Intro.pdf")
+        split_images = split_vault / "Sources" / "Images"
+        code, so, se = run(["--src", str(named_book), "--out",
+                            str(split_images), "--dpi", "72"])
+        ok("a named split book is refused for its chapter folder",
+           code == 1 and "is a split book" in se
+           and repr(str(split_pdfs / "Doe_Book_2025")) in se
+           and not split_images.exists())
+        ok("...and never offers a whole-book run",
+           "--include-split-books" not in se)
+        # A run that only adopts a split book's legacy crop records it and
+        # extracts nothing, so pdf-organize can then rename the book.
+        adopt_vault = Path(tmp) / "adopt-split-book"
+        adopt_pdfs = adopt_vault / "Sources" / "PDFs"
+        (adopt_pdfs / "Doe_Book_2025").mkdir(parents=True)
+        adopt_book = _st_fig_pdf(adopt_pdfs / "Doe_Book_2025.pdf")
+        _st_fig_pdf(adopt_pdfs / "Doe_Book_2025" / "Doe_Book_2025_01_Intro.pdf")
+        adopt_images = adopt_vault / "Sources" / "Images"
+        adopt_images.mkdir(parents=True)
+        Image.new("RGB", (30, 20), (40, 90, 150)).save(
+            adopt_images / "Doe_Book_2025_fig_1.png", format="PNG")
+        code, so, se = run(["--src", str(adopt_book), "--out",
+                            str(adopt_images), "--dpi", "72",
+                            "--adopt-legacy", "Doe_Book_2025:1",
+                            "--mark-reviewed", "Doe_Book_2025:1"])
+        ok("a named split book with a review mark is still refused",
+           code == 1 and "is a split book" in se
+           and not (adopt_images / MANIFEST_FILE).exists())
+        code, so, se = run(["--src", str(adopt_book), "--out",
+                            str(adopt_images), "--dpi", "72",
+                            "--adopt-legacy", "Doe_Book_2025:1"])
+        check("a named split book's legacy crop is adopted without extraction",
+              (code, "Adoption recorded; nothing was extracted." in so,
+               "is a split book; this run only adopts" in so,
+               sorted(load_manifest(adopt_images / MANIFEST_FILE)[0]),
+               sorted(p.name for p in adopt_images.glob("*.png"))),
+              (0, True, True, ["Doe_Book_2025_fig_1.png"],
+               ["Doe_Book_2025_fig_1.png"]))
+        Image.new("RGB", (30, 20), (90, 40, 150)).save(
+            adopt_images / "Doe_Book_2025_fig_2.png", format="PNG")
+        code, so, se = run(["--src", str(adopt_pdfs), "--out",
+                            str(adopt_images), "--dpi", "72", "--dry-run",
+                            "--adopt-legacy", "Doe_Book_2025:2"])
+        ok("a folder sweep adopts a split book's legacy crop and skips the book",
+           code == 0 and "Would record 1 explicitly selected" in so
+           and "Skipping Doe_Book_2025.pdf" in so
+           and "Doe_Book_2025_fig_1.png" not in so.split("would write:")[-1])
+        # A whole-book run on purpose prints a review command that keeps
+        # --include-split-books, or the printed command is refused.
+        _st_tiny_fig_pdf(named_book)
+        code, so, se = run(["--src", str(named_book), "--out",
+                            str(split_images), "--dpi", "72",
+                            "--include-split-books"])
+        commands = [shlex.split(line.strip()) for line in so.splitlines()
+                    if "--mark-reviewed" in line
+                    and line.strip().startswith(shlex.quote(sys.executable))]
+        ok("a whole-book run's review command keeps --include-split-books",
+           len(commands) == 1 and "--include-split-books" in commands[0])
+        if commands:
+            code, so, se = run(commands[0][2:])
+            check("...and records the mark when run",
+                  (code, ("Doe_Book_2025", "1") in load_reviewed(
+                      str(split_images / REVIEW_FILE))), (0, True))
 
         # A caption collision drops a detected figure from the requested
         # output set. The summary has always named it, but returning success
@@ -3879,6 +4600,8 @@ def run_self_test():
         ok("an unorganized PDF is refused", "REFUSED" in so)
         check("a run that refused everything exits non-zero", code, 1)
         ok("...and says nothing is left", "Nothing left to process." in so)
+        ok("...and that pdf-organize's later rename carries the figures",
+           "which carries the recorded figures" in so and "orphan" not in so)
         code, so, se = run(["--src", unorg, "--out", run_out, "--dpi", "72",
                             "--allow-unorganized"])
         check("--allow-unorganized runs it", code, 0)
@@ -3897,6 +4620,99 @@ def run_self_test():
         ok("...and its summary re-lists the refused PDF",
            "PDFs refused (not processed): 1 (1 name not organized)"
            in summary_text and "download (5).pdf" in summary_text)
+
+        # The figure sidecars key every record by the stem. A stem they cannot
+        # store ('#' reads as a comment; a leading space or a backslash is
+        # invalid) is refused before anything is written, even with
+        # --allow-unorganized, and the other PDFs still run.
+        sidecar_src = Path(tmp) / "sidecar-stems"
+        sidecar_src.mkdir()
+        for name in ("#1 Notes.pdf", " leading.pdf", "a\\b.pdf",
+                     "Doe_Sidecar_2025.pdf"):
+            _st_fig_pdf(sidecar_src / name)
+        sidecar_out = Path(tmp) / "sidecar-stems-out"
+        code, so, se = run(["--src", str(sidecar_src), "--out",
+                            str(sidecar_out), "--dpi", "72",
+                            "--allow-unorganized"])
+        check("a sweep refuses stems the figure sidecars cannot store",
+              (code, sorted(p.name for p in sidecar_out.glob("*.png")),
+               sorted(load_manifest(sidecar_out / MANIFEST_FILE)[0])),
+              (1, ["Doe_Sidecar_2025_fig_1.png"],
+               ["Doe_Sidecar_2025_fig_1.png"]))
+        ok("...naming the reason, not a damaged PDF",
+           "3 stem the sidecars cannot store" in so
+           and "read as a comment" in so
+           and "PDF analysis failed" not in so + se)
+        code, so, se = run(["--src", str(sidecar_src / "#1 Notes.pdf"),
+                            "--out", str(sidecar_out), "--dpi", "72",
+                            "--allow-unorganized",
+                            "--mark-reviewed", "#1 Notes:1"])
+        check("...and a review mark for that stem writes no ledger",
+              (code != 0, (sidecar_out / REVIEW_FILE).exists()), (True, False))
+
+        # Adoption extracts nothing, so it runs for a PDF whose name
+        # pdf-organize has not produced: that rename carries only recorded
+        # crops. Extraction of the PDF itself stays refused.
+        adopt_src = Path(tmp) / "unorganized-adoption"
+        adopt_src.mkdir()
+        smith_pdf = _st_fig_pdf(adopt_src / "Smith2020.pdf",
+                                captions=("Figure 1. One.", "Figure 2. Two."))
+        adopt_out = Path(tmp) / "unorganized-adoption-out"
+        adopt_out.mkdir()
+        smith_png = adopt_out / "Smith2020_fig_1.png"
+        Image.new("RGB", (30, 20), (40, 90, 150)).save(smith_png, format="PNG")
+        code, so, se = run(["--src", str(smith_pdf), "--out", str(adopt_out),
+                            "--dpi", "72"])
+        check("a plain run on an unorganized PDF is still refused",
+              (code, (adopt_out / MANIFEST_FILE).exists()), (1, False))
+        code, so, se = run(["--src", str(smith_pdf), "--out", str(adopt_out),
+                            "--dpi", "72", "--dry-run",
+                            "--adopt-legacy", "Smith2020:1"])
+        check("a dry-run adoption on an unorganized PDF saves nothing",
+              (code, (adopt_out / MANIFEST_FILE).exists(),
+               "adoption previewed" in so), (0, False, True))
+        code, so, se = run(["--src", str(smith_pdf), "--out", str(adopt_out),
+                            "--dpi", "72", "--adopt-legacy", "Smith2020:1"])
+        check("adopting an unorganized PDF's legacy crop needs no "
+              "--allow-unorganized and extracts nothing",
+              (code, load_manifest(adopt_out / MANIFEST_FILE)[0],
+               sorted(p.name for p in adopt_out.glob("*.png"))),
+              (0, {smith_png.name: _sha256(smith_png)},
+               ["Smith2020_fig_1.png"]))
+        ok("...and says so and names pdf-organize as the next step",
+           "Adoption recorded; nothing was extracted." in so
+           and "Run pdf-organize next" in so and "REFUSED" not in so)
+        # A sweep that also extracts an organized PDF succeeds, and its
+        # summary still lists the adopted PDF as not organized.
+        adopt_mixed = Path(tmp) / "unorganized-adoption-mixed"
+        adopt_mixed.mkdir()
+        _st_fig_pdf(adopt_mixed / "Doe_Adopted_2025.pdf")
+        _st_fig_pdf(adopt_mixed / "Smith2021.pdf")
+        adopt_mixed_out = Path(tmp) / "unorganized-adoption-mixed-out"
+        adopt_mixed_out.mkdir()
+        Image.new("RGB", (30, 20), (40, 90, 150)).save(
+            adopt_mixed_out / "Smith2021_fig_1.png", format="PNG")
+        code, so, se = run(["--src", str(adopt_mixed), "--out",
+                            str(adopt_mixed_out), "--dpi", "72",
+                            "--adopt-legacy", "Smith2021:1"])
+        check("a sweep that adopts an unorganized PDF's crop and extracts "
+              "the rest exits 0",
+              (code, sorted(load_manifest(adopt_mixed_out / MANIFEST_FILE)[0]),
+               "1 name not organized" in so),
+              (0, ["Doe_Adopted_2025_fig_1.png", "Smith2021_fig_1.png"], True))
+        # A stem two selected PDFs share still refuses adoption.
+        for sub in ("A", "B"):
+            (adopt_src / sub).mkdir()
+            _st_fig_pdf(adopt_src / sub / "Smith2022.pdf")
+        Image.new("RGB", (30, 20), (40, 90, 150)).save(
+            adopt_out / "Smith2022_fig_1.png", format="PNG")
+        before_manifest = (adopt_out / MANIFEST_FILE).read_bytes()
+        code, so, se = run(["--src", str(adopt_src), "--out", str(adopt_out),
+                            "--dpi", "72", "--adopt-legacy", "Smith2022:1"])
+        check("a colliding unorganized stem still refuses adoption",
+              (code, "uniquely identified" in se,
+               (adopt_out / MANIFEST_FILE).read_bytes()),
+              (1, True, before_manifest))
 
         # Feed-owned attachments (naming.py feed) are the collector's. A
         # folder sweep skips them without failing or routing them to
@@ -3921,6 +4737,11 @@ def run_self_test():
                             "--dpi", "72"])
         check("a named feed attachment still needs the explicit exception",
               code, 1)
+        ok("...and its refusal names that exception, never a pdf-organize "
+           "rename",
+           "--allow-unorganized" in so and "collector-owned" in so
+           and "Run pdf-organize" not in so
+           and "expected to change" not in so)
         code, so, se = run(["--src", str(rss_pdf), "--out", str(feed_out),
                             "--dpi", "72", "--allow-unorganized"])
         check("--allow-unorganized extracts a named feed attachment", code, 0)
@@ -4127,6 +4948,101 @@ def run_self_test():
                "Using --ed-prefix ED for 1 PDF(s)" in so), (0, True, True))
         configure_marker_prefix("Extended Data", "S")
 
+        # In a vault, the switch moves the links of an S crop that holds an
+        # Extended Data figure to its _fig_ED<N> name before anything
+        # replaces it, as a rename does, and leaves each note's dates and
+        # read: alone. A dry run writes nothing; an Investments/ record that
+        # cites the crop keeps it unreplaced; a leftover S crop's links move
+        # too; and a later refresh leaves links to the Supplementary crop.
+        rl_vault = Path(tmp) / "ed-relink-vault"
+        rl_pdfs = rl_vault / "Sources" / "PDFs"
+        rl_pdfs.mkdir(parents=True)
+        (rl_vault / "Articles").mkdir()
+        rl_images = rl_vault / "Sources" / "Images"
+        rl_pdf = rl_pdfs / "Doe_Relink_2025.pdf"
+        rdoc = fitz.open()
+        for cap, fill in (("Figure 1. Main.", (0.5, 0.5, 0)),
+                          ("Extended Data Figure 1. First.", (1, 0, 0)),
+                          ("Extended Data Figure 2. Second.", (0, 0.6, 0)),
+                          ("Supplementary Figure 1. Third.", (0, 0, 1))):
+            rpage = rdoc.new_page(width=612, height=792)
+            rpage.draw_rect(fitz.Rect(100, 200, 500, 400), fill=fill)
+            rpage.insert_text((100, 430), cap, fontsize=9)
+        rdoc.save(str(rl_pdf))
+        rdoc.close()
+        code, so, se = run(["--src", str(rl_pdf), "--out", str(rl_images),
+                            "--dpi", "72"])
+        rl_hints = [line.strip() for line in so.splitlines()
+                    if line.strip().startswith(shlex.quote(sys.executable) + " ")
+                    and "--ed-prefix ED" in line]
+        rl_s1 = rl_images / "Doe_Relink_2025_fig_S1.png"
+        rl_ed1 = rl_images / "Doe_Relink_2025_fig_ED1.png"
+        rl_s1_before = rl_s1.read_bytes() if rl_s1.exists() else b""
+        rl_note = rl_vault / "Articles" / "Doe_Relink_2025.md"
+        rl_body = ("---\ncreated: 2025-01-02\nupdated: 2025-01-03\nread: true\n"
+                   "---\nExtended Data Fig. 1: ![[Doe_Relink_2025_fig_S1.png]]\n"
+                   "Extended Data Fig. 2: ![](../Sources/Images/"
+                   "Doe_Relink_2025_fig_S2.png)\n")
+        rl_note.write_text(rl_body, encoding="utf-8")
+        rl_board = rl_vault / "Board.canvas"
+        rl_board.write_text(
+            '{"nodes":[{"id":"a","type":"file","file":"Sources/Images/'
+            'Doe_Relink_2025_fig_S2.png","x":0,"y":0,"width":9,"height":9}],'
+            '"edges":[]}', encoding="utf-8")
+        check("a vault run with an ED/Supplementary collision prints the switch",
+              (code, len(rl_hints), bool(rl_s1_before)), (1, 1, True))
+        if rl_hints:
+            rl_switch = shlex.split(rl_hints[0])[2:]
+            code, so, se = run(rl_switch + ["--dry-run"])
+            ok("a dry-run switch plans the relinks and writes nothing",
+               code == 0 and "would relink: Articles/Doe_Relink_2025.md "
+               "(Doe_Relink_2025_fig_S1.png → Doe_Relink_2025_fig_ED1.png)" in so
+               and rl_note.read_text(encoding="utf-8") == rl_body
+               and not rl_ed1.exists())
+            rl_record = rl_vault / "Investments" / "2025-01-04-stock-research.md"
+            rl_record.parent.mkdir()
+            rl_record.write_text("Old: ![[Doe_Relink_2025_fig_S1.png]]\n",
+                                 encoding="utf-8")
+            code, so, se = run(rl_switch)
+            rl_text = rl_note.read_text(encoding="utf-8")
+            check("an Investments/ record citing S1 keeps that crop unreplaced",
+                  (code, rl_s1.read_bytes() == rl_s1_before,
+                   "![[Doe_Relink_2025_fig_S1.png]]" in rl_text,
+                   "protected Investments/ record" in so,
+                   "S crop kept, not replaced" in so), (1, True, True, True, True))
+            ok("...while a leftover S2 crop's links move to ED2, canvas included",
+               "](../Sources/Images/Doe_Relink_2025_fig_ED2.png)" in rl_text
+               and "Sources/Images/Doe_Relink_2025_fig_ED2.png"
+               in rl_board.read_text(encoding="utf-8")
+               and "Doe_Relink_2025_fig_S2.png (a copy of "
+               "Doe_Relink_2025_fig_ED2.png); no note links to it now" in so)
+            rl_record.unlink()
+            code, so, se = run(rl_switch)
+            rl_text = rl_note.read_text(encoding="utf-8")
+            check("the switch moves S1's links to ED1, then replaces S1",
+                  (code, "![[Doe_Relink_2025_fig_ED1.png]]" in rl_text,
+                   rl_ed1.read_bytes() == rl_s1_before,
+                   rl_s1.read_bytes() != rl_s1_before,
+                   "relinked: Articles/Doe_Relink_2025.md" in so),
+                  (0, True, True, True, True))
+            check("...changing only the link targets, never dates or read:",
+                  rl_text, rl_body.replace("_fig_S1.png", "_fig_ED1.png")
+                  .replace("_fig_S2.png", "_fig_ED2.png"))
+            rl_supp = rl_vault / "Articles" / "Supplement.md"
+            rl_supp.write_text("![[Doe_Relink_2025_fig_S1.png]]\n",
+                               encoding="utf-8")
+            code, so, se = run(["--src", str(rl_pdf), "--out", str(rl_images),
+                                "--dpi", "72", "--overwrite-supplementary"])
+            check("a later refresh leaves links to the Supplementary S1 crop",
+                  (code, rl_supp.read_text(encoding="utf-8"),
+                   "relinked:" in so),
+                  (0, "![[Doe_Relink_2025_fig_S1.png]]\n", False))
+        check("the S<N> name a default run gives each ED<N> label",
+              [_default_s_label(label) for label in
+               ("ED1", "EDA1", "EDS1", "ED2-3", "S1", "1")],
+              ["S1", "SA1", "S1", "S2-3", "S1", "1"])
+        configure_marker_prefix("Extended Data", "S")
+
         # An unrecorded legacy _fig_ED<N> crop (a vault without a manifest)
         # fixes its PDF's namespace too: a default folder sweep must not
         # write the same Extended Data figure again as _fig_S<N>.
@@ -4278,6 +5194,18 @@ def run_self_test():
         check("...in the ledger inside --out",
               ("Doe_Figs_2025", "1") in load_reviewed(
                   os.path.join(run_out, REVIEW_FILE)), True)
+        # A caption-form label is the argument's error: the valid ledger is
+        # neither blamed nor changed, and an unmark in the same run waits.
+        ledger_bytes = open(os.path.join(run_out, REVIEW_FILE), "rb").read()
+        code, so, se = run(["--src", src, "--out", run_out, "--dpi", "72",
+                            "--unmark-reviewed", "Doe_Figs_2025:1",
+                            "--mark-reviewed", "Doe_Figs_2025:Figure 1"])
+        ok("a bad --mark-reviewed label is reported against the argument",
+           code not in (0, None) and "--mark-reviewed" in str(code)
+           and "Repair the review records" not in str(code) + se)
+        check("...and the ledger is unchanged",
+              open(os.path.join(run_out, REVIEW_FILE), "rb").read(),
+              ledger_bytes)
         # The mark protects that crop from --overwrite until it is removed;
         # --unmark-reviewed removes it in the same run that replaces the crop.
         code, so, se = run(["--src", str(a), "--out", run_out, "--dpi", "72",
@@ -4609,6 +5537,19 @@ def run_self_test():
            "into Inbox/ for pdf-organize" in summary_text
            and "exact basename" in summary_text)
         (scratch_dir / "Roe_Other_2024.pdf").unlink()
+        # A copy named in another case would name the figures after it.
+        variant_dir = Path(tmp) / "readable-scratch-variant"
+        variant_dir.mkdir()
+        variant_copy = variant_dir / "doe_scratch_2025.pdf"
+        shutil.copyfile(vault_source, variant_copy)
+        code, so, se = run([
+            "--src", str(variant_copy), "--out", str(scratch_images),
+            "--dpi", "72",
+        ])
+        ok("a scratch copy in another case is refused before any write",
+           code == 1 and "must keep the vault PDF's exact basename" in so
+           and "Use the vault PDF's exact basename 'Doe_Scratch_2025.pdf'" in so
+           and not scratch_images.exists())
 
         link_vault = Path(tmp) / "different-link-vault"
         link_pdf_dir = link_vault / "Sources" / "PDFs"
@@ -4708,6 +5649,43 @@ def run_self_test():
         check("the crop named by that ownership failure remains on disk",
               sorted(path.name for path in late_failure_out.glob("*.png")),
               ["Doe_One_2025_fig_1.png"])
+
+        # Another writer changes the manifest after the first crop of a
+        # sweep. The run stops there, and its summary names the kept draft,
+        # the unread later figures and the PDF it never reached.
+        stopped_src = Path(tmp) / "stopped-src"
+        stopped_src.mkdir()
+        _st_fig_pdf(stopped_src / "A_Multi_2025.pdf",
+                    captions=("Figure 1. One.", "Figure 2. Two.",
+                              "Figure 3. Three."))
+        _st_fig_pdf(stopped_src / "B_Later_2025.pdf", fill=(0, 1, 0))
+        stopped_out = Path(tmp) / "stopped-run" / "Images"
+        stopped_out.mkdir(parents=True)
+        (stopped_out / MANIFEST_FILE).write_text(MANIFEST_HEADER, encoding="utf-8")
+        real_extract_one = extract_one_figure
+
+        def concurrent_manifest_row(*args, **kwargs):
+            published = real_extract_one(*args, **kwargs)
+            with open(stopped_out / MANIFEST_FILE, "a", encoding="utf-8") as fh:
+                fh.write("Other_Paper_2020_fig_1.png\t" + "0" * 64 + "\n")
+            return published
+
+        with patch.dict(globals(), extract_one_figure=concurrent_manifest_row):
+            code, so, se = run(["--src", str(stopped_src),
+                                "--out", str(stopped_out), "--dpi", "72"])
+        check("a stopped sweep fails", code, 1)
+        ok("...counting and naming the PDF it never reached",
+           "1 of 2 PDF(s) scanned" in so and "B_Later_2025.pdf" in so)
+        ok("...calling the stopped PDF's later figures unexamined, not PARTIAL",
+           "PARTIAL: no caption" not in so and "not examined" in so)
+        stage_parent = os.path.dirname(os.path.realpath(stopped_out))
+        stages = [os.path.join(stage_parent, name)
+                  for name in os.listdir(stage_parent)
+                  if name.startswith(".figure-state-stage-")]
+        ok("...and naming the one kept manifest draft (%r)" % (stages,),
+           len(stages) == 1 and ("draft kept at " + stages[0]) in se
+           and ("draft kept at " + stages[0]) in so
+           and os.path.isfile(os.path.join(stages[0], MANIFEST_FILE)))
 
         damaged_src = Path(tmp) / "damaged-late-page"
         damaged_src.mkdir()
@@ -4818,7 +5796,10 @@ def main(argv=None):
         help=("Record one exact complete PNG in an unrecorded figure slot as "
               "historical extractor output (repeatable). Existing manifest "
               "records remain authoritative. The stem must identify one "
-              "eligible selected PDF; no files are adopted by default."),
+              "eligible selected PDF; no files are adopted by default. A PDF "
+              "whose name pdf-organize has not produced is eligible without "
+              "--allow-unorganized: adoption extracts nothing, and its record "
+              "lets pdf-organize's rename carry the crop."),
     )
     p.add_argument(
         "--dry-run", action="store_true",
@@ -4837,7 +5818,9 @@ def main(argv=None):
             "Nature papers that have both 'Supplementary Figure 1' AND "
             "'Extended Data Figure 1' as different figures). A PDF whose "
             "manifest records _fig_ED crops, or whose --out holds an "
-            "unrecorded <stem>_fig_ED<N>.png, always uses 'ED'."
+            "unrecorded <stem>_fig_ED<N>.png, always uses 'ED'. In a vault, "
+            "the links of a _fig_S<N> crop that holds an Extended Data "
+            "figure move to its _fig_ED<N> name in the same run."
         ),
     )
     p.add_argument(
@@ -4852,7 +5835,8 @@ def main(argv=None):
         "--include-split-books", action="store_true",
         help=(
             "Also extract from a book PDF whose chapter PDFs are in the same "
-            "run. Default: skip the book, because its figures would be "
+            "run, or in the vault when the book is named. Default: skip or "
+            "refuse the book, because its figures would be "
             "written a second time under the book's stem — byte-identical, "
             "never colliding, and permanently unused whichever stem an entry "
             "cites."
@@ -4862,10 +5846,11 @@ def main(argv=None):
         "--allow-unorganized", action="store_true",
         help=(
             "Extract from PDFs whose filename pdf-organize has not produced. "
-            "Default: refuse them and name them, because every figure is keyed "
-            "to the PDF's stem and a later rename orphans the whole set under "
-            "a name nothing looks for — invisibly, since the figure glob and "
-            "the unused-figure diagnostic walk that same stem."
+            "Default: refuse them and name them. Every figure is keyed to the "
+            "PDF's current stem, which pdf-organize is expected to change. "
+            "That later rename must go through pdf-organize, which carries the "
+            "recorded figures with the PDF; a rename made any other way leaves "
+            "them under a name nothing looks for."
         ),
     )
     p.add_argument(
@@ -4994,6 +5979,59 @@ def main(argv=None):
     else:
         vault_pdfs = []
 
+    # A split book's figures are its chapters' figures (CONVENTIONS.md 1a).
+    # A request naming a book whose chapters are in the vault extracts from
+    # those chapter PDFs, never from the whole book, so the named book is
+    # refused before any write. The refusal never offers
+    # --include-split-books: that flag is for the user's explicit request
+    # for the book's duplicate figures, not for a request naming the book.
+    # A run that only adopts the book's legacy crops extracts nothing, so it
+    # records them, as pdf-organize's rename of the book requires.
+    adopt_only_books = {}
+    if (source.is_file() and vault_inventory is not None
+            and not args.include_split_books):
+        book_key = core_stem(pdfs[0].stem, is_stem=True).casefold()
+        chapters = sorted(
+            Path(entry.path) for entry in vault_inventory.entries
+            if entry.kind in ("regular", "symlink")
+            and (chapter_book_stem(Path(entry.path).stem, is_stem=True)
+                 or "").casefold() == book_key)
+        if chapters:
+            folders = sorted({str(chapter.parent) for chapter in chapters})
+        if chapters and args.adopt_legacy and not (
+                args.mark_reviewed or args.unmark_reviewed):
+            adopt_only_books[pdfs[0]] = folders
+        elif chapters:
+            print("REFUSED: %s is a split book; its figures are those of "
+                  "its %d chapter PDF(s). Run with --src on its chapter "
+                  "folder %s and report the requested figures from the "
+                  "chapter crops; never re-extract the whole book. No "
+                  "sidecar or figure was written." % (pdfs[0].name, len(chapters),
+                                " or ".join(repr(f) for f in folders)),
+                  file=sys.stderr)
+            return 1
+
+    # The ownership manifest and the review ledger key every record by the
+    # stem, and a crop is published before its record. A stem they cannot
+    # store ('#' reads as a comment; surrounding whitespace, a tab, a slash
+    # or a backslash is invalid) could never be owned or marked reviewed. It
+    # is refused before any sidecar or figure is written, whatever
+    # --allow-unorganized says, and before adoption or a review mark.
+    unstorable = {p: sidecar_stem_problem(p.stem) for p in pdfs}
+    unstorable = {p: problem for p, problem in unstorable.items() if problem}
+    unstorable_remedy = (
+        "give it a canonical name with pdf-organize (run without --vault "
+        "outside the vault), or extract a renamed working copy")
+    if unstorable:
+        print("REFUSED: %d PDF(s) whose stem the figure sidecars cannot "
+              "store; no figures will be written for these PDFs:"
+              % len(unstorable))
+        for p, problem in sorted(unstorable.items()):
+            print(f"  {p}: the stem {p.stem!r} {problem}")
+        print("  " + unstorable_remedy[0].upper() + unstorable_remedy[1:] + ".")
+        print()
+        pdfs = [p for p in pdfs if p not in unstorable]
+
     # The selected processing scope and the vault's durable source namespace
     # answer different questions. Two selected paths with one portable stem
     # are ambiguous inputs. A single external scratch copy, however, is valid
@@ -5010,6 +6048,14 @@ def main(argv=None):
         for source in pdfs:
             decision = verify_selected_pdf(
                 vault_root, source, inventory=vault_inventory)
+            if (decision.unique and
+                    os.path.basename(decision.matches[0]) != source.name):
+                # A readable copy outside the vault names the figures, so a
+                # case or Unicode variant of the owner's name is refused.
+                decision.unique = False
+                decision.reason = (
+                    "the readable copy must keep the vault PDF's exact "
+                    "basename %r" % os.path.basename(decision.matches[0]))
             if not decision.unique:
                 selection_refusals[source] = decision
     refused_keys = selected_collision_keys | {
@@ -5035,10 +6081,15 @@ def main(argv=None):
     ed_namespace = {source for source in pdfs
                     if _records_extended_data(manifest, source.stem)
                     or source in ed_unrecorded}
+    # Adoption records bytes that already exist and derives nothing, so a PDF
+    # whose name pdf-organize has not produced is eligible without
+    # --allow-unorganized. Its manifest record is what lets pdf-organize
+    # carry the crop through that PDF's rename (CONVENTIONS.md §1a). A split
+    # book is eligible for the same reason; a sweep still skips extracting it.
     adoptable_stems = reviewable_stems(
         pdfs,
-        include_split_books=args.include_split_books,
-        allow_unorganized=args.allow_unorganized,
+        include_split_books=True,
+        allow_unorganized=True,
     )
     adoptable_stems -= {
         source.stem for source in pdfs
@@ -5066,6 +6117,10 @@ def main(argv=None):
                 source.stem for source in pdfs
                 if figure_identity(source.stem) in refused_keys
             }
+        if args.mark_reviewed:
+            # Refuse a bad mark before --unmark-reviewed rewrites the ledger.
+            _review_entries("--mark-reviewed", args.mark_reviewed,
+                            allowed_review_stems)
         if args.unmark_reviewed:
             unmarked, unmatched = unmark_reviewed(
                 review_file, args.unmark_reviewed, dry_run=args.dry_run,
@@ -5094,14 +6149,15 @@ def main(argv=None):
     # would report — otherwise the marks the user just passed come back as
     # fresh flags and the dry run disagrees with the run it is previewing.
     reviewed |= set(marked)
-    # Every figure this script writes is keyed to the PDF's on-disk stem, and
-    # nothing downstream survives that stem changing: a later rename orphans
-    # the whole set under a name no consumer looks for, and neither the
-    # figure glob nor the unused-figure diagnostic can report it, because both
-    # walk the same stem (CONVENTIONS.md §1a). So a PDF that has not been
-    # through pdf-organize is refused rather than extracted — the ordering is
-    # a constraint, not a preference, and this is the only place in the
-    # pipeline positioned to enforce it.
+    # Every figure this script writes is keyed to the PDF's on-disk stem. A
+    # name pdf-organize has not produced is expected to change, and only
+    # pdf-organize's rename carries the recorded figures with it; a rename
+    # made any other way leaves them under a name no consumer looks for, and
+    # neither the figure glob nor the unused-figure diagnostic can report it,
+    # because both walk the same stem (CONVENTIONS.md §1a). So a PDF that has
+    # not been through pdf-organize is refused rather than extracted. A
+    # collector-owned feed attachment is refused too, but its name never
+    # changes, so its remedy is --allow-unorganized, never pdf-organize.
     # A split book and its chapters are both in the walk, and extracting
     # both writes every figure twice under two stems. The chapter stem is
     # what everything downstream keys to, so the book is what gets skipped.
@@ -5116,6 +6172,7 @@ def main(argv=None):
     skipped_books = {} if args.include_split_books else split_book_chapters(pdfs)
     if skipped_books:
         pdfs = [p for p in pdfs if p not in skipped_books]
+    pdfs = [p for p in pdfs if p not in adopt_only_books]
 
     unorganized = []
     if not args.allow_unorganized:
@@ -5169,18 +6226,57 @@ def main(argv=None):
         print()
         pdfs = [p for p in pdfs if p not in selection_refusals]
 
-    if unorganized:
+    # A feed attachment keeps its collector name and pdf-organize refuses it,
+    # so its refusal names only the --allow-unorganized exception. A PDF
+    # whose legacy figures this run adopted needed just that record before
+    # its pdf-organize rename, so its extraction refusal does not fail the run.
+    adopted_stems = {filename.rpartition("_fig_")[0]
+                     for _path, filename, _snapshot in adoptions}
+    feed_named = [p for p in unorganized if is_feed_attachment(p.name)]
+    adopted_only = [p for p in unorganized
+                    if p.stem in adopted_stems and p not in feed_named]
+    name_refused = [p for p in unorganized if p not in adopted_only]
+    to_organize = [p for p in name_refused if p not in feed_named]
+    if to_organize:
         print("REFUSED: %d PDF(s) whose filename pdf-organize has not "
-              "produced." % len(unorganized))
-        print("  Every figure is named after the PDF's stem, so extracting "
-              "now and renaming later")
-        print("  orphans the whole set silently. Run pdf-organize on these "
-              "first:")
-        for p in sorted(unorganized):
+              "produced." % len(to_organize))
+        print("  Every figure is named after the PDF's stem, and these names "
+              "are expected to")
+        print("  change. Run pdf-organize on these first:")
+        for p in sorted(to_organize):
             print(f"    {p}")
-        print("  Then re-run. To extract anyway, pass --allow-unorganized "
-              "(the figures are then")
-        print("  keyed to a name that is expected to change).")
+        print("  Then re-run. To extract anyway, pass --allow-unorganized; any "
+              "later rename must")
+        print("  then go through pdf-organize, which carries the recorded "
+              "figures with the PDF.")
+        print()
+    if adopted_only:
+        print("Not extracted: %d PDF(s) whose filename pdf-organize has not "
+              "produced; this run" % len(adopted_only))
+        print("  only adopts their selected legacy figures under the current "
+              "name:")
+        for p in sorted(adopted_only):
+            print(f"    {p}")
+        print("  Run pdf-organize next; its rename carries the recorded "
+              "figures. Then extract")
+        print("  any missing figures under the new name.")
+        print()
+    for book, folders in sorted(adopt_only_books.items()):
+        print("Not extracted: %s is a split book; this run only adopts its "
+              "selected legacy figures." % book.name)
+        print("  Its figures are those of its chapter PDFs in %s; never "
+              "re-extract the whole book." % " or ".join(repr(f) for f in folders))
+        print()
+    if feed_named:
+        print("REFUSED: %d collector-owned feed attachment(s) named without "
+              "--allow-unorganized." % len(feed_named))
+        print("  The feed collector's durable state records these names, so "
+              "they never change;")
+        print("  do not route them to pdf-organize. Re-run with "
+              "--allow-unorganized to extract")
+        print("  their figures under the current name (CONVENTIONS.md §1c):")
+        for p in sorted(feed_named):
+            print(f"    {p}")
         print()
     refused = []
     listed = set()
@@ -5193,9 +6289,18 @@ def main(argv=None):
         if p not in listed:
             listed.add(p)
             refused.append((p,) + vault_refusal(decision))
+    for p in unstorable:
+        listed.add(p)
+        refused.append((p, "stem the sidecars cannot store", unstorable_remedy))
     for p in unorganized:
-        if p not in listed:
-            listed.add(p)
+        if p in listed:
+            continue
+        listed.add(p)
+        if p in feed_named:
+            refused.append((p, "feed-owned attachment",
+                            "pass --allow-unorganized to extract it under its "
+                            "collector name; never route it to pdf-organize"))
+        else:
             refused.append((p, "name not organized",
                             "run pdf-organize, or pass --allow-unorganized "
                             "for a deliberate one-off"))
@@ -5223,11 +6328,36 @@ def main(argv=None):
     for book, chapters in sorted(skipped_books.items()):
         print(f"Skipping {book.name}: split into {len(chapters)} chapter PDF(s); "
               f"figures come from those (--include-split-books to override)")
-    if (unorganized or stem_collisions or selection_refusals) and not pdfs:
+    def report_adoptions():
+        """Name each selected legacy figure before its record is saved."""
+        verb = "Would record" if args.dry_run else "Selected for recording"
+        print(f"{verb} {len(adoptions)} explicitly selected legacy figure(s) "
+              f"as this extractor's output in {manifest_file}:")
+        for path, _filename, _snapshot in adoptions:
+            print(f"  {path}")
+        print()
+
+    if (unorganized or stem_collisions or selection_refusals
+            or unstorable or adopt_only_books) and not pdfs:
         if skipped_books:
             print()
         for p in feed_skipped:
             print(f"feed-owned, skipped: {p}")
+        if adoptions:
+            # Adoption records bytes that already exist, so it still runs
+            # when every PDF it names was refused for extraction.
+            report_adoptions()
+            if not args.dry_run and not (
+                    revalidate_legacy_adoptions(adoptions, manifest)
+                    and save_manifest(manifest_file, manifest,
+                                      expected=manifest_snapshot)):
+                return 1
+            if not (name_refused or stem_collisions or selection_refusals
+                    or unstorable):
+                print("Dry run: adoption previewed; nothing was extracted."
+                      if args.dry_run else
+                      "Adoption recorded; nothing was extracted.")
+                return 0
         print("Nothing left to process.")
         # Non-zero: every PDF the user pointed at was refused, so nothing was
         # extracted. Exiting 0 there tells a caller — a shell `&&`, a wrapper
@@ -5248,12 +6378,7 @@ def main(argv=None):
     # unrecorded slot exactly with --adopt-legacy.
     seen_hashes = seed_output_index(out_dir)
     if adoptions:
-        verb = "Would record" if args.dry_run else "Selected for recording"
-        print(f"{verb} {len(adoptions)} explicitly selected legacy figure(s) "
-              f"as this extractor's output in {manifest_file}:")
-        for path, _filename, _snapshot in adoptions:
-            print(f"  {path}")
-        print()
+        report_adoptions()
 
     # An adoption describes bytes that already exist, so publish those claims
     # before extraction starts. A later crash must not erase them, and an
@@ -5275,19 +6400,26 @@ def main(argv=None):
     def commit_manifest():
         """Persist the ownership of the crop just published, with CAS."""
         nonlocal manifest_snapshot
+        kept = []
         next_snapshot = save_manifest(
-            manifest_file, manifest, expected=manifest_snapshot)
+            manifest_file, manifest, expected=manifest_snapshot, kept=kept)
         if not next_snapshot:
             manifest_commit_failed[0] = True
-            raise OSError("the ownership manifest could not be updated")
+            raise OSError("the ownership manifest could not be updated"
+                          + "".join("; " + location for location in kept))
         manifest_snapshot = next_snapshot
 
     chapter_reference_pdfs = (list(vault_pdfs)
                               if vault_root is not None else list(pdfs))
     chapter_caption_cache = {}
     per_pdf = {}
+    not_processed = []
+    # In a vault, a PDF processed with --ed-prefix ED moves the links of a
+    # `_fig_S<N>` crop holding an Extended Data figure to `_fig_ED<N>`.
+    relinker = (_CropRelinker(vault_root, out_dir, dry_run=args.dry_run)
+                if vault_root is not None else None)
     try:
-        for pdf_path in pdfs:
+        for index, pdf_path in enumerate(pdfs):
             # `--src` may be a single PDF, in which case relative_to() returns
             # "." (or raises, on an odd path) — neither is a useful label.
             try:
@@ -5297,9 +6429,8 @@ def main(argv=None):
             except ValueError:
                 rel = pdf_path.name
             print(f"Processing: {rel}")
-            configure_marker_prefix(
-                "Extended Data",
-                "ED" if pdf_path in ed_namespace else args.ed_prefix)
+            prefix = "ED" if pdf_path in ed_namespace else args.ed_prefix
+            configure_marker_prefix("Extended Data", prefix)
             result = process_pdf(
                 pdf_path, out_dir,
                 overwrite=args.overwrite, dpi=args.dpi, dry_run=args.dry_run,
@@ -5308,6 +6439,7 @@ def main(argv=None):
                 chapter_caption_cache=chapter_caption_cache,
                 manifest_commit=(None if args.dry_run else commit_manifest),
                 overwrite_s=args.overwrite_supplementary,
+                relinker=relinker if prefix == "ED" else None,
             )
             per_pdf[pdf_path] = result
             n = result["extracted"]
@@ -5341,6 +6473,9 @@ def main(argv=None):
                     parts.append(f"{len(result['duplicates'])} duplicate")
                 if result["blank"]:
                     parts.append(f"{len(result['blank'])} blank crop")
+                if result["kept"]:
+                    parts.append(f"{len(result['kept'])} kept (automatic "
+                                 "re-crop failed)")
                 if result["occupied"]:
                     parts.append(f"{len(result['occupied'])} name(s) occupied by "
                                  f"an unrecorded or changed file")
@@ -5362,12 +6497,18 @@ def main(argv=None):
                 if ownership_f:
                     parts.append(
                         f"{ownership_f} ownership save failed (crop exists)")
+                if result["stopped_after"] is not None:
+                    parts.append(f"stopped after Fig {result['stopped_after']}; "
+                                 "later figures not examined")
                 print(f"  → {', '.join(parts)}")
             if result["written"]:
                 # The PNGs that need viewing; counts alone cannot separate a
                 # replacement from a new file or a review-protected keep.
                 print(("    would write: " if args.dry_run else "    wrote: ")
                       + ", ".join(result["written"]))
+            for holder, old, new in result.get("relinked", ()):
+                print(("    would relink: " if args.dry_run else "    relinked: ")
+                      + f"{holder} ({old} → {new})")
             if result["written"] or result["warnings"]:
                 # The visual-review scope names every crop on these pages.
                 pages = result.get("multi_column", ())
@@ -5375,6 +6516,7 @@ def main(argv=None):
                       + ("p. " + ", ".join(str(p) for p in pages)
                          if pages else "none"))
             if manifest_commit_failed[0]:
+                not_processed = list(pdfs[index + 1:])
                 break
 
     finally:
@@ -5387,8 +6529,10 @@ def main(argv=None):
 
     print_summary(per_pdf, out_dir, skipped_books, review_file, args.dry_run,
                   ed_prefix=args.ed_prefix, keep_frame=args.keep_frame,
+                  include_split_books=args.include_split_books,
                   allow_unorganized=args.allow_unorganized, dpi=args.dpi,
-                  refused=refused, feed_skipped=feed_skipped)
+                  refused=refused, feed_skipped=feed_skipped,
+                  not_processed=not_processed)
 
     # The exit code has to say whether the run did what it was asked. It was
     # always 0 — a run that refused every PDF, could not open half of them, or
@@ -5402,15 +6546,22 @@ def main(argv=None):
     # PNG is on disk, and `--mark-reviewed` is the answer to it.
     # A blank crop and an occupied output name join that list for the same
     # reason: in both, a figure was detected and is NOT in `--out` afterwards.
+    # A verified crop `--overwrite` could not re-crop is kept: it is in
+    # `--out`, but the refresh the run was asked for did not happen.
     # A caption inside a crop does not — the PNG is there, it is just wrong,
-    # and it is reported the way every other suspicious bbox is.
+    # and it is reported the way every other suspicious bbox is. Nor does the
+    # name refusal of a PDF whose legacy figures this run adopted: that record
+    # is what its pdf-organize rename needs. An S crop the Extended Data
+    # switch kept because its links could not move fails the run: its
+    # Supplementary figure was not extracted.
     failed = any(r["failures"] or r["collisions"]
                  or r.get("ownership_failures")
                  or r["open_error"] or r["no_pages"]
-                 or r["blank"] or r["occupied"]
+                 or r["blank"] or r["occupied"] or r.get("kept")
+                 or any(item[3] for item in r.get("relink_blocked", ()))
                  for r in per_pdf.values())
-    return 1 if (unorganized or stem_collisions or selection_refusals
-                 or failed or not manifest_saved) else 0
+    return 1 if (name_refused or stem_collisions or selection_refusals
+                 or unstorable or failed or not manifest_saved) else 0
 
 
 if __name__ == "__main__":

@@ -69,7 +69,8 @@ element: its tag, best image URL resolved against the capture URL, alt text,
 figcaption, nearest preceding heading and any Lottie `.json`/`.lottie` source.
 Rows sharing a `figure` number belong to one `<figure>`; rows tagged `in` sit
 inside a `nav` or `aside`, or the page-level `header` or `footer`, and are
-often chrome. Read the neighboring prose in the markup.
+often chrome. The outline tags a screen-reader-only heading `[hidden]`; it is
+never a row's nearest heading. Read the neighboring prose in the markup.
 
 For Lottie, record a real `.json`/`.lottie` source exposed by `<lottie-player>`,
 `<dotlottie-player>`, animation attributes or nearby source markup. Do not execute
@@ -129,15 +130,20 @@ a missing caption.
 Keep equivalent existing `<!-- source has … -->` placeholders on reprocessing;
 do not duplicate or silently remove them.
 
-- An **inert, self-contained inline SVG** may be serialized to a unique scratch
-  file outside the vault. Inspect readability, put its planned filename-only
+- An **inert, self-contained inline SVG** may be serialized as a standalone
+  SVG document to a unique scratch file outside the vault. Its root `<svg>`
+  must carry `xmlns="http://www.w3.org/2000/svg"`, plus
+  `xmlns:xlink="http://www.w3.org/1999/xlink"` when it uses `xlink:`
+  attributes. HTML often omits them, and a file without them does not render.
+  Inspect readability, put its planned filename-only
   embed in the draft, and after the note is safely public use `fetch_images.py place
   --attachments '<vault>/Sources/Images' --slug '<slug>' --index <N>
   --from-file '<scratch>/diagram.svg' --owner-note
   '<vault>/Articles/<slug>.md'`. If it depends
   on external CSS/fonts/JavaScript or definitions outside the serialized SVG,
   do not save a broken diagram. The helper also refuses active SVG content,
-  external resource references, and XML DTDs before publication. Leave
+  external resource references, XML DTDs and a root without the SVG namespace
+  before publication. Leave
   `<!-- source has an inline SVG diagram here, not capturable as a static file;
   view at <source> -->` and report it.
 - For video, canvas and interactive widgets without a faithful asset, leave

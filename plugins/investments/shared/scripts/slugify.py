@@ -17,6 +17,8 @@ character and would erase meaning):
                                           en, em, figure, horbar, minus)
   4.  arrows           -> "-"
   5.  super/subscript digits -> plain digits
+  5b. vulgar fractions -> their digits; fraction slash U+2044 and
+      division slash U+2215 -> "-"      ("½" -> "1-2", like "1/2")
   6.  superscript charges  U+207A -> "-plus", U+207B -> "-minus"
   7.  prime U+2032 and apostrophes -> dropped
   8.  middle dot U+00B7 -> "-"
@@ -55,7 +57,11 @@ FIX-A  ASCII charge notation is normalised so that a plain-text source and
        ion-shaped token (1-2 letter element symbol + optional digits)
        whose trailing "-" is not followed by another word character -- so
        ordinary hyphenated titles ("Cross-validation", "X-ray", "T-cell",
-       "Smith-Waterman") are untouched.
+       "Smith-Waterman") are untouched.  A suspended hyphen is not a charge
+       either: when the list it opens ends in a hyphen compound, the token
+       is left alone ("N- and C-terminal" -> "n-and-c-terminal"), while an
+       ion list still converts ("Cl- and Br- ions" ->
+       "cl-minus-and-br-minus-ions").
 
 FIX-C  Curly apostrophes U+2018 / U+2019 are dropped alongside the ASCII
        apostrophe.  This is a no-op in outcome (ascii-ignore would drop
@@ -84,7 +90,9 @@ CLI (JSON to stdout unless --stem; --help everywhere):
                                    pinned:
                                    {"total","passed","failed","failures","ok"}
     slugify.py "C++" --stem     -> c-plus-plus   (plain text, not JSON)
-    A title that starts with "-" needs the separator: slugify.py -- "---".
+    slugify.py "-ase" --stem    -> ase   (a title that starts with "-" is
+                                   read as the title; "--" before it also
+                                   works: slugify.py -- "-ase" --stem)
 Exit codes: 0 ok, 1 unsluggable title (or failing self-test), 2 bad usage.
 """
 
@@ -186,8 +194,20 @@ NON_DECOMPOSING = {
 # FIX-B -- must run before the main pipeline or C / C++ / C# / C* all collide.
 SYMBOL_WORDS = {"+": "-plus", "#": "-sharp", "*": "-star"}
 
-# FIX-A -- narrow ion-shaped ASCII negative-charge pattern.
-_ASCII_ANION_RE = re.compile(r"(?<![A-Za-z0-9-])([A-Z][a-z]?[0-9]*)-(?![A-Za-z0-9-])")
+# FIX-A -- narrow ion-shaped ASCII negative-charge pattern.  The second
+# lookahead skips a suspended hyphen: a list of "X-" words that ends in a
+# hyphen compound ("N- and C-terminal", "N-, C- and O-linked").  A comma or a
+# conjunction must open that compound, so a lone ion before a hyphen compound
+# ("Cl- co-transporter") still converts.
+_ASCII_ANION_RE = re.compile(
+    r"(?<![A-Za-z0-9-])([A-Z][a-z]?[0-9]*)-(?![A-Za-z0-9-])"
+    r"(?!(?:,?\s+(?:(?:and|or|nor|to)\s+)?[A-Za-z0-9]+-(?=[,\s]))*"
+    r"(?:,\s*(?:(?:and|or|nor|to)\s+)?|\s+(?:and|or|nor|to)\s+)"
+    r"[A-Za-z0-9]+-[A-Za-z])")
+
+#: Step 5b: the slashes inside a fraction.  ascii-ignore would drop them and
+#: fuse the digits ("½" -> "12").
+FRACTION_SLASHES = "⁄∕"  # fraction slash, division slash
 
 _NON_SLUG_RE = re.compile(r"[^a-z0-9]")
 _HYPHEN_RUN_RE = re.compile(r"-{2,}")
@@ -218,6 +238,13 @@ def preprocess(title: str) -> str:
 
     # 5. super/subscript digits
     s = "".join(SUPERSUB_DIGITS.get(ch, ch) for ch in s)
+
+    # 5b. vulgar fractions -> digits around a fraction slash, then every
+    #     fraction or division slash -> "-", so "½" slugs like "1/2"
+    s = "".join(unicodedata.normalize("NFKD", ch)
+                if unicodedata.decomposition(ch).startswith("<fraction>")
+                else ch for ch in s)
+    s = "".join("-" if ch in FRACTION_SLASHES else ch for ch in s)
 
     # 6. superscript charges
     s = "".join(SUPER_CHARGES.get(ch, ch) for ch in s)
@@ -393,6 +420,22 @@ TEST_CASES = [
     ("T-cell receptor", "t-cell-receptor.md", "FIX-A negative control"),
     ("mRNA-seq", "mrna-seq.md", "FIX-A negative control"),
     ("RNA-", "rna.md", "FIX-A negative control: acronym, not an ion"),
+    ("N- and C-terminal domains", "n-and-c-terminal-domains.md",
+     "FIX-A negative control: suspended hyphen"),
+    ("B- and T-cell receptors", "b-and-t-cell-receptors.md",
+     "FIX-A negative control: suspended hyphen"),
+    ("N-, C- and O-linked glycans", "n-c-and-o-linked-glycans.md",
+     "FIX-A negative control: suspended-hyphen list"),
+    ("Cl- and Br- ions", "cl-minus-and-br-minus-ions.md",
+     "FIX-A still fires in an ion list"),
+    ("Cl- and K+ channels", "cl-minus-and-k-plus-channels.md",
+     "FIX-A still fires before a cation"),
+    ("Cl- co-transporter", "cl-minus-co-transporter.md",
+     "FIX-A still fires on a lone ion before a hyphen compound"),
+    ("F- ion-selective electrode", "f-minus-ion-selective-electrode.md",
+     "FIX-A still fires on a lone ion before a hyphen compound"),
+    ("K+ and Cl- co-transport", "k-plus-and-cl-minus-co-transport.md",
+     "FIX-A still fires on a list's last ion before a hyphen compound"),
 
     # --- Greek CAPITALS -----------------------------------------------------
     # GREEK is built by case-folding _GREEK_BASE, so a capital resolves to the
@@ -437,6 +480,12 @@ TEST_CASES = [
     ("state‑of‑the‑art", "state-of-the-art.md",
      "U+2011 NON-BREAKING HYPHEN maps to -, never fuses"),
 
+    # --- fractions: the fraction slash has no ASCII fold either -------------
+    ("Spin-½", "spin-1-2.md", "vulgar fraction keeps its digits apart"),
+    ("Spin-1/2", "spin-1-2.md", "ASCII fraction, same slug as the above"),
+    ("1⁄2-integer spin", "1-2-integer-spin.md",
+     "U+2044 FRACTION SLASH maps to -, never fuses"),
+
     # --- the filename budget: an over-long stem must STOP, not ENAMETOOLONG --
     ("A " + "very " * 60 + "long title", None,
      "past MAX_STEM_BYTES -> stop (ask the user, never crash the write)"),
@@ -466,6 +515,9 @@ def run_self_test():
         (["--stem", "---"], ["--stem", "--", "---"]),
         (["-3dB point", "--stem"], ["--stem", "--", "-3dB point"]),
         (["ROC curve", "--stem"], ["ROC curve", "--stem"]),
+        (["-ase", "--stem"], ["--stem", "--", "-ase"]),
+        (["--", "-ase", "--stem"], ["--stem", "--", "-ase"]),
+        (["-stem"], ["-stem"]),
     ]
     for argv, expected in guard_cases:
         got = _guard_argv(argv)
@@ -537,12 +589,22 @@ def _guard_argv(argv):
     for i, token in enumerate(argv):
         if token in _KNOWN_FLAGS:
             if token == "--":
+                # "-- TITLE --stem": move the trailing value-free flags in
+                # front of the marker, as for an unmarked dash title.
+                rest = argv[i + 1:]
+                if len(rest) > 1 and all(flag in _KNOWN_FLAGS - {"--"}
+                                         for flag in rest[1:]):
+                    return argv[:i] + rest[1:] + ["--", rest[0]]
                 return argv
             continue
-        # A real flag typo looks like "-x" / "--word"; leave those to argparse
-        # so the user sees the error.  Anything else that merely starts with a
-        # dash ("---", "-", "-3dB point") is a title.
-        if token.startswith("-") and not re.match(r"^--?[A-Za-z]", token):
+        # A real flag typo looks like "-x" / "--word" / "-stem"; leave those
+        # to argparse so the user sees the error.  Anything else that merely
+        # starts with a dash ("---", "-", "-3dB point", the suffix "-ase") is
+        # a title: "-h" is the only single-dash flag.
+        affix = (re.match(r"^-[A-Za-z]", token) and len(token) > 2
+                 and "-" + token not in _KNOWN_FLAGS)
+        if token.startswith("-") and (
+                affix or not re.match(r"^--?[A-Za-z]", token)):
             # argparse treats every token after ``--`` as positional. Move
             # the remaining known, value-free flags before that marker so a
             # natural trailing ``--stem`` keeps working.

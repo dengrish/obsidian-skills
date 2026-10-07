@@ -55,9 +55,12 @@ Usage as a module (after the CONVENTIONS.md §5 bootstrap):
 As a CLI:
 
     python3 naming.py canonical 'Prince_UDL_2026_01_Intro_src.pdf'
-    python3 naming.py chapter   'Prince_UDL_2026_01_Intro_src'
+    python3 naming.py chapter   'Prince_UDL_2026_01_Intro_src.pdf'
     python3 naming.py feed      'rss-04dbe4d2aaf17884aaf0f2878cca8178.pdf'
     python3 naming.py --test
+
+Each CLI NAME is a filename or path, and the CLI always removes its
+extension: pass the inventoried name, never a stem.
 """
 import argparse
 import collections
@@ -382,7 +385,9 @@ def run_self_test():
             failures.append("dotted stem %r lost part of its identity" % stem)
         if chapter_parts(stem, is_stem=True) is not None:
             failures.append("dotted stem %r was mistaken for a chapter" % stem)
-        if looks_canonical(stem + ".pdf") or core_stem(stem + ".pdf") != stem:
+        # The CLI passes each NAME as a filename, so this is what it reports.
+        if (looks_canonical(stem + ".pdf") or core_stem(stem + ".pdf") != stem
+                or chapter_parts(stem + ".pdf") is not None):
             failures.append("dotted PDF %r disagrees with its exact stem" % (stem + ".pdf"))
 
     # A chapter pairs with its book whatever `_src` either carries: that is the

@@ -59,8 +59,8 @@ except a legacy research extract (below); a PDF wikilink makes it
 `paper-summarize`'s, so leave that note alone.
 
 An `Articles/` note carrying `<!-- obsidian:wiki-add-research-source -->` is
-a legacy research extract written by an earlier
-[wiki-add](../wiki-add/SKILL.md) version, not a captured article.
+a [legacy research extract](../wiki-add/references/research.md#legacy-research-extracts),
+an agent-written extract of one web page, not a captured article.
 It stays a URL owner; this skill never reprocesses, overwrites or renames it
 or its images.
 
@@ -188,9 +188,12 @@ python3 '<skill>/scripts/fetch_images.py' stage --vault '<vault>' \
     --out-dir '<scratch>/images-<unique-id>' --slug '<slug>' --start 1 '<url1>' '<url2>'
 ```
 
-Use the returned filenames and actual extensions for `![[…]]` embeds. Preserve
-a real caption as one italic line immediately below its embed; do not turn the
-article's lede into a caption. Open completed images to check readability.
+Use the returned filenames and actual extensions for `![[…]]` embeds. A result
+with `needs_conversion: "png"` is a TIFF or ICO that Obsidian cannot display:
+[convert it to PNG](references/images.md#download-and-publish) before placing
+it. Preserve a real caption as one italic line immediately below its embed; do
+not turn the article's lede into a caption. Open completed images to check
+readability.
 Failures get a placeholder and report entry using the helper's redacted `url`
 field. Never copy an image URL's credentials, query string, fragment, or inline
 data payload into the cleaned note or report; the retained raw capture is the
@@ -224,12 +227,16 @@ confidence and exact technical names and numbers. Give a long list's size and
 key members, skip asides and background that do not advance the argument (the
 lead anecdote gets one bullet at most), and state a whole-piece caveat once.
 
-For an opinion, argument or forecast piece, name the author in the thesis
-bullet ('Zuckerberg argues…'), or the publication or issuing body when `author`
-is `[]`, and attribute later opinions, forecasts and recommendations; state
-reported facts directly, never with “the article says” framing. Bold only terms
-that could be their own wiki entry (a named model, method, dataset,
-organization, person or defined concept), never generic words or whole phrases.
+For an opinion, argument or forecast, name whoever argues it in the thesis
+bullet: the byline author for their own argument ('Zuckerberg argues…'), the
+interviewee or quoted subject for an argument the piece reports in an
+interview, Q&A, profile or news story ('Cao argues…' in a Q&A by Wickelgren),
+and the publication or issuing body only when the piece argues in its own
+voice and `author` is `[]`. Attribute later opinions, forecasts and
+recommendations the same way; state reported facts directly, never with “the
+article says” framing. Bold only terms that could be their own wiki entry (a
+named model, method, dataset, organization, person or defined concept), never
+generic words or whole phrases.
 Use roughly 5–8 bullets for a short post, 10–15 for longform and at most 20 for
 a very long piece; merge overlap. No URLs, inline links or footnote markers in
 the summary; escape literal currency dollars as `\$`.
@@ -277,10 +284,12 @@ foreign figures.
 
 **For an authorized rewrite or changed slug**, read and execute
 [the complete replacement procedure](references/duplicates-and-reprocessing.md#publish-an-approved-replacement).
-A changed slug or respelling publishes its note with the shipped
-`rename --phase publish-note` writer, never a private driver. A changed slug
-repairs every link to the old note and its images in the same run, as Obsidian
-does on a rename; the reprocess request authorizes that repair, so never ask
+A changed slug publishes its note with the shipped
+`rename --phase publish-note` writer, never a private driver. A slug that
+differs only by case or Unicode normalization is not a change: the note and its
+images keep their spelling and take a same-name rewrite. A changed slug
+repairs every link to the old note and its images in the same run, Obsidian
+Canvas cards included, as Obsidian does on a rename; the reprocess request authorizes that repair, so never ask
 separately or hand it to another skill. Retain the unchanged original until
 publication succeeds, and keep both resolving versions while any note the
 repair could not rewrite remains a blocker. Do not apply the new-note sequence
@@ -340,8 +349,9 @@ skips to a count and filenames. Report:
   left unchanged; unindexable and `stem_mismatch` notes.
 - Approved reprocessing: regenerated fields, preserved metadata conflicts,
   old → new filenames, each note the live repair rewrote with its old → new
-  links, any remaining link-repair blockers with their `recovery` paths and any
-  pending changed-slug handoff.
+  links, each block ID or linked heading the new draft lacks (and repair's
+  `missing_anchors`) with the notes that link it, any remaining link-repair
+  blockers with their `recovery` paths and any pending changed-slug handoff.
 
 The polished clipping may later be a source for `wiki-build`; this run creates
 no wiki entries, and a changed slug edits existing ones only to repair links.

@@ -45,9 +45,12 @@ _SPECIAL_RE = re.compile(
 _EXTENSION_ALT = "|".join(sorted((re.escape(ext) for ext in FILE_EXTENSIONS),
                                  key=len, reverse=True))
 # A compound extension that starts with a known one, such as ``.tar.gz`` or
-# ``.tar.zst``, is one literal shape and is reported whole.
+# ``.tar.zst``, is one literal shape and is reported whole. A dot that follows
+# another dot or an ellipsis, as in ``...so`` or ``1..r``, is punctuation, not
+# a file extension.
 _EXTENSION_RE = re.compile(
-    r"(?<![\w/`])\.(?:%s)(?:\.[A-Za-z0-9]{1,10})*(?![\w`])" % _EXTENSION_ALT,
+    r"(?<![\w/`.…])\.(?:%s)(?:\.[A-Za-z0-9]{1,10})*(?![\w`])"
+    % _EXTENSION_ALT,
     re.IGNORECASE,
 )
 _DISPLAY_MATH_RE = re.compile(r"\$\$.*?\$\$", re.DOTALL)
@@ -142,6 +145,12 @@ def run_self_test(verbose=False):
          "A | B\n---|---\nx | y\n\nThen save .csv.", 1, ((0, 2),)),
         ("a compound extension is one shape", "Ship a .tar.gz or .tar.bz2 file.", 2),
         ("a backticked compound extension is not bare", "Ship a `.tar.gz` file.", 0),
+        ("an ellipsis before a word is punctuation, not an extension",
+         "I waited...so I left, then...log in.", 0),
+        ("a range's double dot is not an extension",
+         "Sum the terms 1..r and stop.", 0),
+        ("a Unicode ellipsis then a period is punctuation",
+         "It ended….so it goes.", 0),
     ]
     failed = 0
     for case in cases:

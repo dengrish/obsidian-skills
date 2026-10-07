@@ -12,7 +12,9 @@ Read when the captured body contains images or the audit recovers one.
 Keep `![[…]]` embeds and figure numbers. A reprocess driven by a raw capture
 maps its images onto these embeds first, under the
 [body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
-If the slug is unchanged, leave their files alone. If it changes, update only
+If the slug is unchanged (including a
+[case/Unicode-only difference](duplicates-and-reprocessing.md#settle-a-slug-before-writing-images)),
+leave their files and embed names alone. If it changes, update only
 the draft embeds by replacing the old slug and preserving each figure tail and
 extension. Do not alter live images until both owner notes are safely public.
 Follow the complete
@@ -21,15 +23,22 @@ for prepare, the automatic link repair, the unchanged re-probe, and finalize.
 Keep old images until those checks pass; never use bare `cp`/`mv`, omit either
 owner guard, or bypass prepare/repair/finalize.
 
-Prepare's inventory checks the note in both directions: an old-slug image
-embed with no exact attachment, including legacy loose `_figN` spellings,
-blocks the rename. Resolve each one before the new note is published, under the
+Prepare's inventory checks the note in both directions, and `publish-note`
+refuses a blocker in either before the new note is public:
+
+- an old-slug image embed with no exact attachment, including legacy loose
+  `_figN` spellings;
+- an `<old_slug>_fig*` file that the old note does not embed exactly once as a
+  filename-only embed, such as one whose embed was deleted in Obsidian.
+
+Resolve each one before the new note is published, under the
 [body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
-The missing reference is never silently omitted from an otherwise successful
-rename. Other-slug and non-image embeds are outside this plan. A body can
-contain both old embeds and new remote images; download only the remote
-images, starting after the highest occupied number, even if they appear
-earlier in document order.
+Never move, rename or delete an unembedded file yourself; report it as
+ownership-unproven. The missing reference is never silently omitted from an
+otherwise successful rename. Other-slug and non-image embeds are outside this
+plan. A body can contain both old embeds and new remote images; download only
+the remote images, starting after the highest occupied number, even if they
+appear earlier in document order.
 
 A note renamed outside this workflow, which `dedup_index.py` lists under
 `stem_mismatch`, is re-stemmed only on request, by
@@ -81,16 +90,27 @@ cap, deadline and counter. Scheme restrictions and redirect checks are not
 optional flags.
 
 Use the returned filename and extension. The helper refuses non-image bytes
-(even when served as `image/png`) and active or external SVG content; never
-rename a refused file to `.png`. A format needing conversion must be converted at a
-scratch path and checked before guarded `place` publication.
+(even when served as `image/png`), active or external SVG content and an SVG
+root without the SVG namespace; never rename a refused file to `.png`.
+
+A stage result with `needs_conversion: "png"` is a TIFF or ICO image, which
+Obsidian does not display. Its `path` is the staged file. Run
+`python3 '<plugin>/shared/scripts/check_parsers.py'` with the converting
+interpreter under the
+[parser-check rule](../../../shared/RUNTIME.md#only-for-pdf-and-image-workflows),
+then convert the file to PNG in the same scratch child, for example with
+Pillow. Open the PNG to check it, embed `<slug>_fig_<N>.png`, and later
+`place --from-file` the PNG at that index. `place` refuses a TIFF or ICO. If
+the check fails or conversion is unavailable, use the failure placeholder.
 
 An occupied `<slug>_fig_<N>.*` slot is refused across extensions; existing
 attachments are never replaced, and a format change takes a new number, so no
 number carries extension twins. Renames enforce the same rule. Embed-shaped
 strings in frontmatter, comments, escaped text or code do not establish
-ownership. Migrate a legacy scalar `source:` to current `sources:` before a
-destructive attachment operation.
+ownership. Every `--owner-note` operation, including a non-overwrite `place`
+and each rename phase, refuses a note whose only origin is a legacy scalar
+`source:`; migrate it first as in
+[reprocessing](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
 
 ## Captions and embeds
 

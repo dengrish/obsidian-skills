@@ -6,7 +6,8 @@ removes a semantic-invalid alias, creates a missing entry or glosses a
 dangling link's term, and when the current request explicitly authorizes a
 deletion. An ordinary run performs
 all of these but deletion once its evidence identifies the duplicate and its
-owner, the wrong title, the invalid alias or the missing concept, or proves
+owner, a wrong title the [retitle triggers](#retitle-an-entry) cover, the
+invalid alias or the missing concept, or proves
 [step 2](#establish-evidence-and-complete-scope)'s boundary for a merge or
 split; Task 1b's [merge and split rules](../SKILL.md#task-1b--content-repair)
 name what never activates one and where a close call goes. A deletion runs
@@ -48,8 +49,9 @@ creation, and it is limited to a concept the wiki already relies on.
    concepts. Inherent mechanisms, stages, conditions, and limitations remain
    with their subject.
 3. Inventory every live reference to a slug or alias that may disappear across
-   all vault Markdown, including body/Related links, `parents:`, MOCs, note
-   transclusions, and relative Markdown links. Resolve each destination from
+   all vault Markdown and Obsidian Canvas boards, including body/Related links,
+   `parents:`, MOCs, note transclusions, relative Markdown links, and a
+   `.canvas` file card's vault path and text card's Markdown. Resolve each destination from
    its owning note, retaining path qualification and heading/block anchors.
    The entry scanner omits some of these surfaces, so scanner silence cannot
    prove that no inbound references remain. A split can send different
@@ -57,9 +59,18 @@ creation, and it is limited to a concept the wiki already relies on.
    and prevents deletion of the old entry. Preserve code/examples, independent
    source origins, distinct targets, image embeds, and literal suggestion-log examples;
    token equality never authorizes a rewrite. The rewrite scope covers
-   references in `Wiki/`, `MOCs/` and `parents:`, and in other vault notes,
-   such as the navigation links of `Articles/` notes and `Reviews/` logs
-   (never their claims, issue text or `sources:`). A dated historical record, such as a `wiki-review-*.md` report, stays
+   references in `Wiki/`, `MOCs/` and `parents:`, and in every other vault
+   note, `Articles/` notes and `Reviews/` logs included. A link, embed or
+   transclusion there that resolves to the retiring name is rewritten under
+   these rules, even inside a claim sentence or a log item's heading,
+   **Issue** or **Verified** line; only the link changes. The wording of
+   claims and issue text, and every `sources:` value, stay unchanged. In a
+   Canvas board, a file card's path takes the destination's vault path and
+   a text card's link is rewritten as in a note; every other byte of the
+   board stays, and a board that is not valid JSON but may cite the name is
+   a dependency this protocol cannot write. A
+   suggestion log, its Fixed section included, is not a historical record.
+   A dated historical record, such as a `wiki-review-*.md` report, stays
    untouched: report its links as now unresolved; they do not retain the old
    entry. The ordinary run's or the request's authorization covers these
    rewrites, with no additional approval. Notes in vault-root `Investments/`
@@ -78,8 +89,13 @@ creation, and it is limited to a concept the wiki already relies on.
   orientation, without duplicating the full explanation across the results.
   Every note a split creates gets today's `created:` and `updated:` dates and
   `read: false`. An ordinary run's split keeps the original entry as the owner
-  of one subject; retiring the original outright is a deletion and runs only
-  on an explicit request. A retained original keeps `created:` and follows
+  of one subject: the one its title names, or, when the title names several
+  (`Precision and recall`) or none, the one with the fullest treatment, then
+  the alphabetically first resulting slug. When the retained original's title
+  does not name exactly that one subject, the same Task 1b retitles it to the
+  subject's canonical title under [Retitle an entry](#retitle-an-entry) after
+  the split publishes. Retiring the original outright is a deletion and runs
+  only on an explicit request. A retained original keeps `created:` and follows
   the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
   `updated:` and `read:`: a pure trim keeps `read:`, and a rewritten
@@ -90,15 +106,18 @@ creation, and it is limited to a concept the wiki already relies on.
   `issues: ""` once all have moved, and keeps a blank spelling it already
   had.
 - A merge chooses one collision-free surviving identity from the evidence and
-  the run's scope. Preserve that entry's `created:` and user-owned appearance
-  fields, integrate nonduplicate claims, and union only valid source
+  the run's scope, titled by the builder's
+  [title rule](../../wiki-build/references/writing.md#title), its
+  acronym-or-full-form choice included. Preserve that entry's `created:` and
+  user-owned appearance fields, integrate nonduplicate claims, and union only valid source
   contributions and same-entity aliases. The survivor gets today's
   `updated:` and `read: false`, whatever its prior `read:`, in place of the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset),
   because it holds combined content the user has not read in that form.
   Carry every merged entry's unresolved
   [user issue](../SKILL.md#user-issues) text into the survivor's `issues:`
-  verbatim. When several entries hold text, write a block list with one item
+  verbatim, carrying a text that several merged entries hold identically
+  once. When several entries hold text, write a block list with one item
   per original list item or string, unless every value is a string: join
   their texts with a space into one double-quoted string, escaping `\` and
   `"`, so the property stays Text. When none holds text, the survivor keeps
@@ -136,8 +155,12 @@ creation, and it is limited to a concept the wiki already relies on.
   keeps only the survivor's: a retired entry's primary card tests the same
   entity, so the merge removes it. Remove every other card
   under the [card set](flashcards.md#card-set) rule, naming any distinct
-  entity it tested as a missing-entry candidate. Quote every moved or removed
-  card with all attachments in the report. Preserve existing exhibits unless
+  entity it tested as a missing-entry candidate. Each link or embed to a
+  removed card's block ID, primary or extra, becomes a plain link to the
+  survivor, keeping any label, in
+  [publish step 2](#publish-in-dependency-order) under the
+  [rewrite scope](#establish-evidence-and-complete-scope). Quote every moved
+  or removed card with all attachments in the report. Preserve existing exhibits unless
   source evidence and the refactor establish their new owner.
 
 ## Publish in dependency order
@@ -166,9 +189,10 @@ filesystem transaction, so order prevents a disappearing target:
    only change is a rewritten link or `parents:` value keeps its dates and
    `read:`.
 3. Re-scan and independently refresh the complete live-reference inventory.
-   Verify that every changed link or transclusion resolves with its retained
-   anchor, every moved source-specific claim keeps its source, and no obsolete
-   destination remains referenced outside untouched historical records; the
+   Verify that every changed link or transclusion resolves, keeping its
+   anchor unless that anchor was a removed card's block ID, which becomes a
+   plain link; that every moved source-specific claim keeps its source; and
+   that no obsolete destination remains referenced outside untouched historical records; the
    Wiki scan alone cannot establish this postcondition.
 4. Only then conditionally remove an obsolete entry. Every substantive claim,
    equation, exhibit, card (including its scheduling attachments and block ID),
@@ -177,10 +201,12 @@ filesystem transaction, so order prevents a disappearing target:
    to delete. A merged-away primary card counts as accounted for once it is
    quoted in the report, because the survivor's primary card tests the same
    entity; so does an extra card removed under the
-   [card set](flashcards.md#card-set) rule. An inbound link or embed that
-   targets a merged-away primary card's block ID cannot keep its anchor, so it
-   is an unresolved inbound reference that retains the old entry. Missing or
-   unverified source support is a reason to retain the content, never
+   [card set](flashcards.md#card-set) rule. Step 2 has already rewritten each
+   link or embed to a removed card's block ID, the merged-away primary card's
+   included, as a plain link to the survivor, keeping any label. Only such a
+   reference in a note the rewrite scope excludes, such as an `Investments/`
+   note, is an unresolved inbound reference that retains the old entry.
+   Missing or unverified source support is a reason to retain the content, never
    evidence that it is disposable. If a later edit or an
    unresolved inbound reference appears, retain the file and report the mixed
    state; never force cleanup to make the refactor look done. A rollback
@@ -202,9 +228,13 @@ Task 1b runs this protocol when all of these hold:
 - the title is a bare cross-domain term under QC item 5 (a word or phrase in
   test (c)'s corpus, or a term that fails test (a), of the builder's
   [disambiguation rule](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation)),
-  the title is itself an API identifier (QC item 6), or the filename differs
-  from its title's slug;
-- the qualified or conceptual title is determinate;
+  the title is itself an API identifier (QC item 6), the filename differs
+  from its title's slug, the title's acronym-or-full-form choice breaks the
+  builder's [title rule](../../wiki-build/references/writing.md#title)
+  (`PPO` for Proximal policy optimization, under QC item 5), or the title of
+  a split's retained original does not name exactly its one remaining
+  subject;
+- the qualified, conceptual or other-form title is determinate;
 - and the destination slug is free.
 
 Otherwise it reports the case with its blocker. For an existing entry, test
@@ -225,6 +255,9 @@ retitle also activates this protocol.
    follows wiki-build's collision decisions, and the retitle proceeds only
    when they find a distinct entity. Refuse an occupied or ambiguous
    portable-equivalent destination; never pick one owner by directory order.
+   A destination that differs from the old filename only in case or Unicode
+   normalization is a respelling of the same file: record only the source,
+   whose own match is not an occupant.
 2. Rebuild the entry coherently under the new canonical title. Preserve its
    `created:`, sources, review state, `issues:` value, scheduling metadata,
    appearance/publish properties and substantive content. A retitle alone
@@ -236,8 +269,8 @@ retitle also activates this protocol.
    misleading name is not retained merely to make old links resolve.
 3. Inventory the references to the old filename and its aliases under
    [step 3 above](#establish-evidence-and-complete-scope), whose write scope
-   applies: inbound links in `Wiki/`, `MOCs/`, `parents:` and other vault
-   notes are rewritten, a dated historical record stays untouched and is
+   applies: inbound links in `Wiki/`, `MOCs/`, `parents:`, other vault
+   notes and Canvas boards are rewritten, a dated historical record stays untouched and is
    reported, and an `Investments/` reference blocks the retitle. Rewrite only
    references that resolve to this exact owner, preserving display labels,
    headings, block anchors and surrounding bytes; a Related-footer label
@@ -252,6 +285,39 @@ retitle also activates this protocol.
    historical records, and the new entry must pass the current entry rules.
    Then rebuild the connected Task 3 closure from the resulting tree, which a
    default pass's Task 3 does, and re-scan.
+
+   A respelling has no exclusive create and no removal. Publish the rebuilt
+   entry under its old spelling against step 1's record. Re-record that path
+   with `snapshot --replace`, re-read it to confirm its title still slugs to
+   the new spelling, and move it:
+
+   ```bash
+   python3 '<plugin>/shared/scripts/publish_files.py' move --vault '<vault>' \
+       --snapshots '<scratch>/lint-snapshots.json' '<old path>' '<new path>'
+   ```
+
+   `move` keeps the same file. It refuses a changed entry and any other file
+   that shares the new name's case/Unicode identity. Then publish the inbound
+   and hierarchy rewrites and re-scan: every changed link must resolve
+   uniquely to the entry, and neither `item5` nor `rename_candidates` may
+   list it. Rebuild the Task 3 closure as above.
+
+### Finish an interrupted retitle
+
+An entry found beside its own retitle destination is a retitle that
+published the destination but never removed the old file. That holds when
+the destination defines the same entity under the old entry's determinate
+retitled title, carries the old entry's `created:`, and holds every claim,
+equation, exhibit, card (block ID included) and source of the old entry, and
+each of its user issues that the retitle did not resolve. Finish that
+retitle; do not merge. Record both files with `publish_files.py snapshot`
+before reading them, rewrite the inbound references still pointing at the
+old entry under step 3, then run step 4's re-scan and remove the old entry
+against its record. The destination keeps its `read:` and `issues:` value;
+only an issue this run resolves resets `read:` under
+[User issues](../SKILL.md#user-issues). When the old entry holds anything
+the destination lacks, such as a later user edit or issue, the pair goes to
+the [merge check](qc-items.md#5-filename-collision-and-disambiguation).
 
 ## Remove a semantic-invalid alias
 
@@ -379,15 +445,22 @@ as blocked by those entries.
    to a successor drops a heading or block anchor the successor does not
    have, keeping its label. `parents:` values and links in Task 3's generated
    MOCs are left for step 5 and do not block the removal, despite
-   [publish step 3](#publish-in-dependency-order); a link in any other
-   `MOCs/` file or a legacy vault-root MOC is retargeted or unlinked like any
-   other inbound link. A note whose only change is a rewritten link keeps its
+   [publish step 3](#publish-in-dependency-order). The exception is a
+   deletion that leaves the entry's discipline with no member, as deleting
+   its last root does: Task 3 then
+   [preserves that MOC as inactive](hierarchy.md#build-or-maintain-the-moc-files)
+   and never re-derives it. So that MOC's link is retargeted or unlinked like
+   any other inbound link, and the report names the now-inactive MOC, whose
+   removal needs its own explicit request. A link in any other `MOCs/` file
+   or a legacy vault-root MOC is also retargeted or unlinked like any other
+   inbound link. A note whose only change is a rewritten link keeps its
    dates and `read:`.
 3. Quote the entry's card, with its attachments, and any non-blank `issues:`
    text in the report.
 4. Re-scan, then run `publish_files.py remove` against step 1's record. A
    later edit to the entry, or an inbound reference step 2 could not resolve
-   (not the `parents:` values and generated-MOC links step 5 re-derives),
+   (not the `parents:` values and active generated-MOC links step 5
+   re-derives),
    retains the file; report the mixed state.
 5. Tasks 1, 2 and 3 on the affected closure then re-derive the children's
    `parents:` and the MOCs; inside a default pass, its own refresh, Task 2 and

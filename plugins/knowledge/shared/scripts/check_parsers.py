@@ -11,7 +11,8 @@ PDF or image workflow will use, after creating its environment:
 
 ``MINIMUMS`` mirror the floors in ``requirements.txt`` (pypdf) and
 ``skills/figure-extract/scripts/requirements.txt`` (PyMuPDF, Pillow). Releases
-compare numerically; a prerelease of a floor release (``12.3.0rc1``) fails.
+compare numerically; a prerelease of a floor release in any PEP 440 spelling
+(``12.3.0rc1``, ``12.3.0.rc1``, ``12.3.0-dev``) fails.
 Standard library only; the parsers are imported only after their versions
 pass. Exit codes: 0 every floor met and every parser imports, 1 otherwise.
 """
@@ -52,7 +53,8 @@ IMPORTS = {
 }
 
 _RELEASE = re.compile(r"^\d+(?:\.\d+)*")
-_PRERELEASE = ("a", "b", "rc", ".dev", "dev")
+#: A PEP 440 pre-release or development marker, with its optional separator.
+_PRERELEASE = re.compile(r"[._-]?(?:alpha|a|beta|b|c|rc|preview|pre|dev)")
 
 
 def _dotted(parts):
@@ -86,7 +88,7 @@ def find_problems(python_version, installed, minimums=None):
         release += (0,) * (width - len(release))
         floor = tuple(minimum) + (0,) * (width - len(minimum))
         prerelease_at_floor = (release == floor
-                               and suffix.startswith(_PRERELEASE))
+                               and _PRERELEASE.match(suffix) is not None)
         if release < floor or prerelease_at_floor:
             problems.append("%s %s is below %s"
                             % (package, found, _dotted(minimum)))
@@ -147,8 +149,25 @@ def run_self_test(verbose=False):
         ("a development build of the floor fails", current,
          with_versions(pypdf="6.16.1.dev0"),
          ["pypdf 6.16.1.dev0 is below 6.16.1"]),
+        ("a separated release candidate of the floor fails", current,
+         with_versions(Pillow="12.3.0.rc1"),
+         ["Pillow 12.3.0.rc1 is below 12.3.0"]),
+        ("a hyphenated release candidate of the floor fails", current,
+         with_versions(Pillow="12.3.0-rc1"),
+         ["Pillow 12.3.0-rc1 is below 12.3.0"]),
+        ("the c spelling of a release candidate fails", current,
+         with_versions(Pillow="12.3.0c1"),
+         ["Pillow 12.3.0c1 is below 12.3.0"]),
+        ("the preview spelling of a release candidate fails", current,
+         with_versions(Pillow="12.3.0preview2"),
+         ["Pillow 12.3.0preview2 is below 12.3.0"]),
+        ("a hyphenated development build of the floor fails", current,
+         with_versions(Pillow="12.3.0-dev"),
+         ["Pillow 12.3.0-dev is below 12.3.0"]),
         ("a post-release of the floor passes", current,
          with_versions(pypdf="6.16.1.post1"), []),
+        ("an implicit post-release of the floor passes", current,
+         with_versions(Pillow="12.3.0-1"), []),
         ("a local build of the floor passes", current,
          with_versions(Pillow="12.3.0+local"), []),
         ("a prerelease of a later release passes", current,

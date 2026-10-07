@@ -44,6 +44,13 @@ for every load-bearing citation, including the basis/approach, limitations and
 Availability, and check physical page bounds. A heading-search result is only a
 reading aid.
 
+Equations are claims too. The text capture and the finder are unreliable for
+mathematical notation: they drop accents such as hats and bars, and lose
+parentheses and the placement of superscripts, subscripts and indices (a
+printed θ̂ = (XᵀX)⁻¹Xᵀy captures as `θ = X⊺X −1X⊺y`). Check every display and
+inline formula symbol by symbol on its source page image, as for a figure or
+table image, and cite that page.
+
 For OCR or unavailable text search, use the [page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)
 and record that method explicitly. OCR misses are checked against page images;
 a corrected OCR token is not permission to change the original PDF. If neither
@@ -75,9 +82,19 @@ Walk the callout, headings, body and captions with their supporting pages open:
 - [ ] The finding and its necessary qualification remain together in the same
   paragraph/bullet. Rung 1 still needs scope; it does not require an invented
   design weakness. A modal verb alone does not explain a weaker design.
-- [ ] Terms are glossed once for a scientist from another field. Quantities are
-  explained once without turning a hazard ratio into absolute risk or a
-  correlation into causal explained variance.
+- [ ] A concept with its own Wiki entry is linked to that entry at its first
+  body-prose mention and not explained again; each link resolves to an entry
+  for the same concept ([links to Wiki entries](note-format.md#links-to-wiki-entries)).
+  Terms with no entry are glossed once for a scientist from another field.
+  Quantities are explained once without turning a hazard ratio into absolute
+  risk or a correlation into causal explained variance. Each display and each
+  complexity, scaling and iteration bound carries the explanation
+  [note format](note-format.md#prose-and-key-messages) requires, with no
+  invented derivation or reason.
+- [ ] Parallel facts about several items sit one bullet per item under the
+  sentence that introduces them, each stating the same property, as do
+  time-ordered stages that each carry their own facts; causal or procedural
+  chains and arguments stay prose.
 - [ ] The selected [body mode](note-format.md#choose-the-body-mode) matches the
   document's main contribution. Empirical notes identify the design and walk an
   actual procedure where one exists. Argument/synthesis notes state the real
@@ -102,12 +119,15 @@ Walk the callout, headings, body and captions with their supporting pages open:
 
 ## Check provenance and exhibits
 
-- [ ] The title, author order, format and date components come from this PDF.
-  Only unstated month/day components are padded. Any second `sources:` URL is
-  this document's own printed DOI/arXiv identifier (title page, header or
-  footer), not a cited or affected work's, and not inferred; Book has none. An
+- [ ] The title, author order, format and date components come from this PDF
+  or, for a chapter that does not print a byline or date, from its parent book
+  as [note format](note-format.md#frontmatter) describes. Only unstated
+  month/day components are padded. Any second `sources:` URL is this
+  document's own printed DOI/arXiv identifier (title page, header or footer),
+  not a cited or affected work's, and not inferred; Book has none. An
   undated PDF uses `published: null` with its canonical `_nd` stem, or the
-  deliberately preserved noncanonical name recorded at intake.
+  deliberately preserved noncanonical name recorded at intake; a chapter with
+  a dated stem never does.
 - [ ] The first `sources:` PDF exists with the selected unique stem, and the
   final note uses that exact stem or, on an authorized rewrite, the existing
   owned note's recorded spelling. Citations target this PDF and lie within its
@@ -126,9 +146,10 @@ Walk the callout, headings, body and captions with their supporting pages open:
   ([note format](note-format.md#body-content)). “Not stated” marks a relevant
   category with no disclosure; inapplicable labels are omitted, not filled with
   boilerplate.
-- [ ] Every embed is an inventoried file under this PDF's stem and has been
-  opened to confirm identity and readability. A valid filename is not proof of
-  the image contents; a wrong crop this run wrote returns to [intake's figure
+- [ ] Every embed is an inventoried file under this PDF's stem, or a split
+  book's chapter stem, and has been opened to confirm identity and
+  readability. A valid filename is not proof of the image contents; a wrong
+  crop this run wrote returns to [intake's figure
   preparation](../SKILL.md#prepare-the-figure-inventory), and a wrong
   pre-existing crop is skipped and reported. No duplicate composite/panel
   illustrates the same claim.

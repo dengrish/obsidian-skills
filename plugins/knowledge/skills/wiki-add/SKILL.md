@@ -59,10 +59,15 @@ python3 '<skill>/scripts/backlog.py' scan '<backlog.md>' \
     --out '<scratch>/backlog-snapshot-<n>.json'
 ```
 
-Read the complete result and retain the snapshot. Nested lines are context
-for resolving their parent item, never extra requests; an unindented line
-reported as continuing an item is part of that item's request text. Report
-each `report_only` line with its line and reason. An
+Read the complete result and retain the snapshot. Each request is one
+flush-left list item: `- [ ] Topic`, or an unmarked `- Topic` or `1. Topic`,
+which completion marks `[x]`. Plain lines, table rows and indented or quoted
+tasks come back in `report_only` and are never processed. Nested lines are
+context for resolving their parent item, never extra requests; each nested
+open task is also reported, so the report can ask the user to move it to the
+top level. An unindented line reported as continuing the request above is
+part of that request's text. Report each `report_only` line with its line
+and reason. An
 `unclosed frontmatter, fence or comment` report is a valid result: process the
 returned items, but report the queue as incompletely scanned, never as empty
 or fully processed. A missing, crashing or malformed helper result blocks
@@ -85,7 +90,8 @@ under the builder's [title](../wiki-build/references/writing.md#title) and
 [alias](../wiki-build/references/writing.md#aliases) rules. A trailing
 parenthesized acronym of the preceding name is the same entity's other form,
 never a disambiguator; the title rule picks which form is the title
-(`Direct preference optimization` with alias `dpo`, but `GAN`). A
+(`Direct preference optimization` with alias `dpo`, but `GAN`: only the
+builder's listed acronyms override a full form with textbook usage). A
 parenthesized field such as `(ML)` is a disambiguation hint, never an alias.
 
 Write the title, each alias form and the other pending candidates' titles to
@@ -226,9 +232,12 @@ matches that request's `absent` record.
 
 **Revalidate (builder step 7.7).** Rewrite `<scratch>/candidates.json` with
 this item's final title and every alias form the draft carries or step 2
-probed, in place of the builder's title-only list. Rerun step 2's index and
+probed, each once, in place of the builder's title-only list. Rerun step 2's index and
 collision probes against the real Wiki (a private empty folder while Wiki is
-absent), then verify this item's snapshots:
+absent) and the
+[ownership check](references/research.md#check-ownership-of-a-candidate-source)
+of each cited URL against the real `Articles/` (a private empty directory
+while it is absent), then verify this item's snapshots:
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' verify --vault '<vault>' \

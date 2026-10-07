@@ -186,10 +186,9 @@ def preview_path(out_dir, pdf_path, idx):
     """Where the preview for 0-indexed page `idx` of `pdf_path` is written.
 
     The filename mirrors the PDF's own stem exactly — including any `_src`
-    suffix. An earlier version stripped `_src` to match the markdown filename,
-    which made `X.pdf` and `X_src.pdf` collide on one preview name, and no
-    longer matches the figure convention either (figures key off the PDF stem,
-    `_src` included).
+    suffix — so `X.pdf` and `X_src.pdf` never share a preview name, and it
+    matches the figure convention (figures key off the PDF stem, `_src`
+    included).
     """
     stem = os.path.splitext(os.path.basename(pdf_path))[0]
     return os.path.join(out_dir, f"{stem}_page{idx + 1}.png")

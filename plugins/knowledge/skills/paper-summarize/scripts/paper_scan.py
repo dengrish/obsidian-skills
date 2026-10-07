@@ -15,8 +15,9 @@ that decide a run:
     with the wrong `source:` is a `collision`, and nothing is written.
   * **Which must be refused** because pdf-organize has not named them
     (`CONVENTIONS.md` §1a).  Every figure and every note in this pipeline keys
-    to the PDF's on-disk stem, so a rename afterwards orphans the whole set
-    under a name nothing looks for — invisibly.
+    to the PDF's on-disk stem, so that stem should be the durable name.  A
+    later rename goes through pdf-organize, which carries the PDF, its note,
+    its figures and every link together.
   * **Which are feed-owned attachments** (`CONVENTIONS.md` §1): the
     collector's `x-…`/`rss-…` PDFs (`naming.is_feed_attachment`).  Their names
     belong to its receipts, so a folder sweep skips them as `feed` and never
@@ -24,7 +25,9 @@ that decide a run:
     basename inventory.
   * **Which figures exist for each stem**, under §8a's consumer glob
     `[source_stem]_fig*` — matched on `_fig`, never the stricter `_fig_`, and
-    at any extension.
+    at any extension.  A split book's figures are its chapters' figures, so
+    its row also lists its chapter PDFs (`split_book_chapters`) and their
+    crops (`chapter_figures`).
 
 Stdlib only, and it opens no PDF: `paper_text.py` is the one that does.  The
 canonical-stem and chapter-of-which-book rules are imported from
@@ -55,6 +58,13 @@ clipping-clean. A note whose basename differs only by case or Unicode
 normalization still occupies the target's portable identity. Its origin decides
 whether it is ours; a foreign or multiply occupied identity is a `collision`,
 never a second note or an overwrite.
+
+Canonical `Sources/Images/` output implies its vault, and each scan then
+proves every selected PDF's basename unique across the whole vault. A preview
+that reads a scratch image folder passes `--vault '<vault>'` to keep that
+proof. A named PDF's stem is its stored spelling, never a typed case or
+Unicode variant; for an external readable copy it is the sole vault owner's,
+and a copy that does not keep the owner's exact basename is a `collision`.
 
 Add `--json` for the machine-readable form, `--test` to run the self-test.
 Three overrides relax a skip: `--allow-unorganized`, `--include-split-books`
@@ -115,8 +125,11 @@ from naming import (chapter_book_stem, core_stem, is_feed_attachment,
                     looks_canonical, stem_of)
 from portable_names import portable_identity
 from vault_artifacts import (inventory_pdfs, inventory_source_figures,
-                             local_link_matches, output_vault_root, verify_selected_pdf)
-from yaml_scalars import parse_source_fields, read_note_origin, read_regular_text
+                             local_link_matches, on_disk_spelling,
+                             output_vault_root, verify_selected_pdf)
+from yaml_scalars import (parse_source_fields, read_note_origin,
+                          read_note_origin_detail, read_regular_text,
+                          yaml_lines)
 
 #: Figure-label namespaces, ranked so a listing reads main → appendix →
 #: supplementary → Supporting Information → Extended Data.  Longest prefix
@@ -339,7 +352,7 @@ def body_is_embed_only(path):
     # (`title: "A Study --- Part One"`), which shifts the body window and
     # makes a legacy embed-note read as a real summary -- the exact outcome
     # this function exists to prevent.
-    lines = text.splitlines()
+    lines = yaml_lines(text)
     while lines and not lines[0].strip():
         lines.pop(0)
     body_lines = lines
@@ -370,7 +383,7 @@ def bare_embed(path):
     if text is None:
         return None
     body = text.lstrip()
-    lines = body.splitlines()
+    lines = yaml_lines(body)
     if lines and _frontmatter_fence(lines[0]):
         end = next((i for i in range(1, len(lines))
                     if _frontmatter_fence(lines[i])), None)
@@ -543,8 +556,40 @@ def classify(stem, books, note_state, allow_unorganized=False,
     return "done" if note_state == "ours" else "new"
 
 
+def _inside(path, root):
+    """True when `path` is lexically at or under `root`."""
+    path = os.path.abspath(os.fspath(path))
+    root = os.path.abspath(os.fspath(root))
+    try:
+        return os.path.commonpath([path, root]) == root
+    except ValueError:
+        return False
+
+
+def scan_vault_root(images, vault=None):
+    """The vault whose PDF namespace the scan proves unique, or None.
+
+    Canonical `Sources/Images` output implies its vault. `vault` names it
+    when a preview reads a scratch image folder, and it must agree with any
+    vault the image folder implies.
+    """
+    implied = output_vault_root(images)
+    if vault is None:
+        return implied
+    root = os.path.abspath(os.path.expanduser(os.fspath(vault)))
+    if implied is not None and os.path.abspath(os.fspath(implied)) != root:
+        try:
+            same = os.path.samefile(root, implied)
+        except (OSError, ValueError):
+            same = False
+        if not same:
+            raise ValueError("--vault %r is not the vault of --images %r (%s)"
+                             % (root, images, os.fspath(implied)))
+    return root
+
+
 def scan(src, notes, images, allow_unorganized=False,
-         include_books=False, include_chapters=None):
+         include_books=False, include_chapters=None, vault=None):
     note_index = article_note_index(notes)
     # Explicit naming overrides every folder filter, here as everywhere else
     # in this plugin: `--src` pointed at one PDF means process that PDF.
@@ -552,23 +597,68 @@ def scan(src, notes, images, allow_unorganized=False,
     if include_chapters is None:
         include_chapters = named
     pdfs = find_pdfs(src)
-    vault_root = output_vault_root(images)
+    if named:
+        # A case or Unicode variant opens the same file on an insensitive
+        # filesystem, but the note and figures take the stored spelling.
+        pdfs = [on_disk_spelling(pdfs[0])]
+    vault_root = scan_vault_root(images, vault)
     vault_inventory = (inventory_pdfs(vault_root)
                        if vault_root is not None else None)
-    stems = [stem_of(p) for p in pdfs]
+    inventory_detail = ""
+    if vault_inventory is not None and not vault_inventory.complete:
+        # Name the unreadable or looping vault paths, so the user can repair
+        # them. The gate's reason alone names none.
+        errors = [item for item in vault_inventory.findings
+                  if item.severity == "error"]
+        inventory_detail = "; ".join("%s: %s" % (item.path, item.message)
+                                     for item in errors[:3])
+        if len(errors) > 3:
+            inventory_detail += "; and %d more" % (len(errors) - 3)
+    gates, stems, owners, copy_errors = [], [], [], []
+    for index, path in enumerate(pdfs):
+        gate = (verify_selected_pdf(vault_root, path, inventory=vault_inventory)
+                if vault_inventory is not None else None)
+        owner, copy_error = path, ""
+        if gate is not None and gate.unique:
+            # The sole vault owner's stored name is the source identity, also
+            # for a typed variant or an external readable copy of it. An
+            # external copy stays the file to read, and figure-extract names
+            # the figures after it, so it must keep the owner's basename.
+            owner = os.fspath(gate.matches[0])
+            if _inside(path, vault_root):
+                pdfs[index] = owner
+            elif os.path.basename(owner) != os.path.basename(path):
+                copy_error = ("the readable copy must keep the vault PDF's "
+                              "exact basename %r" % os.path.basename(owner))
+        stems.append(stem_of(owner))
+        gates.append(gate)
+        owners.append(owner)
+        copy_errors.append(copy_error)
     books = books_in(stems)
     by_stem = {}
     for path, stem in zip(pdfs, stems):
         by_stem.setdefault(_name_key(stem), []).append(path)
+    # A split book's figures are its chapters' figures (CONVENTIONS §1a, §8):
+    # figure-extract files them under each chapter's stem and never the
+    # book's. A named book is scanned alone, so its chapters come from the
+    # vault-wide inventory; without one, only this scan's own PDFs count.
+    chapter_pool = ([entry.path for entry in vault_inventory.entries
+                     if entry.kind in ("regular", "symlink")]
+                    if vault_inventory is not None else pdfs)
+    chapters_by_book = {}
+    for chapter in chapter_pool:
+        book = chapter_book_stem(stem_of(chapter), is_stem=True)
+        if book:
+            chapters_by_book.setdefault(_name_key(book), set()).add(
+                os.fspath(chapter))
     rows = []
-    for path, stem in zip(pdfs, stems):
-        selected_gate = (verify_selected_pdf(vault_root, path,
-                                             inventory=vault_inventory)
-                         if vault_inventory is not None else None)
+    for path, stem, selected_gate, owner, copy_error in zip(
+            pdfs, stems, gates, owners, copy_errors):
         expected_note = os.path.join(notes, stem + ".md")
         note_matches = note_index.get(_name_key(stem + ".md"), [])
         note_conflicts = list(note_matches) if len(note_matches) > 1 else []
         note = note_matches[0] if len(note_matches) == 1 else expected_note
+        origin_error = ""
         if not note_matches:
             state, existing = "absent", None
         elif note_conflicts:
@@ -581,25 +671,31 @@ def scan(src, notes, images, allow_unorganized=False,
             state, existing = "theirs", None
         else:
             existing = note_source(note)
-            if source_names(existing, stem, pdf_path=path, vault_root=vault_root,
+            if source_names(existing, stem, pdf_path=owner, vault_root=vault_root,
                             note_path=note):
                 state = "legacy" if body_is_embed_only(note) else "ours"
             elif existing is None and source_names(
-                    bare_embed(note), stem, pdf_path=path,
+                    bare_embed(note), stem, pdf_path=owner,
                     vault_root=vault_root, note_path=note):
                 # No origin field, and the body is one embed of this PDF:
                 # the oldest embed-note, which pdf-organize also keys here.
                 state = "legacy"
             else:
                 state = "theirs"
+                if existing is None:
+                    # Malformed metadata may hide this PDF's own note, so
+                    # the report must not call it a different note.
+                    origin_error = read_note_origin_detail(note)[1] or ""
         conflicts = [p for p in by_stem[_name_key(stem)] if p != path]
-        source_gate_error = ""
+        source_gate_error = copy_error
         if selected_gate is not None and not selected_gate.unique:
             conflicts = sorted(set(conflicts + [
                 p for p in selected_gate.matches
                 if os.path.abspath(p) != os.path.abspath(path)
             ]))
             source_gate_error = selected_gate.reason
+            if not selected_gate.inventory.complete and inventory_detail:
+                source_gate_error += ": " + inventory_detail
         status = classify(stem, books, state, allow_unorganized,
                           include_books, include_chapters, named)
         feed = is_feed_attachment(stem, is_stem=True)
@@ -608,27 +704,35 @@ def scan(src, notes, images, allow_unorganized=False,
             # Basename-only sources cannot distinguish two different PDFs in
             # nested folders, and both would otherwise write the same note.
             status = "collision"
+        split_chapters = ([] if status == "feed" else sorted(chapters_by_book.get(
+            _name_key(core_stem(stem, is_stem=True)), ())))
         try:
             # A skipped feed attachment is not a unit of work, so its image
             # slots are not inspected and cannot change the exit status.
             figures = [] if status == "feed" else figures_for(images, stem)
+            chapter_figures = [dict(figure, chapter=stem_of(chapter))
+                               for chapter in split_chapters
+                               for figure in figures_for(images, stem_of(chapter))]
             figure_inventory_error = ""
         except ValueError as exc:
             # Keep the rest of a vault scan useful. This one paper remains
             # blocked, but a foreign/symlinked occupant under its stem no
             # longer erases every other row from the report.
-            figures = []
+            figures, chapter_figures = [], []
             figure_inventory_error = str(exc)
         rows.append({
             "pdf": path,
             "stem": stem,
             "note": note,
             "note_source": existing,
+            "note_origin_error": origin_error,
             "status": status,
             "source_conflicts": conflicts,
             "source_gate_error": source_gate_error,
             "note_conflicts": note_conflicts,
             "figures": figures,
+            "split_book_chapters": split_chapters,
+            "chapter_figures": chapter_figures,
             "figure_inventory_error": figure_inventory_error,
             "feed_attachment": feed,
             "unorganized_override": bool(
@@ -696,6 +800,16 @@ def render(result):
             lines.append("      %d derived variant file(s) share their base "
                          "figure number; they are alternatives, not extra "
                          "figures" % variants)
+        if row.get("split_book_chapters") and row["status"] != "book":
+            chapter_logical = {
+                (_name_key(f["chapter"]), _name_key(
+                    f.get("variant_of") or f.get("panel_of") or f["label"] or "?"))
+                for f in row.get("chapter_figures", [])}
+            lines.append("      split book: its figures are filed under its %d "
+                         "chapter(s), %d figure(s) in chapter_figures. Select "
+                         "and extract from the chapter PDFs, never from this "
+                         "whole-book PDF"
+                         % (len(row["split_book_chapters"]), len(chapter_logical)))
         if row.get("figure_inventory_error"):
             lines.append("      FIGURE INVENTORY BLOCKED: %s. Skip this PDF "
                          "until the unsafe occupant is resolved; other rows "
@@ -728,8 +842,10 @@ def render(result):
                          "make the filename durable")
         if row["status"] == "unorganized":
             lines.append("      run pdf-organize on this file first, or pass "
-                         "--allow-unorganized and accept that a later rename "
-                         "orphans its figures and its note (CONVENTIONS.md §1a)")
+                         "--allow-unorganized for a deliberate one-off: its "
+                         "note and figures then key to this provisional name, "
+                         "and a later pdf-organize rename carries them "
+                         "(CONVENTIONS.md §1a)")
         if row["status"] == "book":
             lines.append("      its chapters are in this scan, so this whole-book "
                          "PDF is skipped to avoid a duplicate. Chapters remain "
@@ -761,12 +877,23 @@ def render(result):
                     and not row.get("source_gate_error")
                     and not row.get("note_conflicts")):
                 source = row["note_source"]
-                lines.append("      %s already exists and its source: is %s -- a "
-                         "different note under the same name. Do NOT write "
-                         "over it; report both and let the user rename one."
-                         % (shown_text(row["note"]),
-                            '"%s"' % shown_text(source) if source is not None
-                            else "none"))
+                if row.get("note_origin_error"):
+                    lines.append("      %s already exists but its origin "
+                                 "metadata cannot be read (%s), so the scan "
+                                 "cannot tell whose note it is. Do NOT write "
+                                 "over it; if it is this PDF's summary, ask "
+                                 "the user to repair that metadata and rescan "
+                                 "(it then reports done); otherwise ask them "
+                                 "to rename or move it."
+                                 % (shown_text(row["note"]),
+                                    shown_text(row["note_origin_error"])))
+                else:
+                    lines.append("      %s already exists and its source: is %s -- a "
+                             "different note under the same name. Do NOT write "
+                             "over it; report both and let the user rename one."
+                             % (shown_text(row["note"]),
+                                '"%s"' % shown_text(source) if source is not None
+                                else "none"))
         if row["status"] == "legacy":
             lines.append("      %s is an embed-note left by an older skill, "
                          "not a summary. Nothing here overwrites a user file: "
@@ -1467,6 +1594,22 @@ def run_self_test():
     _mk("Articles/case_foreign_2025.MD",
         '---\nsources:\n  - "https://example.com/foreign"\n---\n'
         'A clipping.\n')
+    # Malformed origin metadata may hide this PDF's own note, so its report
+    # names the problem instead of calling it a different note.
+    _mk("Sources/PDFs/Own_Dup_2025.pdf")
+    _mk("Articles/Own_Dup_2025.md",
+        '---\nsources:\n  - "[[Own_Dup_2025.pdf]]"\n'
+        'sources:\n  - "[[Own_Dup_2025.pdf]]"\n---\n\n## Methods\n\nx\n')
+    _mk("Sources/PDFs/Own_Null_2025.pdf")
+    _mk("Articles/Own_Null_2025.md",
+        '---\nsources:\n  - "[[Own_Null_2025.pdf]]"\n  - null\n---\n'
+        '\n## Methods\n\nx\n')
+    _mk("Sources/PDFs/Foreign_None_2025.pdf")
+    _mk("Articles/Foreign_None_2025.md", "---\ntitle: Diary\n---\nprose\n")
+    # U+2028 and NEL are YAML content, not line breaks.
+    _mk("Sources/PDFs/Bare_Sep_2020.pdf")
+    _mk("Articles/Bare_Sep_2020.md",
+        '---\ntitle: "A B\x85C"\n---\n\n![[Bare_Sep_2020.pdf]]\n')
     res = scan(os.path.join(_v, "Sources", "PDFs"),
                os.path.join(_v, "Articles"),
                os.path.join(_v, "Sources", "Images"))
@@ -1486,6 +1629,10 @@ def run_self_test():
                        ("Bare_Open_2020", "collision"),
                        ("Case_Owner_2025", "done"),
                        ("Case_Foreign_2025", "collision"),
+                       ("Own_Dup_2025", "collision"),
+                       ("Own_Null_2025", "collision"),
+                       ("Foreign_None_2025", "collision"),
+                       ("Bare_Sep_2020", "legacy"),
                        ("Prince_UDL_2026_src", "book"),
                        ("Prince_UDL_2026_01_Intro", "chapter"),
                        ("Kuhn_X_2012", "book"),
@@ -1505,6 +1652,25 @@ def run_self_test():
             or 'its source: is "https://example.com/g"' not in _report):
         bad += 1
         print("FAIL a collision misquoted the existing note's source:\n%s"
+              % _report)
+    n += 1
+    _origin_errors = {r["stem"]: r["note_origin_error"] for r in res["pdfs"]}
+
+    def _said(stem):
+        return " ".join(line for line in _report.split("\n")
+                        if stem + ".md" in line)
+    if ([_origin_errors.get(stem) for stem in (
+            "Own_Dup_2025", "Own_Null_2025", "Foreign_None_2025",
+            "Bare_Other_2020")]
+            != ["duplicate source field: sources",
+                "sources contains an empty or null item", "", ""]
+            or any("cannot be read" not in _said(stem)
+                   or "a different note" in _said(stem)
+                   for stem in ("Own_Dup_2025", "Own_Null_2025"))
+            or "its source: is none -- a different note"
+            not in _said("Foreign_None_2025")):
+        bad += 1
+        print("FAIL malformed own-note metadata read as a different note:\n%s"
               % _report)
     if symlink_supported:
         blocked_figure = os.path.join(
@@ -1534,6 +1700,38 @@ def run_self_test():
     except Exception as exc:
         bad += 1
         print("FAIL render(): %s: %s" % (type(exc).__name__, exc))
+
+    # A split book's figures are its chapters' figures (CONVENTIONS §1a, §8).
+    # A named book found no crop under its own stem, so the documented
+    # zero-count repair extracted the whole book a second time.
+    _mk("Sources/Images/kuhn_x_2012_01_Intro_fig_1.png")
+    named_book = scan(os.path.join(_v, "Sources", "PDFs", "Kuhn_X_2012.pdf"),
+                      os.path.join(_v, "Articles"),
+                      os.path.join(_v, "Sources", "Images"))
+    book_row = named_book["pdfs"][0]
+    n += 1
+    if (book_row["status"] != "new" or book_row["figures"]
+            or [os.path.basename(p) for p in book_row["split_book_chapters"]]
+            != ["kuhn_x_2012_01_Intro.pdf"]
+            or [(f["file"], f["chapter"]) for f in book_row["chapter_figures"]]
+            != [("kuhn_x_2012_01_Intro_fig_1.png", "kuhn_x_2012_01_Intro")]):
+        bad += 1
+        print("FAIL a named split book did not list its chapters' figures: %r"
+              % book_row)
+    n += 1
+    if "never from this whole-book PDF" not in render(named_book):
+        bad += 1
+        print("FAIL a named split book was not routed to its chapter PDFs:\n%s"
+              % render(named_book))
+    # NEAR MISS: a named chapter and an ordinary paper are not split books.
+    n += 1
+    for named in ("Kuhn_X_2012/kuhn_x_2012_01_Intro.pdf", "Doe_Foo_2025.pdf"):
+        named_row = scan(os.path.join(_v, "Sources", "PDFs", *named.split("/")),
+                         os.path.join(_v, "Articles"),
+                         os.path.join(_v, "Sources", "Images"))["pdfs"][0]
+        if named_row["split_book_chapters"] or named_row["chapter_figures"]:
+            bad += 1
+            print("FAIL %s was read as a split book: %r" % (named, named_row))
 
     for sub in ("Sources/PDFs/first", "Sources/PDFs/second"):
         os.makedirs(os.path.join(_v, *sub.split("/")))
@@ -1711,6 +1909,154 @@ def run_self_test():
             bad += 1
             print("FAIL folder scan did not reuse one whole-vault PDF inventory")
 
+    # An incomplete vault inventory names the paths that broke it. The bare
+    # reason left the user nothing to repair.
+    with tempfile.TemporaryDirectory(dir=_d, prefix="cycle-vault-") as _cycle_vault:
+        for _sub in ("Sources/PDFs", "Sources/Images", "Articles", "Projects"):
+            os.makedirs(os.path.join(_cycle_vault, _sub))
+        _cycle_pdf = os.path.join(_cycle_vault, "Sources/PDFs/Doe_Cycle_2025.pdf")
+        with open(_cycle_pdf, "wb") as _handle:
+            _handle.write(b"%PDF-1.4\n")
+        _cycle_link = os.path.join(_cycle_vault, "Projects", "up")
+        try:
+            os.symlink(_cycle_vault, _cycle_link, target_is_directory=True)
+            _have_cycle = True
+        except (OSError, NotImplementedError):
+            _have_cycle = False
+        n += 1
+        if _have_cycle:
+            _cycle_row = scan(_cycle_pdf, os.path.join(_cycle_vault, "Articles"),
+                              os.path.join(_cycle_vault, "Sources/Images"))["pdfs"][0]
+            if (_cycle_row["status"] != "collision"
+                    or _cycle_link not in _cycle_row["source_gate_error"]):
+                bad += 1
+                print("FAIL an incomplete vault inventory did not name its "
+                      "cause: %r" % _cycle_row)
+
+    # A preview reads a scratch image folder. `--vault` keeps the vault-wide
+    # basename proof, so an Inbox duplicate still blocks the row.
+    with tempfile.TemporaryDirectory(dir=_d, prefix="preview-vault-") as _preview:
+        _pv = os.path.join(_preview, "vault")
+        for _sub in ("Sources/PDFs", "Inbox"):
+            os.makedirs(os.path.join(_pv, _sub))
+        _pv_pdf = os.path.join(_pv, "Sources/PDFs/Doe_Preview_2025.pdf")
+        _pv_dup = os.path.join(_pv, "Inbox/Doe_Preview_2025.pdf")
+        for _file in (_pv_pdf, _pv_dup):
+            with open(_file, "wb") as _handle:
+                _handle.write(b"%PDF-1.4\n")
+        _pv_notes = os.path.join(_preview, "scratch-notes")
+        _pv_images = os.path.join(_preview, "scratch-images")
+        os.makedirs(_pv_notes)
+        os.makedirs(_pv_images)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output):
+            code = main(["--src", _pv_pdf, "--notes", _pv_notes,
+                         "--images", _pv_images, "--vault", _pv, "--json"])
+        _pv_row = json.loads(output.getvalue())["pdfs"][0]
+        n += 1
+        if (code != 0 or _pv_row["status"] != "collision"
+                or _pv_dup not in _pv_row["source_conflicts"]
+                or not _pv_row["source_gate_error"]
+                or os.path.exists(os.path.join(_pv, "Sources", "Images"))):
+            bad += 1
+            print("FAIL a preview with --vault skipped the vault-wide basename "
+                  "gate (code=%r): %r" % (code, _pv_row))
+        # NEAR MISS: a scratch image folder alone implies no vault.
+        n += 1
+        if scan(_pv_pdf, _pv_notes, _pv_images)["pdfs"][0]["status"] != "new":
+            bad += 1
+            print("FAIL a scratch image folder implied a vault")
+        n += 1
+        errors = io.StringIO()
+        with contextlib.redirect_stdout(io.StringIO()), \
+                contextlib.redirect_stderr(errors):
+            code = main(["--src", _pv_pdf, "--notes", _pv_notes,
+                         "--images", os.path.join(_v, "Sources", "Images"),
+                         "--vault", _pv])
+        if code != 2 or "is not the vault of --images" not in errors.getvalue():
+            bad += 1
+            print("FAIL a --vault that disagrees with --images was not refused "
+                  "(code=%r): %s" % (code, errors.getvalue()))
+
+    # A named PDF's stem is its stored spelling. An external readable copy
+    # keeps the sole vault owner's exact basename and stays the file to read;
+    # figure-extract refuses a copy spelled another way, so the scan does too.
+    with tempfile.TemporaryDirectory(dir=_d, prefix="spelling-vault-") as _spell:
+        _sv = os.path.join(_spell, "vault")
+        for _sub in ("Sources/PDFs", "Sources/Images", "Articles"):
+            os.makedirs(os.path.join(_sv, _sub))
+        os.makedirs(os.path.join(_spell, "ext"))
+        os.makedirs(os.path.join(_spell, "ext-variant"))
+        _sv_owner = os.path.join(_sv, "Sources", "PDFs", "Doe_Spelling_2025.pdf")
+        _sv_copy = os.path.join(_spell, "ext", "Doe_Spelling_2025.pdf")
+        _sv_variant_copy = os.path.join(_spell, "ext-variant",
+                                        "doe_spelling_2025.pdf")
+        for _file in (_sv_owner, _sv_copy, _sv_variant_copy):
+            with open(_file, "wb") as _handle:
+                _handle.write(b"%PDF-1.4\n")
+        _sv_notes = os.path.join(_sv, "Articles")
+        _sv_images = os.path.join(_sv, "Sources", "Images")
+        _sv_note = os.path.join(_sv_notes, "Doe_Spelling_2025.md")
+        _copy_row = scan(_sv_copy, _sv_notes, _sv_images)["pdfs"][0]
+        n += 1
+        if (_copy_row["status"] != "new" or _copy_row["stem"] != "Doe_Spelling_2025"
+                or _copy_row["note"] != _sv_note or _copy_row["pdf"] != _sv_copy):
+            bad += 1
+            print("FAIL an external copy did not take its vault owner's "
+                  "spelling: %r" % _copy_row)
+        _copy_row = scan(_sv_variant_copy, _sv_notes, _sv_images)["pdfs"][0]
+        n += 1
+        if (_copy_row["status"] != "collision"
+                or "must keep the vault PDF's exact basename "
+                   "'Doe_Spelling_2025.pdf'"
+                not in _copy_row["source_gate_error"]):
+            bad += 1
+            print("FAIL an external copy spelled another way was not refused: "
+                  "%r" % _copy_row)
+        # A qualified origin names the vault owner, not the external copy.
+        with open(_sv_note, "w", encoding="utf-8") as _handle:
+            _handle.write('---\nsources:\n  - "[[Sources/PDFs/Doe_Spelling_2025.pdf]]"'
+                          '\n---\n\n## Methods\n\nA completed summary.\n')
+        n += 1
+        _copy_row = scan(_sv_copy, _sv_notes, _sv_images)["pdfs"][0]
+        if _copy_row["status"] != "done":
+            bad += 1
+            print("FAIL an external copy did not own its vault owner's "
+                  "qualified origin: %r" % _copy_row)
+        os.unlink(_sv_note)
+        # A typed case variant runs only where the filesystem opens it.
+        _variant = os.path.join(_sv, "sources", "pdfs", "doe_spelling_2025.pdf")
+        _scratch_images = os.path.join(_spell, "scratch-images")
+        os.makedirs(_scratch_images)
+        n += 2
+        if os.path.exists(_variant):
+            _variant_row = scan(_variant, _sv_notes, _sv_images)["pdfs"][0]
+            if (_variant_row["stem"] != "Doe_Spelling_2025"
+                    or _variant_row["note"] != _sv_note
+                    or _variant_row["pdf"] != _sv_owner):
+                bad += 1
+                print("FAIL a typed case variant set the stem: %r" % _variant_row)
+            # Without a vault anchor, the folder listing gives the spelling.
+            _bare_row = scan(_variant, _sv_notes, _scratch_images)["pdfs"][0]
+            if (_bare_row["stem"] != "Doe_Spelling_2025"
+                    or _bare_row["note"] != _sv_note):
+                bad += 1
+                print("FAIL a typed case variant set the stem without a vault: "
+                      "%r" % _bare_row)
+
+    # The unorganized remedy states the current cost: a later pdf-organize
+    # rename carries the note and figures.
+    n += 1
+    _unorganized_text = render({"counts": {s: 0 for s in STATUSES},
+                                "pdfs": [{"status": "unorganized",
+                                          "stem": "download (1)",
+                                          "figures": []}]})
+    if ("a later pdf-organize rename carries them" not in _unorganized_text
+            or "orphan" in _unorganized_text):
+        bad += 1
+        print("FAIL the unorganized remedy misstated a later rename:\n%s"
+              % _unorganized_text)
+
     # A folder sweep skips feed-owned attachments with an informational line:
     # exit 0, no refusal, and never an instruction to run pdf-organize.  A
     # named one keeps its collector name under --allow-unorganized and still
@@ -1815,6 +2161,9 @@ def _build_parser():
     p.add_argument("--src", help="a PDF, or a folder walked recursively")
     p.add_argument("--notes", help="the Articles/ folder this skill writes to")
     p.add_argument("--images", help="the flat Sources/Images/ folder")
+    p.add_argument("--vault",
+                   help="the vault root; proves vault-wide source uniqueness "
+                        "when --images is a scratch folder")
     p.add_argument("--allow-unorganized", action="store_true",
                    help="scan PDFs pdf-organize has not named (see §1a)")
     p.add_argument("--include-split-books", action="store_true",
@@ -1850,7 +2199,10 @@ def main(argv=None):
         return 2
     for flag, path, must_exist in (("--src", args.src, True),
                                    ("--images", args.images, True),
-                                   ("--notes", args.notes, True)):
+                                   ("--notes", args.notes, True),
+                                   ("--vault", args.vault, bool(args.vault))):
+        if not must_exist:
+            continue
         # A mistyped folder must not read as "empty".  `--src` would report a
         # clean zero-work run, `--images` would report every stem as having
         # no figures (which SKILL.md step 1 reads as "the extractor has not
@@ -1870,7 +2222,8 @@ def main(argv=None):
     try:
         result = scan(args.src, args.notes, args.images,
                       args.allow_unorganized, args.include_split_books,
-                      True if args.include_chapters else None)
+                      True if args.include_chapters else None,
+                      vault=args.vault)
     except ValueError as exc:
         print("%s Nothing was scanned; this is not an empty vault." % exc,
               file=sys.stderr)

@@ -118,11 +118,13 @@ if _here != _shared:
 
 from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
                           read_manifest_snapshot, read_sidecar, write_manifest,
-                          manifest_key, figure_identity, check_manifest_writable)
+                          manifest_key, figure_identity, check_manifest_writable,
+                          sidecar_stem_problem)
 import atomic_move
-from naming import looks_canonical
+from naming import is_feed_attachment, looks_canonical
 from render_page import MAX_RENDER_PIXELS, checked_render_dimensions
-from vault_artifacts import (inventory_source_figures, output_vault_root,
+from vault_artifacts import (UnlistedFolderError, inventory_source_figures,
+                             on_disk_spelling, output_vault_root,
                              verify_selected_pdf)
 
 try:
@@ -174,6 +176,12 @@ def vault_refusal(decision):
         return ("no vault PDF owns this basename", UNOWNED_PDF_REMEDY)
     if len(decision.matches) > 1:
         return ("vault basename not unique", DUPLICATE_BASENAME_REMEDY)
+    owner = os.path.basename(decision.matches[0])
+    if owner != os.path.basename(decision.selected):
+        # A case or Unicode variant of the owner's name: the figures would
+        # be named after a stem the vault PDF does not have.
+        return ("basename spelling differs",
+                "use the vault PDF's exact basename %r" % owner)
     return ("vault owner not usable",
             decision.reason + "; inspect that vault PDF")
 
@@ -1689,6 +1697,28 @@ def run_self_test():
               read_manifest(os.path.join(outdir, MANIFEST_FILE)),
               {os.path.basename(png): file_digest(png)})
 
+        # A PDF folder that cannot be listed keeps the typed name.
+        unlisted_dir = os.path.join(tmp, "unlisted")
+        os.makedirs(unlisted_dir)
+        unlisted_pdf = shutil.copy(pdf, unlisted_dir)
+        real_listdir = os.listdir
+
+        def listdir_refusing_pdf_folder(path="."):
+            if (not isinstance(path, int) and os.path.abspath(
+                    os.fspath(path)) == os.path.abspath(unlisted_dir)):
+                raise PermissionError("injected")
+            return real_listdir(path)
+
+        unlisted_out = os.path.join(tmp, "UnlistedImages")
+        with mock.patch.object(os, "listdir", listdir_refusing_pdf_folder):
+            code, so, se = run([unlisted_pdf, "--out", unlisted_out,
+                                "--crop", "1:1:100,150,500,350", "--dpi",
+                                "72", "--no-trim"])
+        check("an unlistable PDF folder keeps the typed name",
+              (code, "using the typed name" in so, os.path.exists(
+                  os.path.join(unlisted_out, "Doe_Figs_2025_fig_1.png"))),
+              (0, True, True))
+
         twin_dir = os.path.join(tmp, "ExtensionTwin")
         os.makedirs(twin_dir)
         twin = os.path.join(twin_dir, "Doe_Figs_2025_fig_2.webp")
@@ -2140,6 +2170,19 @@ def run_self_test():
         code, so, se = run([pdf, "--out", outdir, "--stem", ". ",
                             "--crop", "1:1:1,2,3,4"])
         ok("...as is a dot-space one", "dotfile" in str(code))
+        # The figure sidecars key each record by the stem. A stem they cannot
+        # store ('#' reads as a comment, a leading space is invalid) is
+        # refused before `--out` exists, even with the naming exception.
+        for odd_stem in ("#1 Notes", " lead"):
+            odd_pdf = os.path.join(tmp, "odd-stems", odd_stem + ".pdf")
+            os.makedirs(os.path.dirname(odd_pdf), exist_ok=True)
+            shutil.copyfile(pdf, odd_pdf)
+            odd_out = os.path.join(tmp, "OddStemOut")
+            code, so, se = run([odd_pdf, "--out", odd_out, "--allow-unorganized",
+                                "--crop", "1:1:100,150,500,350", "--dpi", "72"])
+            ok("a stem the sidecars cannot store is refused (%r)" % odd_stem,
+               code != 0 and "could not be recorded" in str(code)
+               and not os.path.lexists(odd_out))
 
         mismatch_out = os.path.join(tmp, "MismatchedStem")
         code, so, se = run([
@@ -2206,9 +2249,24 @@ def run_self_test():
             "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
         ])
         ok("a vault crop refuses an unorganized source stem",
-           code != 0 and "pdf-organize" in str(code))
+           code != 0 and "pdf-organize" in str(code)
+           and "orphan" not in str(code))
         check("the unorganized vault crop publishes nothing",
               os.listdir(repair_images), [])
+
+        # A feed attachment keeps its collector name, so its refusal names
+        # only the --allow-unorganized exception, never pdf-organize.
+        feed_pdf = os.path.join(repair_pdfs, "rss-" + "ab" * 16 + ".pdf")
+        shutil.copyfile(pdf, feed_pdf)
+        code, so, se = run([
+            feed_pdf, "--out", repair_images,
+            "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        check("a vault crop of a named feed attachment names the exception",
+              (code != 0, "--allow-unorganized" in str(code),
+               "Organize it first" in str(code), os.listdir(repair_images)),
+              (True, True, False, []))
+        os.unlink(feed_pdf)
 
         # A readable external scratch representation is allowed when one vault
         # source uniquely owns its basename (the encrypted-PDF recovery route).
@@ -2225,6 +2283,64 @@ def run_self_test():
         ok("external readable copy publishes under the vault owner's stem",
            os.path.isfile(os.path.join(repair_images,
                                        "Doe_Figs_2025_fig_6.png")))
+        variant_scratch = os.path.join(tmp, "scratch-variant",
+                                       "doe_figs_2025.pdf")
+        os.makedirs(os.path.dirname(variant_scratch))
+        shutil.copyfile(pdf, variant_scratch)
+        code, so, se = run([
+            variant_scratch, "--out", repair_images,
+            "--crop", "1:5:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("a readable copy named in another case is refused",
+           code != 0 and "exact basename 'Doe_Figs_2025.pdf'" in str(code)
+           and not any(name.endswith("_fig_5.png")
+                       for name in os.listdir(repair_images)))
+
+        # A typed case variant of the vault PDF opens the same file on an
+        # insensitive filesystem; the crop keeps the stored spelling.
+        typed_variant = os.path.join(repair_pdfs, "doe_figs_2025.pdf")
+        if os.path.lexists(typed_variant):
+            code, so, se = run([
+                typed_variant, "--out", repair_images,
+                "--crop", "1:6:100,150,500,350", "--dpi", "72", "--no-trim",
+                "--overwrite",
+            ])
+            check("a typed case variant repairs the crop under the stored name",
+                  (code, "Doe_Figs_2025_fig_6.png" in os.listdir(repair_images),
+                   "doe_figs_2025_fig_6.png" in os.listdir(repair_images),
+                   sorted(read_manifest(os.path.join(
+                       repair_images, MANIFEST_FILE)))),
+                  (0, True, False, ["Doe_Figs_2025_fig_6.png"]))
+            code, so, se = run([
+                typed_variant, "--out", repair_images,
+                "--stem", "doe_figs_2025",
+                "--crop", "1:6:100,150,500,350", "--dpi", "72",
+            ])
+            ok("a --stem in the typed case is refused, naming the stored stem",
+               code != 0 and "on-disk stem 'Doe_Figs_2025'" in str(code))
+        else:
+            ok("case-variant explicit-crop regressions skipped on this filesystem",
+               True)
+            ok("case-variant --stem regression skipped on this filesystem", True)
+
+        # The same holds for a Unicode normalization variant.
+        nfd_dir = os.path.join(tmp, "NfdSource")
+        os.makedirs(nfd_dir)
+        nfd_stem = "Mu\u0308ller_Figs_2025"
+        shutil.copyfile(pdf, os.path.join(nfd_dir, nfd_stem + ".pdf"))
+        nfc_typed = os.path.join(nfd_dir, "Müller_Figs_2025.pdf")
+        nfd_out = os.path.join(tmp, "NfdOut")
+        if os.path.lexists(nfc_typed):
+            code, so, se = run([
+                nfc_typed, "--out", nfd_out,
+                "--crop", "1:1:100,150,500,350", "--dpi", "72", "--no-trim",
+            ])
+            check("an NFC-typed path writes the stored NFD stem",
+                  (code, sorted(os.listdir(nfd_out))),
+                  (0, sorted([MANIFEST_FILE, nfd_stem + "_fig_1.png"])))
+        else:
+            ok("normalization-variant regression skipped on this filesystem",
+               True)
 
         # The missing-argument path: named, not an argparse usage dump, and
         # exit 2 the way `paper_scan.py` reports the same thing.
@@ -2416,6 +2532,24 @@ def main(argv=None):
 
     out_dir = os.path.expanduser(args.out)
     pdf_path = os.path.expanduser(args.pdf)
+    # A case or Unicode variant of the name opens the same file on an
+    # insensitive filesystem (the macOS default), but the crops take the
+    # stored spelling. A typed variant would rename an existing crop on
+    # --overwrite and name new ones after a stem the PDF does not have.
+    # A folder that cannot be listed keeps the typed name; canonical vault
+    # output still needs the vault owner's exact basename below.
+    if os.path.lexists(pdf_path):
+        try:
+            stored = os.path.basename(on_disk_spelling(pdf_path))
+        except UnlistedFolderError as exc:
+            print(f"Note: {exc}; using the typed name.")
+            stored = os.path.basename(pdf_path)
+        except ValueError as exc:
+            sys.exit(f"{pdf_path}: {exc}")
+        if stored != os.path.basename(pdf_path):
+            print(f"Using the PDF's stored filename {stored!r} "
+                  f"(typed as {os.path.basename(pdf_path)!r}).")
+            pdf_path = os.path.join(os.path.dirname(pdf_path), stored)
     pdf_stem = os.path.splitext(os.path.basename(pdf_path))[0]
     # The stem defaults to, and must equal, the PDF's on-disk stem. It goes
     # straight into `os.path.join(out_dir, f"{stem}_fig_{n}.png")`, so the
@@ -2443,6 +2577,15 @@ def main(argv=None):
         sys.exit(f"--stem {args.stem!r} does not equal the source PDF's exact "
                  f"on-disk stem {pdf_stem!r}. Figure identity follows that "
                  "filename; pass the exact stem or organize the PDF first")
+    # The crop is published before its ownership record. A stem the figure
+    # sidecars cannot store would leave a crop no later run can own.
+    problem = sidecar_stem_problem(args.stem)
+    if problem:
+        sys.exit(f"--stem {args.stem!r} {problem}, so its crops could not be "
+                 "recorded. No sidecar or figure was written. Give the PDF a "
+                 "canonical name with pdf-organize (run without --vault "
+                 "outside the vault), or crop a renamed copy into an "
+                 "external --out")
 
     # Parse every request before opening the source or creating `--out`. A
     # malformed later crop must not leave earlier files behind from what the
@@ -2462,13 +2605,23 @@ def main(argv=None):
     # external output remains an explicit one-off target.
     vault_root = output_vault_root(out_dir)
     if vault_root is not None:
+        if (is_feed_attachment(pdf_stem, is_stem=True)
+                and not args.allow_unorganized):
+            sys.exit(
+                "Refusing explicit crops into the vault's canonical "
+                "Sources/Images folder: %r is a collector-owned feed "
+                "attachment whose name never changes. Repeat the "
+                "--allow-unorganized exception to crop it under that name, "
+                "and never route it to pdf-organize." % pdf_stem)
         if not looks_canonical(pdf_stem, is_stem=True) and not args.allow_unorganized:
             sys.exit(
                 "Refusing explicit crops into the vault's canonical "
                 "Sources/Images folder: the selected PDF stem %r has not "
-                "been produced by pdf-organize. Organize it first so a "
-                "later rename does not orphan this crop, or repeat the "
-                "batch's deliberate --allow-unorganized exception." % pdf_stem)
+                "been produced by pdf-organize. Organize it first so the "
+                "crop is keyed to a durable name (a later rename must go "
+                "through pdf-organize, which carries recorded crops), or "
+                "repeat the batch's deliberate --allow-unorganized "
+                "exception." % pdf_stem)
         decision = verify_selected_pdf(vault_root, pdf_path)
         if not decision.unique:
             detail = decision.reason
@@ -2486,6 +2639,15 @@ def main(argv=None):
                 "Sources/Images folder: the source needs a unique basename "
                 "with one vault PDF owner, but %s. %s%s. No sidecar or "
                 "figure was written." % (detail, remedy[0].upper(), remedy[1:]))
+        # A readable copy outside the vault names the crops, so a case or
+        # Unicode variant of the owner's name would write variant names.
+        owner_name = os.path.basename(decision.matches[0])
+        if owner_name != os.path.basename(pdf_path):
+            sys.exit(
+                "Refusing explicit crops into the vault's canonical "
+                "Sources/Images folder: the readable copy must keep the vault "
+                "PDF's exact basename %r, not %r. No sidecar or figure was "
+                "written." % (owner_name, os.path.basename(pdf_path)))
 
     if args.allow_unorganized and not looks_canonical(pdf_stem, is_stem=True):
         print("Source naming exception (--allow-unorganized): crops remain "

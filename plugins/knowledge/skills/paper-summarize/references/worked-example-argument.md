@@ -91,7 +91,9 @@ Moreau advises city officials to lease rule-making rights to user groups for fix
   one bullet holds both; outside empirical mode it needs no advisory exception.
 - **Contrary evidence.** The lapsed cases stay beside the claim they qualify.
 - **Frontmatter.** A `format: Book` note has no second `sources:` item. The
-  printed `2023` is padded to `2023-01-01`, and the report says so.
+  printed `2023` is padded to `2023-01-01`, and the report says so. Had page 1
+  printed only the chapter heading, the byline and date would follow the
+  [book-chapter rule](note-format.md#frontmatter).
 - **Exhibits.** The scan lists no figures, so `--cites` and a page check
   confirm there are none; the claim is the pattern across cases, so the case
   table is not rebuilt.

@@ -20,6 +20,8 @@ signatures, usually together:
 
 - *Stacked markers on one line:* `- - text`, `- - - text`, `1. 1. text`,
   `* * text` — collapse the leading run of markers down to a single marker.
+  A line holding only three or more identical spaced markers (`* * *`,
+  `- - -`) is a horizontal rule, not stacked markers.
 - *Indentation deeper than the actual structure:* items or continuation lines
   indented more than the real nesting warrants, with no item at the
   intervening levels — so a sub-item or paragraph dangles under a parent that
@@ -114,8 +116,12 @@ python3 '<skill>/scripts/body_checks.py' siblings '<draft>'
 Three transforms, each **region-scoped**: pass only the lines of a block
 confirmed as damaged, never every matching line in the file, which would
 flatten a genuine nested list. Each keeps a blockquote prefix, never changes
-YAML or fenced code, and rewrites only the scratch draft (a path inside a vault
-is refused). Review a `--dry-run` first, then run the same command without it:
+YAML, and rewrites only the scratch draft (a path inside a vault is refused).
+Fenced code keeps its content: `stacked` skips it, and `overindent` or `dedent`
+moves a list-nested fenced block only as a whole, by its fence's indent change.
+A range that covers part of such a block is refused, so include a code block
+inside a repaired item whole in `--lines`. Review a `--dry-run` first, then run
+the same command without it:
 
 ```bash
 python3 '<skill>/scripts/body_checks.py' repair --op stacked --lines '<first>-<last>' --dry-run '<draft>'

@@ -92,6 +92,10 @@ def _records(text, kind):
     seen = {}
     for number, line in enumerate(text.splitlines(keepends=True), 1):
         raw = line.rstrip("\r\n")
+        # An editor's UTF-8 BOM is not part of the first field. It stays in
+        # the file, but out of the key and the replacement span.
+        offset = 1 if number == 1 and raw.startswith("\ufeff") else 0
+        raw = raw[offset:]
         if not raw.strip() or raw.lstrip().startswith("#"):
             continue
         if kind == "manifest":
@@ -105,7 +109,7 @@ def _records(text, kind):
             if identity in seen:
                 raise ValueError("manifest line %d: duplicate/ambiguous filename %r" % (number, key))
             seen[identity] = key
-            yield number - 1, key, value.lower(), (0, len(key))
+            yield number - 1, key, value.lower(), (offset, offset + len(key))
         else:
             # Native rows have an optional third note column. Also preserve
             # the documented hand-written STEM:FIG spelling and comments.
@@ -121,7 +125,7 @@ def _records(text, kind):
                 value = value.strip()
             if not _fragment(key) or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9.-]*", value):
                 raise ValueError("review line %d: invalid stem or figure label" % number)
-            yield number - 1, key, value, (0, len(key))
+            yield number - 1, key, value, (offset, offset + len(key))
 
 
 def parse_manifest(text):
@@ -130,6 +134,28 @@ def parse_manifest(text):
 
 def parse_reviewed(text):
     return {(key, label) for _i, key, label, _span in _records(text, "review")}
+
+
+def sidecar_stem_problem(stem):
+    """Why the figure sidecars cannot store `stem`, or None when they can.
+
+    A crop is published before its ownership record, so a caller refuses an
+    unstorable stem before it writes anything. Both sidecars must read the
+    stem back exactly: the manifest as `<stem>_fig_1.png`, the review ledger
+    as the bare stem.
+    """
+    name = "%s_fig_1.png" % stem
+    try:
+        stored = (parse_manifest("%s\t%s\n" % (name, "0" * 64)) == {name: "0" * 64}
+                  and parse_reviewed("%s\t1\n" % stem) == {(stem, "1")})
+    except ValueError:
+        stored = False
+    if stored:
+        return None
+    if stem.lstrip().startswith("#"):
+        return "starts with '#', which the figure sidecars read as a comment"
+    return ("has surrounding whitespace, a tab, a line break, a slash or a "
+            "backslash, which the figure sidecars cannot store")
 
 
 def _snapshot_identity(item):
@@ -226,7 +252,12 @@ def rewrite_sidecar(text, replacements, kind):
         destinations[dest] = owner
         lines[i] = lines[i][:start] + new + lines[i][end:]
     result = "".join(lines)
-    list(_records(result, kind))       # validate the names being written too
+    # Validate the names being written too: each record must read back under
+    # its new key, not as a comment.
+    planned = [(i, mapping.get(figure_identity(key), key), value)
+               for i, key, value, _span in rows]
+    if [(i, key, value) for i, key, value, _span in _records(result, kind)] != planned:
+        raise ValueError("%s rename would not read back as written" % kind)
     return result
 
 
@@ -338,7 +369,15 @@ def _write_sidecar(path, body, *, expected):
 def write_manifest(path, manifest, *, expected, header=MANIFEST_HEADER):
     """Atomically write valid ownership records, preserving existing modes."""
     body = header + "".join("%s\t%s\n" % (key, manifest[key]) for key in sorted(manifest))
-    parse_manifest(body)
+    # Every record must read back as given. A key that starts with '#' reads
+    # as a comment, so its crop would silently lose its owner.
+    stored = parse_manifest(body)
+    wanted = {key: digest.lower() for key, digest in manifest.items()}
+    if stored != wanted:
+        lost = sorted(key for key in set(stored) | set(wanted)
+                      if stored.get(key) != wanted.get(key))
+        raise ValueError("manifest records would not read back: %s"
+                         % ", ".join(map(repr, lost)))
     return _write_sidecar(path, body, expected=expected)
 
 
@@ -391,6 +430,52 @@ def self_test():
             self.assertEqual(parse_reviewed("A:B: 10-5\n"), {("A:B", "10-5")})
             self.assertEqual(
                 rewrite_sidecar("Doe: 2\n", {"Doe": "Roe"}, "review"), "Roe: 2\n")
+
+        def test_bom_stays_out_of_the_first_key(self):
+            # An editor's UTF-8 BOM on line 1 neither blocks every run nor
+            # keys the first record to a stem that never matches.
+            row = "X_fig_1.png\t" + "a" * 64 + "\n"
+            for text in ("\ufeff" + MANIFEST_HEADER + row, "\ufeff" + row):
+                manifest = parse_manifest(text)
+                self.assertEqual(manifest, {"X_fig_1.png": "a" * 64})
+                self.assertEqual(manifest_key(manifest, "X_fig_1.png"),
+                                 "X_fig_1.png")
+            for text in ("\ufeff" + REVIEW_HEADER + "Doe\t1\n",
+                         "\ufeffDoe\t1\n", "\ufeffDoe:1\n"):
+                self.assertEqual(parse_reviewed(text), {("Doe", "1")})
+            self.assertEqual(
+                rewrite_sidecar("\ufeffDoe\t1\nDoe:2\n", {"Doe": "Roe"}, "review"),
+                "\ufeffRoe\t1\nRoe:2\n")
+            self.assertEqual(
+                rewrite_sidecar("\ufeff" + row, {"X_fig_1.png": "Y_fig_1.png"},
+                                "manifest"),
+                "\ufeff" + row.replace("X_", "Y_"))
+
+        def test_sidecar_stem_problem_names_unstorable_stems(self):
+            for stem in ("#1 Notes", " leading", "trailing ", "a\\b", "a/b",
+                         "Tab\there"):
+                self.assertIsNotNone(sidecar_stem_problem(stem), stem)
+            self.assertIn("comment", sidecar_stem_problem("#1 Notes"))
+            self.assertIn("whitespace", sidecar_stem_problem(" leading"))
+            for stem in ("Doe_Study_2025", "A:B", "Notes #1", "download (1)"):
+                self.assertIsNone(sidecar_stem_problem(stem), stem)
+
+        def test_records_that_read_as_comments_are_refused(self):
+            # A '#' key would be written, then read back as a comment, and
+            # its crop would lose its owner without any error.
+            with tempfile.TemporaryDirectory() as directory:
+                path = os.path.join(directory, MANIFEST_FILE)
+                with self.assertRaisesRegex(ValueError, "would not read back"):
+                    write_manifest(path, {"#1 Notes_fig_1.png": "a" * 64,
+                                          "Doe_fig_1.png": "b" * 64},
+                                   expected=_now(path))
+                self.assertFalse(os.path.lexists(path))
+            text = "Old_fig_1.png\t" + "a" * 64 + "\n"
+            with self.assertRaises(ValueError):
+                rewrite_sidecar(text, {"Old_fig_1.png": "#Old_fig_1.png"},
+                                "manifest")
+            with self.assertRaises(ValueError):
+                rewrite_sidecar("Old\t1\n", {"Old": "#Old"}, "review")
 
         def test_writers_require_the_parsed_snapshot(self):
             with tempfile.TemporaryDirectory() as directory:

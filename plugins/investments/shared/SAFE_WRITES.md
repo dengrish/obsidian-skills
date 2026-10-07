@@ -4,10 +4,10 @@ Read this before a workflow creates, replaces, or removes a vault artifact.
 The user's permission to edit a file applies to the version the workflow
 inspected. It does not extend to a different file or a newer editor save that
 arrives after planning. A workflow that publishes, removes or moves regular
-files with `publish_files.py` needs only that command's documented steps; the
-rest of this guide governs writes it does not perform, such as a case
-respelling or a new file that keeps another file's permissions, which use a
-private driver.
+files with `publish_files.py` needs only that command's documented steps; its
+`move` also respells a file's name in case or Unicode normalization. The rest
+of this guide governs writes it does not perform, such as a new file that
+keeps another file's permissions, which use a private driver.
 
 ## Snapshot the version being edited
 
@@ -101,7 +101,9 @@ heredoc, or command text. When a workflow-specific writer exists, use it.
 For publishing reviewed regular files, `shared/scripts/publish_files.py`
 provides this recipe as a CLI (`snapshot`, `verify`, `publish`); its `remove`
 and `move` commands perform the conditional removal and no-replace move below
-for snapshotted paths, and a moved destination is re-snapshotted with
+for snapshotted paths, `move` keeps the same file when it only respells the
+name in case or Unicode normalization, and a moved destination is
+re-snapshotted with
 `snapshot --replace` before anything is published to it. Use it instead of a
 private driver unless the operation needs a primitive the CLI does not offer.
 Otherwise, put the publication logic in a private Python driver, pass paths as

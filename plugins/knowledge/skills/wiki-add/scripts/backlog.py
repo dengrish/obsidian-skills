@@ -20,7 +20,7 @@ import stat
 import sys
 import tempfile
 
-_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'entry_structure', 'markdown_tables', 'slugify')
+_OBSIDIAN_SHARED_MODULES = ('atomic_move', 'entry_structure', 'markdown_tables', 'portable_names', 'slugify')
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
 import os as _os, sys as _sys
@@ -61,12 +61,14 @@ if _here != _shared:
 
 import atomic_move
 from entry_structure import mask_body_comments
+from portable_names import portable_identity
 
 SCHEMA = "obsidian-wiki-add-backlog-v1"
 LIST = re.compile(r"^([-+*]|[0-9]{1,9}[.)])([ \t]+)(.*)$")
 FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
 THEMATIC_BREAK = re.compile(r" {0,3}([-*_])(?:[ \t]*\1){2,}[ \t]*")
 CHECKED = re.compile(r"^\[[xX]\](?:[ \t]|$)")
+OPEN_TASK = re.compile(r"^\[ \][ \t]+\S")
 QUOTE = re.compile(r"^ {0,3}>[ \t]?(.*)$")
 HEADING = re.compile(r"^ {0,3}#{1,6}(?:[ \t]|$)")
 NOTICE = "File evidence is verified; semantic identity and note quality require caller judgment."
@@ -83,6 +85,26 @@ def digest(data):
 def absolute_leaf(path):
     path = Path(os.path.abspath(os.path.expanduser(os.fspath(path))))
     return path.parent.resolve(strict=True) / path.name
+
+
+def listed_leaf(path):
+    """PATH under the spelling its folder lists, so a rewrite never renames it."""
+    names = os.listdir(path.parent)
+    if path.name in names:
+        return path
+    found = os.lstat(path)
+    for name in names:
+        if portable_identity(name) != portable_identity(path.name):
+            continue
+        listed = os.lstat(path.parent / name)
+        if (listed.st_dev, listed.st_ino) == (found.st_dev, found.st_ino):
+            return path.parent / name
+    raise ValueError("%s is not listed under that spelling" % path)
+
+
+def within(path, folder):
+    """Whether PATH is FOLDER or lies inside it, by file identity, not spelling."""
+    return any(os.path.samefile(part, folder) for part in (path, *path.parents))
 
 
 def read_stable(path):
@@ -130,7 +152,14 @@ def content_column(lead, marker, gap):
 
 
 def parse_queue(data):
-    """Parse flush-left list requests without normalizing any source bytes."""
+    """Parse flush-left list requests without normalizing any source bytes.
+
+    Nested lines are context for their item; a nested open task is also
+    reported. Any other visible text is reported, never dropped: paragraph
+    or table lines, text that continues an item, and indented or quoted
+    list items. Headings, rules, fences, comments and quote lines without a
+    task are not reported.
+    """
     lines = markdown_lines(data.decode("utf-8"))
     source_digest = digest(data)
     items, reports = [], []
@@ -154,15 +183,16 @@ def parse_queue(data):
         """Keep an unindented text line directly under the open item's text.
 
         Obsidian renders it inside that item, so it is never dropped: it
-        becomes context and, under a pending request, a report.
+        becomes context and a report.
         """
         if (not lazy or parent is None or not clean.strip() or line[:1] in (" ", "\t")
                 or QUOTE.match(clean) or HEADING.match(clean)):
             return False
         parent["context_lines"].append(clean)
-        if "id" in parent:
-            reports.append({"line": number, "raw_line": line,
-                            "reason": "unindented line continues the request above"})
+        reports.append({"line": number, "raw_line": line,
+                        "reason": "unindented line continues the request above"
+                        if "id" in parent else
+                        "unindented line continues an item that is not a pending request"})
         return True
 
     for number, raw in enumerate(lines, 1):
@@ -255,6 +285,17 @@ def parse_queue(data):
             if parent is not None and line[:1] in (" ", "\t"):
                 parent["context_lines"].append(clean)
                 lazy = bool(clean.strip())
+                # Obsidian shows a nested open task as its own checkbox, so
+                # it stays context but is surfaced, never dropped. This
+                # includes a task in a blockquote or callout inside the item.
+                body = clean.lstrip(" \t")
+                quoted = QUOTE.match(body)
+                if quoted:
+                    body = quoted[1].lstrip(" >")
+                nested = LIST.match(body)
+                if nested and OPEN_TASK.match(nested[3]):
+                    reports.append({"line": number, "raw_line": line,
+                                    "reason": "nested task is not a top-level request"})
                 continue
             if continues_item(number, line, clean):
                 continue
@@ -266,10 +307,14 @@ def parse_queue(data):
                 if inner and not CHECKED.match(inner[3]):
                     reports.append({"line": number, "raw_line": line,
                                     "reason": "quoted list item is not a top-level request"})
+                elif not quoted and not HEADING.match(clean):
+                    reports.append({"line": number, "raw_line": line,
+                                    "reason": "text outside a list item is not a request"})
                 parent = None
             lazy = False
             continue
-        # Nested lines under a skipped or reported item are discarded context.
+        # Nested lines under a skipped or reported item are discarded context;
+        # a nested open task is still reported (above).
         parent, floor = {"context_lines": []}, content_column(0, match[1], match[2])
         lazy = bool(match[3].strip())
         body = match[3]
@@ -318,7 +363,7 @@ def parse_queue(data):
 
 
 def scan_document(path):
-    path = absolute_leaf(path)
+    path = listed_leaf(absolute_leaf(path))
     data, token = read_stable(path)
     items, reports, counts = parse_queue(data)
     source = token_json(token)
@@ -370,7 +415,7 @@ def complete(snapshot, item_id, wiki, entry):
     if not wiki.is_dir():
         raise ValueError("Wiki must be a directory")
     entry = absolute_leaf(entry)
-    if entry.suffix.casefold() != ".md" or not entry.is_relative_to(wiki):
+    if entry.suffix.casefold() != ".md" or not within(entry.parent, wiki):
         raise ValueError("entry evidence must be a Markdown file inside the selected Wiki")
     entry_bytes, proof = read_stable(entry)
     if not entry_bytes.strip():
@@ -388,7 +433,7 @@ def complete(snapshot, item_id, wiki, entry):
     after = (data[:at] + b"x" + data[at + 1:] if selected["marker_state"] == "unchecked"
              else data[:at] + b"[x] " + data[at:])
     stage_parent = backlog.parent
-    while stage_parent == wiki or stage_parent.is_relative_to(wiki):
+    while within(stage_parent, wiki):
         stage_parent = stage_parent.parent
     stage = Path(tempfile.mkdtemp(prefix=".wiki-add-complete-", dir=stage_parent))
     try:
@@ -504,6 +549,23 @@ def run_self_tests():
         check("literal inline comment syntax cannot expose fenced requests",
               ([item["text"] for item in literal_items], literal_reports),
               (["Explain `<!--` in HTML", "Next real topic"], []))
+        for newline in (b"\n", b"\r\n", b"\r"):
+            parked_items, parked_reports, _ = parse_queue(
+                b"Notes: wrap code in a ` tick.\n\n<!-- parked `later`\n"
+                b"- [ ] Hidden topic\n-->\n- [ ] Visible topic\n"
+                .replace(b"\n", newline))
+            check("a stray tick cannot expose a commented request: %r"
+                  % newline,
+                  ([(item["line"], item["text"]) for item in parked_items],
+                   [report["line"] for report in parked_reports]),
+                  ([(6, "Visible topic")], [1]))
+        example_items, example_reports, _ = parse_queue(
+            b"Stray ` tick.\r\n\r\nExample: `<!--` opens a comment.\r\n"
+            b"- [ ] A\r\n- [ ] B\r\n")
+        check("a stray tick cannot turn a CRLF code example into a comment",
+              ([item["text"] for item in example_items],
+               [report["line"] for report in example_reports]),
+              (["A", "B"], [1, 3]))
         soft_items, soft_reports, _ = parse_queue(
             b'- [ ] Explain ``code\n  <!-- literal -->``\n'
             b'%%\n- [ ] Hidden Obsidian comment\n%%\n'
@@ -549,8 +611,27 @@ def run_self_tests():
                for found, reported, _ in [parse_queue(queue)]
                for item in found],
               [(["    - nested"], []), (["  - nested"], [])])
-        check("a nested line under a skipped item is not reported",
-              parse_queue(b"- [x] Done\n  - [ ] nested follow-up\n- [ ] Next\n")[1], [])
+        nested_reason = "nested task is not a top-level request"
+        nested_parent = parse_queue(
+            b"- [ ] Parent\n  - [ ] Child\n    - [ ] Grandchild\n  - note\n")
+        check("a nested open task stays context and is reported under any parent",
+              ([(r["line"], r["reason"]) for r in parse_queue(
+                  b"- [x] Done\n  - [ ] nested follow-up\n  - [x] nested done\n"
+                  b"- [ ] Next\n")[1]],
+               [(item["text"], item["context_lines"]) for item in nested_parent[0]],
+               [(r["line"], r["reason"]) for r in nested_parent[1]]),
+              ([(2, nested_reason)],
+               [("Parent", ["  - [ ] Child", "    - [ ] Grandchild", "  - note"])],
+               [(2, nested_reason), (3, nested_reason)]))
+        check("a quoted nested open task stays context and is reported",
+              [([(item["text"], item["context_lines"]) for item in found],
+                [(r["line"], r["reason"]) for r in reported])
+               for found, reported, _ in (parse_queue(queue) for queue in (
+                   b"- [x] Done\n  > - [ ] quoted follow-up\n- [ ] Next\n",
+                   b"* [ ] A\n  > [!todo] Q\n  > - [ ] callout task\n  >> - [x] done\n"))],
+              [([("Next", [])], [(2, nested_reason)]),
+               ([("A", ["  > [!todo] Q", "  > - [ ] callout task", "  >> - [x] done"])],
+                [(3, nested_reason)])])
         check("a commented indented item is still reported",
               [(r["line"], r["reason"]) for r in parse_queue(
                   b"# H\n - [ ] Topic <!-- c -->\n- [ ] B %% x %%\n")[1]],
@@ -568,12 +649,34 @@ def run_self_tests():
                   b"- [ ] A\n  wrapped\ntail\n- [ ] B\n")],
               [([("Kalman filter", ["Particle filter"])], [(2, lazy_reason)]),
                ([("A", ["  wrapped", "tail"]), ("B", [])], [(3, lazy_reason)])])
-        check("an unindented line under a checked item is not reported",
-              shape(b"- [x] Done\nlazy\n- [ ] B\n"), ([("B", [])], []))
+        other_lazy = "unindented line continues an item that is not a pending request"
+        check("an unindented line under a checked, empty or custom item is reported",
+              [shape(queue) for queue in (
+                  b"- [x] Done\nlazy\n- [ ] B\n",
+                  b"\n- [x] A\n- [x] B\nParticle filter\n",
+                  b"- [ ]\nKalman filter\n",
+                  b"- [?] Custom\nmore\n")],
+              [([("B", [])], [(2, other_lazy)]),
+               ([], [(4, other_lazy)]),
+               ([], [(1, "empty request"), (2, other_lazy)]),
+               ([], [(1, "custom or malformed checkbox state"), (2, other_lazy)])])
+        stray_text = "text outside a list item is not a request"
         check("a blank line, heading, quote, rule or fence ends the request's text",
               [shape(b"- [ ] A\n" + between + b"Prose\n") for between in (
                   b"\n", b"# H\n", b"> quote\n", b"***\n", b"```\ncode\n```\n")],
-              [([("A", [])], [])] * 5)
+              [([("A", [])], [(3, stray_text)])] * 4 + [([("A", [])], [(5, stray_text)])])
+        check("text outside a list item is reported, never dropped",
+              [shape(queue) for queue in (
+                  b"# Topics to add\n\nKalman filter\nParticle filter\n\n"
+                  b"Hidden Markov model\n",
+                  b"- [ ] Kalman filter\n\nParticle filter\n",
+                  b"# H\n  stray text\n")],
+              [([], [(3, stray_text), (4, stray_text), (6, stray_text)]),
+               ([("Kalman filter", [])], [(3, stray_text)]),
+               ([], [(2, stray_text)])])
+        check("a table queue is reported row by row",
+              shape(b"| Topic | Note |\n| --- | --- |\n| Kalman filter | |\n"),
+              ([], [(1, stray_text), (2, stray_text), (3, stray_text)]))
         check("a task in a blockquote or callout is reported, never dropped",
               shape(b"> [!todo] Q\n> - [ ] Callout task\n> - [x] done\n"),
               ([], [(2, "quoted list item is not a top-level request")]))
@@ -589,7 +692,8 @@ def run_self_tests():
               [shape(queue) for queue in (
                   b"- [ ] A\n%% note %%\nProse\n",
                   b"- [ ] A\n<!-- x\ny --> trailing\nProse\n")],
-              [([("A", [])], [])] * 2)
+              [([("A", [])], [(3, stray_text)]),
+               ([("A", [])], [(3, stray_text), (4, stray_text)])])
 
         unclosed = "unclosed frontmatter, fence or comment"
         comment_items, comment_reports, _ = parse_queue(b"- [ ] A\n<!--\n- [ ] B\n- [ ] C\n")
@@ -668,6 +772,48 @@ def run_self_tests():
         complete(root / "cr.json", cr_scan["items"][1]["id"], wiki, entry)
         check("bare-CR completion changes only the selected line",
               cr_queue.read_bytes(), b"- [ ] One\r- [x] Two\r")
+
+        # A case-insensitive or normalization-insensitive filesystem opens the
+        # queue under an alias spelling; completion must keep the listed name.
+        case_queue = root / "Case-Queue.md"
+        case_queue.write_bytes(b"- [ ] Topic\n")
+        if os.path.lexists(root / "case-queue.md"):
+            case_scan = save_scan(root / "case-queue.md", root / "case.json")
+            complete(root / "case.json", case_scan["items"][0]["id"], wiki, entry)
+            check("completion through a case alias keeps the listed spelling",
+                  ("Case-Queue.md" in os.listdir(root),
+                   "case-queue.md" in os.listdir(root),
+                   Path(case_scan["backlog"]).name, case_queue.read_bytes()),
+                  (True, False, "Case-Queue.md", b"- [x] Topic\n"))
+        else:
+            check("case-alias completion skipped on a case-sensitive filesystem", True)
+
+        nfd_name = "Café queue.md"
+        nfd_queue = root / nfd_name
+        nfd_queue.write_bytes(b"- [ ] Topic\n")
+        if os.path.lexists(root / "Café queue.md"):
+            nfd_scan = save_scan(root / "Café queue.md", root / "nfd.json")
+            complete(root / "nfd.json", nfd_scan["items"][0]["id"], wiki, entry)
+            check("completion through a normalization alias keeps the listed spelling",
+                  (sorted(n for n in os.listdir(root) if n.endswith(" queue.md")),
+                   Path(nfd_scan["backlog"]).name, nfd_queue.read_bytes()),
+                  ([nfd_name], nfd_name, b"- [x] Topic\n"))
+        else:
+            check("normalization-alias completion skipped on a "
+                  "normalization-sensitive filesystem", True)
+
+        if os.path.lexists(root / "wiki"):
+            alias_queue = root / "alias-queue.md"
+            alias_queue.write_bytes(b"- [ ] Alias\n")
+            alias_scan = save_scan(alias_queue, root / "alias.json")
+            alias_refused = raises(ValueError, lambda: complete(
+                root / "alias.json", alias_scan["items"][0]["id"],
+                root / "wiki", root / "WIKI" / "topic.md"))
+            check("a case-alias Wiki spelling still contains its entry evidence",
+                  (alias_refused, alias_queue.read_bytes()), (False, b"- [x] Alias\n"))
+        else:
+            check("case-alias Wiki containment skipped on a case-sensitive filesystem",
+                  True)
 
         # Missing, outside, and symlink evidence must leave a fresh queue
         # byte-for-byte untouched. Exercise the CLI's documented exit 2 for

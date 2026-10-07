@@ -20,6 +20,8 @@ diff in one call:
      finding was already on that path's baseline copy), ``introduced`` (in an
      unmodified file and absent from the baseline), or baseline (counted).
      Findings match the baseline by message, less any cross-entry count.
+     A literal-dollar or backticked-identifier finding matches when the
+     staged copy adds no occurrence, even if it has fewer.
   5. Links: body and Related wikilinks of each staged entry. ``dangling``
      lists a target that matches no entry of the combined tree by filename
      stem or alias, nor, when bare, a file stem in the vault's ``MOCs``
@@ -27,11 +29,17 @@ diff in one call:
      entry's Wiki-relative path, whole or its end, unless no entry has its
      basename and an alias claims it. ``noncanonical`` lists a target that
      resolves but not by its exact filename: ``case`` (one owner spelled
-     differently), ``alias`` (no file has the name, bare or ending a path,
-     and one entry claims it) or ``ambiguous`` (a name or path several
+     differently), ``path`` (an explicit ``.md`` suffix, or a Wiki or folder
+     path that no other vault file with the basename needs, CONVENTIONS
+     section 6), ``alias`` (no Wiki file has the name, bare or ending a
+     path, the target names no note outside the Wiki, and one entry claims
+     it) or ``ambiguous`` (a name or path several
      entries share, a bare name shared by an entry and a MOC, or an owner
-     unmirrored paths or unread aliases leave uncertain). For ``case`` and
-     ``alias``, ``replacement`` is the whole link to write, keeping its
+     unmirrored paths or unread aliases leave uncertain). A ``path``
+     replacement keeps a path that another entry, a MOC, a note outside the
+     Wiki or an unmirrored file or folder may need, and qualifies a bare
+     ``.md`` link whose name an outside note shares. For ``case``, ``path``
+     and ``alias``, ``replacement`` is the whole link to write, keeping its
      anchor and, in body prose, its displayed text; a Related-footer label
      becomes the owner's canonical title. An unmirrored ``.md`` file owns a
      bare name it shares, so an alias link to it is skipped. Any unmirrored
@@ -45,6 +53,12 @@ diff in one call:
      (otherwise every unmirrored file and, for a dangling link, every entry
      whose aliases are unread) and every unmirrored folder it
      may live in; an unmirrored folder or unread alias list adds a note.
+     ``non_entry`` lists a target that names no entry or MOC but a real
+     vault note outside the Wiki and ``MOCs``, as wiki-lint's
+     ``item10/non-entry`` resolves it: a bare basename, a ``./`` or ``../``
+     path from the entry's folder, or a vault path, whole or its end. It is
+     never ``dangling`` or ``alias``, since a real note outranks an alias;
+     ``inherited: true`` marks a link the path's baseline copy already had.
 
 The manifest is the shared publication manifest: a JSON list of
 ``{"path": "Wiki/<slug>.md", "draft": "<absolute draft path>"}`` objects with
@@ -66,11 +80,13 @@ CLI:
         --out '<scratch>/review' [--vault VAULT] [--compact]
 
 Output: {ok, clean, tree, staged[], on_staged[], introduced[],
-baseline_count, dangling[], noncanonical[], unmirrored[], notes[]}. A finding
-is {file, item, severity, message, evidence}; a dangling link {file, section,
-target, unmirrored?}; a noncanonical link {file, section, target, kind,
-replacement?, unmirrored?}. ``clean`` is true when on_staged, introduced,
-dangling and noncanonical are all empty.
+baseline_count, dangling[], noncanonical[], non_entry[], unmirrored[],
+notes[]}. A finding is {file, item, severity, message, evidence}; a
+dangling link {file, section, target, unmirrored?}; a noncanonical link
+{file, section, target, kind, replacement?, unmirrored?}; a non-entry link
+{file, section, target, inherited?}. ``clean`` is true when on_staged,
+introduced, dangling and noncanonical are all empty and every non_entry
+link is inherited.
 
 Exit codes: 0 the review ran (clean or not), 2 it could not run (bad usage,
 refused ``--out``, unreadable manifest or draft, incomplete lint); 1 a
@@ -83,6 +99,7 @@ import argparse
 import collections
 import json
 import os
+import posixpath
 import shutil
 import stat
 import sys
@@ -94,6 +111,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'equation_coverage',
     'introduced_aliases',
     'markdown_tables',
+    'naming',
     'note_provenance',
     'organism_names',
     'plurals',
@@ -389,11 +407,27 @@ def _findings(report, tree):
             yield rel, finding
 
 
+def _occurrences(finding):
+    """The counted occurrences behind a finding whose message counts them.
+
+    A trim can remove some of a neighbor's literal dollars or backticked
+    identifiers and leave the rest untouched, which changes the message.
+    """
+    evidence = finding.get("evidence") or {}
+    if finding["item"] == "12-literal-dollar":
+        return collections.Counter({"$": evidence.get("count", 0)})
+    if evidence.get("check") == "backticked-identifiers":
+        return collections.Counter(evidence.get("identifiers") or [])
+    return None
+
+
 def _match_key(rel, finding):
     """A finding's baseline identity: its message, less cross-entry counts.
 
     A staged draft can change how many entries claim an alias, or how many
-    links reach one target, without touching the file that reports it.
+    links reach one target, without touching the file that reports it.  A
+    finding that counts occurrences is matched without its count;
+    ``review`` then compares the occurrences themselves.
     """
     detail, evidence = finding["message"], finding.get("evidence") or {}
     if finding["item"] == "18-alias-collision":
@@ -401,6 +435,8 @@ def _match_key(rel, finding):
                   "filename slug" in detail)
     elif finding["item"] == "10-duplicate-wikilink":
         detail = evidence.get("target")
+    elif _occurrences(finding) is not None:
+        detail = evidence.get("check")
     return fold_name(rel), finding["item"], detail
 
 
@@ -412,6 +448,91 @@ def _moc_stems(vault):
         return set()
     return {fold_name(name[:-3]) for name in names
             if name.lower().endswith(".md") and not name.startswith(".")}
+
+
+def _outside_notes(vault, wiki):
+    """``(paths, complete)`` for the vault's notes outside the Wiki and MOCs.
+
+    ``paths`` holds the folded vault-relative paths, without ``.md``, of the
+    ``.md`` notes elsewhere in the vault, such as ``Articles/`` reading
+    notes, which also own a bare name. Dot-folders, the Wiki folder and the
+    vault-root ``MOCs`` folder are skipped. Folder symlinks are followed, as
+    Obsidian indexes them, with a loop guard; one that points back into the
+    vault is not walked, because the real folder already covers its files.
+    ``complete`` is false when a folder could not be read.
+    """
+    paths, complete = set(), True
+    seen = set()
+    inside_vault = os.path.realpath(vault).rstrip(os.sep) + os.sep
+    try:
+        wiki_id = os.stat(wiki)
+        wiki_id = (wiki_id.st_dev, wiki_id.st_ino)
+    except OSError:
+        wiki_id = None
+
+    def failed(_exc):
+        nonlocal complete
+        complete = False
+
+    def skipped(dirpath, name):
+        path = os.path.join(dirpath, name)
+        if name.startswith(".") or (dirpath == vault
+                                    and fold_name(name) == "mocs"):
+            return True
+        if (os.path.islink(path)
+                and (os.path.realpath(path) + os.sep).startswith(
+                    inside_vault)):
+            return True
+        try:
+            info = os.stat(path)
+        except OSError:
+            return False
+        return (info.st_dev, info.st_ino) == wiki_id
+
+    for dirpath, dirnames, filenames in os.walk(
+            vault, followlinks=True, onerror=failed):
+        try:
+            info = os.stat(dirpath)
+        except OSError:
+            complete = False
+            dirnames[:] = []
+            continue
+        if (info.st_dev, info.st_ino) in seen:
+            dirnames[:] = []
+            continue
+        seen.add((info.st_dev, info.st_ino))
+        dirnames[:] = [name for name in dirnames
+                       if not skipped(dirpath, name)]
+        for name in filenames:
+            if (not name.startswith(".") and name.lower().endswith(".md")
+                    and os.path.isfile(os.path.join(dirpath, name))):
+                rel = os.path.relpath(os.path.join(dirpath, name), vault)
+                paths.add(fold_name(rel.replace(os.sep, "/")[:-3]))
+    return paths, complete
+
+
+def _names_outside(target, outside, note=None):
+    """Whether a link target names a vault note outside the Wiki and MOCs.
+
+    ``outside`` holds those notes' folded vault-relative paths without
+    ``.md`` and ``note`` the linking entry's vault-relative path. A bare
+    target names a basename, a ``./`` or ``../`` target the path from the
+    entry's folder, and any other target a vault path, whole or its end,
+    as wiki-lint's ``item10/non-entry`` resolves it.
+    """
+    written = target.replace("\\", "/").strip().strip("/")
+    if written.lower().endswith(".md"):
+        written = written[:-3]
+    if written.startswith(("./", "../")):
+        if note is None:
+            return False
+        written = posixpath.normpath(posixpath.join(
+            posixpath.dirname(note), written))
+        return not written.startswith("../") and fold_name(written) in outside
+    key = fold_name(written)
+    if "/" not in key:
+        return any(path.rsplit("/", 1)[-1] == key for path in outside)
+    return key in outside or any(path.endswith("/" + key) for path in outside)
 
 
 def _link_stem(target):
@@ -433,7 +554,16 @@ def _link_regions(text):
             ("related", sections["related_line"] or ""))
 
 
-def dangling_links(text, known, mocs=(), paths=None, wiki_parts=("Wiki",)):
+def _path_lookup(written, wiki_parts):
+    """A path target's folded key, less a leading Wiki qualifier and ``.md``."""
+    rest = _root_split(written.split("/"), wiki_parts)[1]
+    if rest[-1].lower().endswith(".md"):
+        rest[-1] = rest[-1][:-3]
+    return fold_name("/".join(rest))
+
+
+def dangling_links(text, known, mocs=(), paths=None, wiki_parts=("Wiki",),
+                   outside=(), note=None):
     """``(section, target)`` for each unresolved body or Related wikilink.
 
     ``known`` holds entry stems and aliases; ``mocs`` holds MOC stems, which
@@ -441,7 +571,9 @@ def dangling_links(text, known, mocs=(), paths=None, wiki_parts=("Wiki",)):
     Wiki-relative paths without ``.md``: when given, a path-qualified target
     (other than ``./`` or ``../``) resolves only to an entry whose path it
     spells whole or ends, less a leading Wiki qualifier, or, when no entry
-    has its basename, to an alias of that name.
+    has its basename, to an alias of that name. A target that names a note
+    in ``outside`` from the entry at ``note`` (``_names_outside``) is not
+    dangling: ``non_entry_links`` lists it.
     """
     stems = (None if paths is None
              else {path.rsplit("/", 1)[-1] for path in paths})
@@ -456,15 +588,42 @@ def dangling_links(text, known, mocs=(), paths=None, wiki_parts=("Wiki",)):
             if bare or stems is None or written.startswith(("./", "../")):
                 resolved = stem in known or (bare and stem in mocs)
             else:
-                rest = _root_split(written.split("/"), wiki_parts)[1]
-                if rest[-1].lower().endswith(".md"):
-                    rest[-1] = rest[-1][:-3]
-                lookup = fold_name("/".join(rest))
+                lookup = _path_lookup(written, wiki_parts)
                 resolved = (lookup in paths
                             or any(path.endswith("/" + lookup)
                                    for path in paths)
                             or (stem not in stems and stem in known))
-            if not resolved:
+            if not resolved and not _names_outside(target, outside, note):
+                found.append((section, target))
+    return found
+
+
+def non_entry_links(text, paths, mocs=(), wiki_parts=("Wiki",), outside=(),
+                    note=None):
+    """``(section, target)`` for each link to a vault note outside the Wiki.
+
+    The target names no entry file, by stem or by ``dangling_links``'s path
+    rule (``paths`` as there), nor, when bare, a MOC stem in ``mocs``, and
+    it names a note in ``outside`` from the entry at ``note``
+    (``_names_outside``). A real note outranks an alias, so an alias of the
+    same name does not claim it.
+    """
+    stems = {path.rsplit("/", 1)[-1] for path in paths}
+    found = []
+    for section, region in _link_regions(text):
+        for target, _label in extract_wikilinks(region):
+            stem = _link_stem(target)
+            written = target.replace("\\", "/").strip().strip("/")
+            bare = "/" not in written
+            if stem is None or (section, target) in found:
+                continue
+            if bare or written.startswith(("./", "../")):
+                entry = stem in stems or (bare and stem in mocs)
+            else:
+                lookup = _path_lookup(written, wiki_parts)
+                entry = (lookup in paths
+                         or any(path.endswith("/" + lookup) for path in paths))
+            if not entry and _names_outside(target, outside, note):
                 found.append((section, target))
     return found
 
@@ -473,15 +632,15 @@ def _aliases_readable(path):
     """Whether a tree entry's alias ownership is fully known.
 
     Unreadable bytes or an unparsed title or aliases field can hide an alias;
-    a readable plain note with no frontmatter claims none.
+    a readable plain note with no frontmatter claims none (vault_index's
+    ``identity_complete`` holds both rules).
     """
     try:
         text = _read_regular(path).decode("utf-8-sig")
     except (OSError, UnicodeDecodeError):
         return False
     text = text.replace("\r\n", "\n").replace("\r", "\n")
-    return (index_entry(path, text=text)["identity_complete"]
-            or not text.startswith("---"))
+    return index_entry(path, text=text)["identity_complete"]
 
 
 def _root_split(parts, wiki_parts):
@@ -500,7 +659,8 @@ def _root_split(parts, wiki_parts):
 
 def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                        wiki_parts=("Wiki",), titles=None, unmirrored=(),
-                       folders=(), aliases_complete=True):
+                       folders=(), aliases_complete=True, others=(),
+                       others_complete=False):
     """Body and Related links that resolve, but not by the exact filename.
 
     ``stems`` maps each folded filename stem to the Wiki-relative paths
@@ -509,7 +669,17 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
     ``mocs`` holds MOC stems. ``own`` is the linking entry's path: its
     self-links are lint's ``10-self-link``. ``wiki_parts`` spell the Wiki's
     vault-relative path, which qualifies a replacement whose bare name a MOC
-    or another file shares.
+    or another file shares. ``others`` holds the folded vault-relative
+    paths, without ``.md``, of the vault's notes outside the Wiki and MOCs;
+    ``others_complete`` is true when every vault folder was read. A target
+    that names one of them (``_names_outside``) is no ``alias`` result: a
+    real note outranks an alias, and ``non_entry_links`` lists the link.
+
+    A ``path`` record drops an explicit ``.md`` suffix, and a Wiki or folder
+    path once the inventory proves no other file owns the bare name: no
+    other entry, MOC, unmirrored file or outside note has it, no folder is
+    unmirrored, and ``others_complete`` holds. A bare ``.md`` link whose
+    name an outside note shares takes the qualified path instead.
 
     ``unmirrored`` lists the unmirrored ``.md`` files and ``folders`` the
     unmirrored folders, as reported paths; ``aliases_complete`` is false
@@ -537,6 +707,7 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
     unread = list(unmirrored) + folders
     aliases_complete = aliases_complete and not unread
     own = fold_name(own) if own else None
+    other_stems = {path.rsplit("/", 1)[-1] for path in others}
     found = []
 
     def claim(stem):
@@ -575,6 +746,8 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                 if not files and not occupied:
                     if stem in mocs:
                         continue              # MOC navigation is wiki-lint's
+                    if stem in other_stems:
+                        continue              # a real note outranks an alias
                     kind, owner = claim(stem) or (None, None)
                     if kind is None:
                         continue              # dangling
@@ -598,6 +771,8 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                 elif owners:
                     owner = owners[0]
                 elif not files and not occupied:
+                    if _names_outside(target, others):
+                        continue              # a real note outranks an alias
                     kind, owner = claim(stem) or (None, None)  # by basename
                     if kind is None:
                         continue              # dangling
@@ -616,11 +791,20 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                     if not aliases_complete:
                         kind, where = "ambiguous", unread
                 else:
-                    dest = "/".join(
-                        prefix + owner.split("/")[-len(rest):]) + suffix
+                    keep = "/".join(prefix + owner.split("/")[-len(rest):])
+                    name = owner.rsplit("/", 1)[-1]
+                    if bare:
+                        dest = ("/".join(list(wiki_parts) + [owner])
+                                if suffix and stem in other_stems else name)
+                    elif (others_complete and not folders and not occupied
+                          and len(files) == 1 and stem not in mocs
+                          and stem not in other_stems):
+                        dest = name           # no other file needs the path
+                    else:
+                        dest = keep
                     if dest == written:
                         continue
-                    kind = "case"
+                    kind = "path" if suffix or dest != keep else "case"
                     if bare and folders:
                         kind, where = "ambiguous", folders
             if kind != "ambiguous":
@@ -672,11 +856,14 @@ def review(wiki, manifest, out, vault=None):
 
     # Files the overlay leaves unchanged keep their baseline single-file lint.
     cache = {}
-    baseline = collections.Counter(
-        _match_key(rel, finding)
-        for rel, finding in _findings(_lint(tree, cache), tree))
+    baseline, counted = collections.Counter(), {}
+    for rel, finding in _findings(_lint(tree, cache), tree):
+        key = _match_key(rel, finding)
+        baseline[key] += 1
+        if _occurrences(finding) is not None:
+            counted[key] = _occurrences(finding)
 
-    staged_paths = {}
+    staged_paths, replaced = {}, {}
     for rel, inner, data in staged:
         existing = mirrored.get(fold_name(inner))
         if existing is not None and existing != inner:
@@ -687,6 +874,8 @@ def review(wiki, manifest, out, vault=None):
         target = os.path.join(tree, *inner.split("/"))
         try:
             if os.path.lexists(target):
+                with open(target, "rb") as fh:
+                    replaced[rel] = fh.read()
                 os.unlink(target)          # the mirrored copy it replaces
             _write(target, data)
         except OSError as exc:
@@ -702,6 +891,10 @@ def review(wiki, manifest, out, vault=None):
                   "message": finding["message"],
                   "evidence": finding.get("evidence")}
         seen_before = baseline[key] > 0
+        if seen_before and key in counted:
+            # Fewer of the same occurrences is the old finding; any added
+            # occurrence makes it new.
+            seen_before = not (_occurrences(finding) - counted[key])
         if seen_before:
             baseline[key] -= 1
         if key[0] in staged_paths:
@@ -741,11 +934,23 @@ def review(wiki, manifest, out, vault=None):
     for leaf in leaves:
         unmirrored_stems.setdefault(
             fold_name(leaf.rsplit("/", 1)[-1][:-3]), leaf)
-    mocs, dangling, noncanonical = _moc_stems(vault), [], []
+    mocs, dangling, noncanonical, non_entry = _moc_stems(vault), [], [], []
+    others, others_complete = _outside_notes(vault, wiki)
     for rel, inner, data in staged:
         text = data.decode("utf-8-sig", errors="replace")
+        note = rel[:-3]
+        # A link the path's baseline copy already had is the user's to keep.
+        before = (non_entry_links(
+            replaced[rel].decode("utf-8-sig", errors="replace"), entry_paths,
+            mocs, wiki_parts, others, note) if rel in replaced else [])
+        for section, target in non_entry_links(text, entry_paths, mocs,
+                                               wiki_parts, others, note):
+            record = {"file": rel, "section": section, "target": target}
+            if (section, target) in before:
+                record["inherited"] = True
+            non_entry.append(record)
         for section, target in dangling_links(text, known, mocs, entry_paths,
-                                              wiki_parts):
+                                              wiki_parts, others, note):
             record = {"file": rel, "section": section, "target": target}
             occupant = unmirrored_stems.get(_link_stem(target))
             # A file outranks an alias; otherwise every unmirrored leaf and
@@ -760,11 +965,14 @@ def review(wiki, manifest, out, vault=None):
                                             wiki_parts=wiki_parts,
                                             titles=titles, unmirrored=leaves,
                                             folders=folders,
-                                            aliases_complete=not unread)]
+                                            aliases_complete=not unread,
+                                            others=others,
+                                            others_complete=others_complete)]
 
     return {
         "ok": True,
-        "clean": not (on_staged or introduced or dangling or noncanonical),
+        "clean": not (on_staged or introduced or dangling or noncanonical
+                      or any(not r.get("inherited") for r in non_entry)),
         "tree": tree,
         "staged": [rel for rel, _inner, _data in staged],
         "on_staged": on_staged,
@@ -772,6 +980,7 @@ def review(wiki, manifest, out, vault=None):
         "baseline_count": baseline_count,
         "dangling": dangling,
         "noncanonical": noncanonical,
+        "non_entry": non_entry,
         "unmirrored": unmirrored,
         "notes": notes,
     }
@@ -978,6 +1187,41 @@ def run_self_test():
               (shrunk["on_staged"], shrunk["introduced"],
                shrunk["baseline_count"]), ([], [], 2))
 
+        # An ownership-handoff trim leaves some of a neighbor's counted
+        # faults untouched: fewer of the same occurrences stay inherited.
+        count_wiki = os.path.join(tmp, "count-vault", "Wiki")
+        os.makedirs(count_wiki)
+
+        def voting(body):
+            return _st_entry("Hard voting", "Hard voting picks the class most "
+                             "models predict.", "The class most models "
+                             "predict.", body=body)
+
+        put(os.path.join(count_wiki, "hard-voting.md"), voting(
+            " A vote costs $1 and reads `alpha`.\n\nA recount costs $2 or $3 "
+            "and reads `beta`."))
+
+        def counted_faults(name, body):
+            result = review(count_wiki, manifest(name, [(
+                "Wiki/hard-voting.md",
+                put(os.path.join(drafts, "hard-voting.md"), voting(body)))]),
+                os.path.join(tmp, "count-review"))
+            return sorted((r["item"], r.get("inherited"))
+                          for r in result["on_staged"]
+                          if r["item"] in ("12-literal-dollar", "6-api-surface"))
+
+        check("a trim that leaves fewer literal dollars and backticked "
+              "identifiers keeps both findings inherited",
+              counted_faults("trim.json", " A vote costs $1 and reads `alpha`."),
+              [("12-literal-dollar", True), ("6-api-surface", True)])
+        check("an added literal dollar is a new finding",
+              counted_faults("grow.json", " A vote costs $1, $2, $3 or $4 and "
+                             "reads `alpha` and `beta`."),
+              [("12-literal-dollar", None), ("6-api-surface", True)])
+        check("a swapped backticked identifier is a new finding",
+              counted_faults("swap.json", " A vote costs $1 and reads `gamma`."),
+              [("12-literal-dollar", True), ("6-api-surface", None)])
+
         canon_vault = os.path.join(tmp, "canon-vault")
         canon_wiki = os.path.join(canon_vault, "Wiki")
         for folder in ("metrics", "scores"):
@@ -1128,13 +1372,106 @@ def run_self_test():
             "accuracy]], [[Wiki/accuracy|accuracy]] and [[nowhere/tpr|TPR]].")
         check("a path whose folder holds no such entry is dangling even when "
               "its basename is an entry; whole, trailing and root-qualified "
-              "paths resolve, and a path to an alias follows the alias rule",
+              "paths resolve, a path no other file needs is dropped, and a "
+              "path to an alias follows the alias rule",
               ([(r["section"], r["target"], r.get("unmirrored"))
                 for r in wrong["dangling"]], wrong_links, wrong["clean"]),
               ([("body", "metrics/precision", None),
                 ("body", "Wiki/nowhere/precision", None)],
-               [("body", "nowhere/tpr", "alias", "[[recall|TPR]]", None)],
+               [("body", "Wiki/precision", "path", "[[precision]]", None),
+                ("body", "Wiki/metrics/accuracy", "path", "[[accuracy]]",
+                 None),
+                ("body", "metrics/accuracy.md", "path", "[[accuracy]]", None),
+                ("body", "Wiki/accuracy", "path", "[[accuracy]]", None),
+                ("body", "nowhere/tpr", "alias", "[[recall|TPR]]", None)],
                False))
+
+        # A path stays where another vault file owns the bare name: a note
+        # outside the Wiki or a previous-layout MOC. A bare `.md` link
+        # beside an outside note takes the qualified path.
+        shared_vault = os.path.join(tmp, "shared-path", "vault")
+        for folder in ("Articles", "MOCs"):
+            os.makedirs(os.path.join(shared_vault, folder))
+        put(os.path.join(shared_vault, "Articles", "variance.md"),
+            "A reading note.\n")
+        put(os.path.join(shared_vault, "MOCs", "statistics.md"), "- x\n")
+        _shared, shared_links = links_review(
+            "shared-path", {"variance.md": measure("Variance"),
+                            "statistics.md": measure("Statistics"),
+                            "mean.md": measure("Mean")},
+            " It uses [[Wiki/variance|variance]], [[variance.md|variance]], "
+            "[[Wiki/variance.md|variance]], [[Wiki/statistics|statistics]] "
+            "and [[Wiki/mean|mean]].")
+        check("a path another vault file needs is kept, less its .md",
+              shared_links,
+              [("body", "variance.md", "path", "[[Wiki/variance|variance]]",
+                None),
+               ("body", "Wiki/variance.md", "path",
+                "[[Wiki/variance|variance]]", None),
+               ("body", "Wiki/mean", "path", "[[mean]]", None)])
+        _unproven, unproven_links = links_review(
+            "unproven-path", {"precision.md": measure("Precision")},
+            " It uses [[Wiki/precision|precision]] and "
+            "[[Wiki/precision.md|precision]].", links=[("sub", external)])
+        check("beside an unmirrored folder a path stays, less its .md",
+              unproven_links,
+              [("body", "Wiki/precision.md", "path",
+                "[[Wiki/precision|precision]]", None)])
+        # Obsidian indexes a symlinked folder, so its same-named note keeps a
+        # path. A loop inside that folder is walked once.
+        linked_store = os.path.join(tmp, "linked-store")
+        os.makedirs(os.path.join(tmp, "linked-path", "vault"))
+        os.makedirs(linked_store)
+        put(os.path.join(linked_store, "mean.md"), "A shared note.\n")
+        os.symlink(linked_store,
+                   os.path.join(tmp, "linked-path", "vault", "Shared"))
+        os.symlink(linked_store, os.path.join(linked_store, "loop"))
+        _linked, linked_links = links_review(
+            "linked-path", {"mean.md": measure("Mean")},
+            " It uses [[Wiki/mean|mean]].")
+        check("a note in a symlinked folder keeps the path it needs",
+              (linked_links, _outside_notes(
+                  os.path.join(tmp, "linked-path", "vault"),
+                  os.path.join(tmp, "linked-path", "vault", "Wiki"))),
+              ([], ({"shared/mean"}, True)))
+
+        # A link to a real note outside the Wiki is not dangling, and the
+        # note outranks an entry alias of its name (wiki-lint's
+        # item10/non-entry). The merged entry's own such link is inherited.
+        def outside_review(name, body):
+            articles = os.path.join(tmp, name, "vault", "Articles")
+            os.makedirs(articles)
+            for stem in ("doe-paper", "gadget", "extra"):
+                put(os.path.join(articles, stem + ".md"), "A reading note.\n")
+            kept = _st_entry("F1 score", "F1 score is the harmonic mean of "
+                             "precision and recall.", "The harmonic mean of "
+                             "the two error-rate shares.",
+                             body=" It cites [[doe-paper|Doe]].")
+            result, links = links_review(
+                name, {"tool.md": measure("Tool", ["gadget"]),
+                       "f1-score.md": kept}, body)
+            return result, links, [
+                (r["section"], r["target"], r.get("inherited"))
+                for r in result["non_entry"]]
+
+        outside_new, outside_links, outside_rows = outside_review(
+            "non-entry", " It cites [[doe-paper|Doe]], [[gadget]], "
+            "[[Articles/gadget|g]], [[../Articles/extra|x]] and "
+            "[[Articles/extra.md|x]].")
+        check("a link to a note outside the Wiki is non_entry, never "
+              "dangling or an alias; only the merged entry's own is "
+              "inherited, and a new one keeps the review from being clean",
+              (outside_rows, outside_new["dangling"], outside_links,
+               outside_new["clean"]),
+              ([("body", "doe-paper", True), ("body", "gadget", None),
+                ("body", "Articles/gadget", None),
+                ("body", "../Articles/extra", None),
+                ("body", "Articles/extra.md", None)], [], [], False))
+        outside_kept, _kept_links, kept_rows = outside_review(
+            "non-entry-kept", " It cites [[doe-paper|Doe]].")
+        check("an inherited non_entry link leaves the review clean",
+              (kept_rows, outside_kept["clean"]),
+              ([("body", "doe-paper", True)], True))
 
         # An online page's URL is a valid source item (CONVENTIONS section 7),
         # and a frontmatter URL is never a link, even when its last path

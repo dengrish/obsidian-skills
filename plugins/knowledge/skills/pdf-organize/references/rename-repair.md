@@ -10,10 +10,24 @@ separate way to rename files.
 
 The helper's candidate family is the PDF, its same-stem
 `Sources/Images/<stem>_fig*` images, an `Articles/` note whose origin
-identifies this PDF, and any split-book folder with its chapters. Each
+identifies this PDF, and the book's chapter folder with its chapters. Each
 chapter has its own family. The rename plan moves only proven members and
-repairs Markdown references vault-wide; it never independently renames
-unrelated notes or images. Resolve each blocker at its cause, then re-plan:
+repairs Markdown and Canvas references vault-wide; it never independently
+renames unrelated notes or images.
+
+- **Chapter folder.** A `Sources/PDFs/` folder named after the book, with
+  or without `_src`, belongs to the family only when it holds at least one
+  chapter PDF of this book. A topic folder that merely shares the name is
+  never renamed. The folder's other files, such as an errata PDF or a
+  reading plan, keep their names and move with it. The plan renames the
+  folder in every link to one of them, and verification fails if a link
+  still names the old folder.
+- **Other representation.** When the book is split, its other copy (the
+  same stem with or without `_src`) belongs to the family too, with its own
+  figures and note, because both copies pair with one chapter set. Each copy
+  keeps its own marker.
+
+Resolve each blocker at its cause, then re-plan:
 
 - **Investment records.** Records in vault-root `Investments/` stay
   unchanged, including when reached through a linked-folder alias. If one has
@@ -41,28 +55,53 @@ unrelated notes or images. Resolve each blocker at its cause, then re-plan:
 - **Figures.** A `_fig*` candidate moves only when the figure manifest
   records its exact current digest; any other candidate blocks the rename. A
   same-stem clipping, a deleted note, or no visible rival does not prove
-  ownership. Adopt an unrecorded legacy image through figure-extract's
-  explicit legacy-adoption procedure against the named PDF. Never infer
-  ownership from the `_fig` name, delete a conflicting occupant, or reset the
-  manifest to make the plan pass.
+  ownership. Compare each unrecorded legacy crop with its page. Record each
+  confirmed one under the PDF's current stem with
+  `python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' --src '<current PDF>' --out '<vault>/Sources/Images' --adopt-legacy '<current stem>:<label>'`
+  (repeat the option per figure; the PDF needs no `--allow-unorganized` for
+  this), then re-plan the rename. A candidate the comparison shows is another
+  source's file, such as a clipping-clean image or a slide deck's crop, is
+  no crop of this PDF: pass `--foreign-image '<name>'` for it (repeat the
+  option per file), and it keeps its name outside the family. When the PDF
+  would keep that stem, re-plan it under a distinguishing abbreviated title
+  by the
+  [target-stem rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan).
+  An unconfirmed crop stays a blocker. Never
+  infer ownership from the `_fig` name, delete a conflicting occupant, or
+  reset the manifest to make the plan pass.
 - **Aliases and symlinks.** Vault containment follows the logical path: a PDF
   beneath a linked source directory is in scope, but the link target's
   physical path is not. A case or normalization spelling counts only when
   filesystem identity proves it is the selected vault. A PDF reachable
   through several directory aliases, or a leaf PDF symlink to a moved source,
   blocks the rename: reconcile the reported aliases to one source path. Any
-  leaf `.md` symlink in the vault blocks the reference scan, because reading
-  or rewriting it could reach a file outside the vault: reconcile it, or
-  replace it with a regular in-scope note.
-- **Link repair is the helper's job.** It resolves folder-qualified links
-  against the keyed file's actual location and handles extensionless links,
-  case and Unicode variants, and symlinked directories. Code, escaped
+  leaf `.md` or `.canvas` symlink in the vault blocks the reference scan,
+  because reading or rewriting it could reach a file outside the vault:
+  reconcile it, or replace it with a regular in-scope file.
+- **Link repair is the helper's job.** It repairs wikilinks, inline and
+  reference-style Markdown links (also inside a callout), and HTML
+  `src`/`href` values. It resolves folder-qualified links against the keyed
+  file's actual location and handles extensionless links, percent-encoded
+  paths, case and Unicode variants, and symlinked directories. Code, escaped
   wikilinks, and closed HTML/Obsidian comments are literal evidence, and their
   bytes are preserved; an unclosed comment opener does not hide a dependency.
-  This applies vault-wide, including `Reviews/` logs: a rename rewrites each
-  whole old filename outside that literal evidence, so links and filename
-  mentions follow the file, and leaves all other issue text unchanged. Never
-  replace it with whole-body substring matching.
+  This applies vault-wide, including `Reviews/` logs. Outside that literal
+  evidence, a rename rewrites the whole old filename in every link. It also
+  rewrites the filename in plain text, so the mention follows the file, when
+  the name is canonical (a PDF or its figure) or when a plain-text folder path
+  leads to it from the vault root or from the note, as in
+  `Sources/PDFs/download.pdf`. Any other name in plain text,
+  such as a download's bare `main.pdf`, can be ordinary prose: it is not a
+  reference and stays unchanged. All other issue text stays unchanged. Never
+  replace this with whole-body substring matching.
+- **Canvas boards.** In an Obsidian `.canvas` board, a file card or a group
+  background holds the file's full vault path, so it follows every move,
+  including filing under the same basename. A text card is Markdown and is
+  repaired like a note. Labels, edges and link cards stay unchanged, and so
+  does every other byte of the board. A canvas that cannot be read as UTF-8
+  JSON blocks the rename when it may cite a changed name; otherwise it is
+  listed as not read. After an apply, the CLI also verifies that no canvas
+  card still points at an old path.
 
 The canonical contracts are
 [source identity (§1a)](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first),
@@ -85,9 +124,12 @@ apply once nothing below blocks it.
   collisions that differ only in case or Unicode normalization, overlong
   derived names, extension mismatches, unsafe paths, permissions, and
   malformed or conflicting sidecars. Do not force a partial family through.
+- **Moved with the chapter folder, names unchanged** lists the folder's
+  other files. Report them as moved, not renamed.
 - **Not read, and cite nothing this rename changes** lists notes that could
-  not be read as UTF-8. They remain untouched and must be reported as unread,
-  not verified clean. An unreadable note that cites this rename is a blocker.
+  not be read as UTF-8, and canvases that could not be read as UTF-8 JSON.
+  They remain untouched and must be reported as unread, not verified clean.
+  An unreadable note or canvas that cites this rename is a blocker.
 - **Figure sidecar updates** covers only the default figure ownership and
   review files in `Sources/Images/`; their changes are planned, applied, and
   rolled back with the rename. A custom figure-extract `--review-file` ledger

@@ -28,11 +28,13 @@ if _HERE not in sys.path:
 
 from code_typography import FILE_EXTENSIONS  # noqa: E402
 from entry_structure import (  # noqa: E402
+    BOLD_TEXT,
     SOURCE_REFERENCE_FORMS,
     _BOLD_OUTER_RE,
     acronym_initial_forms,
     description_subject_forms,
     first_letter_ci_equal,
+    first_prose_paragraph_lines,
     mask_body_comments,
     math_title_plain_text,
     normalized_answer_surface,
@@ -49,7 +51,7 @@ from organism_names import (  # noqa: E402
     organism_title_classification,
     scientific_abbreviation_matches,
 )
-from plurals import pluralize, singular_forms  # noqa: E402
+from plurals import pluralize, singular_forms, singular_keys  # noqa: E402
 from portable_names import portable_identity  # noqa: E402
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
 
@@ -145,11 +147,15 @@ def bare_common_noun_slug(slug):
 
     A hyphen-free stem is bare when it is a :data:`COMMON_NOUNS` word; a
     hyphenated one when it spells a :data:`CROSS_DOMAIN_PHRASES` phrase
-    (``tree-of-life``). A qualified stem (``tree-of-life-biology``) is not.
+    (``tree-of-life``). A regular plural of the word, or of the phrase's last
+    word, is folded (``kernels``, ``online-learnings``). A qualified stem
+    (``tree-of-life-biology``) is not bare.
     """
-    slug = slug or ""
-    return (("-" not in slug and slug in COMMON_NOUNS)
-            or slug.replace("-", " ") in CROSS_DOMAIN_PHRASES)
+    slug = (slug or "").replace(" ", "-")
+    keys = singular_keys(slug) if slug else set()
+    return bool({key for key in keys if "-" not in key} & COMMON_NOUNS
+                or {key.replace("-", " ") for key in keys}
+                & CROSS_DOMAIN_PHRASES)
 
 
 def cross_domain_alias_findings(aliases):
@@ -478,7 +484,7 @@ SOURCE_META_PATTERNS = (
     r"|signal|term)s?\b)",
     r"\bas (?:mentioned|discussed|noted|shown|described) "
     r"(?:above|below|earlier|previously|later)\b",
-    r"\bin the previous section\b", r"\bas we saw\b",
+    r"\b(?:in )?the previous section\b", r"\bas we saw\b",
     r"\bthe figure (?:above|below)\b",
 )
 #: In a Work entry, “the paper”, “the book” or “the article” (also “this book”
@@ -554,7 +560,7 @@ _CAPTION_LINE_RE = re.compile(r"^\s*\*(?!\*).*\*\s*$")
 # The anchor itself is read like the outer bold, so an italic taxon
 # (`- ***Mus musculus*** —`) is an anchor too.
 _BULLET_ANCHOR_RE = re.compile(
-    r"^\s*[-*]\s+\*\*(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?\*\*(?!\*)"
+    r"^\s*[-*]\s+\*\*" + BOLD_TEXT + r"\*\*(?!\*)"
     r"(?:\s*[*_]?[\(\[][^)\]\n]{1,60}[\)\]][*_]?)*\s*[—–:\-]")
 _SINGLE_SPAN_RE = re.compile(r"\[\[[^\]]*\]\]|\$[^$]+\$|`[^`]+`")
 _EMPHASIS_SPAN_RE = re.compile(
@@ -582,21 +588,19 @@ def unenumerated_bold_findings(prose, table_spans=()):
     """Item 16: bold outside the title, bullet anchors and ``**Related:**``.
 
     The opener's first bold is the title slot (the opener check owns its
-    form); the opener starts at the first visible line, so a leading comment
-    does not end it. Whole-line italic captions belong to item 12. Wikilinks
-    are masked so markup in a display label stays item 18's finding, and bold
-    around a single link, math or code span is left to
-    ``emphasis_span_findings``.
+    form). The opener is the first prose paragraph, so a leading comment does
+    not end it and a leading heading or display block does not take the
+    slot. Whole-line italic captions belong to item 12. Wikilinks are masked
+    so markup in a display label stays item 18's finding, and bold around a
+    single link, math or code span is left to ``emphasis_span_findings``.
     """
     masked = mask_line_spans(strip_code(prose or ""), table_spans)
     masked = _ANYLINK_RE.sub(lambda match: " " * len(match.group(0)), masked)
+    opener = first_prose_paragraph_lines(prose) or (0, 0)
     findings = []
-    in_opener, opener_skipped, seen_text = True, False, False
+    opener_skipped = False
     for index, line in enumerate(masked.split("\n")):
-        if line.strip():
-            seen_text = True
-        elif in_opener and seen_text:
-            in_opener = False
+        in_opener = opener[0] <= index < opener[1]
         if _CAPTION_LINE_RE.match(line) or _BULLET_ANCHOR_RE.match(line):
             continue
         for bold in BOLD_OUTER_RE.finditer(line):
@@ -623,10 +627,10 @@ def emphasis_span_findings(prose, related="", table_spans=(),
 
     The markup itself already styles the span. ``opener_markup`` is the exact
     opener bold of a title made from one inline-math span (see
-    ``pure_math_opener_markup``): its first occurrence in the opener is the
-    one allowed exception; the opener starts at the first visible text. Code
-    contents are blanked but their delimiters kept, so emphasis shown inside a
-    code sample is not rendered emphasis.
+    ``pure_math_opener_markup``): its first occurrence in the opener, the
+    first prose paragraph, is the one allowed exception. Code contents are
+    blanked but their delimiters kept, so emphasis shown inside a code sample
+    is not rendered emphasis.
     """
     prose = prose or ""
     zones = (mask_line_spans(strip_indented(strip_fenced(prose)), table_spans)
@@ -636,9 +640,10 @@ def emphasis_span_findings(prose, related="", table_spans=(),
                        + " " * (len(match.group(0)) - 2 * len(match.group(1)))
                        + match.group(1)),
         zones)
-    lead = len(zones) - len(zones.lstrip())
-    opener_break = re.search(r"\n[ \t]*\n", zones[lead:])
-    opener_limit = lead + opener_break.start() if opener_break else len(prose)
+    line_starts = [0] + [match.end() for match in re.finditer(r"\n", zones)]
+    opener = first_prose_paragraph_lines(prose) or (0, 0)
+    opener_start, opener_limit = (
+        line_starts[min(line, len(line_starts) - 1)] for line in opener)
     findings = []
     for match in _EMPHASIS_SPAN_RE.finditer(zones):
         if match.group(1) != match.group(3):
@@ -650,7 +655,8 @@ def emphasis_span_findings(prose, related="", table_spans=(),
             kind, fix = "math", "LaTeX"
         else:
             kind, fix = "code", "backticks"
-        if opener_markup == match.group(0) and match.start() < opener_limit:
+        if (opener_markup == match.group(0)
+                and opener_start <= match.start() < opener_limit):
             opener_markup = None
             continue
         findings.append({
@@ -1024,7 +1030,7 @@ def primary_line3_faults(card_count, rows, term, counterpart):
 #: later parentheticals to the title. introduced_aliases.py reads the same
 #: slot as item-17 alias evidence.
 BOLD_PAREN_RE = re.compile(
-    r"(?<!\*)\*\*(?P<bold>(?:\$[^$\n]+\$|\*[^*\n]+\*|[^*\n])+?)"
+    r"(?<!\*)\*\*(?P<bold>" + BOLD_TEXT + r")"
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
     r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)"
     r"[^()\n]{0,59}\)\s*)?"
@@ -1570,6 +1576,12 @@ def run_self_test(verbose=False):
               ["entropy", "Tree of life", "online-learning",
                "tree-of-life-biology", "shannon-entropy", "", None]),
           ["entropy", "Tree of life", "online-learning"])
+    check("a plural of a floor word or phrase is bare too",
+          ([bare_common_noun_slug(value) for value in
+            ("kernels", "policies", "online-learnings", "precisions")],
+           cross_domain_alias_findings(
+               ["targets", "Policies", "kernels", "entropy-physics"])),
+          ([True, True, True, False], ["targets", "Policies", "kernels"]))
     check("single-word alias candidates of qualified or common subjects",
           [bare_word_alias_candidate(slug, title) for slug, title in (
               ("sensitivity", "Recall (machine learning)"),
@@ -1657,8 +1669,11 @@ def run_self_test(verbose=False):
           [checks(source_meta_findings(prose, "Concept")) for prose in (
               "As shown in the paper, it holds.", "This source gives it.",
               "The source text states it.", "It maps the source domain.",
-              "It reads the source-code tree.")],
-          [["phrase"], ["phrase"], ["phrase"], [], []])
+              "It reads the source-code tree.",
+              "The previous section showed it.",
+              "As the previous section showed, it holds.")],
+          [["phrase"], ["phrase"], ["phrase"], [], [], ["phrase"],
+           ["phrase"]])
     check("the paper, the book and the article are source-meta outside Work "
           "entries; this paper is source-meta everywhere",
           [[checks(source_meta_findings(prose, kind))
@@ -1720,6 +1735,12 @@ def run_self_test(verbose=False):
                          "             \n**Rate** opens.",
                          "   \n**Rate** opens.")],
           [["third"], [], []])
+    check("a leading heading or display block does not take the title slot",
+          [[finding["span"] for finding in unenumerated_bold_findings(prose)]
+           for prose in ("# Rate\n\n**Rate** opens.\n\nThe **third** follows.",
+                         "## **Overview**\n\n**Rate** opens.",
+                         "$$\nx\n$$\n\n**Rate** opens.")],
+          [["third"], ["Overview"], []])
     check("bullet anchors, captions, Related and single spans are exempt",
           unenumerated_bold_findings(
               "**Rate** opens.\n\n- **True positives** (TP) — correct.\n"
@@ -1759,6 +1780,12 @@ def run_self_test(verbose=False):
               "              \n\n**$x$** is a variable.\n\nLater **$x$** again.",
               opener_markup=markup)],
           [5])
+    check("the pure-math exemption holds in the first prose paragraph only",
+          [[finding["line"] for finding in emphasis_span_findings(
+              prose, opener_markup=markup)] for prose in (
+                  "## Overview\n\n**$x$** is a variable.\n\nLater **$x$**.",
+                  "## **$x$**\n\n**$x$** is a variable.")],
+          [[5], [1]])
     check("the exemption needs a pure-math title and an opener bold",
           [pure_math_opener_markup(title, opener)
            for title, opener in (("Rate", "**Rate** opens."),
@@ -1767,6 +1794,36 @@ def run_self_test(verbose=False):
     matched = BOLD_OUTER_RE.search("***E. coli* K-12** is a strain.")
     check("the outer-bold reader keeps the mixed taxon/strain form",
           bold_parts(matched), ("E. coli K-12", "mixed", "E. coli"))
+
+    def timed(scan):
+        import time
+        start = time.perf_counter()
+        scan()
+        return time.perf_counter() - start < 1.0
+
+    for label, scan in (
+            ("an opener bold with no parenthetical",
+             lambda: list(BOLD_PAREN_RE.finditer(
+                 "The **weighted mean** of " + ", ".join(
+                     "$x_{%d}$" % i for i in range(40))))),
+            ("a `**` inside math",
+             lambda: list(BOLD_OUTER_RE.finditer(
+                 "Here $a^{**}$ is the dual and " + "$x_i$ and " * 40))),
+            ("an unclosed bullet anchor",
+             lambda: _BULLET_ANCHOR_RE.match(
+                 "- **Weights " + "$x_i$ and " * 40)),
+            ("an unclosed bold before escaped dollars",
+             lambda: list(BOLD_OUTER_RE.finditer("**a " + "\\$ " * 40)))):
+        check("bold readers stay linear on 40 math spans after %s" % label,
+              timed(scan), True)
+    check("bold readers keep escaped dollars, math, `**` in math and a "
+          "currency dollar",
+          [BOLD_PAREN_RE.search(text).group("bold", "paren") for text in (
+              "The **\\$5 bill** (FB) is worth $x$ dollars",
+              "The **$k$-means algorithm** (KMA) uses $k$",
+              "**$a^{**}$ dual** (AD)", "**US$ price** (USP)")],
+          [("\\$5 bill", "FB"), ("$k$-means algorithm", "KMA"),
+           ("$a^{**}$ dual", "AD"), ("US$ price", "USP")])
 
     # item 18
     check("display-label markup kinds",

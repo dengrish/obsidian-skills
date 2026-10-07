@@ -29,7 +29,14 @@ batch mode never overwrites a duplicate or selects polished notes on its own.
 restores missing attachments of a matching owned note from its raw (as under
 *Body source* below) without rewriting the note, and finishes a pending
 changed-slug handoff by [its procedure](#finish-a-pending-changed-slug-handoff).
-Every other match stays a `duplicate` skip.
+It reports, and does not restore, the missing attachments of a note whose only
+origin is a legacy `source:`, because `place` refuses that note and restoring
+attachments never migrates its origin; only
+[finishing a pending handoff](#finish-a-pending-changed-slug-handoff) does. It
+restores the old note's images in a pending handoff only as
+that procedure directs, because finalize may already have retired them. Every
+other match stays a
+`duplicate` skip.
 
 Before reading the note for the rewrite, record its bytes, identity and mode
 in the run's snapshot file; it must record `file`:
@@ -40,18 +47,33 @@ python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
 ```
 
 Once a changed slug is settled, record `'Articles/<new_slug>.md'` in the same
-file; it must record `absent`. A case/Unicode respelling of the same note needs
-no second record. This JSON record is the expected version through publication
-and cleanup; never re-record it at commit time. Exclude this one note from its
-own dedup scan.
+file; it must record `absent`. These JSON records are the expected versions
+through publication and cleanup; never re-record them at commit time. The old
+note is recorded afresh only after an approved rewrite before publication (a
+legacy-origin migration or a missing-attachment placeholder) or when finishing
+a pending handoff. The new note gets a fresh record right after step 4 creates
+it. Exclude this one note from its own dedup scan.
+
+**Legacy origin.** Every `fetch_images.py` command that takes `--owner-note`
+refuses a note whose only origin is a legacy scalar `source:`. That includes a
+non-overwrite `place` and each rename phase, `publish-note` included. When the
+named note has `source:` and no `sources:`, migrate it before any such command:
+
+1. Write a scratch copy that changes only the `source: <url>` line into a
+   one-item `sources:` list holding the same URL.
+2. Publish it against the note's record with `publish_files.py publish`, as in
+   [publication](../SKILL.md#6-publish-safely).
+3. Record the note afresh with `snapshot --replace` and re-read it.
+
+The reprocess request authorizes this rewrite; report it.
 
 **Body source.** For a named `Articles/` note, remove only its leading Summary
 callout and following `___` separator to get the article body. Keep existing
-body prose, embeds and still-valid audit placeholders. Do not summarize the old
-summary as if it were source prose. For an authorized overwrite from a raw
-capture, clean the raw afresh and stage its images to scratch. A staged image
-that matches an attachment the note already embeds (identical bytes, else
-caption, alt text and position, as in the
+body prose, embeds and still-valid audit placeholders.
+Do not summarize the old summary as if it were source prose. For an authorized
+overwrite from a raw capture, clean the raw afresh and stage its images to
+scratch. A staged image that matches an attachment the note already embeds (identical
+bytes, else caption, alt text and position, as in the
 [completeness audit](completeness-audit.md#inventory-and-match-media)) keeps
 that embed's name: discard the staged copy, first restoring the attachment with
 `fetch_images.py place` (existing slug and `--owner-note`) if it is missing.
@@ -61,14 +83,34 @@ caption, and never delete an attachment. A missing attachment that cannot be
 restored becomes a reported `<!-- missing attachment: … -->` placeholder;
 [image handling](images.md#existing-embeds-on-a-reprocess) covers a changed slug.
 
+**Block IDs and linked headings.** Block IDs (an `^id` at the end of a
+block, or on its own line after a table, quote or list) are anchors for links
+from other notes, and a raw capture has none. Before drafting, list the old
+note's block IDs and the notes that link a heading or block of it
+(`<old_slug>#`). Carry each block ID byte-for-byte onto the matching block of
+the draft, and never invent one. Report each block ID or linked heading the
+draft cannot match, with the notes that link it.
+
+**Origin.** The draft keeps the existing note's first current `sources:` URL,
+even when the capture's URL is a scheme, `m.`/AMP, path-alias or query variant
+of it; report the capture URL as a variant. `publish-note` and `prepare`
+require the old note's web origin.
+
 For a changed slug, resolve every old-slug embed in the old note that lacks its
 exact attachment before step 4 of the
-[replacement](#publish-an-approved-replacement). Either restore it with
+[replacement](#publish-an-approved-replacement), after any legacy-origin
+migration. Either restore it with
 `fetch_images.py place` (old slug, `--owner-note` the old note), or first
 publish an approved same-slug rewrite of the old note that replaces that embed
 with the `<!-- missing attachment: … -->` placeholder, then record the old note
-afresh with `snapshot --replace` and re-read it. Prepare refuses a missing old
-attachment, and by step 5 the new note is already public.
+afresh with `snapshot --replace` and re-read it. An `<old_slug>_fig*` file that
+the old note does not embed exactly once as a filename-only embed also blocks
+the handoff; deleting an embed in Obsidian leaves its attachment behind. Never
+move, rename or delete that file yourself. Stop with nothing published, keep
+the old note and every attachment, and report the file as ownership-unproven so
+the user can re-embed, move or delete it. `rename --phase publish-note`
+refuses either blocker before anything is published, with or without
+`--dry-run`.
 
 Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polished-note)
 to decide which fields regenerate and which preserve user state. In particular,
@@ -77,9 +119,10 @@ that state and any metadata conflicts as required there.
 
 Retain existing figure numbers. An unchanged slug leaves existing attachments
 alone; new images continue after the highest occupied number. A changed slug
-maps each existing attachment by replacing only the slug; `rename --phase
-prepare --dry-run` reviews that plan after the new note is public (step 5).
-Nothing changes files the original note uses before then.
+maps each existing attachment by replacing only the slug. `publish-note`
+refuses the old note's image blockers before publication (step 4), and
+`rename --phase prepare --dry-run` reviews the full plan after the new note is
+public (step 5). Nothing changes files the original note uses before then.
 
 ## Settle a slug before writing images
 
@@ -99,9 +142,9 @@ free name.
 
 | Existing owner | Action |
 |---|---|
-| The same article: a note with the same normalized web origin, or one whose origin differs only by scheme, an `m.`/AMP host or path alias, or query fields the normalizer keeps, and whose title and author/date match this capture's verified metadata | Batch: skip, keep the raw, and report a dedup escape with the existing path and both URLs. Named capture: use the explicit overwrite-or-skip decision, not filename similarity as authorization. If sameness is uncertain, treat it as this row, not the next. Never offer a marked research extract for overwrite. |
+| The same article: a note with the same normalized web origin, or one whose origin differs only by scheme, an `m.`/AMP host or path alias, or query fields the normalizer keeps, and whose title and author/date match this capture's verified metadata | Batch: skip, keep the raw, and report a dedup escape with the existing path and both URLs. Named capture: use the explicit overwrite-or-skip decision, not filename similarity as authorization; an approved overwrite keeps the existing note's origin URL. If sameness is uncertain, treat it as this row, not the next. Never offer a marked research extract for overwrite. |
 | A different source (URL and title/identity differ), PDF summary, PDF or loose figure set | Choose `<slug>_2`, then `_3`, … until the note and image stem are free. Use the suffix for both. Report the collision. |
-| Current note being explicitly reprocessed | Keep its stem if still correct, or plan its own note/image rename below. |
+| Current note being explicitly reprocessed | Keep its stem if still correct, or plan its own note/image rename below. A stem that differs from the new slug only by case or Unicode normalization is still correct: keep its spelling and its images' names, and publish a same-name rewrite. |
 
 Do not rename another owner's figures to free a stem. If a new collision appears
 at final publication, return to this check and prepare/review the new draft and
@@ -129,9 +172,7 @@ never moved, deleted or rewritten, including after a successful reprocess.
    report `changed`, `appeared` or `removed`; a nonzero exit caused only by
    those entries does not refuse this preflight. An `error` result, or any
    other status on this replacement's own entries, does. Refuse any other
-   occupant. A case/Unicode spelling of the same note is allowed only when
-   `os.path.samefile` confirms it and the directory has **one** entry with that
-   normalized name. Two distinct hard-link entries are not a spelling alias.
+   occupant.
 3. Stage nothing in the vault by hand. Each writer in step 4 stages its own
    copy of the reviewed draft, with the old note's recorded `mode`, in a
    unique hidden directory outside the note folder and on its filesystem.
@@ -139,10 +180,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
    publish` against the record with the manifest
    `[{"path": "Articles/<slug>.md", "draft": "<absolute draft path>"}]`, as in
    [publication](../SKILL.md#6-publish-safely); it replaces only the recorded
-   version and keeps its mode. A changed slug or a same-file case/Unicode
-   respelling runs the shipped writer instead, because `publish_files.py`
-   cannot give a new name the original note's permissions and refuses a case
-   alias. Run it first with `--dry-run`, review the plan, then run the
+   version and keeps its mode. A changed slug runs the shipped writer instead,
+   because `publish_files.py` cannot give a new name the original note's
+   permissions. Run it first with `--dry-run`, review the plan, then run the
    identical command without `--dry-run`:
 
    ```bash
@@ -156,23 +196,31 @@ never moved, deleted or rewritten, including after a successful reprocess.
 
    The writer follows the shared
    [safe-write API](../../../shared/SAFE_WRITES.md#call-the-shared-python-api).
-   It rebuilds the expected token from the old note's JSON record `r` as
-   `atomic_move.RegularFileSnapshot(identity=tuple(r["identity"]), digest=r["digest"], mode=r["mode"], size=r["size"])`,
-   never from a fresh snapshot. It refuses an old note that no longer matches
-   its record, a draft whose first current `sources:` item is another web
-   origin, and a legacy research extract. At a free destination recorded
-   `absent` (a changed slug), it calls
+   It checks the old note against its JSON record, never a fresh snapshot.
+   It refuses an old note that no longer matches its record, a draft whose
+   first current `sources:` item is another web origin, and a legacy research
+   extract. It also refuses an old note without a current `sources:` list and
+   every old-note image blocker that prepare would raise, such as a missing
+   embedded attachment, an unembedded `<old_slug>_fig*` file, a PDF-owned stem
+   or an occupied destination. It refuses a case/Unicode-only slug change
+   ([kept spelling](#settle-a-slug-before-writing-images)). At a free destination recorded `absent`, it calls
    `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`
-   with the old note's recorded mode and leaves the old note in place. For a
-   same-file spelling change, it calls
-   `atomic_move.replace_expected(staged, target, expected, atomic_move.regular_file_snapshot, stage_dir, stage_parent=stage_parent)`
-   with that token and a fresh `stage_dir`. Any other occupant of the portable
-   name, and any case alias that is not the same single directory entry, is
-   refused. Its JSON `action` is `created`, `respelled`, or `unchanged` on a
-   rerun. A `failed` publication attempt names its retained `stage_dir` and
-   any `recovery_path`. Never recheck and then call `os.replace`, and never
+   with the old note's recorded mode and leaves the old note in place. Any
+   occupant of the portable name is refused. Its JSON `action` is `created`,
+   or `unchanged` on a rerun. A `failed` publication attempt names its
+   retained `stage_dir` and any `recovery_path`. Never recheck and then call `os.replace`, and never
    publish through a private driver. If publication fails, no attachment has
    moved and the unchanged old note still resolves.
+
+   When publish-note reports `created`, record the new note at once:
+
+   ```bash
+   python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
+       -o '<scratch>/clipping-snapshots.json' --replace 'Articles/<new_slug>.md'
+   ```
+
+   Its `digest` must equal the result's `sha256`. A mismatch means another
+   writer changed the note; keep it and report it.
 5. Read back the published note. For a same-path rewrite, place every newly
    staged remote or recovered image through the guarded
    [image publication procedure](images.md#download-and-publish), then verify
@@ -195,13 +243,24 @@ never moved, deleted or rewritten, including after a successful reprocess.
    ownership and destination-collision guards. Prepare exclusively copies the
    exact old bytes to the new names, rolls back copies it cannot complete, and
    retains every old name. Its JSON supplies the exact one-to-one mapping and
-   complete dependency report by checking every Markdown note outside the owner.
+   complete dependency report by checking every Markdown note and Obsidian
+   Canvas board outside the owner.
    Its top-level `ok: true` means only that the new-name copies exist; remaining
    dependents are listed in `dependency.blockers` (with `dependency.ok: false`),
    each a `path` and its `references`. Step 6 repairs them.
-   A refusal is not permission to copy by hand; retain the old note and images,
-   conditionally withdraw only the exact new note if safe, and report every
-   named recovery path.
+   A refusal is not permission to copy by hand. Retain the old note and its
+   images. Withdraw the new note only when publish-note reported `created` in
+   this run, its step-4 record matched, `verify` still reports the old note
+   `unchanged`, and no `Sources/Images/<new_slug>_fig*` file exists:
+
+   ```bash
+   python3 '<plugin>/shared/scripts/publish_files.py' remove --vault '<vault>' \
+       --snapshots '<scratch>/clipping-snapshots.json' 'Articles/<new_slug>.md'
+   ```
+
+   If `remove` refuses or a new-slug image exists, keep both notes and report
+   the same-URL pair as [pending](#finish-a-pending-changed-slug-handoff).
+   Report prepare's error and every named recovery path.
    After prepare succeeds, place any additional staged remote or recovered
    images through that same guarded image procedure, using the new owner note
    and the new figure numbers. They are separate from the old-image mapping.
@@ -227,6 +286,7 @@ never moved, deleted or rewritten, including after a successful reprocess.
    recomputes prepare's dependency inventory over every visible Markdown note
    outside the old owner, never editing either owner, including Wiki entries,
    MOCs, `Reviews/` logs and notes under `Articles/` and `Investments/`. A
+   note reached through a vault folder link is repaired like any other. A
    dated `Investments/*-stock-research.md` or `*-market-research.md` record
    is immutable; repair reports it `blocked`. In each other dependent note it
    rewrites only the parsed wikilinks, embeds, Markdown inline and
@@ -234,16 +294,30 @@ never moved, deleted or rewritten, including after a successful reprocess.
    old note or to an exact mapped old image, pointing each at its mapped new
    name. Each keeps its path form, display label, `#heading` or `^block`
    anchor, `|size` and alt text; code, math, prose and URLs are never
-   touched. It snapshots each note before reading it and publishes the
-   rewrite against that snapshot through the shared safe-write API. Nothing
-   else changes: a Wiki entry keeps `created:`, `updated:` and `read:`
-   byte-for-byte. Its JSON has one row per note: the `path`, a `status`
+   touched. In a Canvas board it rewrites a file card or group background
+   whose vault path names the old note or an old image in its own folder,
+   and a text card's Markdown as in a note; every other byte of the board
+   stays, and a board that is not valid JSON but holds an old name is
+   `blocked`. It snapshots each note or board before reading it and
+   publishes the rewrite against that snapshot through the shared
+   safe-write API. Apart
+   from a `sources:` copy it removes (below), nothing else changes: a Wiki
+   entry keeps `created:`, `updated:` and `read:` byte-for-byte. Its JSON has one row per note: the `path`, a `status`
    (`rewritten`, which the dry-run shows as `would-rewrite`; `unchanged`; or
    `blocked`) and `references`, each `{line, from, to}` holding the raw old
    and new target text. A `blocked` row adds its `reason`, the old names
-   found (`dependencies`) and any retained `recovery` path. The command exits
-   1 while any row is blocked. In the dry-run, check that every pair maps an
-   old name to its mapped new one.
+   found (`dependencies`) and any retained `recovery` path. A row adds
+   `missing_anchors`, each `{line, reference}`, for a rewritten note link
+   whose `#heading` or `#^block` anchor the new note lacks. It does not
+   block; report each one. When an entry's `sources:` cites both the old and
+   the new note, the rewrite would list one document twice. In a block list,
+   repair removes the rewritten line and keeps the item already there; the
+   row adds `deduplicated`, each `{line, source}`. Duplicate items that
+   predate the repair stay. Any other list form keeps both items, and the
+   row adds `duplicate_sources` instead. Report
+   both; wiki-lint resolves a kept copy. The command exits 1 while any row
+   is blocked. In
+   the dry-run, check that every pair maps an old name to its mapped new one.
 
    A `blocked` note is left unchanged and stays a blocker: it is unreadable,
    changed after its snapshot, failed to publish, or holds an ambiguous
@@ -258,7 +332,7 @@ never moved, deleted or rewritten, including after a successful reprocess.
    image: correct the draft, record the new note with `snapshot --replace`,
    republish it as the same-name rewrite in step 4, then rerun repair.
    Rerunning the identical command is safe; it rewrites only what is left.
-7. After the repair, run the same complete Markdown dependency re-probe:
+7. After the repair, run the same complete note and Canvas dependency re-probe:
 
    ```bash
    python3 '<skill>/scripts/fetch_images.py' dependencies \
@@ -266,8 +340,8 @@ never moved, deleted or rewritten, including after a successful reprocess.
        --owner-note '<vault>/Articles/<old_slug>.md' --old-slug '<old_slug>'
    ```
 
-   An `ok: true` result means no other scanned note links the old note or
-   references one of its old image names. Anything else leaves both versions
+   An `ok: true` result means no other scanned note or board links the old
+   note or references one of its old image names. Anything else leaves both versions
    resolving. A dependent that appeared after the repair gets one more step-6
    run and re-probe; whatever still remains is a reported blocker.
 8. With an `ok: true` re-probe, run finalize first with `--dry-run`, review the
@@ -298,9 +372,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
 
    It refuses a path with no record or one whose bytes, identity or mode
    changed, and reports any retained stage directory in its JSON outcome.
-   Do not use a check followed by `unlink`, remove it for the same-file
-   spelling case, or remove it if it changed. A cleanup refusal
-   keeps the path; never delete first and report broken references afterward.
+   Do not use a check followed by `unlink`, or remove it if it changed. A
+   cleanup refusal keeps the path; never delete first and report broken
+   references afterward.
    Report a mixed state rather than hiding it.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
@@ -312,20 +386,42 @@ claim a failed rename completed.
 
 ### Finish a pending changed-slug handoff
 
-A same-URL pair stays pending when repair left a blocker, or when an older
-version of this skill stopped before repairing links. A resume, a request to
+A same-URL pair stays pending when repair left a blocker, when prepare refused
+and the new note could not be withdrawn, when a run stopped after finalize but
+before step 9 removed the old note (or step 9 refused), or when a run
+stopped before repairing links. A resume, a request to
 finish it, or a reprocess request naming either note finishes it without a
 separate question. Confirm that both notes share the web origin, the old note
 embeds the old-slug images and the new note embeds their mapped names. Record
 the old note with `publish_files.py snapshot --replace` in this run's snapshot
 file before reading it for this check; step 9 removes it against that record.
+If its only origin is a legacy `source:`, migrate it first as under
+[Legacy origin](#reprocessing-an-existing-note); that is not a redraft.
 Rerun `rename --phase prepare --dry-run` with the original paths and slugs,
 review it, then run the identical live command. Copies prepared earlier are
 verified as `already-prepared`, and it returns the current mapping and
 dependency report. Continue with steps 6–9: repair, the re-probe, finalize and
-old-note removal. Do not re-clean the raw or redraft either note. A reprocess
-request reprocesses the new note only after the handoff finishes; remaining
-blockers stop it.
+old-note removal. Do not re-clean the raw or redraft either note.
+
+If the prepare dry-run says each old-slug image is already retired, finalize
+already retired the old images: each mapped new
+copy exists, no old-slug image remains and no other note references the old
+names. Do not rerun prepare, repair or finalize, and never restore the retired
+images or replace their embeds with placeholders. Run the step-7
+`dependencies` re-probe; with `ok: true`, go straight to step 9. Otherwise a
+note has linked the old names since; restore the images as below.
+
+If the dry-run instead asks to restore an old-slug attachment and names its
+mapped new copy, the handoff still needs the old name. Copy that new copy to
+scratch outside the vault, then restore the old name with `fetch_images.py
+place` (old slug, the image's figure number as `--index`, the scratch copy as
+`--from-file`, the old note as `--owner-note`). Then rerun prepare as above
+and continue with steps 6–9.
+
+A prepare refusal for an `<old_slug>_fig*` file that the old note does not
+embed keeps the pair pending. Keep both notes and every attachment, report the
+file, and wait for the user to resolve it. A reprocess request reprocesses the
+new note only after the handoff finishes; remaining blockers stop it.
 
 ### Re-stem a renamed note's images
 

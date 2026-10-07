@@ -78,8 +78,9 @@ treating a detector match as permission to rewrite.
 - Banner-ad text that got scraped as prose ("ADVERTISEMENT", sponsored-content
   disclosures unrelated to the article).
 - Cookie/GDPR notices.
-- **Horizontal rules** — any line that is just `---`, `***`, `___` (three or
-  more), or `<hr>`, with blank lines around it. Articles often use them as
+- **Horizontal rules** — any line that is just three or more of one of `-`,
+  `*` or `_`, optionally separated by spaces (`---`, `***`, `___`, `* * *`,
+  `- - -`), or `<hr>`, with blank lines around it. Articles often use them as
   decorative section breaks; the heading hierarchy normalization (under [Repair
   structure and markup](#repair-structure-and-markup) below) already gives the
   note clear structure, so the rules are redundant noise. **Important
