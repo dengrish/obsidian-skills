@@ -55,6 +55,9 @@ __all__ = [
     "inventory_sources",
     "verify_selected_pdf",
     "source_stem_groups",
+    "within_folder",
+    "LINK_ALIAS_REMEDY",
+    "link_aliases",
     "output_vault_root",
     "on_disk_spelling",
     "UnlistedFolderError",
@@ -535,6 +538,81 @@ def source_stem_groups(selected, vault_inventory=()):
         key: sorted(paths, key=lambda path: _sort_key(str(path)))
         for key, paths in groups.items()
     }
+
+
+def within_folder(path, root):
+    """Whether ``path`` is the existing folder ``root`` or lies below it.
+
+    Compares ``(st_dev, st_ino)`` identities rather than strings: realpath
+    keeps the caller's letter case and Unicode normalization, which a case-
+    or normalization-insensitive filesystem treats as the same folder.
+    """
+    try:
+        info = os.stat(root)
+    except OSError:
+        return False
+    target, path = (info.st_dev, info.st_ino), os.path.realpath(path)
+    while True:
+        try:
+            info = os.stat(path)
+        except OSError:
+            pass                           # not created yet; check its parent
+        else:
+            if (info.st_dev, info.st_ino) == target:
+                return True
+        parent = os.path.dirname(path)
+        if parent == path:
+            return False
+        path = parent
+
+
+#: The remedy when symlinks show one PDF under several vault paths
+#: (CONVENTIONS.md §1a); ``%s`` names the links.
+LINK_ALIAS_REMEDY = (
+    "the symlink(s) %s show one file under several vault paths; ask the "
+    "user to remove each such link or move it out of the vault, never the "
+    "file it reaches, then retry (CONVENTIONS.md §1a)")
+
+
+def link_aliases(paths, root=None):
+    """Map each of *paths* that is another's file reached through a symlink.
+
+    Two such paths end at one directory entry (one folder, one name), so
+    neither is a copy; hard links are separate entries and stay copies.
+    Each value lists the links to remove: the outermost symlinked component
+    of either path below their shared folder, and inside *root* when given.
+    """
+    def entry(path):
+        real = os.path.realpath(path)
+        info = os.stat(os.path.dirname(real))
+        return info.st_dev, info.st_ino, portable_identity(os.path.basename(real))
+
+    def outer_link(path, stop):
+        link = None
+        while path != stop and (root is None or (
+                path != root and _lexically_within(path, root))):
+            if os.path.islink(path):
+                link = path
+            path = os.path.dirname(path)
+        return link
+
+    if root is not None:
+        root = os.path.abspath(os.fspath(root))
+    spelled = [(path, os.path.abspath(os.fspath(path))) for path in paths]
+    found = defaultdict(set)
+    for index, (first, a) in enumerate(spelled):
+        for second, b in spelled[index + 1:]:
+            try:
+                if a == b or not os.path.samefile(a, b) or entry(a) != entry(b):
+                    continue
+                shared = os.path.commonpath([a, b])
+            except (OSError, ValueError):
+                continue
+            links = {outer_link(a, shared), outer_link(b, shared)} - {None}
+            if links:
+                found[first] |= links
+                found[second] |= links
+    return {path: sorted(links, key=_sort_key) for path, links in found.items()}
 
 
 def output_vault_root(out_dir):
@@ -1119,6 +1197,33 @@ def run_self_test():
         else:
             ok("selected-alias regression skipped without symlinks", True)
             ok("inventoried-alias regression skipped without symlinks", True)
+
+        # A folder link shows one PDF under two paths. The link is what the
+        # user removes, never the file; a hard link is a real second entry.
+        shelf = pdfs / "Shelf"
+        shown = [nested / other.name, shelf / other.name]
+        if have_symlinks:
+            shelf.symlink_to(nested, target_is_directory=True)
+            check("a folder link is named for both paths of one PDF",
+                  link_aliases(shown), {path: [str(shelf)] for path in shown})
+            check("a link outside root is not named",
+                  link_aliases(shown, root=nested), {})
+            check("within_folder compares folder identities",
+                  [within_folder(shelf, nested), within_folder(shelf, vault),
+                   within_folder(shelf, images)], [True, True, False])
+            shelf.unlink()
+        else:
+            ok("link-alias regressions skipped without symlinks", True)
+            ok("root-bound link-alias regression skipped without symlinks", True)
+            ok("within_folder regression skipped without symlinks", True)
+        hard = pdfs / "hardcopy" / other.name
+        hard.parent.mkdir()
+        try:
+            os.link(nested / other.name, hard)
+        except (OSError, NotImplementedError):
+            hard.write_bytes(b"%PDF fixture")
+        check("a hard link stays a copy", link_aliases([nested / other.name, hard]), {})
+        shutil.rmtree(hard.parent)
 
         # Model names returned by a normalization-sensitive filesystem without
         # requiring this host to be able to create both spellings. Inventories

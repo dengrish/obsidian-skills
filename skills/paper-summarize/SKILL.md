@@ -71,8 +71,11 @@ to split that one book, keeping the original; then summarize the chapter PDF.
 A [preview run](#preview-runs) splits nothing and reports the proposed split.
 If pdf-organize finds no chapter structure, or the split or a rename it needs
 is blocked, write nothing from the book and report the blocker and the
-proposed split. Never write a chapter-only note under the book's stem: a note
-covers the whole PDF it is named after.
+proposed split. A requested part that is none of the book's chapters (a
+preface, an introduction not labeled as a chapter, an appendix) authorizes no
+split: write nothing and report the book's chapters or proposed split. Never
+write a chapter-only note under the book's stem: a note covers the whole PDF
+it is named after.
 
 A PDF outside the vault is usable only as a readable copy of the one vault PDF
 with its basename. When that vault PDF exists, run the
@@ -132,7 +135,7 @@ case-folded) duplicate name is a `collision`.
 | `new` | Continue. |
 | `done` | Skip unless the request already authorizes replacing existing summaries; for a named file without that authorization, ask whether to overwrite or skip. |
 | `legacy` | Leave the older embed note untouched and report it: the user removes or renames it; a rescan then reports `new`. |
-| `collision` | Write nothing; report the existing origin, `note_origin_error`, `source_conflicts`, `note_conflicts` or `source_gate_error`. For another producer's note or `note_conflicts`, the user renames, moves or removes the other note, or all but one of the portable-equivalent names; a rescan then reports `new`, or `done` when the remaining note is this PDF's. A `note_origin_error` means the existing note's origin metadata is malformed: if it is this PDF's own note, the user repairs that metadata rather than renaming or removing the note; otherwise the other-producer remedy applies. Resolve `source_conflicts` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. An incomplete inventory names the unreadable or looping vault paths; report them for the user to repair. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
+| `collision` | Write nothing; report the existing origin, `note_origin_error`, `source_conflicts`, `source_aliases`, `note_conflicts` or `source_gate_error`. For another producer's note or `note_conflicts`, the user renames, moves or removes the other note, or all but one of the portable-equivalent names; a rescan then reports `new`, or `done` when the remaining note is this PDF's. A `note_origin_error` means the existing note's origin metadata is malformed: if it is this PDF's own note, the user repairs that metadata rather than renaming or removing the note; otherwise the other-producer remedy applies. Resolve `source_conflicts` and `source_aliases` by the [duplicate-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames). A `source_gate_error` alone, such as an incomplete inventory or an external file with no vault owner, is a scope problem to fix before rescanning. An incomplete inventory names the unreadable or looping vault paths; report them for the user to repair. Never append `_2` to the summary, hand-rename another producer's note or pick either copy by directory order. |
 | `unorganized` | Stop for that PDF and route naming to `pdf-organize`. After it files the PDF, re-run the inventory and continue from the new path; the old path is no longer the source identity. |
 | `feed` | A [feed-owned attachment](../../shared/CONVENTIONS.md#1c-feed-owned-attachments): skip it, and never route it to `pdf-organize`. Only when the user names one, rescan that file alone with `--allow-unorganized`, keep its collector path and feed receipts unchanged, and report the exception. |
 | `book` | Skip a whole split book in a folder sweep and name the chapter folder; `--include-split-books` selects split books only for a sweep that asks for them. |
@@ -219,7 +222,10 @@ files every figure a second time under the book's stem.
 6. **View only the crops this run wrote.** Complete figure-extract's
    [visual review](../figure-extract/SKILL.md#3-inspect-the-summary-and-verify-crops)
    of them, repairing a bad one through its explicit-crop workflow; do not
-   invent a separate crop or rename procedure. Crops the extractor reports
+   invent a separate crop or rename procedure. A crop written from a false
+   caption names no figure: never repair or embed it, and report it as
+   figure-extract's [Unclaimed crops](../figure-extract/references/review-and-repair.md#interpret-the-diagnostics)
+   row says. Crops the extractor reports
    only as occupied are no gap: select from them and do not adopt them here.
    Never overwrite, adopt or repair a pre-existing crop: skip a wrong one,
    carry its claim in prose and report it for figure-extract.
@@ -244,8 +250,10 @@ Otherwise read the whole captured file in page-ordered slices.
 
 Read the document's argument, evidence, approach and actual exhibits, not only
 its abstract or executive summary. For an empirical document, read the methods
-and results in full. When the abstract and results disagree, use the results and
-report the discrepancy.
+and results in full. When the abstract and results disagree, use the results.
+When the text and one of its own tables or figures disagree, give both values
+beside the claim or cut the number; never place the exhibit under a number it
+contradicts. Report each discrepancy.
 Page numbers are **physical, 1-indexed positions in this PDF**, not printed
 folios. Before drafting, record each claim's supporting page and, where they
 apply, its numbers, population/system and comparator.
@@ -287,7 +295,8 @@ argument/synthesis note, the
 
 ```bash
 python3 '<skill>/scripts/note_lint.py' '<draft note>' \
-    --mode '<empirical|argument|notice>' --images '<vault>/Sources/Images'
+    --mode '<empirical|argument|notice>' --images '<vault>/Sources/Images' \
+    --wiki '<vault>/Wiki'
 ```
 
 Use the body mode chosen in step 3 and the same `--images` folder the scan
@@ -360,13 +369,13 @@ Fill in this template, omitting lines that do not apply:
   byline or date taken from its parent book or stem, an absent `read:`, a
   metadata conflict that kept the original, and missing basis,
   methodological or mode-relevant availability information.
-- **Calls and exceptions:** abstract-results discrepancies, low-confidence
-  calls, approved rewrites, explicit scan overrides such as
+- **Calls and exceptions:** the document's internal discrepancies,
+  low-confidence calls, approved rewrites, explicit scan overrides such as
   `--allow-unorganized`, duplicate documents, and affected papers that have
   their own note.
 - **Chapter request:** the chapter PDFs pdf-organize split from the book, with
-  the original kept; or the proposed split, with any blocker that left the
-  chapter unsummarized.
+  the original kept; or the proposed split, with any blocker or non-chapter
+  part that left the request unsummarized.
 - **Blockers:** each unpublished draft, with the reason and every staging or
   recovery path the helper printed.
 

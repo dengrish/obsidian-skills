@@ -33,9 +33,9 @@ with another entry. An absent DIR passes; only ``--create-dir`` creates it.
       already equals its draft is skipped, so the same command can be rerun
       after a partial failure. Any failed precheck publishes nothing; the
       first publication failure stops the run and leaves later paths pending.
-      ``--create-dir`` creates a missing direct child of the vault, and
-      refuses its paths when the vault holds a case or Unicode variant of
-      that name.
+      ``--create-dir`` (repeatable) creates a missing direct child of the
+      vault, and refuses its paths when the vault holds a case or Unicode
+      variant of that name.
   remove --vault VAULT --snapshots SNAP.json PATH...
       Remove each recorded file with ``atomic_move.remove_expected`` only
       while its bytes, identity and mode match the record. A path with no
@@ -454,7 +454,7 @@ def _refuse(plan, detail):
     return plan
 
 
-def _plan(vault, records, item, create_dir, new_mode, owned_dirs=()):
+def _plan(vault, records, item, create_dirs, new_mode, owned_dirs=()):
     """Check one manifest item without writing; return its planned action."""
     plan = {"path": item["path"]}
     try:
@@ -465,9 +465,10 @@ def _plan(vault, records, item, create_dir, new_mode, owned_dirs=()):
     refusal = _owned_dir_refusal(vault, key, owned_dirs)
     if refusal:
         return _refuse(plan, refusal)
-    if (create_dir is not None and "/" in key
-            and portable_identity(key.split("/", 1)[0])
-            == portable_identity(create_dir)):
+    top = portable_identity(key.split("/", 1)[0]) if "/" in key else None
+    create_dir = next((name for name in create_dirs
+                       if portable_identity(name) == top), None)
+    if create_dir is not None:
         try:
             owners = _root_owners(vault, create_dir)
         except OSError as exc:
@@ -515,7 +516,7 @@ def _plan(vault, records, item, create_dir, new_mode, owned_dirs=()):
         rel_dir = os.path.dirname(key)
         if os.path.lexists(directory):
             return _refuse(plan, "%s is not a directory" % rel_dir)
-        if rel_dir != create_dir:
+        if rel_dir not in create_dirs:
             return _refuse(plan, "the target directory %s does not exist; %s"
                            % (rel_dir, "pass --create-dir %s to create it"
                               % rel_dir if "/" not in rel_dir else
@@ -586,20 +587,24 @@ def _publish_one(vault, plan, stage_parent, made_dirs):
     del plan["stage_dir"]
 
 
-def cmd_publish(vault_arg, snapshots, manifest, create_dir=None,
+def cmd_publish(vault_arg, snapshots, manifest, create_dirs=(),
                 dry_run=False, owned_dirs=()):
     try:
         vault = _vault(vault_arg)
         records = load_snapshots(snapshots, vault)
         items = _load_manifest(manifest)
-        if create_dir is not None:
-            create_dir = _direct_child(create_dir, "--create-dir")
+        create_dirs = sorted({_direct_child(name, "--create-dir")
+                              for name in create_dirs})
+        if len({portable_identity(name) for name in create_dirs}) < len(
+                create_dirs):
+            raise InputError("--create-dir names case or Unicode variants of "
+                             "one folder")
         owned_dirs = [_direct_child(name, "--owned-dir") for name in owned_dirs]
     except InputError as exc:
         return {"ok": False, "error": str(exc)}, 1
 
     new_mode = _new_file_mode()
-    plans = [_plan(vault, records, item, create_dir, new_mode, owned_dirs)
+    plans = [_plan(vault, records, item, create_dirs, new_mode, owned_dirs)
              for item in items]
     keys = [portable_identity(plan["path"]) for plan in plans]
     for plan, key in zip(plans, keys):
@@ -1108,13 +1113,33 @@ def run_self_test():
                os.path.lexists(os.path.join(vault, "Topics"))),
               (1, ["refused"], False))
         payload, code = cmd_publish(vault, topics, topic_manifest,
-                                    create_dir="Topics")
+                                    create_dirs=["Topics"])
         check("--create-dir creates exactly that direct child first",
               (code, actions(payload),
                os.path.isdir(os.path.join(vault, "Topics"))
                and not os.path.islink(os.path.join(vault, "Topics")),
                read(os.path.join(vault, "Topics", "t.md"))),
               (0, ["created"], True, b"topic\n"))
+
+        pair = os.path.join(scratch, "pair.json")
+        cmd_snapshot(vault, ["Pair1/a.md", "Pair2/b.md"], pair)
+        pair_manifest = manifest("pair-manifest.json", [
+            ("Pair1/a.md", draft("pa.md", b"a\n")),
+            ("Pair2/b.md", draft("pb.md", b"b\n"))])
+        variant, variant_code = cmd_publish(
+            vault, pair, pair_manifest, create_dirs=["Pair1", "pair1", "Pair2"])
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            pair_code = main(["publish", "--vault", vault, "--snapshots", pair,
+                              "--manifest", pair_manifest, "--create-dir",
+                              "Pair1", "--create-dir", "Pair2"])
+        check("repeated --create-dir creates each folder, never two spellings "
+              "of one",
+              (variant_code, "variants of one folder" in variant.get("error", ""),
+               pair_code, actions(json.loads(out.getvalue())),
+               read(os.path.join(vault, "Pair1", "a.md")),
+               read(os.path.join(vault, "Pair2", "b.md"))),
+              (1, True, 0, ["created", "created"], b"a\n", b"b\n"))
 
         removal = os.path.join(scratch, "removal.json")
         put(wiki("rm-keep.md"), b"keep\n")
@@ -1222,6 +1247,27 @@ def run_self_test():
                spellings("resp.md")),
               (0, ["respelled"], True, ["resp.md"]))
 
+        put(wiki("Kept.md"), b"kept\n")
+        cmd_snapshot(vault, ["Wiki/Kept.md"], respells)
+        real_move = atomic_move.move_noreplace
+
+        def folding_move(src, dst, **kwargs):
+            real_move(src, dst, **kwargs)
+            os.rename(dst, src)  # a filesystem that keeps the old spelling
+
+        atomic_move.move_noreplace = folding_move
+        try:
+            payload, code = cmd_move(vault, respells, "Wiki/Kept.md",
+                                     "Wiki/kept.md")
+        finally:
+            atomic_move.move_noreplace = real_move
+        check("a respelling the folder does not keep fails as SpellingNotKept",
+              (code, payload["ok"], actions(payload),
+               payload["results"][0].get("error"), spellings("kept.md"),
+               read(wiki("Kept.md"))),
+              (1, False, ["failed"], "SpellingNotKept", ["Kept.md"],
+               b"kept\n"))
+
         put(wiki("Café resp.md"), b"nfd\n")
         cmd_snapshot(vault, ["Wiki/Café resp.md"], respells)
         payload, code = cmd_move(vault, respells, "Wiki/Café resp.md",
@@ -1274,7 +1320,7 @@ def run_self_test():
         os.makedirs(os.path.join(vault, "reviews"))
         cmd_snapshot(vault, ["Reviews/log.md"], owned, replace=True)
         twin_runs = [cmd_publish(vault, owned, owned_manifest,
-                                 create_dir="Reviews", owned_dirs=extra)
+                                 create_dirs=["Reviews"], owned_dirs=extra)
                      for extra in ([], ["Reviews"])]
         check("--create-dir never adds a case variant of an existing folder",
               ([(code, actions(payload)) for payload, code in twin_runs],
@@ -1287,8 +1333,29 @@ def run_self_test():
               ([(1, ["refused"])] * 2, True, True, ["reviews"], []))
 
         os.rmdir(os.path.join(vault, "reviews"))
+        planned_publish = _publish_one
+
+        def racing_publish(*args):
+            os.mkdir(os.path.join(vault, "reviews"))
+            return planned_publish(*args)
+
+        globals()["_publish_one"] = racing_publish
+        try:
+            payload, code = cmd_publish(vault, owned, owned_manifest,
+                                        create_dirs=["Reviews"])
+        finally:
+            globals()["_publish_one"] = planned_publish
+        check("--create-dir rechecks for a case variant made after planning",
+              (code, actions(payload), payload["results"][0].get("error"),
+               "now holds reviews" in payload["results"][0]["detail"],
+               sorted(n for n in os.listdir(vault)
+                      if portable_identity(n) == "reviews"),
+               os.listdir(os.path.join(vault, "reviews"))),
+              (1, ["failed"], "PublicationConflict", True, ["reviews"], []))
+
+        os.rmdir(os.path.join(vault, "reviews"))
         payload, code = cmd_publish(vault, owned, owned_manifest,
-                                    create_dir="Reviews",
+                                    create_dirs=["Reviews"],
                                     owned_dirs=["Reviews"])
         refreshed = cmd_snapshot(vault, ["Reviews/log.md"], owned,
                                  replace=True, owned_dirs=["Reviews"])
@@ -1469,8 +1536,10 @@ def _build_parser():
     publish.add_argument("--vault", required=True)
     publish.add_argument("--snapshots", required=True, metavar="SNAP.json")
     publish.add_argument("--manifest", required=True, metavar="MANIFEST.json")
-    publish.add_argument("--create-dir", metavar="DIR",
-                         help="missing direct child of the vault to create")
+    publish.add_argument("--create-dir", action="append", default=[],
+                         metavar="DIR",
+                         help="missing direct child of the vault to create "
+                              "(repeatable)")
     publish.add_argument("--dry-run", action="store_true",
                          help="check and plan without writing")
     for command in (snapshot, verify, publish):

@@ -58,26 +58,33 @@ read: false
   author from an affiliation, publisher or filename. A book chapter follows
   the chapter bullet below.
 - **Published:** valid `YYYY-MM-DD`, using every component the document prints.
-  Pad an unstated month/day with `01` and report the padding. Do not look up a
-  more precise date elsewhere. If the year is still absent (for a book
-  chapter, after the chapter bullet below), the organized PDF must already carry its
-  canonical `_nd` segment; write the explicit YAML null `published: null` and
-  report it. Under intake's deliberate noncanonical-name exception, such as a
-  named feed-owned attachment, retain that filename and use `published: null`
-  when the source is undated; carry `--allow-unorganized` to lint rather than
-  inventing a year or forcing an `_nd` rename.
+  For an article this is the date published online, else the issue date, never
+  a received or accepted date. Read it on the title-page image too: a stamped
+  date can be missing from the text capture. Pad an unstated month/day with
+  `01` and report the padding. Do not look up a more precise date elsewhere. If
+  the year is still absent (for a book chapter, after the chapter bullet
+  below), the organized PDF must already carry its canonical `_nd` segment;
+  write the explicit YAML null `published: null` and report it. Under intake's
+  deliberate noncanonical-name exception, such as a named feed-owned
+  attachment, retain that filename and use `published: null` when the source is
+  undated; carry `--allow-unorganized` to lint rather than inventing a year or
+  forcing an `_nd` rename.
   For canonical filenames, a `published` year that differs from the stem's year
   segment, including a date paired with `_nd` or a null paired with a
   year-bearing stem, means one of them misreads the document. Recheck the
   printed date: correct `published` only if the note misread it; otherwise
-  route the rename to `pdf-organize`. Never reconcile from outside knowledge or
-  change a correctly read date to pass lint.
-- **Book chapter without a byline or date:** take each missing value from the
-  parent book's printed one and report it. The parent book is the whole-book
-  PDF whose core stem is the chapter's book stem, anywhere under
-  `Sources/PDFs/`. Without that PDF, write `author: []`, and use the chapter
-  stem's year as the book's edition year (`<year>-01-01`); report where each
-  value came from. A chapter with a dated stem never uses `published: null`.
+  route the rename to `pdf-organize` (for a chapter, its book's rename, which
+  renames its chapters). Never reconcile from outside knowledge or change a
+  correctly read date to pass lint.
+- **Book chapter:** a chapter is dated by the book edition it is read from, the
+  year its stem carries. Name a date it prints for another year, such as a
+  reprint's original year, in the body. Take a byline or date the chapter does
+  not print from the parent book's printed one and report it. The parent book
+  is the whole-book PDF whose core stem is the chapter's book stem, anywhere
+  under `Sources/PDFs/`. Without that PDF, write `author: []`, and use the
+  chapter stem's year as the book's edition year (`<year>-01-01`); report where
+  each value came from. A chapter with a dated stem never uses
+  `published: null`.
 - **Created:** on creation, the date the note is written. Preserve it on an
   authorized rewrite unless correcting that field is specifically in scope.
   Clippings instead preserve their capture date; do not import that producer's
@@ -212,17 +219,16 @@ to reconstruct.
   Limitations. In the other modes, establish the thesis/problem or the affected
   work/issue without retelling the whole document.
 - **Methods / basis position:** keep the prose to about 1,200 characters,
-  excluding numbered steps. Empirical mode uses a short design paragraph with
-  only the design, population/system, comparator and procedure detail needed
-  to read the results, not infrastructure, hardware or incidental training
-  detail. When the document reports a procedure, it adds 3–8 numbered steps in
-  simple past, active voice, one action each, targeting at most 20 words. Put
-  each step's numbers inside it. In the other modes, explain only the scope,
-  premises, evidence selection, derivation, development process or grounds the
-  document actually gives. Use numbered steps only for a real reported
-  procedure, keep them contiguous and at 1–8 steps, and use prose when a
-  theory, narrative review, book or notice has no such procedure. The empirical
-  3-step minimum does not apply outside empirical mode. Include methodological
+  counted like Results and excluding numbered steps. Empirical mode uses a
+  short design paragraph with only the design, population/system, comparator
+  and procedure detail needed to read the results, not infrastructure,
+  hardware or incidental training detail. In the other modes, explain only the scope, premises, evidence
+  selection, derivation, development process or grounds the document actually
+  gives. In every mode, a procedure the document reports with three or more
+  steps takes one [numbered list](#prose-and-key-messages) of at most 8 steps
+  in simple past, active voice, one action each. Each step keeps its numbers
+  and the reason the document gives. A later phase joins that list or stays
+  prose, so Methods never holds a second list. Include methodological
   preregistration where the document has it.
 - **Results / contribution position:** develop the main finding, argument,
   recommendation or notice action for a scientist from another field. Empirical
@@ -235,7 +241,8 @@ to reconstruct.
   introduces may take a [numbered list](#prose-and-key-messages) here, under
   the sentence that introduces it. Put every exhibit here, beneath its supporting
   claim; cite load-bearing numbers. The cap is **2,400 characters of prose**,
-  excluding embeds, captions, tables and citation markup.
+  excluding embeds, captions, tables and citation markup; a link counts as its
+  display text.
 - **Interpretation / consequence position:** state the authors' or issuer's own
   conclusions and the implications they draw, attributed and only as far as
   the design, reasoning or notice reaches. Add another reading only when the
@@ -251,7 +258,7 @@ to reconstruct.
   State each document-level limitation once, here; the callout may carry the
   chief one in a short bullet. Keep a caveat about one claim beside that claim,
   not here, and add no generic research filler. Keep each bullet at or below
-  420 characters, not counting citation markup.
+  420 characters, counted like Results.
 - **Availability:** use 1–3 bullets with only relevant labels. Empirical notes
   name Data and add Code or Materials when relevant. Argument/synthesis notes
   use Sources, Materials, Data or Code only for supporting artifacts the
@@ -290,10 +297,9 @@ replaces explanation: each item keeps its why.
   introducing sentence. Each item is one step: it opens with its action, in
   the same grammatical form across the list, and keeps its reason (what the
   step achieves or why), plus any display equation and that display's
-  explanation. A loop ends with a "Repeat from step N until …" item.
-  What happens after the procedure, such as prediction after training, follows
-  the list in prose. The document's reported procedure in the second section
-  keeps its own rule in [body content](#body-content).
+  explanation. A loop ends with a "Repeat from step N until …" item, which
+  counts as one of the steps. What happens after the procedure, such as
+  prediction after training, follows the list in prose.
 - **Prose.** A causal chain (mechanism, then condition, then consequence) and
   an argument stay prose, where the connecting words carry the explanation. A
   sequence of fewer than three steps is prose too.
@@ -301,19 +307,19 @@ replaces explanation: each item keeps its why.
 Time order alone does not make a causal chain. Time-ordered stages of one
 process that each carry their own facts take a numbered list, one item per
 stage, each opened by its stage name when the document names the stages, and
-otherwise by the process's action, in the same form across the list. Parallel
-facts by period or age window stay bullets, each opened by its period. A prose
-section never holds a list alone, and a list counts toward the section's length
-limits.
+otherwise by its actor and verb (cGAS binds DNA; cGAMP activates STING), in the
+same form across the list. Parallel facts by period or age window stay bullets,
+each opened by its period. A prose section never holds a list alone, and a list
+counts toward the section's length limits.
 
-Number a list with sequential markers (`1.`, `2.`, `3.`). Indent a display, or
-an extra paragraph inside a step, to the item's text column: 3 spaces after
-`1. `, 4 after `10. `. Leave a blank line above and below a display. A block
-left at the margin ends the list there in Obsidian, and lint reports it when
-the next step carries on the numbering. Nest at most one level. A step opens
-with its action or stage name, never a bold lead word or label; a stage name
-with a Wiki entry keeps its first-mention link. The display rules below apply
-inside a step too:
+Number a list with sequential markers (`1.`, `2.`, `3.`). Indent a display, an
+extra paragraph or a nested list inside a step to the item's text column: 3
+spaces after `1. `, 4 after `10. `. Leave a blank line above and below a
+display. A block left at the margin ends the list there in Obsidian, and lint
+reports it when the next step carries on the numbering. Nest at most one
+level. A step opens with its action, actor or stage name, never a bold lead
+word or label; a stage name with a Wiki entry keeps its first-mention link. The
+display rules below apply inside a step too:
 
 ```markdown
 The fitting procedure lowers the error by small steps downhill:

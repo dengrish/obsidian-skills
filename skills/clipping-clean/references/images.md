@@ -28,8 +28,9 @@ refuses a blocker in either before the new note is public:
 
 - an old-slug image embed with no exact attachment, including legacy loose
   `_figN` spellings;
-- an `<old_slug>_fig*` file that the old note does not embed exactly once as a
-  filename-only embed, such as one whose embed was deleted in Obsidian.
+- an `<old_slug>_fig*` file that the old note does not embed as a
+  filename-only embed (such as one whose embed was deleted in Obsidian), or
+  embeds under two case or Unicode spellings.
 
 Resolve each one before the new note is published, under the
 [body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).

@@ -151,6 +151,17 @@ def content_column(lead, marker, gap):
     return start + (width if 1 <= width <= 4 else 1)
 
 
+def outdent(text, column):
+    """TEXT without its first `column` columns of indentation, or None.
+
+    Tabs expand to multiples of 4, as in content_column; None means TEXT
+    is indented less than `column`.
+    """
+    body = text.lstrip(" \t")
+    width = len(text[:len(text) - len(body)].expandtabs(4))
+    return " " * (width - column) + body if width >= column else None
+
+
 def parse_queue(data):
     """Parse flush-left list requests without normalizing any source bytes.
 
@@ -175,8 +186,10 @@ def parse_queue(data):
     comment_lines = lines[:body_at] + markdown_lines(mask_body_comments(
         "".join(lines[body_at:])))
     # `floor` is the smallest indent that can continue the open parent item;
+    # `sub_floor` is that of the last list item nested in it (0 for none);
     # `lazy` records that the previous line was that item's paragraph text.
     fence, comment, parent, floor, offset, lazy = None, False, None, 0, 0, False
+    sub_floor = 0
     opened_at = 1  # line of the frontmatter, fence or comment still open
 
     def continues_item(number, line, clean):
@@ -210,10 +223,22 @@ def parse_queue(data):
                 frontmatter = False
             continue
         if fence:
-            if re.fullmatch(r" {0,3}" + re.escape(fence[0]) +
-                            "{" + str(fence[1]) + r",}[ \t]*", line):
+            # A fence inside an item is measured from the content column of
+            # the item or nested item it sits in, and is the item's context.
+            # A less indented line ends the fence, and the item too when it
+            # is indented less than the item's content.
+            rest = outdent(line, fence[2])
+            if rest is None and line.strip():
                 fence = None
-            continue
+                if outdent(line, floor) is None:
+                    parent = None
+            else:
+                if re.fullmatch(r" {0,3}" + re.escape(fence[0]) +
+                                "{" + str(fence[1]) + r",}[ \t]*", rest or ""):
+                    fence = None
+                if parent is not None:
+                    parent["context_lines"].append(line)
+                continue
         # Hide comments without letting apparent requests or fences inside
         # them become syntax. Keep the visible part of an inline request.
         visible = []
@@ -255,14 +280,21 @@ def parse_queue(data):
             continue
         # Otherwise text beside a comment is plain text: never a request,
         # fence or rule, but still context or a continuation of the item.
-        opening = None if hidden else FENCE.match(clean)
-        if opening and not (opening[1][0] == "`" and "`" in opening[2]):
-            fence = (opening[1][0], len(opening[1]))
-            opened_at = number
-            parent, lazy = None, False
-            continue
         indent = len(clean) - len(clean.lstrip(" "))
         inside = parent is not None and (clean[:1] == "\t" or indent >= floor)
+        base = sub_floor if sub_floor and outdent(clean, sub_floor) is not None else floor
+        rest = outdent(clean, base) if inside else None
+        opening = None if hidden else FENCE.match(clean if rest is None else rest)
+        if opening and not (opening[1][0] == "`" and "`" in opening[2]):
+            # A fence inside the open item is its context; any other ends it.
+            fence = (opening[1][0], len(opening[1]), 0 if rest is None else base)
+            opened_at = number
+            if rest is None:
+                parent = None
+            else:
+                parent["context_lines"].append(clean)
+            lazy = False
+            continue
         if not hidden and not inside and THEMATIC_BREAK.fullmatch(clean):
             # `* * *` and `- - -` are rules, not requests.
             parent, lazy = None, False
@@ -278,7 +310,7 @@ def parse_queue(data):
                 if not CHECKED.match(shifted[3]):
                     reports.append({"line": number, "raw_line": line,
                                     "reason": "indented list item is not a top-level request"})
-                parent = {"context_lines": []}
+                parent, sub_floor = {"context_lines": []}, 0
                 floor = content_column(indent, shifted[1], shifted[2])
                 lazy = bool(shifted[3].strip())
                 continue
@@ -293,6 +325,9 @@ def parse_queue(data):
                 if quoted:
                     body = quoted[1].lstrip(" >")
                 nested = LIST.match(body)
+                if nested and not quoted:
+                    column = len(clean[:len(clean) - len(body)].expandtabs(4))
+                    sub_floor = content_column(column, nested[1], nested[2])
                 if nested and OPEN_TASK.match(nested[3]):
                     reports.append({"line": number, "raw_line": line,
                                     "reason": "nested task is not a top-level request"})
@@ -316,7 +351,7 @@ def parse_queue(data):
         # Nested lines under a skipped or reported item are discarded context;
         # a nested open task is still reported (above).
         parent, floor = {"context_lines": []}, content_column(0, match[1], match[2])
-        lazy = bool(match[3].strip())
+        sub_floor, lazy = 0, bool(match[3].strip())
         body = match[3]
         prefix = match[1] + match[2]
         if original_match and prefix != original_match[1] + original_match[2]:
@@ -674,6 +709,20 @@ def run_self_tests():
               [([], [(3, stray_text), (4, stray_text), (6, stray_text)]),
                ([("Kalman filter", [])], [(3, stray_text)]),
                ([], [(2, stray_text)])])
+        check("a fence inside an item is its context, measured from its own item",
+              [shape(queue) for queue in (
+                  b"- [ ] Softmax\n  ```\n  - [ ] code\n  ```\n  - note\n  - [ ] Log\n",
+                  b"1.  A\n    ```\n    - [ ] code\n    ```\n",
+                  b"- [ ] A\n\t~~~\n\t- [ ] code\n\t~~~\n- [ ] B\n",
+                  b"- [ ] A\n  ```\n  code\n- [ ] B\n",
+                  b"- [ ] A\n  - sub\n    ```\n    code\n  - [ ] nested\n- [ ] B\n")],
+              [([("Softmax", ["  ```", "  - [ ] code", "  ```", "  - note", "  - [ ] Log"])],
+                [(6, nested_reason)]),
+               ([("A", ["    ```", "    - [ ] code", "    ```"])], []),
+               ([("A", ["\t~~~", "\t- [ ] code", "\t~~~"]), ("B", [])], []),
+               ([("A", ["  ```", "  code"]), ("B", [])], []),
+               ([("A", ["  - sub", "    ```", "    code", "  - [ ] nested"]), ("B", [])],
+                [(5, nested_reason)])])
         check("a table queue is reported row by row",
               shape(b"| Topic | Note |\n| --- | --- |\n| Kalman filter | |\n"),
               ([], [(1, stray_text), (2, stray_text), (3, stray_text)]))

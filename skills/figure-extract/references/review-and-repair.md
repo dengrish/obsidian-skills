@@ -22,7 +22,7 @@ files, and review findings. Do not merge these into one extraction count.
 | Finding | What to inspect or do |
 |---|---|
 | Caption collisions | The first caption wins when two labels normalize to one filename. Render both reported pages and follow the summary's printed next step; an Extended Data/Supplementary pair uses [Extended Data and Supplementary figures](#extended-data-and-supplementary-figures). A continuation's later pages are not extracted; report that limitation. If the kept crop is prose or another figure, set an explicit crop for the dropped caption's figure on its page before marking the label reviewed. |
-| Suspicious bboxes | Inspect the page and PNG. Reasons include a very small crop, low coverage of the figure region or of the content the caption was read against, a running head or body prose inside the crop, caption overlap, and a scanned page (one page-covering image under the text layer). A suspicious PNG may still have been written. |
+| Suspicious bboxes | Inspect the page and PNG. Reasons include a very small crop, low coverage of the figure region or of the content the caption was read against, content or a text line cut by a crop edge, a running head or body prose inside the crop, caption overlap, and a scanned page (one page-covering image under the text layer). A suspicious PNG may still have been written. |
 | Caption text in crop | Re-crop before anything embeds it. Check all nearby captions, including the neighboring column's, not just the target figure's caption. |
 | Caption position ambiguous | The detector has competing “beside” and “below” interpretations. “Contested” and “thin” describe different evidence; neither proves the crop is wrong. Compare both readings with the page. Margin-caption layouts commonly need this review. |
 | Blank crops | Nothing was written. Render the caption's page and the next page; the figure may be overleaf. Crop the page where the figure actually appears. |
@@ -32,6 +32,7 @@ files, and review findings. Do not merge these into one extraction count.
 | Byte-identical duplicates | Under one stem, two labels may have received the same crop; the summary explains an S<N>/ED<N> pair. Under different stems, check for duplicate documents or book/chapter representations. Inspect the sources; identical bytes alone do not authorize deletion. |
 | Failed to write | Detection succeeded but a collapsed crop or rendering error prevented a PNG. Inspect the error and source page; use a valid explicit crop when possible. |
 | Existing crops kept | `--overwrite` could not re-crop these (degenerate or blank detection), so the earlier PNG is unchanged and may predate a revised PDF. Compare it with its page. If it is wrong, [set an explicit crop](#set-and-verify-an-explicit-crop) with `--overwrite`. Then mark the checked crop reviewed. |
+| Unclaimed crops | A recorded, unmarked crop that no caption of this run claims. A crop written from a false caption, such as a body reference wrapped to a line start (`…and Supplementary` / `Fig. 7.`), lands here once the detector rejects that caption; until then it is listed under `wrote:` like any other. Compare each with its page. A crop of a real figure whose caption the detector misses, such as an earlier explicit crop, takes a `--mark-reviewed` mark. A crop written from a false caption is mislabelled, like a [leftover S crop](#extended-data-and-supplementary-figures): never repair, mark or embed it. Report it with the notes that `python3 '<plugin>/skills/pdf-organize/scripts/organize.py' check --vault '<vault>' '<pdf>'` shows citing it, and leave deleting it to the user. Record a false caption the detector still reads in the [suggestion log](../SKILL.md#4-report-completed-and-unresolved-work). |
 | No figure captions detected | Check whether the PDF is figureless or uses a caption style the detector did not recognize; for a missed style, see the labelling rule under [caption labels](#caption-labels-when-diagnosing-collisions). Do not promise a complete extraction without inspecting it. |
 | No extractable text | Inspect the PDF; it may be a scan without OCR. Use available OCR on a [readable working copy](#readable-working-copies) if appropriate, following runtime tool guidance. OCR makes the captions readable but does not separate a figure from its page: each page of the copy is one image, so the batch flags every crop as a scanned page. Render each page and [set an explicit crop](#set-and-verify-an-explicit-crop). |
 | Could not open or fully read PDF (including encrypted) | Report the file and error. An encrypted PDF needs a [readable working copy](#readable-working-copies). Corrupt downloads, HTML saved as PDF, or damaged pages need a valid source, not automatically OCR. Other PDFs continue and completed crops retain ownership records, but the run fails. |
@@ -49,12 +50,13 @@ reviews.
 ### Extended Data and Supplementary figures
 
 Under the default prefix, Extended Data and Supplementary figures share
-`_fig_S<N>`. To switch a PDF after a default run, run the rerun command the
-summary prints: that PDF alone with `--ed-prefix ED --overwrite-supplementary`
-and an `--unmark-reviewed` for each S label whose collision kept an Extended
-Data caption. It replaces only unmarked `_fig_S<N>` crops, so other S marks
-keep protecting Supplementary repairs. Compare every PNG it lists under
-`wrote:` with its page.
+`_fig_S<N>`. To switch a PDF after a default run, run that PDF alone with
+`--ed-prefix ED --overwrite-supplementary`, carrying the batch's other
+non-default options. After an Extended Data/Supplementary collision the
+summary prints this command with an `--unmark-reviewed` for each S label whose
+collision kept an Extended Data caption; run it as printed. It replaces only
+unmarked `_fig_S<N>` crops, so other S marks keep protecting Supplementary
+repairs. Compare every PNG it lists under `wrote:` with its page.
 
 In a vault, the switch repairs links as a rename does. An Extended Data
 figure moves from `_fig_S<N>` to `_fig_ED<N>`, so before any S crop holding
@@ -63,17 +65,21 @@ Only those link targets change; each note keeps its `created:`, `updated:`
 and `read:`. The run lists each repaired note under `relinked:`; view each
 one's ED embed against its page and report the repaired notes. A link the
 run cannot change (an `Investments/` record, or a note it cannot read or
-write) keeps that S crop unreplaced, fails the run, and is listed with its
-blocker. Report it; rerun the same command after fixing a blocker you can
-fix. A `--dry-run` lists the planned relinks and rewrites nothing.
+write) leaves all of that S crop's links on it and is listed with its
+blocker. If a Supplementary figure needs that S name, the crop stays
+unreplaced and the run fails. Report each blocked link; rerun the same
+command after fixing a blocker you can fix. `.figure-ed-pending.txt`
+remembers each S crop that still holds an Extended Data figure, by its
+digest, so no later batch run replaces it before its links move, even after
+the ED crop is repaired or re-cropped. A `--dry-run` lists the planned
+relinks and rewrites nothing.
 
 A `_fig_S<N>` that no Supplementary caption claims, such as one reported as
 identical to `_fig_ED<N>`, is a leftover Extended Data crop. Its links move
-to `_fig_ED<N>` too, and the summary lists it as a leftover no note links
-to. Report it as mislabelled. Delete it only with authorization, and only
-after
-`python3 '<plugin>/skills/pdf-organize/scripts/organize.py' check --vault '<vault>' '<pdf>'`
-shows no note citing it.
+to `_fig_ED<N>` too, and the summary lists it as a leftover. A link that
+cannot move stays on it and is listed with its blocker, without failing the
+run, since no figure is missing. Report it as
+mislabelled, as the [Unclaimed crops](#interpret-the-diagnostics) row says.
 
 Later batch runs, folder sweeps included, switch a PDF to `--ed-prefix ED` by
 themselves and print `Using --ed-prefix ED` when its manifest records
@@ -120,6 +126,9 @@ The default sidecars in `--out` have separate purposes:
   batch run of that PDF and `--unmark-reviewed '<pdf_stem>:<label>'` before
   deleting the crop or asking automatic detection to replace it. Do not
   hand-edit the ledger: one malformed line blocks every later run.
+- `.figure-ed-pending.txt` records, in the same row form, each `_fig_S<N>`
+  crop that still holds an Extended Data figure
+  ([details](#extended-data-and-supplementary-figures)). Do not hand-edit it.
 
 A malformed, protected, or symlinked manifest blocks before extraction or
 review marks are written. A late save failure makes the run fail; resolve it
@@ -163,7 +172,8 @@ manifest digest before it can be skipped or replaced. On a case- or
 normalization-insensitive filesystem (the macOS default), a lone variant
 spelling that opens as the exact PNG path is that path: its manifest digest
 decides skip or replace, its record keeps the stored spelling, and
-`--adopt-legacy` can claim it. On a case-sensitive filesystem the variant is
+`--adopt-legacy` can claim it when its label has the requested letter case.
+On a case-sensitive filesystem the variant is
 a separate file and blocks. The refusal preserves every occupant and reports
 its stored name. A conflicting different figure
 slot does not block a named crop; an incomplete inventory still blocks because
@@ -173,11 +183,20 @@ the requested slot cannot be proved free.
 
 The default batch treats every occupied name without an ownership record as
 unclaimed. A matching canonical stem is not provenance: a URL-origin clipping
-can have the same stem and exact figure filename. After inspecting a confirmed
+can have the same stem and exact figure filename. Another tool's crop of this
+PDF shares the stem, and
+[pdf-organize's label test](../../pdf-organize/references/rename-repair.md#establish-the-owned-family)
+tells it from a legacy figure-extract crop. By that test, every unrecorded
+crop, even a `_fig_1`, beside one with an uppercase panel letter, as a slide
+deck's `_fig_1A_B` has, is another tool's; it stays that tool's file and is
+never adopted. After inspecting a confirmed
 historical extractor crop, select that exact file with a repeatable
 `--adopt-legacy '<pdf_stem>:<figure_label>'` option. The summary prints one
 such command per PDF for its unrecorded exact PNGs; drop every slot not yet
-compared with its page. Adoption is limited to complete PNGs for eligible,
+compared with its page. Add one `--mark-reviewed` with the same `STEM:FIG`
+per adopted crop confirmed correct, in the run that extracts its PDF (after a
+pending rename, the extraction that follows it), so a later batch
+`--overwrite` keeps it. Adoption is limited to complete PNGs for eligible,
 uniquely identified PDFs in this run and is revalidated before the sidecar is
 saved. A missing, changed, truncated, symlinked, ambiguous, or differently
 formatted file is left unchanged and unclaimed. A manifest may already exist,
@@ -191,9 +210,9 @@ under its current stem and without `--allow-unorganized`. It records
 ownership only and extracts nothing for that PDF; the PDF's name refusal then
 does not fail the run. pdf-organize blocks a rename while an unrecorded crop
 shares the PDF's stem, and its rename then carries each adopted crop to the
-new stem. Extract any missing figures after the rename. A split book's legacy
-crops are adopted the same way, named with `--src` or in a folder sweep; the
-run extracts nothing for the book, whose figures are its chapters'.
+new stem. Extract any missing figures after the rename. A split book's legacy crops are adopted the same way, named
+with `--src` or in a folder sweep; the run extracts nothing for the book,
+whose figures are its chapters'.
 
 A new explicit crop records its digest, creating the manifest when necessary.
 Inspect legacy images and explicitly adopt each confirmed `STEM:FIG` before
@@ -250,15 +269,16 @@ unnumbered or colliding exhibit unextracted and report it.
 
 ## Set and verify an explicit crop
 
-1. Inspect detections and coverage for the affected PDF. Pass the batch's
-   effective `--ed-prefix`, including an `ED` the batch applied by itself
-   (its summary printed `Using --ed-prefix ED`), and the same `--keep-frame`,
-   so labels and geometry agree; `auto_fig_bbox.py` does not read the
-   manifest. The table gives each figure's output label (`Fig`), bbox,
-   caption rectangle, and raw caption label.
+1. Inspect the detections for the affected PDF: for a split book, the
+   chapter PDF that holds the figure, whose own page numbers the later steps
+   use. Pass the batch's effective `--ed-prefix`, including an `ED` the batch
+   applied by itself (its summary printed `Using --ed-prefix ED`), and the
+   same `--keep-frame`, so labels and geometry agree; `auto_fig_bbox.py`
+   does not read the manifest. The table gives each figure's output label
+   (`Fig`), bbox, caption rectangle, and raw caption label.
 
    ```bash
-   python3 '<skill>/scripts/auto_fig_bbox.py' '<PDF path>' --coverage
+   python3 '<skill>/scripts/auto_fig_bbox.py' '<PDF path>'
    ```
 
 2. Render the problem page into a fresh child of the active run's `<scratch>`
@@ -297,36 +317,41 @@ unnumbered or colliding exhibit unextracted and report it.
 
    Pass the batch's non-default `--dpi` too, so the repair renders like its
    siblings; this command takes no `--keep-frame`, because the coordinates
-   define the crop. With canonical output, this command applies the same whole-vault basename
-   gate and remedies as `batch_extract.py` before it reads the ownership
-   sidecar or writes a crop. For an encrypted source,
-   use a [readable working copy](#readable-working-copies). Arbitrary external
+   define the crop. With canonical output, this command applies the same
+   whole-vault basename and split-book gates and remedies as
+   `batch_extract.py` before it reads the ownership sidecar or writes a crop.
+   For an encrypted source, use a
+   [readable working copy](#readable-working-copies). Arbitrary external
    output remains a one-off and does not imply a vault scan.
 
-   If intake deliberately used `--allow-unorganized`, repeat that flag on
-   this explicit command and the review-mark command below. This includes a
-   named collector-owned PDF attachment whose filename must remain unchanged.
-   The exception changes only the naming gate; duplicate vault basenames and
-   unknown or changed image occupants remain blocked.
+   If intake deliberately used `--allow-unorganized` or
+   `--include-split-books`, repeat that flag on this explicit command and the
+   review-mark command below. The first includes a named collector-owned PDF
+   attachment whose filename must remain unchanged. Neither exception
+   relaxes the duplicate vault basename or image occupant checks.
 
    `--overwrite` is needed to replace a verified crop; without it that crop
    is skipped. Unknown occupants remain protected. Keep every caption
-   rectangle out of the crop, including neighbors' captions from the coverage
+   rectangle out of the crop, including neighbors' captions from the detection
    table and any caption the detector missed. For a caption below the figure
    use `y1 <= cap_y0 - 0.5`; for one above it, `y0 >= cap_y1 + 0.5`. For a
    caption beside the figure, keep the crop's x-range clear of the caption;
-   the figure may extend above and below the caption band. The explicit crop
-   tool warns on detected caption overlap; `--no-caption-check` only
-   suppresses that diagnostic and does not permit captions in the delivered
-   PNG.
+   the figure may extend above and below the caption band. When the caption
+   occupies a corner of the figure's bounding box, so no rectangle holds the
+   whole figure without it, crop the whole figure and add `--blank-captions`:
+   it whites out the words of each detected caption inside the crop, and
+   step 4's comparison confirms that no caption text remains and no figure
+   content was blanked. The explicit crop tool warns on detected caption
+   overlap; `--no-caption-check` only suppresses that diagnostic and does not
+   permit captions in the delivered PNG.
 
 4. View the resulting PNG and compare it with the source page. The crop is
    trimmed of near-white margins; if the trim cut into a pale figure
    background, repeat step 3 with `--no-trim` (keep `--overwrite`, because the
    crop just written is now verified output). Only then record the review,
    including for a repair of a crop that was never flagged, with that PDF as
-   `--src` and the same output folder. A flagged batch crop confirmed correct
-   as written after the same comparison takes the same mark; leave an
+   `--src` and the same output folder. A flagged or adopted crop confirmed
+   correct as written after the same comparison takes the same mark; leave an
    unviewed or doubtful crop unmarked and report it. Pass one
    `--mark-reviewed` per checked figure of that PDF in one run:
 
@@ -365,7 +390,7 @@ command:
 - Add the batch's non-default `--dpi`, which the emitted command omits, and
   `--overwrite` only to replace verified output (it also replaces reviewed
   crops).
-- Repeat any `--allow-unorganized` used at intake.
+- Repeat any `--allow-unorganized` or `--include-split-books` used at intake.
 
 Collapsed rectangles are omitted and counted on stderr, so an emitted command
 is not evidence that all figures have usable crops.

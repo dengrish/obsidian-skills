@@ -142,7 +142,12 @@ def split_provenance(text):
 
 
 def _runtime_inventory(root):
-    """Reject unlisted executable/runtime material, links and special files."""
+    """Reject unlisted executable/runtime material, links and special files.
+
+    Claude Code writes ``.in_use/<pid>`` and ``.orphaned_at`` into its cache
+    copy of a plugin; at the plugin root they are host markers, not bundle
+    content.
+    """
     result = {}
     for folder, dirs, names in os.walk(root, followlinks=False):
         parent = Path(folder)
@@ -150,13 +155,14 @@ def _runtime_inventory(root):
             path = parent / name
             if path.is_symlink():
                 raise ValueError('plugin contains a symlink: ' + str(path))
-            if name == '__pycache__' or (parent == root and name == '.git'):
+            if name == '__pycache__' or (parent == root and name in {'.git', '.in_use'}):
                 dirs.remove(name)
         for name in names:
             path = parent / name
             if path.is_symlink():
                 raise ValueError('plugin contains a symlink: ' + str(path))
-            if name == '.DS_Store' or path.suffix in {'.pyc', '.pyo'}:
+            if (name == '.DS_Store' or path.suffix in {'.pyc', '.pyo'}
+                    or (parent == root and name == '.orphaned_at')):
                 continue
             relative = path.relative_to(root).as_posix()
             if relative != 'provenance.json':
@@ -333,6 +339,21 @@ def run_self_test():
                     split_provenance(text)
                 str(caught.exception).encode('utf-8')
                 self.assertNotIn('\n', str(caught.exception))
+
+        def test_host_cache_markers_are_skipped_only_at_the_plugin_root(self):
+            import tempfile
+            with tempfile.TemporaryDirectory() as folder:
+                root = Path(folder).resolve()
+                for relative in ('skills/x/SKILL.md', '.in_use/12345', '.orphaned_at'):
+                    (root / relative).parent.mkdir(parents=True, exist_ok=True)
+                    (root / relative).write_bytes(b'1\n')
+                self.assertEqual(sorted(_runtime_inventory(root)), ['skills/x/SKILL.md'])
+                for relative in ('skills/x/.in_use/12345', 'skills/x/.orphaned_at'):
+                    (root / relative).parent.mkdir(parents=True, exist_ok=True)
+                    (root / relative).write_bytes(b'1\n')
+                self.assertEqual(sorted(_runtime_inventory(root)),
+                                 ['skills/x/.in_use/12345', 'skills/x/.orphaned_at',
+                                  'skills/x/SKILL.md'])
 
     result = unittest.TextTestRunner().run(unittest.defaultTestLoader.loadTestsFromTestCase(ProvenanceTests))
     total = result.testsRun

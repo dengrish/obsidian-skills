@@ -19,7 +19,7 @@ Only files that are already in `Sources/Images/` under this PDF's stem or, for a
 - **Never invent a filename.** An embed of a file that does not exist renders in Obsidian as ordinary text — no broken-image marker, no error, nothing. It is the most silently-wrong thing this skill can write.
 - **Extraction and crop repair happen only at [intake's figure preparation](../SKILL.md#prepare-the-figure-inventory).** Follow `figure-extract` there; do not implement another cropper or rename images inside this skill (`CONVENTIONS.md` §8b). An unresolved extraction gap is reported; carry the supported claim in prose.
 
-**Labels are the caption's figure numbers, not sequence numbers.** `..._fig_3.png` is the paper's Figure 3. `..._fig_1-2.png` is Figure 1.2 with the dot written as a dash. `..._fig_S1.png` is a supplementary figure, and `Supplementary Figure 1`, `Suppl. Fig. 1`, `Supp. Figure 1` and `Extended Data Figure 1` all land there by default (`CONVENTIONS.md` §8b).
+**Labels are the caption's figure numbers, not sequence numbers.** `..._fig_3.png` is the paper's Figure 3. `..._fig_1-2.png` is Figure 1.2 with the dot written as a dash. `..._fig_S1.png` is a supplementary figure, and `Supplementary Figure 1`, `Suppl. Fig. 1`, `Supp. Figure 1` and `Extended Data Figure 1` all land there by default (`CONVENTIONS.md` §8b). A leftover `_fig_S<N>` of an Extended Data switch (`CONVENTIONS.md` §8b) is not a figure: never embed or count it, and report it for figure-extract.
 
 The scan identifies legacy panel files with `panel_of`; use the [panel rules](#panels) below when those files appear. A file with `variant_of` (for example `_fig_1-38-transparent`) is another rendering of its base figure, not another figure: inspect both, embed at most one, and count the pair as one figure when reporting unused figures. Files flagged `duplicate_label` both claim one figure number (for example `.png` beside `.webp`). Embed neither on a guess: ask which is current, or carry the claim in prose and report the ambiguity.
 
@@ -89,7 +89,7 @@ The shape, exactly:
 
 ## Panels
 
-The extractor writes whole figures. Existing vaults can also contain legacy panel files: `..._fig_3a.png` is panel a beside the composite `..._fig_3.png`. The scan lists both and marks a panel with `panel_of: "3"`; the composite has `panel_of: null`. These legacy panels remain eligible.
+The extractor writes whole figures. Existing vaults can also contain legacy panel files: `..._fig_3a.png` is panel a beside the composite `..._fig_3.png`. The scan lists both and marks a panel with `panel_of: "3"`; the composite has `panel_of: null`. These legacy panels remain eligible. Another tool's crop with an uppercase panel letter, such as a slide deck's `..._fig_3A_B.png`, is a panel of Figure 3 too (`CONVENTIONS.md` §8b).
 
 **Default to the whole plate.** A figure's panels were laid out together because they argue together, and a reader meeting panel b alone has lost the comparison it was set against. Where the note's surrounding claim is about the whole argument, embed the composite and name the panel in the prose or the caption — *"the comparison that matters is the middle row: …"* — naming the panel by what it shows rather than by a figure number, which no caption carries ([note format](note-format.md#complete-shape)).
 

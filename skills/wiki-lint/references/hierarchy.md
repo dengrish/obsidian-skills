@@ -18,8 +18,9 @@ outline. `#misc` uses `Wiki/misc` with one level of title-sorted members.
 Seed the requested entries and named disciplines. An entry in scope only for
 its [user issues](../SKILL.md#user-issues) is a seed only when one of its
 issues routes to item 8 or Task 3, or a retitle, split or merge resolves one.
-A [missing entry](refactors.md#create-a-missing-entry) created to resolve a
-user issue is a seed, so Task 3 places it. Include every current and
+The new notes of a seed's [split](refactors.md#build-the-refactored-entries),
+and a [missing entry](refactors.md#create-a-missing-entry) created to resolve
+a user issue, are seeds too, so Task 3 places them. Include every current and
 proven prior group of those entries, all members of those groups, their Wiki
 roots, and their MOCs. Repeat until stable. Groups that share no entry, root
 or MOC are separate closures. Keep old-tag and old-placement
@@ -28,11 +29,11 @@ to `#misc` closes misc together with the old and new disciplines. Legacy
 multi-tagged entries connect all their old groups while Task 1 selects one home.
 
 Run Task 3 on each closure the request covers in full or whose expansion the
-user authorizes, as a request to
-[fix the flagged issues](../SKILL.md#explicit-requests) does. Skip every
-other closure, report its required expansion, and complete the narrower
-authorized tasks. Never publish part of a MOC or leave parents derived from
-a different plan. Blank, missing, malformed, or multiple tags need Task 1 resolution; they do not imply
+user or an [explicit request](../SKILL.md#explicit-requests) authorizes. Skip
+every other closure and report its required expansion: each discipline with
+its root, MOC and entry count, naming only an entry whose retag or multiple
+tags join two groups. Then complete the narrower authorized tasks. Never
+publish part of a MOC or leave parents derived from a different plan. Blank, missing, malformed, or multiple tags need Task 1 resolution; they do not imply
 misc. If one stays unresolved, because Task 1 was outside the request or the
 metadata settles no home, report the item-8 blocker and still complete the
 closure: an entry naming no enum discipline stays unplaced with its existing
@@ -86,9 +87,9 @@ method of inquiry, and adds the branches the definition's scales and questions
 still need, keeping its other claims and its card byte-for-byte; dates
 follow the
 [body-change rule](../../wiki-build/references/merge.md#the-read-reset).
-Otherwise preserve existing roots' substantive content, review state, and card
-history under the normal correction rules. An ambiguous root owner blocks that
-group's publication; never fall back to an MOC parent.
+Otherwise preserve existing roots' substantive content and review state under
+the normal correction rules. An ambiguous root owner blocks that group's
+publication; never fall back to an MOC parent.
 
 ## Derive the hierarchy
 

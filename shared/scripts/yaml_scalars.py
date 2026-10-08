@@ -12,6 +12,7 @@ import argparse
 import os
 import re
 import stat
+import unicodedata
 
 
 def strip_comment(raw):
@@ -202,6 +203,55 @@ def parse_scalar(raw):
             out.append(ch)
         i += 1
     raise ValueError("unterminated quoted YAML scalar")
+
+
+def text_scalar(raw):
+    """:func:`parse_scalar` for a title, description or alias.
+
+    A single LaTeX backslash in double quotes is a YAML escape: ``"$\\tau$"``
+    decodes to a tab and ``au``. Such text is never a title, so a decoded
+    control or line-separator character raises ValueError.
+    """
+    value, style = parse_scalar(raw)
+    for ch in value or "":
+        if unicodedata.category(ch) in ("Cc", "Zl", "Zp"):
+            raise ValueError(
+                "decodes to the non-printing character U+%04X; a single "
+                "backslash starts a YAML escape, so double each LaTeX "
+                "backslash"
+                % ord(ch))
+    return value, style
+
+
+# The plain spellings a YAML 1.1 or 1.2 resolver types as something other
+# than a string: null, booleans, the value and merge keys, integers in every
+# base, sexagesimal numbers, floats, infinities, NaN, dates and timestamps.
+_TYPED_PLAIN_RE = re.compile(r"""
+    ~ | null | true | false | yes | no | on | off | y | n | = | <<
+  | [-+]?0(?:b[01_]+ | o[0-7_]+ | x[0-9a-f_]+)
+  | [-+]?(?:[0-9][0-9_]*(?::[0-5]?[0-9])*(?:\.[0-9_]*)? | \.[0-9_]+)
+    (?:e[-+]?[0-9]+)?
+  | [-+]?\.(?:inf|nan)
+  | [0-9]{4}-[0-9]{1,2}-[0-9]{1,2}
+    (?:(?:t|[ \t]+)[0-9]{1,2}:[0-9]{2}:[0-9]{2}(?:\.[0-9]*)?
+       (?:[ \t]*(?:z|[-+][0-9]{1,2}(?::[0-9]{2})?))?)?
+""", re.IGNORECASE | re.VERBOSE)
+
+
+def plain_string_allowed(value, style):
+    """Whether a plain scalar resolves losslessly as a string.
+
+    ``value`` and ``style`` are what :func:`parse_scalar` returns. Under
+    CONVENTIONS §2a a plain title, description or alias needs no quotes when
+    no YAML 1.1 or 1.2 resolver types it, so "3D printing" and "$k$-means
+    clustering" stay plain while "1984", "yes" and "2026-01-01" need quotes.
+    A leading ``?``, ``:`` or ``,`` and an interior colon-space or
+    space-hash change the structure in a block or flow list.
+    """
+    return (style == "bare" and isinstance(value, str) and bool(value)
+            and value[0] not in "?:,"
+            and not _TYPED_PLAIN_RE.fullmatch(value)
+            and not re.search(r":(?:\s|$)|\s#", value))
 
 
 def parse_source_fields(frontmatter_lines):
@@ -491,6 +541,28 @@ def self_test():
             self.assertEqual(parse_scalar(r'"\x41\u03bc\U0001F4DA"')[0], "Aμ📚")
             self.assertEqual(parse_scalar(r'"a\nb\t\\c"')[0], "a\nb\t\\c")
             self.assertEqual(parse_scalar(r"'a\nb'"), (r"a\nb", "single"))
+
+        def test_text_scalar_rejects_decoded_control_characters(self):
+            for raw in (r'"$\tau$-leaping"', r'"$\nu$"', r'"$\Lambda$"'):
+                with self.subTest(raw=raw):
+                    with self.assertRaises(ValueError):
+                        text_scalar(raw)
+            self.assertEqual(text_scalar(r'"$\\tau$-leaping"'),
+                             (r"$\tau$-leaping", "double"))
+
+        def test_plain_string_allowed_is_lossless(self):
+            for raw in ("3D printing", "2-opt", "$k$-means clustering",
+                        r"$\chi^2$ test", "3d-cnn", "0-1 loss", "ROC curve",
+                        "-ase", "Yesterday # note"):
+                with self.subTest(raw=raw):
+                    self.assertTrue(plain_string_allowed(*parse_scalar(raw)))
+            for raw in ("1984", "1_000", "0x1F", "0o10", "0b10", "0123", "09",
+                        "1:20", "12:34:56", ".5", "1.", "1e3", "+.inf",
+                        ".NaN", "y", "Yes", "~", "=", "2026-01-01",
+                        "2026-01-01 10:00:00", "2026-09-03T10:00:00Z", "?x",
+                        ":x", '"3D printing"', "'ROC curve'"):
+                with self.subTest(raw=raw):
+                    self.assertFalse(plain_string_allowed(*parse_scalar(raw)))
 
         def test_null_and_empty(self):
             for raw in ("null", "Null # missing", "NULL", "~"):

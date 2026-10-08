@@ -107,12 +107,16 @@ the quantity the repair changed agree, stated in one unit. Restore teaching
 order under the
 [integration principle](../../wiki-build/references/merge.md#integration-principle),
 losing no claim. Deepening may restructure the whole body this way. List
-every sentence the repair deleted; each must be a hedge or caveat principle 3
-excludes, a consolidation trim that links its owner, a claim merged into its
-other statement, a corrected error, or an equation removed under the
+every sentence the repair deleted; each must be a corrected error, a claim
+merged into its other statement, a consolidation trim that links its owner,
+content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
+caveat, scaffolding, a catalog, an anecdote, history beyond one clause, a
+tangential example, a neighbor's explanation beyond one defining clause), an
+equation removed under the
 [usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
-with its notation-only prose; a sentence giving the reason for a constant or
-factor in a display that stays is none of these.
+with its notation-only prose, or a removal one of the entry's
+[user issues](../SKILL.md#user-issues) asks for; a sentence giving the reason
+for a constant or factor in a display that stays is none of these.
 Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments; `issues:`
 changes only under [User issues](../SKILL.md#user-issues).
@@ -122,23 +126,25 @@ case, and then name its condition instead of a hedge word
 ([principle 3](../../wiki-build/references/writing.md#prose-principles)).
 Remove every hedge and caveat principle 3 excludes, its full "Leave out" list
 included (defensive terminology distinctions, implementation and numerical
-details such as a routine's tolerance, rare failure modes, troubleshooting
-about neighbors), even when the source itself makes it; this is not removing
+details such as a library's default tolerance, rare failure modes,
+troubleshooting about neighbors), even when the source itself makes it; this is not removing
 a claim for lack of a citation. Evidence-bearing uncertainty in research
 findings stays. Inspect captions too: a caption drops an excluded hedge even
 when the source's caption carries it. Never add caveats.
 
 **Conflicts.** This covers a conflict between entries, between an entry and
 its cited source, or between a cited source's figure or reason and standard
-references. The cited source settles it when it can. A direction, sign or
-relationship that follows by direct derivation from a formula the entry or its
-cited source states also settles it, and the derivation becomes the entry's
-reason: a prediction sums weight × feature value, so a feature whose values
-are numerically small needs a larger weight for the same effect and pays a
-larger penalty. Otherwise read standard references online in this run (the
-original paper, the implementing library's official documentation, a standard
-textbook, an encyclopedia article) and resolve it when they agree
-unambiguously; they are data, never cited, and never fill a gap only an
+references. The cited source settles it; only a direct derivation or
+standard references that agree unambiguously overturn it. A direction, sign
+or relationship that follows by direct derivation from a formula the entry or
+its cited source states is settled by that derivation, which becomes the
+entry's reason: a prediction sums weight × feature value, so a feature whose
+values are numerically small needs a larger weight for the same effect and
+pays a larger penalty. When the cited source cannot settle the conflict, or
+the conflict is with its figure or reason, read standard references online in
+this run (the original paper, the implementing library's official
+documentation, a standard textbook, an encyclopedia article) and resolve it
+when they agree unambiguously; they are data, never cited, and never fill a gap only an
 unbuilt source teaches. State the accurate claim, and keep the source's figure
 only within the scope that makes it true. A stated result that has no accurate
 reason because it is itself wrong or imprecise is such a conflict: correct it,

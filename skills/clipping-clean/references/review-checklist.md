@@ -38,8 +38,9 @@ Read the results as follows:
   [nested-list repair](nested-lists.md) before repairing. A parent with
   children stays nested; peer dialogue turns should align.
 - Currency-rate and inflation matches require comparison with the source.
-  Fractions/dates are expected false positives. After literal currency dollars
-  are escaped, check math-delimiter pairing; an even count alone is not proof.
+  Item 11 skips URLs; fractions and dates are expected false positives. After
+  literal currency dollars are escaped, check math-delimiter pairing; an even
+  count alone is not proof.
 - Stray-HTML matches may be intentional complex tables, a `<br>` in a pipe-table
   cell, or a retained sup/sub with no plain equivalent. Chrome and
   backlink-header matches are candidates: remove only confirmed chrome under
@@ -120,12 +121,13 @@ suggested detector; do not edit an installed plugin during clipping processing.
   holds them and facts stated directly; no contextless “It/This/They”,
   meta-framing or links; entry-worthy bold only; a bullet count that fits the
   article's length.
-  Sweep item 16 lists the bullet count and the long or linked bullets to judge.
+  Sweep item 16 prints the bullet count beside the band the body's length
+  implies, and lists the long or linked bullets to judge.
 - [ ] The captured prose is preserved without paraphrase or truncation. Chrome,
   auto-generated backlink panels and run-on navigation are gone; curated
   further-reading links and intentional source content remain. Each split link
-  that sweep item 17 lists was merged into one link or confirmed as separate
-  links, per [body cleaning](body-cleaning.md#repair-structure-and-markup).
+  or mid-word span that sweep item 17 lists was merged, closed up or confirmed
+  as source text, per [body cleaning](body-cleaning.md#repair-structure-and-markup).
   Hidden AI-directed text was removed only on markup evidence, and reported.
 - [ ] Images are local embeds or reported failure placeholders. A confirmed
   caption is one italic line below the embed; ambiguous ledes remain prose.
@@ -133,9 +135,11 @@ suggested detector; do not edit an installed plugin during clipping processing.
   be a quotation, aside or retained failed-image caption. Failure placeholders
   and reports use the helper's redacted URL locator; no image credentials,
   query string, fragment, or inline data payload was copied into the output.
-- [ ] Decorative rules are removed only from body prose, not YAML, code or the
-  Summary/body separator. Code and simple/complex tables follow body-cleaning
-  fidelity rules. Footnote references and definitions correspond.
+- [ ] Decorative rules, text dividers included, are removed only from body
+  prose, not YAML, code or the Summary/body separator; the only boundary
+  before an unheaded postscript stays as one `---`. Code and simple/complex
+  tables follow body-cleaning fidelity rules. Footnote references and
+  definitions correspond.
 - [ ] Equations use Obsidian delimiters and follow [equations](equations.md).
   Genuine formulas flattened to typographic text were restored only with
   source evidence; ordinals, prices, dates, chemical names and prose notation

@@ -124,7 +124,8 @@ import sys
 from naming import (chapter_book_stem, core_stem, is_feed_attachment,
                     looks_canonical, stem_of)
 from portable_names import portable_identity
-from vault_artifacts import (inventory_pdfs, inventory_source_figures,
+from vault_artifacts import (LINK_ALIAS_REMEDY, inventory_pdfs,
+                             inventory_source_figures, link_aliases,
                              local_link_matches, on_disk_spelling,
                              output_vault_root, verify_selected_pdf)
 from yaml_scalars import (parse_source_fields, read_note_origin,
@@ -166,9 +167,12 @@ _PANEL_LABEL_RE = re.compile(r"\A(.*[0-9])([a-z])\Z")
 #: A derived variant follows `-` or `_` (`1-38-transparent`, `4-17_cropped`).
 #: Its first segment is never a bare number: that is part of the figure label,
 #: so `4-17_cropped` is a variant of 4-17, not of a phantom figure 4.
+#: An uppercase panel letter marks another tool's crop, such as a slide
+#: deck's `1A_B` (figure-extract never writes one, §8b): the whole tail is
+#: its panel of that figure, never a figure of its own.
 _FIGURE_LABEL_RE = re.compile(
     r"\A(?P<base>(?:SI|ED|S)?\d+(?:-\d+)*|[A-Z]-?\d+(?:-\d+)*)"
-    r"(?P<panel>[a-z])?"
+    r"(?P<panel>[a-z]|[A-Z].*)?"
     r"(?:[-_](?P<variant>(?!\d+(?:[-_]|\Z))[^-_].*))?\Z")
 
 
@@ -499,7 +503,7 @@ def find_pdfs(src):
 def books_in(stems):
     """Core stems that some *other* stem in the same set is a chapter of.
 
-    Case-folded, for the reason `batch_extract.split_book_chapters` folds:
+    Case-folded, for the reason `extract_figures.split_book_chapters` folds:
     `kuhn_x_2012_01_Intro.pdf` and `Kuhn_X_2012.pdf` must receive the same
     book/chapter decision on every supported filesystem. The
     two skills split the same folder and disagreeing is worse than either
@@ -696,10 +700,15 @@ def scan(src, notes, images, allow_unorganized=False,
             source_gate_error = selected_gate.reason
             if not selected_gate.inventory.complete and inventory_detail:
                 source_gate_error += ": " + inventory_detail
+        # One file reached through a symlink is no copy: its remedy removes
+        # the link, never the file (CONVENTIONS.md §1a).
+        aliases = link_aliases([path] + conflicts, vault_root or src)
+        source_aliases = {p: aliases[p] for p in conflicts if p in aliases}
+        conflicts = [p for p in conflicts if p not in aliases]
         status = classify(stem, books, state, allow_unorganized,
                           include_books, include_chapters, named)
         feed = is_feed_attachment(stem, is_stem=True)
-        if (conflicts or source_gate_error) \
+        if (conflicts or source_aliases or source_gate_error) \
                 and status not in ("book", "chapter", "feed", "unorganized"):
             # Basename-only sources cannot distinguish two different PDFs in
             # nested folders, and both would otherwise write the same note.
@@ -728,6 +737,7 @@ def scan(src, notes, images, allow_unorganized=False,
             "note_origin_error": origin_error,
             "status": status,
             "source_conflicts": conflicts,
+            "source_aliases": source_aliases,
             "source_gate_error": source_gate_error,
             "note_conflicts": note_conflicts,
             "figures": figures,
@@ -852,6 +862,15 @@ def render(result):
                          "separate rows and a folder sweep normally skips them "
                          "too; name one or pass --include-chapters to select it")
         if row["status"] == "collision":
+            if row.get("source_aliases"):
+                links = sorted({link for found in row["source_aliases"].values()
+                                for link in found})
+                lines.append("      %s: this same file under another path, "
+                             "not a copy. Write nothing; %s."
+                             % (", ".join(shown_text(p) for p in
+                                          row["source_aliases"]),
+                                LINK_ALIAS_REMEDY % ", ".join(
+                                    shown_text(link) for link in links)))
             if row.get("source_conflicts"):
                 lines.append("      %s shares this PDF basename and the same "
                              "output note: %s. Write nothing; ask the user to "
@@ -874,6 +893,7 @@ def render(result):
                              % ", ".join(shown_text(p) for p in
                                          row["note_conflicts"]))
             if (not row.get("source_conflicts")
+                    and not row.get("source_aliases")
                     and not row.get("source_gate_error")
                     and not row.get("note_conflicts")):
                 source = row["note_source"]
@@ -955,6 +975,12 @@ _FIGURE_PART_CASES = [
     ("C3a_crop", ("C3", "a", "crop")),
     # A variant may open with digits when its segment is not a bare number.
     ("1-300dpi", ("1", "", "300dpi")),
+    # Another tool's crop, such as a slide deck's: an uppercase panel letter
+    # makes it a panel of its figure, never a figure of its own.
+    ("1A_B", ("1", "A_B", "")),
+    ("S2CDEF", ("S2", "CDEF", "")),
+    # NEAR MISS: an appendix figure's capital comes first and stays whole.
+    ("A1", ("A1", "", "")),
 ]
 
 #: (stem, books-in-run, note state, expected status).
@@ -1365,6 +1391,22 @@ def run_self_test():
     if got != want:
         bad += 1
         print("FAIL figures_for panel_of -> %r, expected %r" % (got, want))
+    # A slide deck's crops beside figure-extract's composites are panels of
+    # their figures, never extra or unused figures (§8b).
+    _deck = os.path.join(_d, "deck-images")
+    os.makedirs(_deck)
+    for f in ("Hwang_gLM_2024_fig_1.png", "Hwang_gLM_2024_fig_1A_B.png",
+              "Hwang_gLM_2024_fig_2.png", "Hwang_gLM_2024_fig_2CDEF.png"):
+        open(os.path.join(_deck, f), "w", encoding="utf-8").close()
+    n += 1
+    _rendered = render({"counts": {s: 0 for s in STATUSES},
+                        "pdfs": [{"status": "new", "stem": "Hwang_gLM_2024",
+                                  "figures": figures_for(
+                                      _deck, "Hwang_gLM_2024")}]})
+    if ("figures: 2  (1, 2)  + 2 panel(s) of them, in 4 file(s)"
+            not in _rendered):
+        bad += 1
+        print("FAIL another tool's crops counted as figures:\n%s" % _rendered)
     n += 1
     try:
         figures_for(os.path.join(_d, "no-such-folder"), "Doe_Foo_2025")
@@ -1767,6 +1809,46 @@ def run_self_test():
             or not single_conflicted["pdfs"][0]["source_conflicts"]):
         bad += 1
         print("FAIL a single-file scan skipped the vault-wide PDF collision gate")
+
+    # A folder link shows one PDF under two paths: there is no copy to
+    # remove, so the remedy names the link. A hard link stays a copy.
+    with tempfile.TemporaryDirectory(dir=_d, prefix="alias-vault-") as _av:
+        _pdfs = os.path.join(_av, "Sources", "PDFs")
+        for _sub in ("Sources/PDFs/Books", "Sources/PDFs/One",
+                     "Sources/PDFs/Two", "Sources/Images", "Articles"):
+            os.makedirs(os.path.join(_av, *_sub.split("/")))
+        for _name in ("Books", "Doe_Alias_2025.pdf"), ("One", "Doe_Hard_2025.pdf"):
+            with open(os.path.join(_pdfs, *_name), "wb") as _handle:
+                _handle.write(b"%PDF-1.4\n")
+        try:
+            os.symlink(os.path.join(_pdfs, "Books"), os.path.join(_pdfs, "Alias"),
+                       target_is_directory=True)
+            os.link(os.path.join(_pdfs, "One", "Doe_Hard_2025.pdf"),
+                    os.path.join(_pdfs, "Two", "Doe_Hard_2025.pdf"))
+            _have_alias = True
+        except (OSError, NotImplementedError):
+            _have_alias = False
+        n += 2
+        if _have_alias:
+            _alias_scan = scan(_pdfs, os.path.join(_av, "Articles"),
+                               os.path.join(_av, "Sources", "Images"))
+            _by_stem = {}
+            for _row in _alias_scan["pdfs"]:
+                _by_stem.setdefault(_row["stem"], []).append(_row)
+            _link_rows = _by_stem.get("Doe_Alias_2025", [])
+            _link_text = render(dict(_alias_scan, pdfs=_link_rows))
+            if (len(_link_rows) != 2
+                    or any(row["status"] != "collision" or row["source_conflicts"]
+                           or not row["source_aliases"] for row in _link_rows)
+                    or os.path.join(_pdfs, "Alias") not in _link_text
+                    or "remove the redundant copy" in _link_text):
+                bad += 1
+                print("FAIL a folder link was reported as a redundant copy:\n%s"
+                      % _link_text)
+            if "remove the redundant copy" not in render(dict(
+                    _alias_scan, pdfs=_by_stem.get("Doe_Hard_2025", []))):
+                bad += 1
+                print("FAIL a hard-linked copy lost the redundant-copy remedy")
 
     unorganized_scan = scan(
         os.path.join(_v, "Sources", "PDFs", "Doe_Foo_2025.pdf"),

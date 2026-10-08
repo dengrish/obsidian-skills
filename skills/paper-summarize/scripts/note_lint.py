@@ -7,7 +7,8 @@ above the callout, a quoted `read`, a caption pushed one line down -- and each
 drift is invisible from inside the note that has it.
 
     python3 note_lint.py '<note.md>' --mode empirical [--allow-unorganized]
-    python3 note_lint.py '<note.md>' --mode argument --images '<vault>/Sources/Images'
+    python3 note_lint.py '<note.md>' --mode argument --images '<vault>/Sources/Images' \\
+        --wiki '<vault>/Wiki'
     python3 note_lint.py --test
 
 Exit 0 with no violations, 1 with one line per violation, 2 for a bad invocation.
@@ -71,7 +72,7 @@ from equation_coverage import (find_display_spans,
 from naming import chapter_book_stem, core_stem, looks_canonical
 from note_provenance import split_provenance
 from portable_names import portable_identity
-from vault_artifacts import inventory_source_figures
+from vault_artifacts import inventory_source_figures, within_folder
 from yaml_scalars import parse_scalar, parse_source_fields, strip_comment
 
 # --- the format, as data -----------------------------------------------------
@@ -175,9 +176,9 @@ MAX_STEP_WORDS = 20
 #: start a new Markdown paragraph.
 MAX_PARAGRAPH_SENTENCES = 6
 
-#: Methods carries the experiment as numbered steps.  Fewer than three is not a
-#: procedure; more than eight is the paper's methods section copied across.
-#: A numbered list elsewhere also needs three steps; a shorter sequence is prose.
+#: A numbered list needs three steps; a shorter sequence is prose.  Methods
+#: carries a reported procedure, in any mode, as one such list of at most
+#: eight steps; more is the paper's methods section copied across.
 MIN_STEPS = 3
 MAX_STEPS = 8
 
@@ -246,6 +247,19 @@ _PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=[^\]|]*)(?:\|([^\]]*))?\]\]")
 # The whole citation: the link wrapped in <sup>, which is how Obsidian renders a
 # superscript.  Nothing between the tags and the brackets.
 _CITATION = re.compile(r"<sup>\[\[[^\]|]*#page=[^\]|]*(?:\|[^\]]*)?\]\]</sup>")
+# A wikilink that is not an embed: group 1 the target, group 2 the display text.
+_WIKILINK = re.compile(r"(?<!!)\[\[([^\]|]*)(?:\|([^\]]*))?\]\]")
+
+
+def _visible(text):
+    """`text` as the reader sees it, for the character caps.
+
+    A citation renders as a raised page number and a link as its display
+    text.  Counting their markup would shrink a budget every time a claim was
+    cited or a concept was linked to its Wiki entry.
+    """
+    return _WIKILINK.sub(lambda m: m.group(1) if m.group(2) is None
+                         else m.group(2), _CITATION.sub("", text))
 # An exhibit number in any spelling: "Figure 2", "Fig. 1.2", "FIGURE S1",
 # "Figures 2 and 3", "Supplementary Figure 1", "Extended Data Figure 1", and the
 # same for tables.  No trailing delimiter is required: "Figure 2 The arms
@@ -938,8 +952,8 @@ def _check_structure(note, body_start, fenced, mode):
                     if not b[2:].strip():
                         note.fail(start + 1, "a Limitations bullet has no content")
                         break
-                    # Citation markup is not counted, as for the Results cap.
-                    visible = len(_CITATION.sub("", b))
+                    # Counted as the reader sees it, as for the Results cap.
+                    visible = len(_visible(b))
                     if visible > MAX_LIMITATION_CHARS:
                         note.fail(start + 1, "a Limitations bullet is %d characters, "
                                              "over %d -- state the caveat, or move "
@@ -1055,10 +1069,10 @@ def _prose_lines(note, start, end, captions, fenced):
             continue
         if _EMBED.match(s) or _TABLE_ROW.match(s) or _TABLE_SEP.match(s):
             continue
-        # Citation markup is not prose: `<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>`
-        # is 39 characters the reader sees as a raised `5`, and counting it
-        # would make the budget shrink every time a claim was properly cited.
-        out.append((n, _CITATION.sub("", s)))
+        # Markup is not prose: `<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>` is 39
+        # characters the reader sees as a raised `5`, and a link to a Wiki
+        # entry shows only its display text (`_visible`).
+        out.append((n, _visible(s)))
     return out
 
 
@@ -1088,35 +1102,22 @@ def _check_prose(note, bounds, captions, fenced, body_start, mode):
                              "(references/note-format.md)"
                       % (len(counted), MAX_PARAGRAPH_SENTENCES))
 
-    # In empirical mode, Methods carries a walked-through procedure as 3--8
-    # numbered steps. A non-empirical source may still report a real procedure
-    # (for example, a standards-development process or a notice review), but it
-    # must not inherit the empirical minimum. Every numbered procedure remains
-    # contiguous and capped so a source section is not copied wholesale.
+    # In any mode, Methods carries a procedure the document reports as 3--8
+    # numbered steps: a shorter one stays prose, and a longer one copies the
+    # source section across. `_check_lists` keeps it one list numbered 1..n.
     span = next(((s, e) for name, s, e in bounds if name == "Methods"), None)
     if span is not None:
         starts, in_steps = _step_lines(note, span[0], span[1], fenced)
-        steps = [note.raw_lines[n].strip() for n in starts]
-        if steps and mode == "empirical" \
-                and not MIN_STEPS <= len(steps) <= MAX_STEPS:
-            note.fail(span[0] + 1, "the empirical procedure lists %d numbered "
-                                   "steps; it has %d to %d "
-                                   "(references/note-format.md)"
-                      % (len(steps), MIN_STEPS, MAX_STEPS))
-        elif steps and mode != "empirical" and len(steps) > MAX_STEPS:
+        if starts and not MIN_STEPS <= len(starts) <= MAX_STEPS:
             note.fail(span[0] + 1, "the reported procedure lists %d numbered "
-                                   "steps; keep at most %d in a concise reading "
-                                   "note (references/note-format.md)"
-                      % (len(steps), MAX_STEPS))
-        if not steps and mode == "empirical":
+                                   "steps; it has %d to %d, and a shorter "
+                                   "sequence stays prose "
+                                   "(references/note-format.md)"
+                      % (len(starts), MIN_STEPS, MAX_STEPS))
+        if not starts and mode == "empirical":
             note.advise(span[0] + 1, "no numbered procedure; confirm the "
                                      "document reports none "
                                      "(references/note-format.md)")
-        numbers = [int(_STEP.match(s).group(1)) for s in steps]
-        if numbers and numbers != list(range(1, len(numbers) + 1)):
-            note.fail(span[0] + 1, "the procedure steps are numbered %s; they "
-                                   "must run 1..%d in their reported order"
-                      % (", ".join(str(x) for x in numbers), len(numbers)))
         chars = sum(len(t) for n, t in
                     _prose_lines(note, span[0], span[1], captions, fenced)
                     if n not in in_steps)
@@ -1153,12 +1154,13 @@ def _list_walk(lines, start, end, fenced, resets):
     """Yield `(n, item, stack)` for each non-blank line in [start, end).
 
     `item` is the list item the line opens, or None. An item is a dict with
-    its `line`, `number` (None for a `- ` bullet), text column `col`,
+    its `line`, `number` (None for a bullet), text column `col`,
     `depth` (0 at the top level) and `text`. `stack` holds the items whose
     content the line is, outermost first; it is empty outside every list.
     A line in `resets`, such as a heading, ends every list.
 
-    This follows CommonMark closely enough for a note. After a blank line,
+    This follows CommonMark closely enough for a note, a tab counting four
+    columns and `-`, `*` and `+` each opening a bullet. After a blank line,
     a display or a fence, a line indented to an item's text column stays in
     that item, so a display or paragraph inside a step is step content; a
     line indented less ends the item. A wrapped line directly after
@@ -1169,7 +1171,7 @@ def _list_walk(lines, start, end, fenced, resets):
     """
     stack, fresh = [], True
     for n in range(start, end):
-        raw = lines[n]
+        raw = lines[n].expandtabs(4)
         s = raw.strip()
         if n in resets:
             stack, fresh = [], True
@@ -1188,7 +1190,7 @@ def _list_walk(lines, start, end, fenced, resets):
             fresh = n + 1 not in fenced
             continue
         m = _STEP.match(s)
-        bullet = s.startswith("- ")
+        bullet = s.startswith(("- ", "* ", "+ "))
         opens = bool(bullet or m and (fresh or m.group(1) == "1"))
         if m and not opens and stack and indent < stack[-1]["col"]:
             opens = True
@@ -1206,28 +1208,19 @@ def _list_walk(lines, start, end, fenced, resets):
 
 
 def _step_lines(note, start, end, fenced):
-    """(step start lines, every step's own text line) in [start, end).
+    """(step start lines, every line inside a step) in [start, end).
 
-    Only a top-level numbered item is a step, and a nested list is part of
-    its step (`_list_walk`). A step's own text is its item lines and their
-    wrapped lines. A paragraph inside the step, after a blank line or a
-    display, is prose like a top-level one, and counts toward the Methods
-    prose target.
+    Only a top-level numbered item is a step. Its wrapped lines, nested
+    list, displays and indented paragraphs are part of it (`_list_walk`), so
+    they stay out of the Methods prose target, which excludes numbered steps.
     """
-    starts, out, own = [], set(), False
-    lines = note.raw_lines
-    for n, item, stack in _list_walk(lines, start, end, fenced, {start}):
-        top = stack[0] if stack else None
-        if top is None or top["number"] is None:
-            continue
-        if item is not None:
-            own = True
-            if item is top:
-                starts.append(n)
-        elif n in fenced or not lines[n - 1].strip() or n - 1 in fenced:
-            own = False
-        if own:
+    starts, out = [], set()
+    for n, item, stack in _list_walk(note.raw_lines, start, end, fenced,
+                                     {start}):
+        if stack and stack[0]["number"] is not None:
             out.add(n)
+            if item is stack[0]:
+                starts.append(n)
     return starts, out
 
 
@@ -1283,9 +1276,10 @@ def _check_lists(note, bounds, fenced):
     A display or paragraph that belongs to a step sits at the step's text
     column; indented less, it ends the list, and Obsidian restarts the
     numbering after it.  A block counts as a step's when the next step
-    carries on the numbering.  Outside the Methods procedure, which keeps its
-    own count, a list runs 1..n with at least three steps.  Every list nests
-    at most one level, and no step opens with a bold lead word.  A list is
+    carries on the numbering.  Every list runs 1..n.  The Methods procedure
+    is one list, whose step count `_check_prose` checks; any other list has
+    at least three steps.  Every list nests at most one level, and no step
+    opens with a bold lead word.  A list is
     numbered with `1.` markers: a `1)` item opens a list where a new block
     starts or with the number 1, and the step checks would miss it.
     """
@@ -1311,20 +1305,22 @@ def _check_lists(note, bounds, fenced):
             if (item is not None and item["number"] is not None
                     and item["text"].startswith("**")):
                 note.fail(n + 1, "numbered step %d opens with bold text; a step "
-                                 "opens with its action or stage name, never a "
-                                 "bold lead word (references/note-format.md)"
+                                 "opens with its action, actor or stage name, "
+                                 "never a bold lead word "
+                                 "(references/note-format.md)"
                           % item["number"])
             top = stack[0] if stack else None
             if item is not None and item is top and item["number"] is not None:
                 if prev is not None and (broke is None or item["number"]
                                          == prev["number"] + 1):
                     if broke is not None:
-                        raw = note.raw_lines[broke]
+                        raw = note.raw_lines[broke].expandtabs(4)
                         note.fail(broke + 1, "a block between numbered steps %d "
                                              "and %d is indented %d space(s), "
                                              "short of step %d's text column "
-                                             "(%d); indent it to that column, "
-                                             "or the list ends here "
+                                             "(%d); indent it to that column "
+                                             "only if it belongs to that step; "
+                                             "otherwise move it out of the list "
                                              "(references/note-format.md)"
                                   % (prev["number"], item["number"],
                                      len(raw) - len(raw.lstrip()),
@@ -1336,7 +1332,14 @@ def _check_lists(note, bounds, fenced):
             elif (prev is not None and broke is None
                   and (top is None or top["number"] is None)):
                 broke = n
-        if name == "Methods":
+        if name == "Methods" and len(lists) > 1:
+            note.fail(lists[1][0]["line"] + 1, "a second numbered list starts "
+                                               "in Methods; the reported "
+                                               "procedure is one list, so join "
+                                               "its steps and move the text "
+                                               "between them out of it, or keep "
+                                               "a later phase in prose "
+                                               "(references/note-format.md)")
             continue
         for steps in lists:
             numbers = [step["number"] for step in steps]
@@ -1346,7 +1349,7 @@ def _check_lists(note, bounds, fenced):
                                                 "its steps 1..%d in order"
                           % (name, ", ".join(str(x) for x in numbers),
                              len(numbers)))
-            elif len(steps) < MIN_STEPS:
+            elif name != "Methods" and len(steps) < MIN_STEPS:
                 note.fail(steps[0]["line"] + 1, "a numbered list in the %s "
                                                 "section has %d step(s); a "
                                                 "sequence of fewer than %d "
@@ -1662,6 +1665,63 @@ def _check_citations(note, body_start, captions, fenced, source=None):
                                  "`sources:` item 1 is %r" % (base, source))
 
 
+def _check_wiki_links(note, body_start, fenced, wiki):
+    """Every body link to a Wiki entry names a file in `wiki`.
+
+    A bare target matches, ignoring case, the stem of exactly one `.md` file
+    anywhere under the folder; a `Wiki/<path>` target names that file.  Page
+    citations, embeds, code and display math are not entry links.  A missing
+    folder holds no entries (references/note-format.md#links-to-wiki-entries).
+    Symlinked subfolders are walked as wiki-build's vault_index.py walks them,
+    since its index picks the links: `seen` stops a loop, and a link back
+    into the tree is left to the real folder.
+    """
+    stems, paths, seen = {}, set(), set()
+    for folder, dirs, names in os.walk(wiki, followlinks=True):
+        try:
+            info = os.stat(folder)
+        except OSError:
+            dirs[:] = []
+            continue
+        if (info.st_ino, info.st_dev) in seen:
+            dirs[:] = []
+            continue
+        seen.add((info.st_ino, info.st_dev))
+        dirs[:] = [d for d in dirs if not d.startswith(".")
+                   and not (os.path.islink(os.path.join(folder, d))
+                            and within_folder(os.path.join(folder, d), wiki))]
+        rel = os.path.relpath(folder, wiki).replace(os.sep, "/")
+        for name in names:
+            if name.lower().endswith(".md") and not name.startswith("."):
+                stem = name[:-3]
+                paths.add(_name_key(stem if rel == "." else rel + "/" + stem))
+                stems.setdefault(_name_key(stem), []).append(stem)
+    head = _name_key(os.path.basename(os.path.normpath(wiki)) + "/")
+    for n in range(body_start, len(note.raw_lines)):
+        if n in fenced:
+            continue
+        for m in _WIKILINK.finditer(_CODE_SPAN.sub(" ", note.raw_lines[n])):
+            target = m.group(1).split("#", 1)[0].strip()
+            if target.lower().endswith(".md"):
+                target = target[:-3]
+            if (not target or target.lower().endswith(".pdf")
+                    or "#page=" in m.group(1)):
+                continue
+            key = _name_key(target)
+            if key.startswith(head):
+                if key[len(head):] not in paths:
+                    note.fail(n + 1, "wikilink [[%s]] names no file in %s"
+                              % (m.group(1), wiki))
+            elif len(stems.get(key, ())) > 1:
+                note.fail(n + 1, "wikilink [[%s]] matches %d entries in %s; "
+                                 "qualify it as [[Wiki/<entry-path>|label]]"
+                          % (m.group(1), len(stems[key]), wiki))
+            elif key not in stems:
+                note.fail(n + 1, "wikilink [[%s]] names no entry in %s; link an "
+                                 "existing Wiki entry or gloss the term unlinked"
+                          % (m.group(1), wiki))
+
+
 def _check_display_math(note, body_start):
     """Every equation gets its own display line (references/note-format.md).
 
@@ -1685,12 +1745,13 @@ def _name_key(name):
 
 
 def lint(text, path="<note>", images=None, *, mode,
-         allow_unorganized=False, advisories=None):
+         allow_unorganized=False, advisories=None, wiki=None):
     """Return sorted blocking (line, message) pairs, preserving the list API.
 
     An empty result means no format violations. If supplied, append sorted
     advisories to the caller's list; they need review but never suppress a
-    violation or change the returned list's shape.
+    violation or change the returned list's shape.  With `wiki`, every body
+    entry link must resolve to a file in that folder.
     """
     if mode not in MODES:
         raise ValueError("mode must be one of: %s" % ", ".join(MODES))
@@ -1731,6 +1792,8 @@ def lint(text, path="<note>", images=None, *, mode,
     _check_exhibit_numbers(note, body_start, captions, fenced)
     _check_prose(note, bounds, captions, fenced, body_start, mode)
     _check_citations(note, body_start, captions, fenced, src)
+    if wiki is not None:
+        _check_wiki_links(note, body_start, fenced, wiki)
     _check_display_math(note, body_start)
     if advisories is not None:
         advisories.extend(sorted(note.advisories))
@@ -2015,11 +2078,17 @@ def _cases():
         ("null publication date requires an nd source stem",
          _mutate("published: 2025-01-03", "published: null"),
          "reserved for a source PDF"),
-        # A chapter that prints no date takes its book's; without the book
-        # PDF, the chapter stem's year is the book's edition year.
+        # A chapter is dated by its book edition: a date it does not print
+        # comes from its book, and without the book PDF the chapter stem's
+        # year is the book's edition year.  A reprint's original year printed
+        # in the chapter belongs in the body.
         ("a chapter dated by its book's stem year",
          GOOD.replace("Doe_X_2025", "Doe_X_2025_03_Ch")
          .replace("published: 2025-01-03", "published: 2025-01-01", 1), CLEAN),
+        ("a chapter is not dated by a reprint's original year",
+         GOOD.replace("Doe_X_2025", "Doe_X_2025_03_Ch")
+         .replace("published: 2025-01-03", "published: 1998-01-01", 1),
+         "published` year 1998 conflicts"),
         ("a chapter with a dated stem never takes a null date",
          GOOD.replace("Doe_X_2025", "Doe_X_2025_03_Ch")
          .replace("published: 2025-01-03", "published: null", 1),
@@ -2557,6 +2626,17 @@ def _cases():
          _mutate("More prose.",
                  "\n\n".join(["P" * 200] * (MAX_RESULTS_CHARS // 202))),
          CLEAN),
+        ("NEAR MISS: a Wiki entry link counts as its display text in the "
+         "Results cap",
+         _mutate("More prose.",
+                 "\n\n".join(["P" * 200] * (MAX_RESULTS_CHARS // 202)
+                             + ["[[gut-microbiota|" + "L" * 170 + "]]"])),
+         CLEAN),
+        ("the Results cap still counts a link's display text",
+         _mutate("More prose.",
+                 "\n\n".join(["P" * 200] * (MAX_RESULTS_CHARS // 202)
+                             + ["[[gut-microbiota|" + "L" * 210 + "]]"])),
+         "Results holds"),
 
         # --- callout bullet and Methods length targets ---------------------
         ("a callout bullet over the word target is advisory only",
@@ -2632,7 +2712,7 @@ def _cases():
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  + "\n".join("%d. The team did a thing." % i
                               for i in range(1, MAX_STEPS + 2))),
-         "empirical procedure lists"),
+         "reported procedure lists"),
         ("NEAR MISS: a list at the cap is clean",
          _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
@@ -2643,36 +2723,70 @@ def _cases():
          _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The team did a thing.\n2. The team did another thing."),
-         "empirical procedure lists"),
-        ("one reported procedure step is valid outside empirical mode",
-         _mutate(M_ALL,
-                 "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
-                 "1. The standards committee recorded its final decision."),
-         CLEAN, "argument"),
-        ("two reported procedure steps are valid outside empirical mode",
+         "reported procedure lists"),
+        # 2026-10-07 (knowledge 1.24.0): a reported procedure has 3-8 steps
+        # in every mode, as one list.
+        ("a two-step reported procedure stays prose outside empirical mode",
          _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The committee reviewed the proposal.\n"
                  "2. The committee published its decision."),
+         "__ONLY__reported procedure lists 2", "argument"),
+        ("NEAR MISS: three reported steps are clean outside empirical mode",
+         _mutate(M_ALL,
+                 "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
+                 "1. The committee reviewed the proposal.\n"
+                 "2. The committee heard objections.\n"
+                 "3. The committee published its decision."),
          CLEAN, "argument"),
-        ("a non-empirical reported procedure retains the concise cap",
+        ("a non-empirical reported procedure keeps the cap",
          _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  + "\n".join("%d. The committee completed one stage." % i
                               for i in range(1, MAX_STEPS + 2))),
-         "keep at most", "argument"),
+         "reported procedure lists", "argument"),
         ("steps out of order",
          _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The team did a thing.\n3. The team did another.\n"
                  "4. The team did a third."),
-         "must run 1.."),
-        ("non-empirical procedure numbering remains contiguous",
+         "__ONLY__is numbered 1, 3, 4"),
+        ("non-empirical procedure numbering runs 1..n",
          _mutate(M_ALL,
                  "## A 219-patient double-blind trial of transplant capsules\n\nProse.\n\n"
                  "1. The committee reviewed the proposal.\n"
-                 "3. The committee published its decision."),
-         "must run 1..", "argument"),
+                 "3. The committee heard objections.\n"
+                 "4. The committee published its decision."),
+         "__ONLY__is numbered 1, 3, 4", "argument"),
+        ("a two-phase procedure in Methods is one list",
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n"
+                 "1. The team enrolled 219 adults.\n"
+                 "2. The team gave capsules or placebo.\n"
+                 "3. The team counted recurrences.\n\n"
+                 "The follow-up phase reused the cohort.\n\n"
+                 "1. The team sampled stool.\n"
+                 "2. The team typed donor strains.\n"
+                 "3. The team compared the arms."),
+         "__ONLY__a second numbered list starts in Methods"),
+        ("a phase's introduction between Methods steps leaves the list",
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n"
+                 "1. The team enrolled 219 adults.\n"
+                 "2. The team gave capsules or placebo.\n"
+                 "3. The team counted recurrences.\n\n"
+                 "The follow-up phase reused the cohort.\n\n"
+                 "4. The team sampled stool.\n"
+                 "5. The team typed donor strains.\n"
+                 "6. The team compared the arms."),
+         "__ONLY__otherwise move it out of the list"),
+        ("NEAR MISS: a two-phase procedure joined into one list is clean",
+         _mutate(M_ALL, M_H + "\n\nThe follow-up phase reused the cohort. "
+                 "The trial ran in five steps.\n\n"
+                 "1. The team enrolled 219 adults.\n"
+                 "2. The team gave capsules or placebo.\n"
+                 "3. The team counted recurrences.\n"
+                 "4. The team sampled stool.\n"
+                 "5. The team typed donor strains."),
+         CLEAN),
         # Only a list starting at 1 can interrupt a paragraph (CommonMark), so
         # a soft-wrapped line that opens with a year continues its sentence.
         ("a wrapped year in Methods prose is not a numbered step",
@@ -2695,12 +2809,12 @@ def _cases():
                  "2021. It used two banks.\n"
                  "2. The team randomized the adults.\n"
                  "3. The team followed them for eight weeks."),
-         "must run 1.."),
+         "__ONLY__is numbered 1, 2021, 2, 3"),
         ("NEAR MISS: a list starting at 1 still interrupts a paragraph",
          _mutate(M_ALL,
                  M_H + "\n\nThe trial ran in two phases.\n"
                  "1. The team did a thing.\n2. The team did another thing."),
-         "empirical procedure lists 2"),
+         "reported procedure lists 2"),
         ("NEAR MISS: a wrapped year does not split a paragraph",
          _mutate(I_H + "\n\nProse.",
                  I_H + "\n\nOne. Two. Three. Four. Five. Six ran to March\n"
@@ -2877,16 +2991,18 @@ def _cases():
                  "\n2. The team gave capsules at a fixed rate:\n\n   $$\n"
                  "   d = 4 / 2\n   $$\n\n   Here d counts capsules per day."
                  "\n3. The team counted recurrences."), CLEAN),
-        ("a paragraph inside a Methods step counts as Methods prose",
+        ("NEAR MISS: a display's explanation inside a Methods step is step "
+         "content, not Methods prose",
          _mutate(M_ALL, M_H + "\n\n"
                  + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200))
-                 + "\n\n1. The team enrolled 219 adults.\n\n   "
-                 + "The team measured every sample twice. " * 6
-                 + "\n\n2. The team gave capsules or placebo.\n"
+                 + "\n\n1. The team enrolled 219 adults.\n"
+                 "2. The team scored each sample with a weighted index:\n\n"
+                 "   $$\n   s = \\sum_i w_i x_i\n   $$\n\n"
+                 "   Each weight w_i came from the pilot data, so frequent "
+                 "taxa count less.\n\n"
                  "3. The team counted recurrences."),
-         "__ADVISORY__Methods/basis section holds"),
-        ("NEAR MISS: a short paragraph inside a Methods step stays under the "
-         "prose target",
+         CLEAN),
+        ("NEAR MISS: a short paragraph inside a Methods step is clean",
          _mutate(M_ALL, M_H + "\n\nProse.\n\n1. The team enrolled 219 "
                  "adults.\n\n   The team measured every sample twice.\n\n"
                  "2. The team gave capsules or placebo.\n"
@@ -2939,6 +3055,18 @@ def _cases():
              "3. Step against the gradient, which lowers the loss.",
              "3. " + " ".join(["Step"] * (MAX_STEP_WORDS + 1)) + ".")),
          "__ADVISORY__a step runs %d words" % (MAX_STEP_WORDS + 1)),
+        # 2026-10-07 (knowledge 1.24.0): a tab counts four columns, and `*`
+        # and `+` open bullets, as in CommonMark and entry_checks.
+        ("NEAR MISS: a tab-indented display, paragraph and nested bullet "
+         "under a step are step content",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace("\n   ", "\n\t")
+                 .replace("influence.\n", "influence:\n\t- the bias starts "
+                          "at zero too.\n")), CLEAN),
+        ("a `+` sub-list indented short of a step's text column ends the list",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. Set the weights.\n  + Set the first to zero.\n"
+                 "2. Fit them.\n3. Check them."),
+         "__ONLY__a block between numbered steps 1 and 2 is indented 2"),
     ]
 
 
@@ -3029,16 +3157,20 @@ def _selftest():
             print("FAIL  origin round trip of %r -> %r, expected %r"
                   % (front_matter, got, want))
     # The Limitations cap counts what the reader sees; a required citation
-    # must not shrink the allowance.
-    cited = "- **One.** " + "x" * (MAX_LIMITATION_CHARS - 12) + "." \
-        + "<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>"
-    uncapped = GOOD.replace("- **One.** Prose.", cited, 1)
-    if not any("Limitations bullet is" in message
-               for _line, message in lint(uncapped, mode="empirical")):
-        ok += 1
-    else:
-        fail += 1
-        print("FAIL  citation markup counted against the Limitations cap")
+    # or Wiki entry link must not shrink the allowance.  Each bullet below
+    # shows exactly the cap.
+    for markup, cited in (
+            ("citation", "x" * (MAX_LIMITATION_CHARS - 12) + "."
+             + "<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>"),
+            ("link", "x" * (MAX_LIMITATION_CHARS - 14)
+             + " [[gut-microbiota|x]].")):
+        uncapped = GOOD.replace("- **One.** Prose.", "- **One.** " + cited, 1)
+        if not any("Limitations bullet is" in message
+                   for _line, message in lint(uncapped, mode="empirical")):
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  %s markup counted against the Limitations cap" % markup)
     over = GOOD.replace("- **One.** Prose.",
                         "- **One.** " + "x" * MAX_LIMITATION_CHARS + ".", 1)
     if any("Limitations bullet is" in message
@@ -3047,6 +3179,50 @@ def _selftest():
     else:
         fail += 1
         print("FAIL  an over-long Limitations bullet passed")
+    # With a Wiki folder, every body entry link names a file in it.  GOOD's
+    # embed and page citations are never entry links.
+    with tempfile.TemporaryDirectory() as vault:
+        wiki = os.path.join(vault, "Wiki")
+        for rel in ("enzyme.md", "sub/x.md", "a/twin.md", "b/twin.md"):
+            entry = os.path.join(wiki, *rel.split("/"))
+            os.makedirs(os.path.dirname(entry), exist_ok=True)
+            with open(entry, "w", encoding="utf-8") as fh:
+                fh.write("")
+        missing = os.path.join(vault, "Wikis")
+        cases = [
+                ("[[enzyme|enzymes]]", wiki, None),
+                ("[[Enzyme|enzymes]]", wiki, None),
+                ("[[Wiki/sub/x|label]]", wiki, None),
+                ("`[[x-typo]]`", wiki, None),
+                ("[[x-typo]]", wiki, "[[x-typo]] names no entry in " + wiki),
+                ("[[Wiki/x|label]]", wiki, "names no file in " + wiki),
+                ("[[twin]]", wiki, "matches 2 entries"),
+                ("[[enzyme]]", missing, "names no entry in " + missing)]
+        # A synced subfolder is a symlink in plenty of vaults; one that
+        # links back to itself is walked once.
+        synced = os.path.join(vault, "Synced", "Chemistry")
+        os.makedirs(synced)
+        with open(os.path.join(synced, "catalase.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write("")
+        try:
+            os.symlink(synced, os.path.join(wiki, "Chemistry"))
+            os.symlink(synced, os.path.join(synced, "again"))
+        except (OSError, NotImplementedError):
+            pass
+        else:
+            cases += [("[[catalase]]", wiki, None),
+                      ("[[Wiki/Chemistry/catalase|catalase]]", wiki, None)]
+        for link, folder, want in cases:
+            linked = _mutate("A claim with a citation.",
+                             "A claim about %s with a citation." % link)
+            got = [message for _line, message in
+                   lint(linked, mode="empirical", wiki=folder)]
+            if (not got if want is None else len(got) == 1 and want in got[0]):
+                ok += 1
+            else:
+                fail += 1
+                print("FAIL  --wiki on %s: expected %r, got %r" % (link, want, got))
     with tempfile.TemporaryDirectory() as scratch:
         fifo_note = os.path.join(scratch, "changed-note.md")
         os.mkfifo(fifo_note)
@@ -3218,6 +3394,8 @@ def main(argv=None):
         description="Check a summary note against paper-summarize's format.")
     p.add_argument("note", nargs="?", help="the .md note to check")
     p.add_argument("--images", help="image folder; also verify every embed resolves")
+    p.add_argument("--wiki", help="the vault's Wiki/ folder; also verify every "
+                                  "body entry link resolves to a file in it")
     p.add_argument("--mode", choices=MODES,
                    help="selected body mode (required when checking a note)")
     p.add_argument("--allow-unorganized", action="store_true",
@@ -3254,7 +3432,7 @@ def main(argv=None):
     advisories = []
     findings = lint(text, a.note, a.images, mode=a.mode,
                     allow_unorganized=a.allow_unorganized,
-                    advisories=advisories)
+                    advisories=advisories, wiki=a.wiki)
     if a.images is None:
         fenced = _fenced(text.splitlines())
         for index, line in enumerate(text.splitlines()):

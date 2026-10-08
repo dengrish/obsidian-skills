@@ -80,8 +80,11 @@ would turn entry markup such as bold openers into extra cards. The plugin
 reviews a note's card only when its *Flashcard tags* setting lists the note's
 tag, unless folders-as-decks is on, so list every
 [discipline tag](shared/CONVENTIONS.md#3-the-discipline-tag-enum) your Wiki
-uses. wiki-lint reports unlisted tags, changed separators and active cloze
-conversion but never edits the plugin's settings. To pause a card, change its
+uses. Reading notes in `Articles/` carry the same tags, so add `Articles/`
+to the plugin's *Folders to ignore*: otherwise a `::` or a line that is only
+`?` in an article becomes a card. wiki-lint reports unlisted tags, changed
+separators, active cloze conversion and an `Articles/` folder the plugin does
+not ignore, but never edits the plugin's settings. To pause a card, change its
 separator line to `!!`; restore `??` to resume it. wiki-lint may reword a
 card to make it clearer, keeping its review schedule, and wiki-lint and
 wiki-build remove any further card from an entry, along with its review

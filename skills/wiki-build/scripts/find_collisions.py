@@ -28,6 +28,9 @@ VERDICTS
 
 Candidate-to-candidate matches carry ``matched_via: "candidate"`` and also
 appear in ``candidate_collisions``. Review them before writing either entry.
+A match on a common name an existing Organism binds to its title (the index's
+``common_names``) carries ``matched_via: "organism-common-name"`` and only
+ever adjudicates: that name is a link label, never an alias.
 A title listed twice is two candidates claiming one slug, so list each once.
 Probes (f) and (g) are enabled by default and can be disabled independently.
 The token-superset probe is deliberately absent from wiki-lint's whole-vault
@@ -80,7 +83,7 @@ import sys
 
 _OBSIDIAN_SHARED_MODULES = (
     'code_typography', 'entry_checks', 'entry_structure', 'markdown_tables',
-    'organism_names', 'plurals', 'portable_names', 'slugify',
+    'naming', 'organism_names', 'plurals', 'portable_names', 'slugify',
     'vault_artifacts', 'yaml_scalars',
 )
 
@@ -242,11 +245,12 @@ def _validate_index(index):
     for i, rec in enumerate(index["entries"], 1):
         if not isinstance(rec, dict) or not isinstance(rec.get("slug"), str) or not rec["slug"].strip():
             raise ValueError("index entry %d must be an object with a nonempty slug" % i)
-        aliases = rec.get("aliases", [])
-        if aliases is None:
-            aliases = []
-        if not isinstance(aliases, list) or any(not isinstance(a, str) for a in aliases):
-            raise ValueError("index entry %d aliases must be a list of strings" % i)
+        for key in ("aliases", "common_names"):
+            names = rec.get(key)
+            if names is None:
+                names = []
+            if not isinstance(names, list) or any(not isinstance(a, str) for a in names):
+                raise ValueError("index entry %d %s must be a list of strings" % (i, key))
         if not isinstance(rec.get("errors", []), list):
             raise ValueError("index entry %d errors must be a list" % i)
         if not isinstance(rec.get("identity_complete", False), bool):
@@ -310,7 +314,8 @@ def build_targets(index):
     Returns a list of dicts:
     ``{slug, via, alias, entry_slug, path}`` -- one for each filename stem,
     one for its slug form and one for its canonical title when each derives to
-    a different slug, and one for each alias on each entry.
+    a different slug, one for each alias on each entry, and one for each
+    common name an Organism binds.
     """
     _validate_index(index)
     targets = []
@@ -369,6 +374,17 @@ def build_targets(index):
                 continue
             targets.append({
                 "slug": alias_slug, "via": "alias", "alias": alias,
+                "entry_slug": slug,
+                "path": rec.get("relpath") or rec.get("path"),
+                "entry_errors": list(rec.get("errors") or ()),
+            })
+        for name in rec.get("common_names") or []:
+            try:
+                name_slug = slug_stem(name)
+            except SlugError:
+                continue
+            targets.append({
+                "slug": name_slug, "via": "organism-common-name", "alias": None,
                 "entry_slug": slug,
                 "path": rec.get("relpath") or rec.get("path"),
                 "entry_errors": list(rec.get("errors") or ()),
@@ -530,7 +546,10 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
                 "entry_slug": target["entry_slug"],
                 "entry_path": target["path"],
                 "entry_errors": target.get("entry_errors", []),
-                "implies": _implies(probe),
+                # A bound common name is no alias, so it never owns a merge.
+                "implies": ("adjudicate"
+                            if target["via"] == "organism-common-name"
+                            else _implies(probe)),
             }
             if target["via"] == "alias":
                 match["alias"] = target["alias"]
@@ -837,6 +856,50 @@ def run_self_test():
               "destination and blocks no create",
               ([r["verdict"] for r in rep["results"]], rep["index_problems"]),
               (["merge", "create"], []))
+        # An aliases list with no indent decodes fully: its two-space finding
+        # is reported but hides no alias, so it blocks no create.
+        flat_wiki = os.path.join(tmp, "zero-indent-aliases")
+        os.makedirs(flat_wiki)
+        with open(os.path.join(flat_wiki, "roc-curve.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_st_entry_text("ROC curve", aliases=["auroc"]).replace(
+                '  - "auroc"', '- "auroc"'))
+        rep = check_candidates(["AUROC", "A new unmatched term"],
+                               _vault_index.build_index(flat_wiki),
+                               include_peers=False)
+        check("an aliases list with no indent is still probed, reported, and "
+              "blocks no create",
+              ([r["verdict"] for r in rep["results"]],
+               [m["matched_via"] for m in rep["results"][0]["matches"]],
+               len(rep["index_problems"])),
+              (["adjudicate", "create"], ["alias"], 1))
+        # An Organism's bound common name is a link label, not an alias: a
+        # match on it adjudicates and never merges.
+        organism_wiki = os.path.join(tmp, "organism")
+        os.makedirs(organism_wiki)
+        for name, kind in (("mus-musculus.md", "Organism"),
+                           ("danio-rerio.md", "Concept")):
+            title = "Mus musculus" if kind == "Organism" else "Danio rerio"
+            with open(os.path.join(organism_wiki, name), "w",
+                      encoding="utf-8") as fh:
+                fh.write(_st_entry_text(title).replace(
+                    "type: Concept", "type: " + kind).replace(
+                    "A worked example used by the self-test.",
+                    "%s is the %s, a small animal." % (
+                        title, "mouse" if kind == "Organism" else "zebrafish")))
+        rep = check_candidates(["Mouse", "House mouse", "Mus musculus",
+                                "Zebrafish"],
+                               _vault_index.build_index(organism_wiki),
+                               include_peers=False)
+        check("an Organism's bound common name adjudicates, never merges; its "
+              "title still merges and another type binds no common name",
+              [(r["verdict"], sorted({(m["probe"], m["matched_via"])
+                                      for m in r["matches"]}))
+               for r in rep["results"]],
+              [("adjudicate", [("a-slug-equality", "organism-common-name")]),
+               ("adjudicate", [("g-token-superset", "organism-common-name")]),
+               ("merge", [("a-slug-equality", "filename")]),
+               ("create", [])])
         # A lost, `----` or `--- text` closing fence leaves the separator
         # above `## Flashcards` to close the frontmatter: no safe destination.
         lost_verdicts = []
@@ -905,6 +968,7 @@ def run_self_test():
         malformed_index = os.path.join(tmp, "malformed-index.json")
         for payload in ({"entries": ["bad"]},
                         {"entries": [{"slug": "x", "aliases": 0}]},
+                        {"entries": [{"slug": "x", "common_names": "mouse"}]},
                         {"entries": [], "ok": "false"}):
             with open(malformed_index, "w", encoding="utf-8") as fh:
                 json.dump(payload, fh)

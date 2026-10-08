@@ -29,7 +29,10 @@ rather than by path is identified first. Look for the name in the filenames of
 the complete `vault_artifacts.py pdfs --vault '<vault>'` inventory, in the
 `title:` and `description:` of notes about a document (such as `Articles/`
 reading notes and slide notes), and on the first page of each `Sources/PDFs/`
-file with `python3 '<plugin>/skills/paper-summarize/scripts/paper_text.py' '<pdf>' --find '<name>'`.
+file other than a
+[feed-owned attachment](source-cases.md#inbox-captures-feed-attachments-and-research-extracts):
+a `python3 '<plugin>/skills/paper-summarize/scripts/paper_text.py' '<pdf>' --find '<name>'`
+hit counts only when its pages include 1.
 A document that only cites the name is not a candidate. A matching note leads
 to the document its decoded `sources:` names
 ([resolve a Markdown source](source-cases.md#resolve-a-markdown-source)). A
@@ -117,8 +120,11 @@ to split that one book, keeping the original; then pair and process the named
 chapter PDF. A preview or no-apply run splits nothing and reports the proposed
 split. If pdf-organize finds no chapter structure, or the split or a rename it
 needs is blocked, build nothing from the book and report the blocker and the
-proposed split. Never build a chapter from the whole-book PDF: an entry citing
-the book marks the whole book covered, so folder runs skip its other chapters.
+proposed split. A requested part that is none of the book's chapters (a
+preface, an introduction not labeled as a chapter, an appendix) authorizes no
+split: build nothing and report the book's chapters or proposed split. Never
+build a chapter from the whole-book PDF: an entry citing the book marks the
+whole book covered, so folder runs skip its other chapters.
 
 ## Check prior coverage
 

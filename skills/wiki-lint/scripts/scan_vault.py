@@ -38,6 +38,7 @@ deleting a file.
 """
 
 import argparse
+import bisect
 import datetime
 import hashlib
 import json
@@ -74,6 +75,7 @@ _OBSIDIAN_SHARED_MODULES = (
     'equation_coverage',
     'introduced_aliases',
     'markdown_tables',
+    'naming',
     'note_provenance',
     'organism_names',
     'plurals',
@@ -126,7 +128,8 @@ from slugify import (  # noqa: E402
     has_parenthetical,
     slug_stem as _slug_stem,
 )
-from yaml_scalars import parse_scalar, split_flow, strip_comment  # noqa: E402
+from yaml_scalars import (parse_scalar, plain_string_allowed,  # noqa: E402
+                          split_flow, strip_comment, text_scalar)
 from note_provenance import split_provenance  # noqa: E402
 from portable_names import portable_identity  # noqa: E402
 
@@ -183,6 +186,7 @@ from entry_structure import (  # noqa: E402
     strip_indented,
     answer_surface_match,
     body_opens_with_prose,
+    card_block_numbers,
     count_sentences,
     ends_with_sentence_period,
     flashcard_brevity_hints,
@@ -191,7 +195,6 @@ from entry_structure import (  # noqa: E402
     flashcard_line1_faults,
     first_prose_paragraph,
     heading_repeats_title,
-    is_review_metadata_block,
     math_title_plain_text,
     mask_body_comments,
     normalized_answer_surface,
@@ -247,13 +250,15 @@ from entry_checks import (  # noqa: E402
     plural_surface,
     primary_line3_faults,
     pure_math_opener_markup,
+    source_identity_pairs,
     source_meta_findings,
     source_reference_kind,
     sr_card_marker_faults,
+    sr_card_syntax_fault,
     sr_marker_findings,
     unenumerated_bold_findings,
 )
-from vault_artifacts import looks_staging  # noqa: E402
+from vault_artifacts import looks_staging, within_folder  # noqa: E402
 
 
 def slug(title):
@@ -627,8 +632,14 @@ def split_frontmatter(text, bad=None):
 FM_KEY = re.compile(r"^([^\W\d][\w -]*?)\s*:(?=\s|$)(.*)$")
 FM_ITEM = re.compile(r"^\s*-(?:\s+(.*)|\s*)$")
 
-def unquote(raw):
-    """Decode a validated YAML scalar; malformed input raises ValueError."""
+def unquote(raw, key=None):
+    """Decode a validated YAML scalar; malformed input raises ValueError.
+
+    A title, description or alias that decodes to a non-printing character,
+    such as a single-backslash ``\\tau``, is malformed too.
+    """
+    if key in ("title", "description", "aliases"):
+        return text_scalar(raw)[0]
     return parse_scalar(raw)[0]
 
 def raw_scalar(fm_raw, key):
@@ -703,7 +714,7 @@ def issues_spans(fm_raw):
 #: closes; lint_entry reports the same defect as 1-valid-yaml.
 FLASHCARDS_CLOSE_MESSAGE = (
     "frontmatter is not closed before the body: the '---' above "
-    "'## Flashcards' closes it; restore an exact '---' after the last property")
+    "'## Flashcards' closes it")
 
 
 def flashcards_close_frontmatter(fm_raw, body):
@@ -872,7 +883,7 @@ def parse_fm(fm, bad=None):
         if mi and key is not None and isinstance(d.get(key), list):
             val = (mi.group(1) or "").strip()
             try:
-                d[key].append(unquote(val))
+                d[key].append(unquote(val, key))
             except ValueError:
                 if bad is not None: bad.append(line)
                 d[key].append(None)
@@ -893,7 +904,7 @@ def parse_fm(fm, bad=None):
                 flow_items = []
             for item in flow_items:
                 try:
-                    values.append(unquote(item))
+                    values.append(unquote(item, key))
                 except ValueError:
                     if bad is not None: bad.append(line)
                     values.append(None)
@@ -901,7 +912,7 @@ def parse_fm(fm, bad=None):
             key = None                                   # a flow list ends on its own line
         else:
             try:
-                d[key] = unquote(raw)
+                d[key] = unquote(raw, key)
             except ValueError:
                 if bad is not None: bad.append(line)
                 d[key] = None
@@ -960,9 +971,12 @@ def regions(body):
     not a section, and reading it as one truncated the entry's prose there —
     the sample was parsed as the real footer/section (phantom findings whose
     fix edits the listing) while the text past the fence, real findings
-    included, vanished from every prose scan.  ``flash_off`` is the heading's
-    character offset in the RAW body (−1 when absent); ``flash_head`` is the
-    heading line as spelled.
+    included, vanished from every prose scan.  The prose also ends at the
+    structural ``---`` before Flashcards, as lint_entry's ``split_sections``
+    ends it, so an entry missing its Related footer keeps that separator out
+    of every prose check.  ``flash_off`` is the heading's character offset in
+    the RAW body (−1 when absent); ``flash_head`` is the heading line as
+    spelled.
     """
     lines, related_indexes, flashcard_indexes = section_marker_indexes(body)
     rel_i = related_indexes[0] if related_indexes else None
@@ -976,6 +990,12 @@ def regions(body):
     if rel_i is not None: cut = offs[rel_i]
     fc = offs[flash_i] if flash_i is not None else -1
     if fc != -1 and fc < cut: cut = fc
+    if flash_i is not None:
+        visible_lines = visible_body.split("\n")
+        sep = next((i for i in range(flash_i - 1, -1, -1)
+                    if visible_lines[i].strip()), None)
+        if sep is not None and visible_lines[sep].strip() == "---":
+            cut = min(cut, offs[sep])
     flash_head = lines[flash_i] if flash_i is not None else ""
     return visible_body[:cut], rel, (body[fc:] if fc != -1 else ""), fc, flash_head
 
@@ -1014,10 +1034,6 @@ READ_NULLS = {"", "null", "~"}
 #: §2c), appended to each report-only `read:` message; `%s` names the write.
 READ_EXCEPTIONS = ("The exceptions (CONVENTIONS §2c): resolving one of the "
                    "entry's user_issues, or keeping it as a merge's survivor, %s")
-_YAML_TYPED_PLAIN_RE = re.compile(
-    r"^(?:null|~|true|false|yes|no|on|off|\.nan|[+-]?\.inf|"
-    r"[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:e[+-]?[0-9]+)?|"
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2})$", re.IGNORECASE)
 VALID_TYPES = [
     "Concept", "Person", "Organization", "Dataset", "Software", "Device",
     "Event", "Standard", "Gene/Protein", "Organism", "Chemical", "Reaction",
@@ -1099,14 +1115,6 @@ def _plain_item_allowed(key, value):
     return key == "aliases" or (
         key == "sources" and isinstance(value, str)
         and re.match(r"https?://", value) is not None)
-
-
-def plain_string_allowed(value, style):
-    """Whether a conservative letter-led plain scalar stays a YAML string."""
-    return (style == "bare" and isinstance(value, str) and bool(value)
-            and value[:1].isalpha()
-            and not _YAML_TYPED_PLAIN_RE.fullmatch(value.strip())
-            and not re.search(r":(?:\s|$)|\s#", value))
 
 
 def tag_canonical(tag_slug):
@@ -1301,11 +1309,13 @@ def settle_context(text):
     return hashlib.sha1(" ".join((text or "").split()).encode("utf-8")).hexdigest()
 
 
-def _sentence_at(text, offset):
+def _sentence_at(text, offset, splits=None):
     """The whitespace-collapsed sentence of ``text`` that holds ``offset``.
 
     The sentence is split from its block: the run of non-blank lines around
     ``offset``, cut where a list item, quote, heading or table row starts.
+    ``splits`` caches each block's sentences across calls, so a long
+    paragraph is split once, not once per mention in it.
     """
     lines = text.split("\n")
     line_i = text.count("\n", 0, offset)
@@ -1316,22 +1326,28 @@ def _sentence_at(text, offset):
     while (last + 1 < len(lines) and lines[last + 1].strip()
            and not _BLOCK_START_RE.match(lines[last + 1])):
         last += 1
-    block_start = sum(len(line) + 1 for line in lines[:first])
+    block_start = sum(map(len, lines[:first])) + first
     block = "\n".join(lines[first:last + 1])
     before = block[:offset - block_start]
     position = len(" ".join(before.split()))
     if position and before[-1:].isspace():
         position += 1
-    compact = " ".join(block.split())
-    cursor = 0
-    for sentence in split_sentences(block):
-        found = compact.find(sentence, cursor)
-        if found < 0:
-            break
-        cursor = found + len(sentence)
-        if position < cursor:
-            return sentence
-    return compact
+    if splits is None:
+        splits = {}
+    if block not in splits:
+        compact = " ".join(block.split())
+        ends, sentences, cursor = [], [], 0
+        for sentence in split_sentences(block):
+            found = compact.find(sentence, cursor)
+            if found < 0:
+                break
+            cursor = found + len(sentence)
+            ends.append(cursor)
+            sentences.append(sentence)
+        splits[block] = compact, ends, sentences
+    compact, ends, sentences = splits[block]
+    index = bisect.bisect_right(ends, position)
+    return sentences[index] if index < len(sentences) else compact
 
 
 def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=None,
@@ -1375,7 +1391,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             strip_code(e["prose"]), e.get("table_spans", ()))
         # The settle context hashes the sentence as written, each wikilink
         # reduced to its visible text, so linking another candidate in the
-        # same sentence keeps the key.
+        # same sentence keeps the key unless the link drops emphasis. The
+        # closeout takes its records from the run's last scan.
         sentence_text = (e["prose"] if len(e["prose"]) == len(prose)
                          else prose)
         linked = set()
@@ -1457,6 +1474,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                 masked_lines[line_i] = " " * len(line)
         masked = "\n".join(masked_lines)
         proposed = {}                     # target -> contexts already proposed
+        splits = {}                       # block -> its sentences
         late = set()
         global_hits = []
         # A `_` or `*` inside LaTeX (`$\hat{y}_{i}$`, `$\theta^*$`) is not an
@@ -1561,7 +1579,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             # occurrence, the target's next sentence is offered instead.
             context = settle_context(WIKILINK.sub(
                 lambda m: (m.group(2) or m.group(1)).strip(),
-                _sentence_at(sentence_text, start)))
+                _sentence_at(sentence_text, start, splits)))
             if context in proposed.setdefault(tgt, set()):
                 continue
             proposed[tgt].add(context)
@@ -1619,15 +1637,10 @@ def iter_entry_files(wiki, on_error=None):
     """
     out = []
     seen_dirs = set()
-    real_wiki = os.path.realpath(wiki)
-    inside_wiki = real_wiki.rstrip(os.sep) + os.sep
 
     def links_back(dirpath, name):
         path = os.path.join(dirpath, name)
-        if not os.path.islink(path):
-            return False
-        real = os.path.realpath(path)
-        return real == real_wiki or real.startswith(inside_wiki)
+        return os.path.islink(path) and within_folder(path, wiki)
 
     for dirpath, dirnames, filenames in os.walk(wiki, followlinks=True, onerror=on_error):
         # followlinks, because a synced or shared subfolder under Wiki/ is a
@@ -1666,7 +1679,8 @@ def iter_entry_files(wiki, on_error=None):
 _DOC_EXTS = {".pdf", ".epub", ".docx", ".html", ".txt"}
 
 
-_IMAGE_ALLOWED_HIDDEN = {".figure-manifest.tsv", ".figure-review.txt", ".DS_Store"}
+_IMAGE_ALLOWED_HIDDEN = {".figure-manifest.tsv", ".figure-review.txt",
+                         ".figure-ed-pending.txt", ".DS_Store"}
 
 
 def image_index(images):
@@ -2246,6 +2260,17 @@ SR_CLOZE_CONVERSIONS = (
      "any {{...}} span, such as doubled LaTeX braces"),
 )
 
+#: minimatch's glob tokens: `*` and `?` stay inside one folder, and a `**/`
+#: segment spans zero or more folders.
+SR_GLOB_TOKENS = {"**/": "(?:.*/)?", "**": ".*", "*": "[^/]*", "?": "[^/]"}
+
+
+def _sr_ignores(path, pattern):
+    """The plugin's ignore test: a path prefix, or a minimatch glob match."""
+    regex = "".join(SR_GLOB_TOKENS.get(token, re.escape(token))
+                    for token in re.split(r"(\*\*/|\*\*|\*|\?)", pattern))
+    return path.startswith(pattern) or re.fullmatch(regex, path) is not None
+
 
 def spaced_repetition_report(vault_root, discipline_counts):
     """Advisory, read-only view of the Spaced Repetition plugin's settings.
@@ -2327,6 +2352,19 @@ def spaced_repetition_report(vault_root, discipline_counts):
             "cloze card; keep cloze conversion off"
             % (pattern, " (%s)" % known[0] if known else "",
                known[2] if known else "matching text"))
+    # Reading notes carry discipline tags, and the plugin parses a tagged
+    # note whole. It ignores a path that starts with, or globs to, an entry.
+    if os.path.isdir(os.path.join(vault_root, "Articles")):
+        ignored = settings.get("noteFoldersToIgnore", ["**/*.excalidraw.md"])
+        probe = "Articles/note.md"
+        if not any(isinstance(folder, str) and folder
+                   and _sr_ignores(probe, folder)
+                   for folder in (ignored if isinstance(ignored, list)
+                                  else [])):
+            report["separator_findings"].append(
+                "noteFoldersToIgnore does not cover Articles/: its notes "
+                "carry discipline tags, so a '::' or a line that is only '?' "
+                "in one becomes a card; add Articles/ to Folders to ignore")
     return report
 
 
@@ -2360,10 +2398,11 @@ def _vault_root_for(wiki, images=None, vault=None):
 def vault_note_index(vault_root, wiki):
     """Index the vault's real Markdown notes outside the Wiki tree.
 
-    Returns ``(paths, basenames, complete)``. ``paths`` maps each folded,
+    Returns ``(paths, basenames, unread)``. ``paths`` maps each folded,
     extensionless vault-relative path to the exact vault-relative paths
     (with ``.md``) that own it, and ``basenames`` maps each folded basename
-    the same way. ``complete`` is false when a folder could not be read.
+    the same way. ``unread`` lists, sorted, the vault-relative folders that
+    could not be read.
     Dot-folders, the scanned Wiki tree and the vault-root ``MOCs/`` folder,
     which the MOC inventory owns, are skipped. Folder symlinks are followed,
     as Obsidian indexes them, with a loop guard; one that points back into
@@ -2371,25 +2410,23 @@ def vault_note_index(vault_root, wiki):
     files.
     """
     paths, basenames = {}, {}
-    complete = True
+    unread = set()
     root = os.path.abspath(vault_root)
     wiki_identity = _folder_identity(wiki)
-    inside_root = os.path.realpath(root).rstrip(os.sep) + os.sep
     seen = set()
 
-    def failed(_exc):
-        nonlocal complete
-        complete = False
+    def failed(path):
+        unread.add(os.path.relpath(path, root).replace(os.sep, "/"))
 
     def links_back(path):
-        return (os.path.islink(path)
-                and (os.path.realpath(path) + os.sep).startswith(inside_root))
+        return os.path.islink(path) and within_folder(path, root)
 
     for dirpath, dirnames, filenames in os.walk(
-            root, followlinks=True, onerror=failed):
+            root, followlinks=True,
+            onerror=lambda exc: failed(exc.filename or root)):
         identity = _folder_identity(dirpath)
         if identity is None:
-            complete = False
+            failed(dirpath)
         if identity is None or identity in seen:
             dirnames[:] = []
             continue
@@ -2411,7 +2448,7 @@ def vault_note_index(vault_root, wiki):
             key = fold_name(relative[:-3])
             paths.setdefault(key, []).append(relative)
             basenames.setdefault(key.rsplit("/", 1)[-1], []).append(relative)
-    return paths, basenames, complete
+    return paths, basenames, sorted(unread)
 
 
 class _ProblemList(list):
@@ -2919,10 +2956,12 @@ def scan(wiki, images=None, vault=None, settled=None):
     # entry's bare name. Only a known vault root is walked; the parent-folder
     # fallback may be any directory, so it proves nothing about the vault.
     if vault_root_known:
-        _outside_paths, _outside_basenames, _outside_complete = \
+        _outside_paths, _outside_basenames, _outside_unread = \
             vault_note_index(vault_root, wiki)
+        _outside_complete = not _outside_unread
     else:
-        _outside_paths, _outside_basenames, _outside_complete = {}, {}, False
+        _outside_paths, _outside_basenames, _outside_unread = {}, {}, []
+        _outside_complete = False
 
     def _origin_target_key(raw_target, note_path=None):
         target = entry_link_path_key(raw_target)
@@ -3063,15 +3102,13 @@ def scan(wiki, images=None, vault=None, settled=None):
         Drops an explicit `.md` suffix, which never changes the destination.
         Drops a path as well when the complete vault inventory proves that no
         other file owns the bare name. Otherwise keeps the on-disk spelling of
-        the path the link uses. A bare link is qualified only when its `.md`
-        is respelled anyway and another vault file owns the bare name, so it
-        takes the form `_entry_link_target` supplies.
+        the path the link uses. A bare link takes the form
+        `_entry_link_target` supplies: qualified when a note outside Wiki/
+        owns the bare name.
         """
         written = raw_target.replace("\\", "/").strip().strip("/")
         if qualified_target is None:
-            if written.lower().endswith(".md"):
-                return _entry_link_target(record)
-            return record["slug"]
+            return _entry_link_target(record)
         if (_outside_complete
                 and _entry_link_target(record) == record["slug"]):
             return record["slug"]
@@ -3298,7 +3335,7 @@ def scan(wiki, images=None, vault=None, settled=None):
         # A duplicate issues: key is the report-only issues-malformed below.
         _other_keys = [k for k in e["key_order"] if k != "issues"]
         if len(_other_keys) != len(set(_other_keys)):
-            problems.append((sl,"item2","duplicate frontmatter key (stacked-body artifact?)"))
+            problems.append((sl,"item1","duplicate frontmatter key (stacked-body artifact?)"))
         # Every MANDATORY key must be PRESENT, whatever its value — a missing
         # KEY and a missing VALUE are two findings and both are real (item 7
         # reports an absent description, item 3 an absent date; item 2 reports
@@ -3646,17 +3683,19 @@ def scan(wiki, images=None, vault=None, settled=None):
         # needs the markdown note's provenance before any source may be removed.
         # Only a stem collision ACROSS the two extensions counts — an entry may
         # legitimately cite several distinct PDFs and several distinct clippings —
-        # and stems use the portable case/NFC identity from fold_name.
-        pdf_by_stem, md_items = {}, []
-        for src in e["sources"]:
-            stem, ext = source_stem(src)
-            if not stem: continue
-            if ext == "pdf": pdf_by_stem.setdefault(stem, src)   # keep the first spelling
-            elif ext == "md": md_items.append((stem, src))
-        for stem, md_src in md_items:
-            if stem not in pdf_by_stem: continue
+        # and stems use the portable case/NFC identity from fold_name. A chapter
+        # PDF cited beside its whole-book PDF is one split book in two forms.
+        # Shared with lint_entry (entry_checks.source_identity_pairs).
+        for _kind, _first, _second in source_identity_pairs(e["sources"]):
+            _first, _second = e["sources"][_first], e["sources"][_second]
+            if _kind == "book-and-chapter":
+                problems.append((sl, "item4/source-identity",
+                                 f'{_second} is a chapter of {_first}; a split book is cited '
+                                 'in one form, never both its whole-book PDF and its chapter '
+                                 'PDFs. Review which citation the entry keeps'))
+                continue
             problems.append((sl,"item4/source-identity",
-                             f'{md_src} and {pdf_by_stem[stem]} share a filename stem; review the '
+                             f'{_second} and {_first} share a filename stem; review the '
                              f'markdown note\'s decoded sources: (or legacy source:) to establish '
                              f'whether it summarizes that PDF. A URL-origin clipping can be '
                              f'independent. Preserve both sources until their identity is confirmed'))
@@ -4169,18 +4208,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                 % dict(occurrence, line=occurrence["line"] + _line_off)))
         # ---- item 13: stray frontmatter key, `---` or digit line mid-body (stacked-merge scars) ----
         # Shared with lint_entry; listings are masked (shown, not asserted).
-        # If Related is missing, regions() reaches the legitimate separator
-        # before Flashcards: item 11's finding, not an item-13 scar.
-        _structural_separator_i = None
-        if e.get("flashcard_indexes"):
-            _flash_i = e["flashcard_indexes"][0]
-            _structural_separator_i = next(
-                (i for i in range(_flash_i - 1, -1, -1)
-                 if e["body_lines"][i].strip()), None)
-            if (_structural_separator_i is not None
-                    and e["body_lines"][_structural_separator_i].strip() != "---"):
-                _structural_separator_i = None
-        for _scar in merge_scar_findings(e["prose"], _structural_separator_i):
+        # regions() ends the prose before the separator above Flashcards, so
+        # a missing Related footer is item 11's finding, not an item-13 scar.
+        for _scar in merge_scar_findings(e["prose"]):
             problems.append((sl, "item13", _scar["message"]))
         # ---- item 19: Flashcards presence/absence + card-set shape + per-card structure / markup / answer-leak ----
         # A discipline root needs no card (hierarchy.md, *Establish discipline
@@ -4238,16 +4268,16 @@ def scan(wiki, images=None, vault=None, settled=None):
             # belong to the review plugin/user. None is another card to
             # remove. Mask it only in this read-only check.
             cards = parse_flashcard_blocks(after_head)
-            # A block of only schedule state, which a blank line separates
-            # from its card, is neither a card nor an attachment (lint_entry
-            # reports the same); block numbers stay as parsed.
-            _schedules = {ci for ci, cl in enumerate(cards, 1)
-                          if is_review_metadata_block(cl)}
-            if len(cards) == len(_schedules) and not _root_entry:
+            # Only the blocks the shared card_block_numbers names are cards;
+            # every other block, such as a detached schedule or the user's
+            # own text, is reported and kept (lint_entry reports the same).
+            # Block numbers stay as parsed.
+            _card_numbers = card_block_numbers(cards)
+            if not _card_numbers and not _root_entry:
                 problems.append((sl,"item19","## Flashcards section has no card"))
             for _message in flashcard_set_faults(
                     sum(1 for ci, cl in enumerate(cards, 1)
-                        if len(cl) >= 3 and ci not in _schedules)):
+                        if len(cl) >= 3 and ci in _card_numbers)):
                 problems.append((sl, "item19", "## Flashcards holds " + _message))
             alias_forms = list(e["aliases"])
             _expected_term, _expected_counterpart = flashcard_primary_answer(
@@ -4264,26 +4294,39 @@ def scan(wiki, images=None, vault=None, settled=None):
                  flashcard_line3_fault(cl[2], title, e["aliases"], opener,
                                        e["type"]))
                 for ci, cl in enumerate(cards, 1)
-                if len(cl) >= 3 and ci not in _schedules]
+                if len(cl) >= 3 and ci in _card_numbers]
             _primary_tag = (kept_card_label(
                 _complete_rows, _expected_term, _expected_counterpart)
                 if len(_complete_rows) > 1 and title else None)
             for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
-                if ci in _schedules:
+                _syntax = sr_card_syntax_fault(
+                    cl, 0 if ci not in _card_numbers else 3)
+                if ci not in _card_numbers and _syntax:
+                    # The plugin reviews card syntax as a card, so the block
+                    # is an extra card to remove (lint_entry reports the same).
+                    problems.append((sl, "item19", f"block {ci} {_syntax}"))
+                    continue
+                if ci not in _card_numbers:
                     problems.append((
                         sl, "item19",
-                        f"block {ci} is a Spaced Repetition schedule that a "
-                        "blank line separates from the card — it is neither "
-                        "a card nor an attachment; preserve it byte-for-byte, "
-                        "never delete, move or reattach it, and report it"))
+                        f"block {ci} is not a card, such as a schedule a blank "
+                        "line separates from the card or the user's own text "
+                        "— preserve it byte-for-byte, never delete, move or "
+                        "reattach it, and report it"))
                     continue
                 if len(cl) < 3:
                     problems.append((sl,"item19",f'{tag} malformed — needs 3 contiguous lines (cue / separator / answer), found {len(cl)} (a blank line between lines 1–3 breaks the card)'))
                     continue
                 _extra = _primary_tag is not None and tag != _primary_tag
                 _lead = EXTRA_CARD_PREFIX % ci if _extra else ""
-                if len(cl) > 3:
+                if len(cl) > 3 and _syntax:
+                    # Card syntax after line 3 is a card of its own to remove.
+                    problems.append((
+                        sl, "item19",
+                        f"{_lead}{tag} has {len(cl)} visible lines, and the "
+                        f"content after line 3 {_syntax}"))
+                elif len(cl) > 3:
                     # Removing an extra card never takes the content after its
                     # line 3 that is not a recognized attachment.
                     problems.append((
@@ -4448,6 +4491,11 @@ def scan(wiki, images=None, vault=None, settled=None):
         else:
             _related_i = _related_indexes[0]
             _related_line = _visible_body_lines[_related_i].rstrip()
+            if _related_i and _visible_body_lines[_related_i - 1].strip():
+                problems.append((
+                    sl, "item11",
+                    "leave a blank line before the Related footer; without "
+                    "one it joins the paragraph, list item or table above"))
             _related_form_bad = not _related_line.startswith("**Related:**")
             if not _related_form_bad:
                 _related_tail = _related_line[len("**Related:**"):]
@@ -4636,19 +4684,30 @@ def scan(wiki, images=None, vault=None, settled=None):
             if (final_target is not None
                     and fold_name(normalized_target) != fold_name(final_target)):
                 # An explicit `.md` or a path no other owner needs: CONVENTIONS
-                # §6 spells the link bare and extensionless.
+                # §6 spells the link bare and extensionless. A bare name that
+                # a note outside Wiki/ shares takes the Wiki/ path.
                 _extra = []
+                _keep = "preserving its anchor and display label"
                 if normalized_target.lower().endswith(".md"):
                     _extra.append("an explicit `.md` suffix")
                 if "/" in normalized_target and "/" not in final_target:
                     _extra.append("a path that no other vault file with "
                                   "this basename needs")
+                if "/" not in normalized_target and "/" in final_target:
+                    _extra.append("a bare name that a vault note outside "
+                                  "Wiki/ shares")
+                    # An unanchored body link keeps its written name as its
+                    # label; item 11 labels a Related footer link.
+                    if (m.group(2) is None and "#" not in m.group(1)
+                            and _link_region == "body prose"):
+                        _keep = ("with display label "
+                                 f'"{bare[:-3] if bare.lower().endswith(".md") else bare}"')
                 problems.append((
                     sl, "item10/case",
                     f'wikilink target "{tgt}" names the entry "{actual}" with '
                     f'{" and ".join(_extra) or "a noncanonical path"} — this is a '
                     f'FIX IN PLACE (rewrite the target to "{final_target}", '
-                    "preserving its anchor and display label)"))
+                    f"{_keep})"))
                 continue
             if canonical_target is not None:
                 problems.append((
@@ -4728,6 +4787,13 @@ def scan(wiki, images=None, vault=None, settled=None):
                                  f'rewrite to "{_replacement}". A new same-named note '
                                  f'creates a file that outranks the alias and steals every '
                                  f'"[[{tgt}]]" in the vault away from "{_own_sl}"'))
+            elif alias_inventory_complete and _outside_unread:
+                problems.append((
+                    sl, "item10/ambiguous",
+                    f'wikilink target "{tgt}" names no entry but may name a '
+                    "note in a vault folder outside Wiki/ that could not be "
+                    f'read ({", ".join(_outside_unread)}); preserve the link, '
+                    "anchor and display text. Report only"))
             elif alias_inventory_complete:
                 problems.append((sl,"item10/dangling",f'wikilink target "{tgt}" does not resolve'))
         # Duplicate means one resolved entry, regardless of how the link was
@@ -4772,6 +4838,10 @@ def scan(wiki, images=None, vault=None, settled=None):
                 if owner_slug == sl:
                     continue
                 key = fold_name(owner_slug)
+            elif _outside_unread:
+                # An unresolved spelling may name a note in an unread folder
+                # outside Wiki/; do not infer removal.
+                continue
             seen[key] = seen.get(key, 0) + 1
             spellings.setdefault(key, []).append(raw_target)
         for key, count in seen.items():
@@ -5033,8 +5103,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                         f'wikilink [[{tgt}|{disp}]] — "{disp}" keeps only '
                         f'modifiers of the target title "{target_title}" and '
                         f'omits its head word "{_head}"; reword so the label '
-                        "names the target (its title, an alias, an inflection "
-                        "or a derived form), or review whether the label names "
+                        "names the target (its title, an alias, an inflection, "
+                        "a derived form or a word it introduces in italics), "
+                        "or review whether the label names "
                         "a different entity; do not auto-retarget"))
 
     problems.current_path = ""
@@ -5208,7 +5279,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                     else record["slug"])
         key = entry_link_path_key(target)
         if (status == "missing" and "/" not in key
-                and key not in ambiguous_aliases and key in alias_of):
+                and key not in ambiguous_aliases and key in alias_of
+                and not _outside_owners(target, _entry_vault_target(entry))):
             return alias_of[key][0]
         return None
 
@@ -6286,6 +6358,24 @@ def run_self_test():
         check("a symlinked folder back into Wiki/ is not walked, and its "
               "real paths still resolve (skipped where symlink creation is "
               "unavailable)", _back_seen, _back_want)
+        # Folder identity, not spelling: a link back whose absolute target
+        # spells the Wiki in another case or Unicode form is pruned too. On
+        # a case- or normalization-sensitive filesystem that target dangles.
+        v_accent = os.path.join(tmp, "v1-bäck")
+        _st_write(v_accent, "topics/mean.md", _st_entry(
+            "Mean", "**Mean** is a worked example."))
+        _spelled = []
+        for _root, _target in (
+                (v_back, os.path.join(tmp, "V1-SYMLINK-BACK", "topics")),
+                (v_accent, os.path.join(tmp, "v1-bäck", "topics"))):
+            try:
+                os.symlink(_target, os.path.join(_root, "alias-spelled"))
+            except (OSError, NotImplementedError, AttributeError):
+                pass
+            _spelled.append([os.path.relpath(path, _root).replace(os.sep, "/")
+                             for path in iter_entry_files(_root)])
+        check("a link back spelled in another case or Unicode form is not "
+              "walked", _spelled, [_back_want[0], ["topics/mean.md"]])
 
         # zero entries, and one entry
         empty = os.path.join(tmp, "empty")
@@ -6729,6 +6819,11 @@ def run_self_test():
             "[[Ada Lovelace]], [[Doe_X_2025.md|the note]], "
             "[[turing-note|Turing]] and [[nowhere]]. It names "
             "[[Ada Lovelace]] again."))
+        # A link to the outside note named like an alias is not the alias
+        # owner's link, so a mention of that entry stays a backfill candidate.
+        _st_write(w_notes, "machine-reader.md", _st_entry(
+            "Machine reader", "**Machine reader** extends the Turing "
+            "machine; the [[turing-note|note]] has more."))
         # A body or Related link drops an explicit .md suffix, and a path
         # that no other vault file with the basename needs.
         _st_write(w_notes, "mean.md", _st_entry(
@@ -6759,6 +6854,12 @@ def run_self_test():
                _st_msg(notes_res, "note-reader", "item10/dangling")),
               (6, [True, True, True], ["item10/dangling"],
                'wikilink target "nowhere" does not resolve'))
+        check("a link to an outside note named like an alias is not that "
+              "entry's link; its mention stays a backfill candidate",
+              ("item10/late-link" in _st_keys(notes_res, "machine-reader"),
+               [row["target"] for row in notes_res["backfill_candidates"]
+                if row["slug"] == "machine-reader"]),
+              (False, ["turing-machine"]))
         check("an unneeded .md suffix or Wiki/ path is item10/case naming "
               "the bare slug; a path a same-named vault note needs is kept",
               [_st_msg(notes_res, _slug, "item10/case").split(
@@ -6780,10 +6881,16 @@ def run_self_test():
         for _slug, _prose in (
                 ("twin-mention", "depends on the variance of the data"),
                 ("twin-alias", "uses [[var-alias|variance]]"),
-                ("twin-md", "uses [[variance.md|variance]]")):
+                ("twin-md", "uses [[variance.md|variance]]"),
+                ("twin-bare", "uses [[variance]]. Later the "
+                              "[[Wiki/variance|variance]] recurs"),
+                ("twin-anchor", "uses [[variance#Definition]]")):
             _title = _slug.replace("-", " ").capitalize()
             _st_write(w_outside, _slug + ".md", _st_entry(
                 _title, "**%s** %s." % (_title, _prose)))
+        _st_write(w_outside, "twin-child.md", _st_entry(
+            "Twin child", "**Twin child** is a worked example.",
+            parents=('"[[variance]]"',), related="[[variance]]"))
         res = scan(w_outside)
         check("beside an outside same-named note, backfill, alias, .md and "
               "unlinked-child targets are all the qualified path",
@@ -6798,6 +6905,27 @@ def run_self_test():
                 if row["slug"] == "mean"]),
               (["Wiki/variance"], True, '"Wiki/variance"',
                [["Wiki/variance"]]))
+        check("beside an outside same-named note, a bare body or Related "
+              "link is item10/case naming the Wiki/ path; parents: stay bare",
+              ([_st_msg(res, _slug, "item10/case").split(
+                  "rewrite the target to ")[-1].split(")")[0]
+                for _slug in ("twin-bare", "twin-child")],
+               "item10/dup" in _st_keys(res, "twin-bare"),
+               [k for k in _st_keys(res, "twin-child")
+                if k.startswith("item2")],
+               res["hierarchy_diagnostic"]["unresolved_parents"]),
+              (['"Wiki/variance", with display label "variance"',
+                '"Wiki/variance", preserving its anchor and display label'],
+               True, [], []))
+        check("beside an outside same-named note, an anchored body link or "
+              "a Related link takes no written-name label; item 11 labels "
+              "the footer link",
+              ([_st_msg(res, _slug, "item10/case").split(
+                  "rewrite the target to ")[-1]
+                for _slug in ("twin-anchor", "twin-child")],
+               "item11" in _st_keys(res, "twin-child")),
+              (['"Wiki/variance", preserving its anchor and display label)']
+               * 2, True))
         # Obsidian indexes a symlinked folder, so its same-named note keeps a
         # needed Wiki/ path. A loop and a link back into the vault add nothing.
         v_linked = os.path.join(tmp, "v2-symlinked-outside")
@@ -6810,7 +6938,7 @@ def run_self_test():
         _st_write(w_linked, "median.md", _st_entry(
             "Median", "**Median** is unlike the [[Wiki/mean|mean]]."))
         _linked_want = ({"articles/doe": ["Articles/doe.md"],
-                         "shared/mean": ["Shared/mean.md"]}, True, [])
+                         "shared/mean": ["Shared/mean.md"]}, [], [])
         try:
             os.symlink(os.path.join(tmp, "v2-shared"),
                        os.path.join(v_linked, "Shared"))
@@ -6820,13 +6948,38 @@ def run_self_test():
         except (OSError, NotImplementedError, AttributeError):
             _linked_seen = _linked_want
         else:
-            _linked_paths, _, _linked_complete = vault_note_index(
+            _linked_paths, _, _linked_unread = vault_note_index(
                 v_linked, w_linked)
-            _linked_seen = (_linked_paths, _linked_complete,
+            _linked_seen = (_linked_paths, _linked_unread,
                             _st_keys(scan(w_linked), "median"))
         check("a note in a symlinked outside folder owns its basename and "
               "keeps the Wiki/ path (skipped where symlink creation is "
               "unavailable)", _linked_seen, _linked_want)
+        # A link that names no entry may name a note in an unreadable folder
+        # outside Wiki/: it is item10/ambiguous, never a dangler or a dup.
+        v_unread = os.path.join(tmp, "v2-unread-outside")
+        os.makedirs(os.path.join(v_unread, ".obsidian"))
+        _st_write(v_unread, "Private/doe.md", "A private note.\n")
+        w_unread = os.path.join(v_unread, "Wiki")
+        _st_write(w_unread, "mean.md", _st_entry(
+            "Mean", "**Mean** is cited by [[doe]] and by [[doe|Doe]]."))
+        _unread_want = (["item10/ambiguous", "item10/ambiguous"], True)
+        os.chmod(os.path.join(v_unread, "Private"), 0)
+        try:
+            if os.access(os.path.join(v_unread, "Private"), os.R_OK):
+                _unread_seen = _unread_want      # a superuser reads it
+            else:
+                _unread_res = scan(w_unread)
+                _unread_seen = (
+                    [k for k in _st_keys(_unread_res, "mean")
+                     if k.startswith("item10")],
+                    "(Private)" in _st_msg(_unread_res, "mean",
+                                           "item10/ambiguous"))
+        finally:
+            os.chmod(os.path.join(v_unread, "Private"), 0o755)
+        check("a link that may name a note in an unread folder outside "
+              "Wiki/ is report-only item10/ambiguous, never dangling or dup",
+              _unread_seen, _unread_want)
 
         # ------------------------------------------------------------------
         # 3. item 8 -- tag aliases, case variants, and the duplicate check
@@ -7028,8 +7181,10 @@ def run_self_test():
               ("item16" in _st_keys(_notation_res, "su2"),
                "line 3 is" in _st_msg(_notation_res, "su2", "item19")),
               (_notation_split, _notation_split))
-        check("a second card joined without a blank line is malformed visible content",
-              "visible lines" in _st_msg(res, "joined-cards", "item19"), True)
+        check("a second card joined without a blank line is an extra card to "
+              "remove",
+              "the content after line 3 holds `??`"
+              in _st_msg(res, "joined-cards", "item19"), True)
         check("a non-SR line-four HTML comment is malformed visible content",
               "visible lines" in _st_msg(
                   res, "ordinary-line4-comment", "item19"), True)
@@ -8980,7 +9135,8 @@ def run_self_test():
             open(os.path.join(_imgdir, _f), "w", encoding="utf-8").close()
         # Valid sidecars/OS metadata stay quiet.  Nested and staging residue is
         # reported without making a nested-but-resolving embed look missing.
-        for _f in (".figure-manifest.tsv", ".figure-review.txt", ".DS_Store"):
+        for _f in (".figure-manifest.tsv", ".figure-review.txt",
+                   ".figure-ed-pending.txt", ".DS_Store"):
             open(os.path.join(_imgdir, _f), "w", encoding="utf-8").close()
         os.makedirs(os.path.join(_imgdir, "nested"))
         open(os.path.join(_imgdir, "nested", ".DS_Store"), "w",
@@ -9304,10 +9460,11 @@ def run_self_test():
         #      that merely opens with the heading, with no stray line in the
         #      issues: span, is not.
         v_close = os.path.join(tmp, "v12b-flash-close")
-        _close_slugs = ("lost-fence", "four-dash-card", "fence-text-card")
+        _close_slugs = ("lost-fence", "four-dash-card", "fence-text-card",
+                        "lost-fence-list")
         for _name, _fence in zip(_close_slugs, (
                 'issues: ""\n', 'issues: ""\n----\n',
-                'issues: ""\n--- closed\n')):
+                'issues: ""\n--- closed\n', 'issues:\n  - fix opener\n')):
             _title = _name.replace("-", " ").capitalize()
             _st_write(v_close, _name + ".md", _st_entry(
                 _title, "**%s** is a worked example." % _title)
@@ -9319,12 +9476,12 @@ def run_self_test():
         res_close = scan(v_close)
         check("a frontmatter that only the Flashcards separator closes is item1",
               [FLASHCARDS_CLOSE_MESSAGE in _st_msg(res_close, slug_, "item1")
-               for slug_ in _close_slugs], [True] * 3)
+               for slug_ in _close_slugs], [True] * 4)
         check("...while its issues: span stays issues-malformed, never an "
               "unparseable item-1 line",
               [("item2/issues-malformed" in _st_keys(res_close, slug_),
                 "unparseable" in _st_msg(res_close, slug_, "item1"))
-               for slug_ in _close_slugs], [(True, False)] * 3)
+               for slug_ in _close_slugs], [(True, False)] * 4)
         check("a body that opens with ## Flashcards after a closed "
               "frontmatter is not a lost fence",
               FLASHCARDS_CLOSE_MESSAGE in _st_msg(res_close, "flash-only",
@@ -9602,6 +9759,37 @@ def run_self_test():
             'Detached callout', '**Detached callout** is a worked example.')
                   + '\n> [!sr|card-metadata]\n>\n'
                     '> <!--SR:!2026-03-01,12,270--> ^detached-card\n')
+        for name, note in (
+                ('user-note', 'My own note: compare with ℓ1.\n'
+                              'It boosts trees on the same gradients.\n'
+                              'Ask about this in the reading group.\n'),
+                ('user-checklist', '- [ ] Read\n- [ ] Ask\n- [ ] Write\n'),
+                ('user-line', 'One line of my own.\n')):
+            _st_write(v, name + '.md', _st_entry(
+                name.replace('-', ' ').capitalize(),
+                '**%s** is a worked example.'
+                % name.replace('-', ' ').capitalize()) + '\n' + note)
+        # A blank line splits the primary card before a full block.
+        for name, after in (
+                ('split-question', 'Why?\n?\nBecause.\n'),
+                ('split-note', 'My note.\nIt goes on.\nAsk about it.\n')):
+            _st_write(v, name + '.md', _st_entry(
+                name.replace('-', ' ').capitalize(),
+                '**%s** is a worked example.'
+                % name.replace('-', ' ').capitalize()).replace(
+                    'stated once.\n??\n', 'stated once.\n??\n\n')
+                + '\n' + after)
+        # Card syntax in a block after the card, or joined after its line 3.
+        for name, note in (
+                ('syntax-block', '\nWhy square the errors::Large ones.\n'),
+                ('syntax-question', '\nWhy square the errors?\n?\n'),
+                ('syntax-joined', 'Q::A\n'),
+                ('syntax-joined-question', 'Why?\n?\nBecause.\n')):
+            _st_write(v, name + '.md', _st_entry(
+                name.replace('-', ' ').capitalize(),
+                '**%s** is a worked example.'
+                % name.replace('-', ' ').capitalize()).rstrip('\n')
+                + '\n' + note)
         for name, trailing in (
                 ('schedule-block-id', '^bid3\n'),
                 ('schedule-user-lines',
@@ -9644,13 +9832,38 @@ def run_self_test():
                for name in ('detached', 'unterminated')], [True, True])
         check("a detached schedule is a block to report, never a card",
               [(_st_keys(res, name),
-                'Spaced Repetition schedule that a blank line separates'
+                'is not a card, such as a schedule'
                 in _st_msg(res, name, 'item19'),
                 any(word in _st_msg(res, name, 'item19')
                     for word in ('holds 2 cards', 'extra card',
                                  'contiguous lines')))
                for name in ('detached', 'detached-callout')],
               [(['item19'], True, False)] * 2)
+        check("the user's text after the card is a block to report, never "
+              "an extra or malformed card",
+              [(_st_keys(res, name), _st_msg(res, name, 'item19'))
+               for name in ('user-note', 'user-checklist', 'user-line')],
+              [(['item19'], "block 2 is not a card, such as a schedule a "
+                "blank line separates from the card or the user's own text "
+                "— preserve it byte-for-byte, never delete, move or "
+                "reattach it, and report it")] * 3)
+        check("a blank inside the primary card breaks it before a full "
+              "block too",
+              [[m.split(' — ')[0]
+                for m in _st_msg(res, name, 'item19').split(' | ')
+                if 'malformed' in m or m.startswith('block ')]
+               for name in ('split-question', 'split-note')],
+              [['card 1 malformed', 'card 2 malformed']] * 2)
+        check("card syntax in a block after the card, or after its line 3, "
+              "is an extra card to remove, not text to keep",
+              [(_st_keys(res, name),
+                _st_msg(res, name, 'item19').split(' holds `')[0],
+                'remove it as an extra card' in _st_msg(res, name, 'item19'))
+               for name in ('syntax-block', 'syntax-question',
+                            'syntax-joined', 'syntax-joined-question')],
+              [(['item19'], 'block 2', True)] * 2
+              + [(['item19'], 'flashcard has %d visible lines, and the '
+                  'content after line 3' % lines, True) for lines in (4, 6)])
         check("content after an attached schedule stays on the card",
               [('visible lines' in _st_msg(res, name, 'item19'),
                 any(word in _st_msg(res, name, 'item19')
@@ -9673,20 +9886,41 @@ def run_self_test():
                   .replace('title: "Commented"', 'title: "Comm\\u0065nted" # user annotation')
                   .replace('read: false', 'read: true # already read')
                   .replace('sources:\n', 'sources: # origin\n# preserve this annotation\n'))
-        for name, raw in (('null-title', 'null'), ('malformed', '"Malformed "yaml""')):
+        for name, raw in (('null-title', 'null'), ('malformed', '"Malformed "yaml""'),
+                          ('tau-title', '"$\\tau$-leaping"')):
             _st_write(v, name + '.md', _st_entry(name.title(), '**Example** is a worked example.')
                       .replace('title: "' + name.title() + '"', 'title: ' + raw))
         _st_write(v, 'two-sources.md', _st_entry('Two sources', '**Two sources** is a worked example.',
                   sources=('"[[Study.pdf#page=2]]"', '"[[Study.md]]"')))
+        _chapter = '"[[Prince_UDL_2026_02_SupLearn.pdf#page=3]]"'
+        for name, book in (('book-and-chapter', '"[[Prince_UDL_2026.pdf#page=40]]"'),
+                           ('src-book-and-chapter', '"[[Prince_UDL_2026_src.pdf#page=40]]"'),
+                           ('two-chapters', '"[[Prince_UDL_2026_01_Intro.pdf#page=1]]"'),
+                           ('other-book-and-chapter', '"[[Prince_UDL_2026_2.pdf#page=4]]"')):
+            _st_write(v, name + '.md', _st_entry(
+                name.replace('-', ' ').capitalize(),
+                '**%s** is a worked example.' % name.replace('-', ' ').capitalize(),
+                sources=(book, _chapter)))
         res = scan(v)
         check("comments and decoded YAML title preserve a clean studied entry",
               _st_keys(res, 'commented'), [])
         check("null or malformed titles never produce rename candidates",
-              [r for r in res['rename_candidates'] if r['slug'] in ('null-title', 'malformed')], [])
+              [r for r in res['rename_candidates']
+               if r['slug'] in ('null-title', 'malformed', 'tau-title')], [])
         check("malformed quoted YAML is a validity finding",
               'item1' in _st_keys(res, 'malformed'), True)
+        check("a title whose single LaTeX backslash decodes to a tab is item1",
+              'item1' in _st_keys(res, 'tau-title'), True)
         check("same-stem PDF/clipping provenance is a report-only candidate",
               _st_keys(res, 'two-sources'), ['item4/source-identity'])
+        check("a chapter PDF beside its whole-book PDF, `_src` aside, is "
+              "item4/source-identity; two chapters or a `_2` book are not",
+              [_st_keys(res, name) for name in (
+                  'book-and-chapter', 'src-book-and-chapter', 'two-chapters',
+                  'other-book-and-chapter')]
+              + ['is a chapter of' in _st_msg(res, 'book-and-chapter',
+                                              'item4/source-identity')],
+              [['item4/source-identity']] * 2 + [[]] * 2 + [True])
         for raw, want in (("[O'Reilly, real-alias]", ["O'Reilly", "real-alias"]),
                           ("['tail\\', 'real-alias']", ["tail\\", "real-alias"]),
                           ("['O''Reilly, Inc.', 'real-alias']", ["O'Reilly, Inc.", "real-alias"])):
@@ -10037,6 +10271,14 @@ def run_self_test():
                 ("1984", _st_entry(
                     "1984", "***1984*** is a worked example.", type_="Work")
                  .replace('title: "1984"', "title: 1984")),
+                ("3d-printing", _st_entry(
+                    "3D printing", "**3D printing** is a worked example.",
+                    aliases=("3d-print",))
+                 .replace('title: "3D printing"', "title: 3D printing")
+                 .replace('description: "3D printing is a worked example '
+                          'used by the self-test."',
+                          "description: 3D printing is a worked example "
+                          "used by the self-test.")),
                 # Valid YAML that is not double-quoted, so the entry still
                 # parses and only the quoting rule fires.
                 ("desc-colon", _st_entry(
@@ -10097,18 +10339,20 @@ def run_self_test():
                                    ("read-bare", "item2/read-null"),
                                    ("read-tilde", "item2/read-null"))],
               [(True, True)] * 3)
-        check("schema order, duplicate keys, an unquoted numeric title, a "
-              "single-quoted description and quoted type/date values are "
-              "item2",
-              [(_st_keys(res, slug_), needle in _st_msg(res, slug_, "item2"))
-               for slug_, needle in (
-                   ("out-of-order", "fields out of schema order"),
-                   ("duplicate-key", "duplicate frontmatter key"),
-                   ("1984", "title must be double-quoted"),
-                   ("desc-colon", "description must be double-quoted"),
-                   ("quoted-type", "type must not be quoted"),
-                   ("quoted-date", "created must not be quoted"))],
-              [(["item2"], True)] * 6)
+        check("schema order, an unquoted numeric title, a single-quoted "
+              "description and quoted type/date values are item2; a "
+              "duplicate key is item1, as lint_entry files it",
+              [(_st_keys(res, slug_), needle in _st_msg(res, slug_, item_))
+               for slug_, item_, needle in (
+                   ("out-of-order", "item2", "fields out of schema order"),
+                   ("duplicate-key", "item1", "duplicate frontmatter key"),
+                   ("1984", "item2", "title must be double-quoted"),
+                   ("desc-colon", "item2", "description must be double-quoted"),
+                   ("quoted-type", "item2", "type must not be quoted"),
+                   ("quoted-date", "item2", "created must not be quoted"))],
+              [(["item2"], True), (["item1"], True)] + [(["item2"], True)] * 4)
+        check("a digit-led plain title, description and alias are lossless, "
+              "not item2", _st_keys(res, "3d-printing"), [])
         check("an impossible calendar date and a missing updated: are item3",
               ("is not a valid date" in _st_msg(res, "impossible-date", "item3"),
                "updated missing" in _st_msg(res, "no-updated", "item3")),
@@ -10212,6 +10456,30 @@ def run_self_test():
         check("the CLI exits 2 when WIKI holds .obsidian/ or Wiki/ or equals "
               "--vault, and scans <vault>/Wiki",
               _root_codes, [(2, True), (2, True), (2, True), 0])
+        # A stray .obsidian/ or Wiki/ inside <vault>/Wiki is a nested folder
+        # once --vault names that vault; a vault root deeper inside --vault
+        # is still refused.
+        _stray = os.path.join(tmp, "v19b-stray")
+        _st_write(_stray, "Wiki/entry.md", _st_entry(
+            "Entry", "**Entry** is a worked example."))
+        for _folder in (".obsidian", "Wiki/.obsidian", "Wiki/Wiki"):
+            os.makedirs(os.path.join(_stray, _folder))
+        _stray_codes = []
+        for _stray_argv in ([os.path.join(_stray, "Wiki"), "--vault", _stray],
+                            [os.path.join(_stray, "Wiki")],
+                            [_stray, "--vault", tmp]):
+            _stray_err = io.StringIO()
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(_stray_err):
+                try:
+                    _stray_codes.append(main(_stray_argv))
+                except SystemExit as exc:
+                    _stray_codes.append(
+                        (exc.code, "with --vault <vault>"
+                         in _stray_err.getvalue()))
+        check("a stray .obsidian/ or Wiki/ in <vault>/Wiki is scanned with "
+              "--vault; without it, or for a deeper vault root, exit 2",
+              _stray_codes, [0, (2, True), (2, True)])
 
         # WIKI must lie inside the vault and be the wiki folder itself.
         _other_vault = os.path.join(tmp, "v19c-other-vault")
@@ -11506,6 +11774,19 @@ def run_self_test():
               ["item19" in _st_keys(res, slug_) for slug_ in
                ("separator-spacing", "heading-spacing")],
               [True, True])
+        # A footer directly under a list item or paragraph renders inside it.
+        v = os.path.join(tmp, "lazy-footer")
+        for _slug, _prose in (
+                ("lazy-list", "**Lazy list** is a worked example. It takes "
+                              "three steps:\n\n1. Start.\n2. Continue.\n3. Stop."),
+                ("lazy-prose", "**Lazy prose** is a worked example.")):
+            _st_write(v, _slug + ".md", _st_entry(
+                _slug.replace("-", " ").capitalize(), _prose + "\n**Related:**"))
+        res = scan(v)
+        check("a Related footer directly under a list item or paragraph is item11",
+              [_st_msg(res, slug_, "item11").startswith(
+                  "leave a blank line before the Related footer")
+               for slug_ in ("lazy-list", "lazy-prose")], [True, True])
 
         # A linked target's earlier plain mention (item10/late-link), with
         # the hyphen-compound, apposition and alias-only-noun exclusions.
@@ -11785,7 +12066,19 @@ def run_self_test():
                      "$$\n\\epsilon = \\sum_{i=1}^{n} w_i\n$$\n\nHere")
             .replace("    $$\n    w_i \\leftarrow \\frac{w_i}{Z}\n    $$",
                      "   $$\n   w_i \\leftarrow \\frac{w_i}{Z}\n   $$")))
+        # Without Related, the separator above Flashcards still ends the
+        # prose, as in lint_entry: it is neither an item-13 scar nor a rule
+        # that ends the step's gap.
+        _st_write(v, "footless-steps.md", _st_entry(
+            "Footless steps", "**Footless steps** run in order.\n\n"
+            "1. Count the hits.\n"
+            "2. Repeat until nothing changes, which ends at the total:\n\n"
+            "$$\nh = 1\n$$", related=False))
         res = scan(v)
+        check("without the Related footer, a step display at the margin is "
+              "item9/list-indent and the separator is no item13 scar",
+              sorted(set(_st_keys(res, "footless-steps"))),
+              ["item11", "item9/list-indent"])
         check("a numbered procedure with indented displays, a nested bullet "
               "and a two-digit step scans clean",
               _st_keys(res, "steps"), [])
@@ -12250,6 +12543,29 @@ def run_self_test():
                 _variants["single-line"]["separator_findings"]],
                _variants["single-line-defaults"]["separator_findings"]),
               (["singleLineCardSeparator"], []))
+        _articles = []
+        for _name, _data in (
+                ("articles-default", _sr_settings()),
+                ("articles-ignored", _sr_settings(
+                    noteFoldersToIgnore=["Articles/"])),
+                ("articles-glob", _sr_settings(
+                    noteFoldersToIgnore=["Articles/**"])),
+                ("articles-globstar", _sr_settings(
+                    noteFoldersToIgnore=["**/Articles/**"])),
+                ("articles-star", _sr_settings(
+                    noteFoldersToIgnore=["*.md"]))):
+            _root = _sr_vault("sr-" + _name, _data)[0]
+            os.makedirs(os.path.join(_root, "Articles"))
+            _articles.append(
+                [finding.split(":")[0] for finding in spaced_repetition_report(
+                    _root, _counts)["separator_findings"]])
+        check("an Articles/ folder the plugin does not ignore is one finding",
+              _articles[:3],
+              [["noteFoldersToIgnore does not cover Articles/"], [], []])
+        check("as in minimatch, a leading **/ spans zero folders and * stays "
+              "inside one",
+              _articles[3:],
+              [[], ["noteFoldersToIgnore does not cover Articles/"]])
 
         # ------------------------------------------------------------------
         # Discipline roots need no card; parents link down to their children.
@@ -12469,6 +12785,17 @@ def run_self_test():
               [_sentence_at(_text, _text.index(word))
                for word in ("one.", "line", "two", "Last")],
               ["First one.", "Second line here.", "Item two.", "Last."])
+        # A shared cache splits each block into sentences once, not once
+        # per mention in it, and finds the same sentences.
+        _long = ("Intro. " + " ".join("Case %d names the mean." % _i
+                                      for _i in range(200))
+                 + "\n\n- Item one. Item two.")
+        _offsets = [m.start() for m in re.finditer("mean|Item", _long)]
+        _splits = {}
+        check("a cached split finds the same sentences, one split per block",
+              ([_sentence_at(_long, _o, _splits) for _o in _offsets]
+               == [_sentence_at(_long, _o) for _o in _offsets], len(_splits)),
+              (True, 2))
         _settle_wiki = _hub_vault("v-hub-settled")
         _st_write(_settle_wiki, "settle-reader.md", _st_entry(
             "Settle reader", "**Settle reader** names a hub term once. It "
@@ -12535,6 +12862,15 @@ def run_self_test():
               [row["settle_key"] for row in scan(_settle_wiki)
                ["backfill_candidates"] if row["target"] == "hub-term"],
               [_before])
+        # A link that drops emphasis changes the sentence, so the closeout
+        # takes its records from the run's last scan.
+        _st_write(_settle_wiki, "settle-reader.md", _st_entry(
+            "Settle reader", "**Settle reader** names a hub term and a "
+            "*topic*."))
+        check("a link that drops emphasis changes the key",
+              [row["settle_key"] == _before for row in scan(_settle_wiki)
+               ["backfill_candidates"] if row["target"] == "hub-term"],
+              [False])
         _st_write(_settle_wiki, "settle-reader.md", _st_entry(
             "Settle reader", "**Settle reader** names a hub term twice. It "
             "also names a topic."))
@@ -12701,12 +13037,23 @@ def run_self_test():
 
 
 def _looks_like_vault_root(wiki, vault=None):
-    """Whether the WIKI argument names a vault root instead of its Wiki/."""
-    if (os.path.isdir(os.path.join(wiki, ".obsidian"))
-            or os.path.isdir(os.path.join(wiki, "Wiki"))):
-        return True
-    return (vault is not None
-            and os.path.realpath(wiki) == os.path.realpath(vault))
+    """Whether the WIKI argument names a vault root instead of its Wiki/.
+
+    The ``Wiki`` folder directly inside ``--vault`` is never one: a stray
+    ``.obsidian/`` or ``Wiki/`` inside it is only a nested folder.
+    """
+    if vault is not None:
+        if os.path.realpath(wiki) == os.path.realpath(vault):
+            return True
+        wiki_abs = os.path.abspath(wiki)
+        try:
+            if (fold_name(os.path.basename(wiki_abs)) == "wiki"
+                    and os.path.samefile(os.path.dirname(wiki_abs), vault)):
+                return False
+        except OSError:
+            pass
+    return (os.path.isdir(os.path.join(wiki, ".obsidian"))
+            or os.path.isdir(os.path.join(wiki, "Wiki")))
 
 
 def _vault_spelling(wiki, vault):
@@ -12823,8 +13170,8 @@ def main(argv=None):
     # reads every Articles/, Slides/ or Investments/ note as a broken entry
     # and exits 0 with thousands of false repair cues.
     if _looks_like_vault_root(args.wiki, args.vault):
-        ap.error("WIKI looks like a vault root: %s; pass <vault>/Wiki"
-                 % args.wiki)
+        ap.error("WIKI looks like a vault root: %s; pass <vault>/Wiki "
+                 "with --vault <vault>" % args.wiki)
     # A mistyped --images must not read as "the folder is empty": that reports
     # EVERY embed in the vault as naming a missing file, and the executing agent reading
     # that has no way to tell it from a genuinely broken vault. `isdir`, not

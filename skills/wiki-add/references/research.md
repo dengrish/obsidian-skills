@@ -131,10 +131,10 @@ before publication. The helper's `not a directory` error does not confirm
 absence, because a non-directory occupant gives it too. An unreadable path or
 a non-directory occupant is not an empty inventory. When
 `<vault>/Inbox` exists, add `--raw '<vault>/Inbox'`: a URL row
-`duplicate-of-earlier-input` means the user's own capture of that page awaits
-clipping-clean, so do not cite that page; use other evidence or leave the
-topic pending, and report the capture with its route (clipping-clean, then
-wiki-build).
+`duplicate-of-earlier-input`, or an `Inbox/` path in its `variant_matches`,
+means the user's own capture of that page awaits clipping-clean, so do not
+cite that page; use other evidence or leave the topic pending, and report the
+capture with its route (clipping-clean, then wiki-build).
 
 Read the full result. A unique existing URL-origin note may be reused only
 under the [local-source rules](#find-local-sources-first), after reading it and
@@ -143,9 +143,12 @@ match is not enough. Leave its exact bytes and images unchanged. If it lacks
 necessary evidence, find another adequate source or leave the topic pending.
 A URL owned by an unbuilt note, other than a legacy research extract, routes
 to wiki-build under the local-source
-rules; its page is not cited by URL instead. Ambiguous or incomplete ownership
-does not prove the page has no vault copy, so it does not authorize citing
-that URL.
+rules; its page is not cited by URL instead. An `Articles/` path in
+`variant_matches` may hold the page under a mobile, AMP, `http` or versioned
+address: read it, and treat it as a match when it is the same page. Ambiguous
+or incomplete ownership, including such a copy while its sameness is
+uncertain, does not prove the page has no vault copy, so it does not
+authorize citing that URL.
 
 For PDFs, resolve PDF/reading-note identity from decoded `sources:`
 provenance, not shared stems. A reading note only leads to its PDF: the

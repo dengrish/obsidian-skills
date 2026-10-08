@@ -290,6 +290,25 @@ class RuntimeCliTests(unittest.TestCase):
                     extra.unlink()
                 self.assertEqual(self.cli("inspect").returncode, 0)
 
+    def test_host_cache_markers_at_plugin_root_are_ignored(self):
+        # Claude Code's cache copy carries these beside the bundle.
+        (self.plugin / ".in_use").mkdir()
+        (self.plugin / ".in_use/12345").write_text('{"pid":12345}', encoding="utf-8")
+        (self.plugin / ".orphaned_at").write_text("1791425871003", encoding="utf-8")
+        inspected = self.cli("inspect")
+        self.assertEqual(inspected.returncode, 0, inspected.stderr)
+        self.assertEqual(json.loads(inspected.stdout)["runtime_sha256"],
+                         self.manifest["runtime_sha256"])
+        for relative in ("skills/wiki-build/.in_use/12345", "shared/.orphaned_at"):
+            with self.subTest(relative=relative):
+                marker = self.plugin / relative
+                marker.parent.mkdir(exist_ok=True)
+                marker.write_text("1", encoding="utf-8")
+                inspected = self.cli("inspect")
+                self.assertNotEqual(inspected.returncode, 0)
+                self.assertIn(relative, inspected.stderr)
+                marker.unlink()
+
     def test_inventory_fingerprint_and_host_version_cannot_disagree(self):
         pristine = copy.deepcopy(self.manifest)
         self.manifest["runtime_sha256"] = "0" * 64

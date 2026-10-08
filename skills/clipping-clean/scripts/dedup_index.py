@@ -31,6 +31,7 @@ CLI
 
 Importable
     normalize_url(url) -> str
+    variant_key(url) -> str
     split_frontmatter(text) -> (frontmatter_lines, body) | None
     read_source(path)  -> str | None
     is_research_extract(path) -> bool
@@ -44,7 +45,10 @@ Importable
 
 Output: one JSON object on stdout. Exit status is 0 whenever the scan ran.
 Each `checked` row lists, in `research_extracts`, the matching Articles notes
-that are legacy wiki-add research extracts (wiki-add creates none).
+that are legacy wiki-add research extracts (wiki-add creates none). Its
+`variant_matches` lists the Articles notes and earlier inputs whose URL
+differs from its own only by an http scheme, a mobile or AMP host label, a
+trailing `/amp` segment or an arXiv version; they do not change its status.
 `stem_mismatch` lists URL-owning notes whose rendered
 `![[…_fig…]]` embeds use another stem. Dot-prefixed subfolders (private
 stages, hidden folders) are not scanned. Stdlib only.
@@ -215,13 +219,46 @@ def normalize_url(url):
     # Preserve order AND spelling. An HTTP query is opaque to the origin: some
     # applications interpret repeated keys in order, distinguish encodings, or
     # sign the original query bytes. A false negative here is caught by the
-    # later slug ownership check; a false duplicate has no downstream recovery.
+    # later slug ownership check or listed in `variant_matches`; a false
+    # duplicate has no downstream recovery.
     query = "&".join(query_fields)
     # An anchor fragment is dropped; a routing fragment is the page and stays.
     # An emptied query drops its trailing "?" too.
     fragment = parts.fragment
     fragment = fragment if fragment[:1] in ROUTING_FRAGMENT else ""
     return urlunsplit((scheme, host, path, query, fragment))
+
+
+#: Host labels that mark a mobile or AMP copy of a page (`en.m.wikipedia.org`).
+VARIANT_HOST_LABELS = {"m", "mobile", "amp"}
+
+
+def variant_key(url):
+    """A looser key that also folds the scheme, a mobile or AMP copy and an
+    arXiv version, so a copy saved under one of them can be found.
+
+    It never decides a verdict: `check()` only lists its matches in
+    `variant_matches`, for a reader to compare. Query and routing fragment stay
+    as `normalize_url` leaves them.
+    """
+    norm = normalize_url(url)
+    if not norm:
+        return ""
+    parts = urlsplit(norm)
+    userinfo, separator, authority = parts.netloc.rpartition("@")
+    host, colon, port = (authority.partition(":")
+                         if not authority.startswith("[") else (authority, "", ""))
+    labels = host.split(".")
+    if not all(label.isdigit() for label in labels):
+        # Keep the last two labels: `m.com` is a site, not a mobile copy.
+        labels = [label for i, label in enumerate(labels)
+                  if i >= len(labels) - 2 or label not in VARIANT_HOST_LABELS]
+    host = ".".join(labels)
+    path = re.sub(r"/amp$", "", parts.path)
+    if host == "arxiv.org":
+        path = re.sub(r"^(/(?:abs|pdf)/.+?)v[0-9]+(\.pdf)?$", r"\1\2", path)
+    netloc = userinfo + separator + host + colon + port
+    return urlunsplit(("https", netloc, path, parts.query, parts.fragment))
 
 
 def _frontmatter_fence(line):
@@ -546,8 +583,15 @@ def check(entries, index):
     index, so a second raw in the same batch that captures the same article is
     caught against the first — the reason the index is kept live rather than
     frozen at start-of-run.
+
+    `variant_matches` lists the notes and earlier inputs whose URL has this
+    row's `variant_key` under another normalized key. The status ignores them.
     """
     live = {k: list(v) for k, v in index.items()}
+    variants = {}
+    for norm, paths in index.items():
+        variants.setdefault(variant_key(norm), []).extend(
+            (norm, path) for path in paths)
     seen_this_run = {}
     results = []
     for ent in entries:
@@ -555,7 +599,7 @@ def check(entries, index):
         norm = normalize_url(src)
         if not norm:
             results.append({**ent, "normalized": None, "status": "no-source",
-                            "matches": []})
+                            "matches": [], "variant_matches": []})
             continue
         matches = live.get(norm, [])
         if matches:
@@ -564,11 +608,17 @@ def check(entries, index):
         else:
             status = "new"
             live.setdefault(norm, [])
+        key = variant_key(norm)
         results.append({**ent, "normalized": norm, "status": status,
-                        "matches": list(matches)})
+                        "matches": list(matches),
+                        "variant_matches": [path for other, path
+                                            in variants.get(key, ())
+                                            if other != norm]})
         if status == "new":
             seen_this_run[norm] = ent.get("id")
             live[norm].append(ent.get("id") or "<pending write>")
+            variants.setdefault(key, []).append(
+                (norm, ent.get("id") or "<pending write>"))
     return results
 
 
@@ -718,6 +768,46 @@ def run_self_test():
     case("?ref= survives normalization",
           normalize_url("https://example.com/a?ref=alpha"),
           "https://example.com/a?ref=alpha")
+
+    # --- variant_key: copies saved under a URL variant are listed ----------
+    # A citation drops a mobile host, an AMP copy and an arXiv version, and a
+    # clipping keeps whatever URL it captured. The verdict stays exact; the
+    # looser key only lists the copies a reader must compare.
+    for label, url, want in (
+            ("a mobile host label is folded",
+             "http://en.m.wikipedia.org/wiki/X?utm_source=y",
+             "https://en.wikipedia.org/wiki/X"),
+            ("an AMP host and a trailing /amp segment are folded",
+             "https://amp.example.com/a/amp", "https://example.com/a"),
+            ("an arXiv version is folded",
+             "https://arxiv.org/abs/2305.18290v3", "https://arxiv.org/abs/2305.18290"),
+            ("an old-style arXiv PDF version is folded",
+             "https://arxiv.org/pdf/hep-th/9901001v2.pdf",
+             "https://arxiv.org/pdf/hep-th/9901001.pdf"),
+            ("a site named m keeps its host", "https://m.com/a", "https://m.com/a"),
+            ("the query is kept", "https://m.example.com/a?id=1",
+             "https://example.com/a?id=1")):
+        case("variant_key: %s" % label, variant_key(url), want)
+    variant_index = {normalize_url(url): [path] for url, path in (
+        ("https://en.m.wikipedia.org/wiki/X", "Mobile.md"),
+        ("https://arxiv.org/abs/2305.18290v3", "Versioned.md"),
+        ("https://m.example.com/q?id=1", "Query.md"),
+        ("https://m.com/a", "Site.md"),
+        ("https://example.com/same", "Same.md"))}
+    variant_rows = check([
+        {"id": "Inbox/raw.md", "source": "http://example.com/raw"},
+        {"id": "wiki", "source": "https://en.wikipedia.org/wiki/X"},
+        {"id": "https-raw", "source": "https://example.com/raw"},
+        {"id": "arxiv", "source": "https://arxiv.org/abs/2305.18290"},
+        {"id": "query", "source": "https://example.com/q?id=2"},
+        {"id": "com", "source": "https://com/a"},
+        {"id": "same", "source": "https://example.com/same"},
+        {"id": "none", "source": None}], variant_index)
+    case("variant matches list mobile, scheme and arXiv copies; status stays exact",
+         [(row["status"], row["variant_matches"]) for row in variant_rows],
+         [("new", []), ("new", ["Mobile.md"]), ("new", ["Inbox/raw.md"]),
+          ("new", ["Versioned.md"]), ("new", []), ("new", []),
+          ("duplicate", []), ("no-source", [])])
 
     # --- read_source, against the note shapes a real vault holds ------------
     tmp = tempfile.mkdtemp(prefix="dedup_selftest.")

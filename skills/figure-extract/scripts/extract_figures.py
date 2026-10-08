@@ -22,7 +22,8 @@ side it faces: below the figure, y1 stays above its y0; above it, y0 stays
 below its y1; beside it, the crop's x-range stays clear. `auto_fig_bbox.py`
 prints the caption rect next to every bbox for exactly this, and caption text
 in the PNG is the one thing this skill promises it never delivers. Crops that
-overlap a detected caption are warned about by name.
+overlap a detected caption are warned about by name. When the caption sits in
+a corner of the figure's bounding box, `--blank-captions` whites out its words.
 
 Existing files are skipped only after their ownership record and current
 bytes are verified, matching `batch_extract.py`. Pass --overwrite to replace
@@ -34,8 +35,8 @@ After cropping, each PNG is auto-trimmed to remove near-white margins on all
 four sides (with `--trim-pad` pixels of breathing room). The PyMuPDF crop tends
 to leave whitespace because `auto_fig_bbox.py` pads aggressively for axis labels
 and panel letters that may or may not be present. The trim treats pixels within
-`--trim-tolerance` of white as margin, and refuses an extreme reduction; inspect
-the result because a pale figure background can still resemble margin.
+`--trim-tolerance` of white as margin, refuses an extreme reduction, and keeps
+a pale panel the trim would otherwise cut through.
 
 Use --no-trim to keep the raw PyMuPDF crop (e.g. for figures where surrounding
 whitespace is meaningful).
@@ -75,6 +76,8 @@ import stat
 import sys
 import tempfile
 import warnings
+from collections import defaultdict
+from pathlib import Path
 
 _OBSIDIAN_SHARED_MODULES = ('atomic_move', 'figure_state', 'naming',
                             'portable_names', 'vault_artifacts')
@@ -121,9 +124,11 @@ from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
                           manifest_key, figure_identity, check_manifest_writable,
                           sidecar_stem_problem)
 import atomic_move
-from naming import is_feed_attachment, looks_canonical
+from naming import (chapter_book_stem, core_stem, is_feed_attachment,
+                    looks_canonical)
 from render_page import MAX_RENDER_PIXELS, checked_render_dimensions
-from vault_artifacts import (UnlistedFolderError, inventory_source_figures,
+from vault_artifacts import (LINK_ALIAS_REMEDY, UnlistedFolderError,
+                             inventory_source_figures, link_aliases,
                              on_disk_spelling, output_vault_root,
                              verify_selected_pdf)
 
@@ -175,6 +180,12 @@ def vault_refusal(decision):
     if not decision.matches:
         return ("no vault PDF owns this basename", UNOWNED_PDF_REMEDY)
     if len(decision.matches) > 1:
+        links = sorted({link for found in link_aliases(
+            decision.matches, decision.inventory.root).values() for link in found})
+        if links:
+            # One file under several paths: removing a path removes the file.
+            return ("basename reached through a link",
+                    LINK_ALIAS_REMEDY % ", ".join(links))
         return ("vault basename not unique", DUPLICATE_BASENAME_REMEDY)
     owner = os.path.basename(decision.matches[0])
     if owner != os.path.basename(decision.selected):
@@ -184,6 +195,69 @@ def vault_refusal(decision):
                 "use the vault PDF's exact basename %r" % owner)
     return ("vault owner not usable",
             decision.reason + "; inspect that vault PDF")
+
+
+def split_book_chapters(pdfs, inventory=None):
+    """{book path: [chapter paths]} for every book in `pdfs` split into chapters.
+
+    Detection is purely by stem, which is what makes it safe: pdf-organize
+    guarantees the chapter stem is the book stem plus `_NN_Name`
+    (book-splitting reference, §3 *Choose chapter names once*). Chapters
+    come from `pdfs` and, with the vault's canonical output, from the vault
+    PDF `inventory`, because pdf-organize files a book's chapters in
+    `Sources/PDFs/<stem>/` wherever the book sits. Without an inventory no
+    vault layout is assumed, so this works for a Downloads folder too. Both
+    batch_extract.py and an explicit crop use this one rule.
+
+    Both sides are compared on the *core* stem — `_src` stripped, `_2` kept —
+    because a book and its chapters carry those tails independently: a book
+    may be `Prince_UDL_2026_src.pdf` while its chapters are
+    `Prince_UDL_2026_01_Intro.pdf`, or the other way round. Comparing raw
+    stems misses the pairing, and a missed pairing writes every figure twice.
+    """
+    # Stems use one portable case-insensitive identity so
+    # `kuhn_x_2012_01_A.pdf` receives the same chapter decision relative to
+    # `Kuhn_X_2012.pdf` on every supported filesystem.
+    #
+    # EVERY path per core stem is collected, not one representative: with both
+    # spellings of a split book in the walk (`X.pdf` beside `X_src.pdf` — the
+    # plain copy lingering after a rename), keeping one path per key skipped
+    # that one and extracted the twin whole, writing every chapter figure a
+    # second time under the twin's stem.  paper_scan.classify skips every stem
+    # whose core is a book of some chapter; the two skills split the same
+    # folder, and disagreeing is worse than either answer.
+    by_stem = {}
+    for p in pdfs:
+        by_stem.setdefault(core_stem(p.stem, is_stem=True).casefold(), []).append(p)
+    candidates = list(pdfs)
+    if inventory is not None:
+        candidates += [Path(entry.path) for entry in inventory.entries
+                       if entry.kind in ("regular", "symlink")]
+
+    def same_file(path):
+        # A chapter in the run is in the inventory too, perhaps spelled
+        # another way; it counts once, under its path in the run.
+        try:
+            info = os.stat(path)
+        except OSError:
+            return os.path.realpath(path)
+        return info.st_dev, info.st_ino
+
+    out = defaultdict(list)
+    seen = set()
+    for p in candidates:
+        book = chapter_book_stem(p.stem, is_stem=True)
+        if not book or book.casefold() not in by_stem:
+            continue
+        if inventory is not None:
+            key = same_file(p)
+            if key in seen:
+                continue
+            seen.add(key)
+        for bp in by_stem[book.casefold()]:
+            if bp != p:
+                out[bp].append(p)
+    return {book: sorted(chs) for book, chs in out.items()}
 
 
 # ASCII digits only: the label becomes part of a filename. A marker prefix
@@ -376,32 +450,45 @@ def trim_white_margins(img_path, pad=4, tolerance=10):
     rgb = img.convert("RGB")
     orig_size = rgb.size  # (w, h)
 
-    # Diff against a pure-white background; pixels within `tolerance` of white
+    # Diff against a pure-white background; pixels within `tol` of white
     # become 0 (pure black after the threshold), so getbbox finds the
     # smallest rect containing real content.
-    bg = Image.new("RGB", orig_size, (255, 255, 255))
-    diff = ImageChops.difference(rgb, bg)
-    diff = diff.point(lambda p: 255 if p > tolerance else 0)
-    bbox = diff.getbbox()
+    diff = ImageChops.difference(rgb, Image.new("RGB", orig_size,
+                                                (255, 255, 255)))
+    w, h = orig_size
 
+    def padded_bbox(tol):
+        found = diff.point(lambda p: 255 if p > tol else 0).getbbox()
+        if found is None:
+            return None
+        x0, y0, x1, y1 = found
+        return (max(0, x0 - pad), max(0, y0 - pad),
+                min(w, x1 + pad), min(h, y1 + pad))
+
+    bbox = padded_bbox(tolerance)
     if bbox is None:
         return orig_size, orig_size  # entirely white — nothing to do
 
+    # A figure drawn on a pale panel (one rendered at 245 is within the default
+    # tolerance) reads as margin, so the trim cut through the panel. When
+    # most of the new edge is pale but not white, count only near-pure white
+    # as margin: that keeps the whole panel and trims the page around it.
+    # Pale tone that reaches three or more sides of the crop is the page
+    # itself (a scan or tinted paper), so that trim stands.
     x0, y0, x1, y1 = bbox
-    w, h = orig_size
-    x0 = max(0, x0 - pad)
-    y0 = max(0, y0 - pad)
-    x1 = min(w, x1 + pad)
-    y1 = min(h, y1 + pad)
+    px = rgb.load()
+    edge = ([px[x, y] for x in range(x0, x1) for y in (y0, y1 - 1)]
+            + [px[x, y] for y in range(y0, y1) for x in (x0, x1 - 1)])
+    if 2 * sum(2 < 255 - min(p) <= tolerance for p in edge) > len(edge):
+        panel = padded_bbox(min(tolerance, 2))
+        if sum(a == b for a, b in zip(panel, (0, 0, w, h))) < 3:
+            x0, y0, x1, y1 = panel
 
     if (x0, y0, x1, y1) == (0, 0, w, h):
         return orig_size, orig_size  # padded bbox covers whole image
 
-    # A figure drawn on a very pale panel (#FBFBFB and lighter) is *within
-    # tolerance of white*, so the whole panel reads as margin and the trim
-    # keeps only whatever dark mark happens to sit on it -- a 1723x1147 figure
-    # came out 79x78, and nothing in the pipeline looked at the result. A trim
-    # that removes almost everything is a trim that misread the background.
+    # A trim that removes almost everything is a trim that misread the
+    # background, such as pale figure content the edge check above misses.
     if (x1 - x0) * (y1 - y0) < MIN_TRIM_KEEP * w * h:
         return orig_size, orig_size
 
@@ -686,7 +773,7 @@ def _publish_staged(tmp_path, out_path, replace_snapshot=None,
 def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
                        trim=True, trim_pad=4, trim_tolerance=10,
                        replace_digest=None, publication_guard=None,
-                       return_publication=False):
+                       return_publication=False, blank_rects=()):
     """Programmatic entrypoint: crop one figure and write it to disk.
 
     This is the API used by `batch_extract.py`. The CLI `main()` below wraps
@@ -717,6 +804,8 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
             guarded filesystem operation. Ownership callers must use this
             snapshot rather than re-reading a pathname that another process
             can replace after publication.
+        blank_rects: rects in the page's displayed space, in points, painted
+            white in the render before the trim (`--blank-captions`).
 
     Returns:
         (rendered_size, final_size, blank) — the first two (width, height)
@@ -770,6 +859,12 @@ def extract_one_figure(doc, page_idx, bbox, out_path, dpi=250,
                 out_path,
             )
     pix = page.get_pixmap(dpi=dpi, clip=rect)
+    # The pixmap's own rect is the clip in page pixels, not crop-relative.
+    for r in blank_rects:
+        r = fitz.Rect(r) & rect
+        if not r.is_empty:
+            pix.set_rect((r * fitz.Matrix(dpi / 72, dpi / 72)).irect,
+                         (255,) * pix.n)
     # Render and trim in a unique sibling directory outside the flat output
     # folder, then publish a complete inode with the guarded helper above.
     # Writing the final path directly meant an interrupted run (a
@@ -1084,10 +1179,10 @@ def run_self_test():
             check("trim: the dark file is untouched on disk",
                   size_on_disk(p), (120, 90))
 
-            # (3) the failure MIN_TRIM_KEEP exists for: a figure drawn on a
-            # #FBFBFB panel is within tolerance of white, so the panel reads as
-            # margin and the trim keeps only the one dark mark on it. A real
-            # 1723x1147 figure came out 79x78 and nothing looked at it.
+            # (3) a figure drawn on a #FBFBFB panel is within tolerance of
+            # white, so the panel read as margin and the trim kept only the
+            # one dark mark on it. A real 1723x1147 figure came out 79x78 and
+            # nothing looked at it.
             p = _st_png(os.path.join(tmp, "trim_pale.png"), (400, 300),
                         (0xFB, 0xFB, 0xFB), [((20, 20, 29, 29), (0, 0, 0))])
             check("trim: a very pale panel is not trimmed away",
@@ -1100,6 +1195,27 @@ def run_self_test():
                         (0xFB, 0xFB, 0xFB), [((20, 20, 340, 260), (0, 0, 0))])
             ok("trim: a large mark on a pale panel still trims",
                trim_white_margins(p, pad=4)[1] != (400, 300))
+            # ...as does an axes box on an off-white (248) scanned page: pale
+            # tone on every side of the crop is the page, not a panel.
+            p = _st_png(os.path.join(tmp, "trim_offwhite.png"), (600, 450),
+                        (248, 248, 248),
+                        [((80, 60, 520, 61), (0, 0, 0)),
+                         ((80, 389, 520, 390), (0, 0, 0)),
+                         ((80, 60, 81, 390), (0, 0, 0)),
+                         ((519, 60, 520, 390), (0, 0, 0))])
+            check("trim: an off-white page is trimmed to the figure",
+                  trim_white_margins(p, pad=4), ((600, 450), (449, 339)))
+            # ...and a 245-grey panel on a white page keeps the whole panel
+            # plus padding, not just the mark on it (288x188). The trim cut
+            # through such a panel and an explicit re-crop repeated the cut.
+            p = _st_png(os.path.join(tmp, "trim_panel.png"), (400, 300),
+                        (255, 255, 255),
+                        [((20, 20, 379, 279), (245, 245, 245)),
+                         ((60, 60, 339, 239), (0, 0, 0))])
+            check("trim: a pale panel on a white page is kept whole",
+                  trim_white_margins(p, pad=4), ((400, 300), (368, 268)))
+            check("trim: the kept panel is what is on disk",
+                  size_on_disk(p), (368, 268))
 
             # (4) an all-white crop: nothing to find, nothing to do.
             p = _st_png(os.path.join(tmp, "trim_white.png"), (80, 60),
@@ -2027,6 +2143,68 @@ def run_self_test():
         check("a crop that stops above the caption is not warned about",
               "WARNING" in se, False)
 
+        # A caption in the top-right corner of an L-shaped figure: every rect
+        # holding the whole figure holds caption text. --blank-captions whites
+        # out the caption's words and keeps the figure, on a /Rotate page too.
+        for rotation in (0, 90):
+            corner_pdf = os.path.join(tmp, "Doe_Corner%d_2025.pdf" % rotation)
+            cdoc = fitz.open()
+            cpage = cdoc.new_page(width=612, height=792)
+            cpage.draw_rect(fitz.Rect(100, 150, 300, 400), color=None,
+                            fill=(0.2, 0.3, 0.7))
+            cpage.draw_rect(fitz.Rect(100, 400, 500, 550), color=None,
+                            fill=(0.7, 0.2, 0.2))
+            cpage.insert_text((320, 170), "Figure 1. An L-shaped figure whose",
+                              fontsize=9)
+            cpage.insert_text((320, 182), "caption sits in its top-right "
+                              "corner.", fontsize=9)
+            cpage.set_rotation(rotation)
+            shown = cpage.rotation_matrix
+            cdoc.save(corner_pdf)
+            cdoc.close()
+            crop = fitz.Rect(100, 150, 500, 550) * shown
+            corner_args = [corner_pdf, "--crop", "1:1:%g,%g,%g,%g" % tuple(crop),
+                           "--dpi", "72", "--no-trim"]
+            corner_out = os.path.join(tmp, "Corner%d" % rotation)
+            code, so, se = run(corner_args + ["--out", corner_out,
+                                              "--blank-captions"])
+            check("--blank-captions on a corner caption (rotation %d) exits 0 "
+                  "unwarned" % rotation,
+                  (code, "WARNING" in se, "blanked caption" in so),
+                  (0, False, True))
+            corner_png = os.path.join(corner_out,
+                                      "Doe_Corner%d_2025_fig_1.png" % rotation)
+            shot = (fitz.Pixmap(corner_png) if os.path.exists(corner_png)
+                    else None)
+
+            def colours(rect):
+                r = fitz.Rect(rect) * shown
+                return {shot.pixel(int(x - crop.x0), int(y - crop.y0))
+                        for x in range(int(r.x0), int(r.x1))
+                        for y in range(int(r.y0), int(r.y1))}
+
+            check("...keeps the whole crop (rotation %d)" % rotation,
+                  shot and (shot.width, shot.height), (400, 400))
+            ok("...whites out the caption (rotation %d)" % rotation,
+               shot is not None
+               and colours((318, 158, 466, 187)) == {(255, 255, 255)})
+            ok("...and keeps both blocks' fill (rotation %d)" % rotation,
+               shot is not None and all(
+                   len(c) == 1 and c != {(255, 255, 255)} for c in (
+                       colours((280, 160, 300, 390)),
+                       colours((310, 405, 490, 545)))))
+        code, so, se = run([os.path.join(tmp, "Doe_Corner0_2025.pdf"),
+                            "--crop", "1:1:100,150,500,550", "--dpi", "72",
+                            "--no-trim", "--out", os.path.join(tmp, "Corner")])
+        ok("...while the same crop without the flag still warns",
+           "overlaps the caption" in se)
+        code, so, se = run(base[:1] + ["--out", os.path.join(tmp, "NoCorner"),
+                                       "--crop", "1:1:100,150,500,350",
+                                       "--dpi", "72", "--no-trim",
+                                       "--blank-captions"])
+        ok("--blank-captions says when no caption was inside the crop",
+           code == 0 and "nothing was blanked" in se)
+
         # `Supplementary Figure 1` is S1. Cropping it as `1` would write, and
         # with --overwrite replace, the main Figure 1 crop: say so by name.
         supp_pdf = _st_pdf(os.path.join(tmp, "Doe_Supp_2025.pdf"),
@@ -2226,6 +2404,19 @@ def run_self_test():
         check("collision refusal writes no figure or sidecar",
               os.listdir(repair_images), [])
         os.unlink(repair_collision)
+        # A folder link shows the same PDF under a second path: the remedy
+        # names the link, never the file, as a copy to remove.
+        repair_shelf = os.path.join(repair_vault, "Shelf")
+        os.symlink(repair_pdfs, repair_shelf, target_is_directory=True)
+        code, so, se = run([
+            repair_pdf, "--out", repair_images,
+            "--crop", "1:6:100,150,500,350", "--dpi", "72", "--no-trim",
+        ])
+        ok("a basename reached through a folder link names that link",
+           code != 0 and "symlink(s) %s show" % repair_shelf in str(code)
+           and "redundant copy" not in str(code)
+           and not os.listdir(repair_images))
+        os.unlink(repair_shelf)
 
         ownerless_pdf = os.path.join(tmp, "ownerless", "Roe_Other_2024.pdf")
         os.makedirs(os.path.dirname(ownerless_pdf))
@@ -2267,6 +2458,36 @@ def run_self_test():
                "Organize it first" in str(code), os.listdir(repair_images)),
               (True, True, False, []))
         os.unlink(feed_pdf)
+
+        # A split book's figures are its chapters', as in the batch: an
+        # explicit crop of the book is refused for its chapter PDF.
+        book_pdf = os.path.join(repair_pdfs, "Doe_Book_2019.pdf")
+        shutil.copyfile(pdf, book_pdf)
+        chapter_dir = os.path.join(repair_pdfs, "Doe_Book_2019")
+        os.makedirs(chapter_dir)
+        chapter_pdf = os.path.join(chapter_dir, "Doe_Book_2019_01_Intro.pdf")
+        shutil.copyfile(pdf, chapter_pdf)
+        book_crop = ["--out", repair_images, "--crop", "1:1:100,150,500,350",
+                     "--dpi", "72", "--no-trim"]
+        code, so, se = run([book_pdf] + book_crop)
+        check("an explicit crop of a split book is refused for its chapters",
+              (code != 0, "is a split book" in str(code),
+               os.path.join("PDFs", "Doe_Book_2019'") in str(code),
+               "--include-split-books" in str(code),
+               os.listdir(repair_images)),
+              (True, True, True, False, []))
+        code, so, se = run([chapter_pdf] + book_crop)
+        check("...the chapter PDF's crop is written under the chapter stem",
+              (code, sorted(os.listdir(repair_images))),
+              (0, sorted([MANIFEST_FILE, "Doe_Book_2019_01_Intro_fig_1.png"])))
+        code, so, se = run([book_pdf, "--include-split-books"] + book_crop)
+        check("...and --include-split-books crops the book's own pages",
+              (code, "Doe_Book_2019_fig_1.png" in os.listdir(repair_images)),
+              (0, True))
+        for name in os.listdir(repair_images):
+            os.unlink(os.path.join(repair_images, name))
+        shutil.rmtree(chapter_dir)
+        os.unlink(book_pdf)
 
         # A readable external scratch representation is allowed when one vault
         # source uniquely owns its basename (the encrypted-PDF recovery route).
@@ -2317,7 +2538,8 @@ def run_self_test():
                 "--crop", "1:6:100,150,500,350", "--dpi", "72",
             ])
             ok("a --stem in the typed case is refused, naming the stored stem",
-               code != 0 and "on-disk stem 'Doe_Figs_2025'" in str(code))
+               code != 0 and "on-disk stem 'Doe_Figs_2025'" in str(code)
+               and "omit --stem" in str(code))
         else:
             ok("case-variant explicit-crop regressions skipped on this filesystem",
                True)
@@ -2483,6 +2705,13 @@ def main(argv=None):
               "whole-vault uniqueness and output ownership checks remain active."),
     )
     p.add_argument(
+        "--include-split-books", action="store_true",
+        help=("Crop a split book's own pages into the vault, matching "
+              "batch_extract.py: only to repair a crop of a deliberate "
+              "--include-split-books run. A split book's figures are its "
+              "chapters'."),
+    )
+    p.add_argument(
         "--no-caption-check",
         dest="caption_check",
         action="store_false",
@@ -2491,6 +2720,12 @@ def main(argv=None):
             "The check is on by default: a crop that overlaps a caption puts "
             "caption text in the PNG."
         ),
+    )
+    p.add_argument(
+        "--blank-captions", action="store_true",
+        help=("White out the words of every detected caption inside the "
+              "crop, for a caption that occupies a corner of the figure's "
+              "bounding box; view the PNG afterwards."),
     )
     p.add_argument(
         "--no-trim",
@@ -2576,7 +2811,8 @@ def main(argv=None):
     if args.stem != pdf_stem:
         sys.exit(f"--stem {args.stem!r} does not equal the source PDF's exact "
                  f"on-disk stem {pdf_stem!r}. Figure identity follows that "
-                 "filename; pass the exact stem or organize the PDF first")
+                 "filename; omit --stem to use that stem, or organize the "
+                 "PDF first")
     # The crop is published before its ownership record. A stem the figure
     # sidecars cannot store would leave a crop no later run can own.
     problem = sidecar_stem_problem(args.stem)
@@ -2648,6 +2884,23 @@ def main(argv=None):
                 "Sources/Images folder: the readable copy must keep the vault "
                 "PDF's exact basename %r, not %r. No sidecar or figure was "
                 "written." % (owner_name, os.path.basename(pdf_path)))
+        # A split book's figures are its chapters' (CONVENTIONS.md 1a), as
+        # in the batch: a whole-book crop would duplicate a chapter crop
+        # under the book's stem. Like the batch, the refusal never offers
+        # --include-split-books.
+        chapters = [] if args.include_split_books else split_book_chapters(
+            [Path(pdf_path)], decision.inventory).get(Path(pdf_path), [])
+        if chapters:
+            folders = sorted({str(chapter.parent) for chapter in chapters})
+            sys.exit(
+                "Refusing explicit crops into the vault's canonical "
+                "Sources/Images folder: %s is a split book; its figures are "
+                "those of its %d chapter PDF(s). Crop the figure from the "
+                "chapter PDF in %s that holds it, with that chapter's own "
+                "page numbers; never re-extract the whole book. No sidecar "
+                "or figure was written." % (
+                    os.path.basename(pdf_path), len(chapters),
+                    " or ".join(repr(f) for f in folders)))
 
     if args.allow_unorganized and not looks_canonical(pdf_stem, is_stem=True):
         print("Source naming exception (--allow-unorganized): crops remain "
@@ -2794,14 +3047,30 @@ def main(argv=None):
         # on. This is the constraint every hand-set crop gets wrong first, and
         # nothing about the result says so: the PNG is written, looks fine at
         # a glance, and carries the caption text the skill exists to leave out.
-        if args.caption_check:
-            for cap_num, cap_raw, cap in captions:
+        # A caption in a corner of the figure's bounding box cannot be cropped
+        # out; --blank-captions whites out its words instead.
+        blank_rects = []
+        if args.caption_check or args.blank_captions:
+            page = doc[page_idx]
+            for cap_num, cap_raw, content_cap in captions:
                 # `--crop` coordinates are the ones `get_pixmap(clip=...)`
                 # takes — the page's displayed space — while caption rects
                 # come back in unrotated content space. On a `/Rotate`d page
                 # the two are different, and comparing them compared nothing.
-                cap = to_page_space(doc[page_idx], cap)
-                if y1 > cap.y0 and x1 > cap.x0 and x0 < cap.x1 and y0 < cap.y1:
+                cap = to_page_space(page, content_cap)
+                if not (y1 > cap.y0 and x1 > cap.x0 and x0 < cap.x1
+                        and y0 < cap.y1):
+                    continue
+                if args.blank_captions:
+                    # Word boxes, not the caption rect, so figure content
+                    # beside a short caption line is kept.
+                    blank_rects += [
+                        to_page_space(page, fitz.Rect(w[:4])
+                                      + (-0.5, -0.5, 0.5, 0.5))
+                        for w in page.get_text("words", clip=content_cap)]
+                    print(f"--crop {spec!r}: blanked caption {cap_raw!r} "
+                          f"inside the crop")
+                else:
                     print(
                         f"WARNING: --crop {spec!r} overlaps the caption for "
                         f"{cap_raw!r} (x={cap.x0:.1f}-{cap.x1:.1f}, "
@@ -2810,6 +3079,10 @@ def main(argv=None):
                         f"(for a caption below, y1 <= {cap.y0 - 0.5:.1f}).",
                         file=sys.stderr,
                     )
+        if args.blank_captions and not blank_rects:
+            print(f"WARNING: --blank-captions found no detected caption "
+                  f"inside --crop {spec!r}; nothing was blanked.",
+                  file=sys.stderr)
 
         def publication_guard():
             conflict = _figure_slot_conflict(
@@ -2840,7 +3113,7 @@ def main(argv=None):
                 trim_pad=args.trim_pad, trim_tolerance=args.trim_tolerance,
                 replace_digest=(expected_digest if args.overwrite else None),
                 publication_guard=publication_guard,
-                return_publication=True,
+                return_publication=True, blank_rects=blank_rects,
             )
         except (OSError, RuntimeError, ValueError) as exc:
             staged = getattr(exc, "staging_path", None)

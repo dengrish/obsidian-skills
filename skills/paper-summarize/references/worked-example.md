@@ -20,8 +20,8 @@ A fictional paper, realistic in every detail that matters. `Sources/PDFs/Doe_Gut
 - **Title:** *Encapsulated faecal microbiota transplant for recurrent Clostridioides difficile infection: a randomised, double-blind, placebo-controlled trial*
 - **Authors:** Priya N. Doe, Marcus A. Feldman, Ingrid S. Halvorsen and eight others (eleven in total). **Year:** the title page prints `2025` and no month or day. **DOI:** printed on page 1 as `10.1016/S2468-1253(25)00114-6`.
 - **Background,** page 2: after a second recurrence, 40–60% of patients relapse again after another vancomycin course. Colonoscopic transplant had been tested against placebo; earlier oral-capsule studies were open-label single-arm series.
-- **Design,** page 3: randomised, double-blind, placebo-controlled trial at 14 hospitals in Denmark and the Netherlands. 219 adults with at least two laboratory-confirmed prior recurrences, all having finished a 10-day vancomycin course, randomised 1:1 to four transplant capsules over two days (110) or identical placebo capsules (109). Powered at 90% for a 20-percentage-point absolute difference; 219 of a planned 220 enrolled. Registered at ClinicalTrials.gov `NCT05712398` before the first patient. Capsules came from two stool banks; children were not eligible.
-- **Procedures,** page 3: patients, treating clinicians and outcome assessors were masked. Recurrence (diarrhoea plus a positive stool toxin assay) was adjudicated by a committee blind to allocation. The paper does not say who generated the allocation sequence or how it was concealed, and does not report losses to follow-up between week 4 and week 8.
+- **Design,** page 3: randomised, double-blind, placebo-controlled trial at 14 hospitals in Denmark and the Netherlands. 219 adults with at least two laboratory-confirmed prior recurrences, all having finished a 10-day vancomycin course to clear the active infection, randomised 1:1 to four transplant capsules over two days (110) or identical placebo capsules (109), so the arms differed only in treatment. Powered at 90% for a 20-percentage-point absolute difference; 219 of a planned 220 enrolled. Registered at ClinicalTrials.gov `NCT05712398` before the first patient. Capsules came from two stool banks; children were not eligible.
+- **Procedures,** page 3: patients, treating clinicians and outcome assessors were masked, so expectations could not sway reports or assessments. Recurrence (diarrhoea plus a positive stool toxin assay) was adjudicated by a committee blind to allocation to count the primary outcome. The paper does not say who generated the allocation sequence or how it was concealed, and does not report losses to follow-up between week 4 and week 8.
 - **Primary outcome,** page 5: recurrence within 8 weeks — 8.2% (9 of 110) on transplant against 45.0% (49 of 109) on placebo; absolute reduction 36.8 percentage points (95% CI 25.9 to 47.7), risk ratio 0.18 (95% CI 0.09 to 0.36).
 - **Harms,** page 6: abdominal cramping in the first 48 hours, 27 of 110 against 11 of 109; one *Escherichia coli* bacteraemia in the transplant arm within 7 days, adjudicated possibly related; no deaths in either arm within 8 weeks.
 - **One null secondary,** page 6: gastrointestinal quality of life at 8 weeks (GIQLI, 144 points) — mean difference 2.6 points, 95% CI −3.1 to +8.3.
@@ -70,13 +70,12 @@ After a second recurrence of *C. difficile* infection, 40–60% of patients rela
 
 ## A 219-patient double-blind trial of transplant capsules
 
-The trial was randomised, double-blind and placebo-controlled, at 14 hospitals in Denmark and the Netherlands. It was registered at ClinicalTrials.gov as NCT05712398 before the first patient was enrolled. Powered at 90% to detect a 20-percentage-point absolute difference, it enrolled 219 of a planned 220.<sup>[[Doe_GutMicrobiome_2025.pdf#page=3|3]]</sup> Capsules came from two stool banks.
+The trial was randomised, double-blind and placebo-controlled, at 14 hospitals in Denmark and the Netherlands. It was registered at ClinicalTrials.gov as NCT05712398 before the first patient was enrolled. Powered at 90% to detect a 20-percentage-point absolute difference, it enrolled 219 of a planned 220.<sup>[[Doe_GutMicrobiome_2025.pdf#page=3|3]]</sup> Capsules came from two stool banks. The trial ran in four steps.
 
-1. 219 adults with at least two laboratory-confirmed prior recurrences completed a 10-day vancomycin course.
-2. Investigators randomised them 1:1 — 110 to transplant capsules, 109 to identical placebo capsules.
-3. The transplant arm took four transplant capsules over two consecutive days.
-4. The trial masked patients, treating clinicians and outcome assessors.
-5. A committee blind to allocation adjudicated recurrence within 8 weeks (diarrhoea plus a positive stool toxin assay).
+1. 219 adults with at least two laboratory-confirmed prior recurrences completed a 10-day vancomycin course to clear the active infection.
+2. Investigators randomised them to four transplant capsules over two days (110) or identical placebo (109), so only treatment differed.
+3. The trial masked patients, treating clinicians and outcome assessors, so expectations could not sway reports or assessments.
+4. A committee blind to allocation adjudicated 8-week recurrence (diarrhoea plus a positive stool toxin assay) to count the primary outcome.
 
 ## Capsules cut 8-week recurrence to 8% against 45% on placebo after repeat relapses
 
@@ -137,7 +136,7 @@ For a real note, save the completed draft to a unique scratch `.md` and lint it:
 
 ```bash
 python3 '<skill>/scripts/note_lint.py' '<scratch>/Doe_GutMicrobiome_2025.md' \
-    --mode empirical --images '<vault>/Sources/Images'
+    --mode empirical --images '<vault>/Sources/Images' --wiki '<vault>/Wiki'
 ```
 
 Lint cannot verify the science or the page citations, and every selected real

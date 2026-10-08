@@ -37,6 +37,7 @@ __all__ = [
     "RELATED_HEAD_LINE_RE",
     "answer_surface_match",
     "body_opens_with_prose",
+    "card_block_numbers",
     "count_sentences",
     "description_subject_forms",
     "acronym_initial_forms",
@@ -1249,8 +1250,8 @@ def strip_flashcard_review_metadata(text):
 def parse_flashcard_blocks(text):
     """Return visible flashcard blocks split on whitespace-only blank lines.
 
-    It never reads line 2, so a card parses alike whatever its separator,
-    such as an extra question card's `?`. Recognized Spaced Repetition
+    It never reads line 2; :func:`card_block_numbers` says which blocks are
+    cards. Recognized Spaced Repetition
     state and trailing block IDs attached to a complete card are omitted by
     ``strip_flashcard_review_metadata``. A hidden attachment line, a blank
     line inside it included, neither splits nor joins a block, so content
@@ -1280,9 +1281,8 @@ def is_review_metadata_block(block_lines):
     ``block_lines`` is one block from :func:`parse_flashcard_blocks`. It is
     True only when the whole block is whole-line ``<!--SR:…-->`` comments
     and exact ``sr|card-metadata`` callouts, as when a blank line separates a
-    schedule from its card. Such a block is neither a card nor an attachment:
-    callers never count it as a card, and report it so it stays byte-for-byte,
-    never deleted, moved or reattached.
+    schedule from its card. Such a block is neither a card nor an attachment
+    (:func:`card_block_numbers`).
     """
     lines = list(block_lines or ())
     index = 0
@@ -1293,6 +1293,29 @@ def is_review_metadata_block(block_lines):
             return False
         index = end
     return bool(lines)
+
+
+def card_block_numbers(blocks):
+    """The 1-based numbers of the flashcard blocks that item 19 checks as cards.
+
+    ``blocks`` come from :func:`parse_flashcard_blocks`. A card is a block of
+    three or more lines whose line 2 is ``??``, ``!!`` or the plugin's
+    one-way ``?``. The first block of three or more lines is a card too, so
+    the primary card with a broken separator still regains its ``??``. Every
+    block before it, or every block when there is none, is a broken card, so
+    a primary card a blank line splits is rejoined. A block of only
+    schedule state is never a card. Every other block, such as a detached
+    schedule or the user's own text after the card, is not a card: callers
+    report it, and it stays byte-for-byte, never deleted, moved or reattached,
+    unless it holds card syntax (``entry_checks.sr_card_syntax_fault``).
+    """
+    blocks = [(number, block) for number, block in enumerate(blocks or (), 1)
+              if not is_review_metadata_block(block)]
+    full = [number for number, block in blocks if len(block) >= 3]
+    cards = [number for number, block in blocks if len(block) >= 3
+             and block[1].strip() in CARD_SEPARATORS + ("?",)]
+    return frozenset(cards + [number for number, _ in blocks
+                              if not full or number <= full[0]])
 
 
 def opener_subject_date_status(opener, entry_type):
@@ -2320,6 +2343,30 @@ def run_self_test(verbose=False):
          ([["Def.", "??", "Term"],
            ["> [!sr|card-metadata]", ">", "> <!--SR:s--> ^term-card"]],
           True)),
+        ("a card is a block whose line 2 is a separator or the first full "
+         "block, else every broken block; other blocks are not cards",
+         [sorted(card_block_numbers(parse_flashcard_blocks(value)))
+          for value in (
+              "Def.\n??\nTerm\n\nMy note.\nIt goes on.\nAsk about it.",
+              "Def.\n??\nTerm\n\n- [ ] Read\n- [ ] Ask\n- [ ] Write",
+              "Def.\n??\nTerm\n\nOne line.",
+              "Def.\n!!\nTerm\n\nWhy?\n?\nBecause.\n\n<!--SR:detached-->",
+              "Def.\n???\nTerm\n\nOne line.",
+              "<!--SR:detached-->\n\nDef.\n???\nTerm",
+              "Def.\n??\n\nTerm",
+              "<!--SR:detached-->", "")],
+         [[1], [1], [1], [1, 2], [1], [2], [1, 2], [], []]),
+        ("the first full block stays a card beside a separator card",
+         sorted(card_block_numbers(parse_flashcard_blocks(
+             "Def.\n???\nTerm\n\nWhy?\n?\nBecause."))),
+         [1, 2]),
+        ("a primary card a blank line splits stays broken cards before a "
+         "full block",
+         [sorted(card_block_numbers(parse_flashcard_blocks(value)))
+          for value in (
+              "Def.\n??\n\nTerm\n\nWhy?\n?\nBecause.",
+              "Def.\n??\n\nTerm\n\nMy note.\nIt goes on.\nAsk about it.")],
+         [[1, 2, 3], [1, 2, 3]]),
         ("a card, an unterminated schedule or plain text is not review state",
          [is_review_metadata_block(block) for block in (
              ["Def.", "??"], ["Def.", "??", "Term"], ["<!--SR:state"],

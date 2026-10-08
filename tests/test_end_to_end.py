@@ -346,6 +346,26 @@ class WorkflowTests(unittest.TestCase):
                                  self.notes, "--url", pending)
         self.assertEqual(json.loads(result.stdout)["checked"][0]["status"], "new")
 
+    def test_wiki_add_ownership_check_lists_copies_under_url_variants(self):
+        # wiki-add cites the canonical address, while a clipping and a raw
+        # capture keep the mobile or http address they were saved under.
+        note = self.notes / "X_Wiki_2026.md"
+        note.write_text('---\nsources:\n  - "https://en.m.wikipedia.org/wiki/X'
+                        '?utm_source=y"\n---\nCaptured body.\n', encoding="utf-8")
+        raw = self.vault / "Inbox/y-capture.md"
+        raw.write_text('---\nsource: "http://en.m.wikipedia.org/wiki/Y"\n---\nRaw.\n',
+                       encoding="utf-8")
+        result = self.run_script(
+            "skills/clipping-clean/scripts/dedup_index.py", self.notes,
+            "--raw", self.vault / "Inbox",
+            "--url", "https://en.wikipedia.org/wiki/X",
+            "--url", "https://en.wikipedia.org/wiki/Y")
+        rows = json.loads(result.stdout)["checked"]
+        self.assertEqual([(row["id"], row["status"], row["variant_matches"]) for row in rows],
+                         [(str(raw), "new", []),
+                          ("https://en.wikipedia.org/wiki/X", "new", [str(note)]),
+                          ("https://en.wikipedia.org/wiki/Y", "new", [str(raw)])])
+
     def test_collected_feed_to_daily_and_all_stock_notes(self):
         """Exercise the installed-tree CLIs without real collection or market calls."""
         self.vault = self.vault.resolve()
@@ -1198,6 +1218,38 @@ raise SystemExit(main(fixture['args'], client))
         self.assertFalse(any("_fig_S1.png" in line or "_fig_S2.png" in line
                              for line in cited), check.stdout)
 
+    def test_extended_data_switch_without_a_supplementary_collision(self):
+        # With no Supplementary figure the summary prints no rerun, yet the
+        # documented switch still moves the crop and its links.
+        batch = "skills/figure-extract/scripts/batch_extract.py"
+        pdf = self.pdfs / "Doe_Widgets_2025.pdf"
+        with pymupdf.open() as doc:
+            for caption, fill in (("Figure 1. Main.", (0.5, 0.5, 0)),
+                                  ("Extended Data Figure 1. First.", (1, 0, 0))):
+                page = doc.new_page(width=612, height=792)
+                page.draw_rect((100, 200, 500, 400), fill=fill)
+                page.insert_text((100, 430), caption, fontsize=9)
+            doc.save(pdf)
+        default = self.run_script(batch, "--src", pdf, "--out", self.images,
+                                  "--dpi", 72)
+        self.assertNotIn("--ed-prefix ED", default.stdout)
+        s1 = self.images / "Doe_Widgets_2025_fig_S1.png"
+        extended_data = digest(s1)
+        note = self.notes / "Doe_Widgets_2025.md"
+        body = summary_note(pdf.stem).replace(
+            "![[Doe_Widgets_2025_fig_1.png]]", "![[Doe_Widgets_2025_fig_S1.png]]")
+        note.write_text(body, encoding="utf-8", newline="\n")
+
+        switch = self.run_script(batch, "--src", pdf, "--out", self.images,
+                                 "--dpi", 72, "--ed-prefix", "ED",
+                                 "--overwrite-supplementary")
+        self.assertEqual(digest(self.images / "Doe_Widgets_2025_fig_ED1.png"),
+                         extended_data)
+        self.assertEqual(note.read_text(encoding="utf-8"),
+                         body.replace("_fig_S1.png", "_fig_ED1.png"))
+        leftovers = switch.stdout.partition("Leftover _fig_S<N> crops")[2]
+        self.assertIn("Doe_Widgets_2025_fig_S1.png", leftovers, switch.stdout)
+
     def test_pdf_year_rename_keeps_owned_summary_metadata_aligned(self):
         organizer = "skills/pdf-organize/scripts/organize.py"
         source = self.pdfs / "Doe_Correction_2025.pdf"
@@ -1385,6 +1437,12 @@ raise SystemExit(main(fixture['args'], client))
                          [path.name for path in chapter_paths])
         self.assertIn("Doe_SynthBook_2025_01_FirstTopic_fig_1.png",
                       [figure["file"] for figure in named["chapter_figures"]])
+        # A re-crop of the named book's figure is refused for its chapters.
+        refused = self.run_script(
+            "skills/figure-extract/scripts/extract_figures.py", book,
+            "--out", self.images, "--crop", "2:2:100,150,500,350",
+            "--dpi", 72, expected=1)
+        self.assertIn("is a split book", refused.stderr)
         self.run_script("skills/figure-extract/scripts/batch_extract.py",
                         "--src", chapter_dir, "--out", self.images,
                         "--dpi", 72)
@@ -1540,29 +1598,77 @@ raise SystemExit(main(fixture['args'], client))
         chapter.parent.mkdir()
         for path in (book, chapter):
             self.make_pdf(path)
-        # A whole-book crop from before the split, with no manifest line.
+        # Whole-book and chapter crops from before ownership records existed,
+        # with no manifest line. Each is adopted under its own PDF's stem.
         legacy_run = Path(self.scratch.name) / "legacy-run"
-        self.run_script(batch, "--src", book, "--out", legacy_run, "--dpi", 72)
-        legacy = self.images / "Doe_Book_2025_fig_1.png"
-        legacy.write_bytes((legacy_run / legacy.name).read_bytes())
-        original = digest(legacy)
+        originals = {}
+        for path in (book, chapter):
+            self.run_script(batch, "--src", path, "--out", legacy_run,
+                            "--dpi", 72)
+            legacy = self.images / (path.stem + "_fig_1.png")
+            legacy.write_bytes((legacy_run / legacy.name).read_bytes())
+            originals[path] = digest(legacy)
 
         blocked = self.run_script(organizer, "rename", "--vault", self.vault, book,
                                   "--to", "Doe_Volume_2025.pdf", "--apply",
                                   expected=1)
-        self.assertIn("--adopt-legacy 'Doe_Book_2025:<label>'", blocked.stdout)
-        adopted = self.run_script(batch, "--src", book, "--out", self.images,
-                                  "--dpi", 72, "--adopt-legacy", "Doe_Book_2025:1")
-        self.assertIn("Adoption recorded; nothing was extracted.", adopted.stdout)
+        for path in (book, chapter):
+            self.assertIn("--src %s --out %s --adopt-legacy '%s:<label>'"
+                          % (shlex.quote(str(path)), shlex.quote(str(self.images)),
+                             path.stem), blocked.stdout)
+            adopted = self.run_script(batch, "--src", path, "--out", self.images,
+                                      "--dpi", 72, "--adopt-legacy",
+                                      path.stem + ":1")
+            if path == book:
+                self.assertIn("Adoption recorded; nothing was extracted.",
+                              adopted.stdout)
+        manifest = (self.images / ".figure-manifest.tsv").read_text(
+            encoding="utf-8")
+        self.assertIn("Doe_Book_2025_fig_1.png\t", manifest)
+        self.assertIn("Doe_Book_2025_01_Intro_fig_1.png\t", manifest)
         self.assertEqual(sorted(path.name for path in self.images.glob("*.png")),
-                         [legacy.name])
+                         ["Doe_Book_2025_01_Intro_fig_1.png",
+                          "Doe_Book_2025_fig_1.png"])
 
         self.run_script(organizer, "rename", "--vault", self.vault, book,
                         "--to", "Doe_Volume_2025.pdf", "--apply")
-        self.assertFalse(legacy.exists())
-        self.assertEqual(digest(self.images / "Doe_Volume_2025_fig_1.png"), original)
+        self.assertEqual(sorted(path.name for path in self.images.glob("*.png")),
+                         ["Doe_Volume_2025_01_Intro_fig_1.png",
+                          "Doe_Volume_2025_fig_1.png"])
+        self.assertEqual(digest(self.images / "Doe_Volume_2025_fig_1.png"),
+                         originals[book])
+        self.assertEqual(digest(self.images / "Doe_Volume_2025_01_Intro_fig_1.png"),
+                         originals[chapter])
         self.assertTrue((self.pdfs / "Doe_Volume_2025"
                          / "Doe_Volume_2025_01_Intro.pdf").is_file())
+
+    def test_errata_pdf_in_a_chapter_folder_is_renamed_where_it_stands(self):
+        # pdf-organize skips only canonical chapters in a book folder, so the
+        # sweep's "run pdf-organize" remedy for an errata PDF there works.
+        organizer = "skills/pdf-organize/scripts/organize.py"
+        batch = "skills/figure-extract/scripts/batch_extract.py"
+        folder = self.pdfs / "Doe_Book_2025"
+        folder.mkdir()
+        book = self.pdfs / "Doe_Book_2025.pdf"
+        errata = folder / "errata.pdf"
+        for path in (book, folder / "Doe_Book_2025_01_Intro.pdf",
+                     folder / "Doe_Book_2025_02_Methods.pdf", errata):
+            self.make_pdf(path)
+        sweep = ("--src", self.pdfs, "--out", self.images, "--dpi", 72)
+        refused = self.run_script(batch, *sweep, expected=1)
+        self.assertIn("Run pdf-organize on these first", refused.stdout)
+        self.assertIn(str(errata), refused.stdout)
+
+        self.run_script(organizer, "rename", "--vault", self.vault, errata,
+                        "--to", "Doe_BookErrata_2025.pdf", "--apply")
+        renamed = folder / "Doe_BookErrata_2025.pdf"
+        self.assertTrue(renamed.is_file())
+        self.run_script(batch, *sweep)
+        self.assertEqual(self.scan_papers()["counts"]["unorganized"], 0)
+        plan = self.run_script(organizer, "rename", "--vault", self.vault, book,
+                               "--to", "Doe_Volume_2025.pdf")
+        self.assertIn("Moved with the chapter folder, names unchanged (1):\n"
+                      "  %s" % renamed, plan.stdout)
 
     def test_escaped_source_identity_survives_scan_and_pdf_rename(self):
         source = self.pdfs / "Doe_Study_2025.pdf"
@@ -1837,10 +1943,17 @@ raise SystemExit(main(fixture['args'], client))
         self.assertFalse([path.name for folder in (self.vault, self.notes)
                           for path in folder.iterdir()
                           if path.name.startswith(".clipping-note-")])
+        # The hidden record names the old note: the pair reads the same both
+        # ways.
+        handoff = self.notes / f".{new}.handoff.json"
+        self.assertEqual(created["handoff_record"], f"Articles/{handoff.name}")
+        self.assertEqual(json.loads(handoff.read_text(encoding="utf-8")),
+                         {"old_note": f"Articles/{old}.md",
+                          "new_note": f"Articles/{new}.md"})
         recorded = json.loads(self.run_script(
             "shared/scripts/publish_files.py", "snapshot", "--vault",
             self.vault, "-o", snapshots, "--replace",
-            f"Articles/{new}.md").stdout)
+            f"Articles/{new}.md", f"Articles/{handoff.name}").stdout)
         self.assertEqual(recorded["snapshots"][0]["digest"], created["sha256"])
 
         # Real dependents in every scanned area. Labels, anchors, sizes, a
@@ -1900,12 +2013,18 @@ issues: ""
         shared = self.vault / "Shared notes/reading.md"
         shared_text = 'Shared reading: [[{slug}|the study]].\n'
         shared.write_text(shared_text.format(slug=old), encoding="utf-8")
+        # A raw capture's link is respelled too; its URL stays.
+        raw = self.vault / "Inbox/follow-up.md"
+        raw_text = ('---\nsource: "https://example.org/other"\n---\n'
+                    'Responds to [[{slug}]].\n')
+        raw.write_text(raw_text.format(slug=old), encoding="utf-8")
         dependents = {wiki: wiki_text.format(slug=new),
                       moc: moc_text.format(slug=new),
                       investment: investment_text.format(image=new_image),
                       log: log_text.format(slug=new),
                       other: other_text.format(slug=new),
-                      shared: shared_text.format(slug=new)}
+                      shared: shared_text.format(slug=new),
+                      raw: raw_text.format(slug=new)}
         rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
                   "--owner-note", note, "--new-owner-note", new_note,
                   "--old-slug", old, "--new-slug", new]
@@ -1919,8 +2038,18 @@ issues: ""
             {wiki.resolve(): [old + ".md", old_image],
              moc.resolve(): [old + ".md"],
              investment.resolve(): [old_image], log.resolve(): [old + ".md"],
-             other.resolve(): [old + ".md"], shared.resolve(): [old + ".md"]})
+             other.resolve(): [old + ".md"], shared.resolve(): [old + ".md"],
+             raw.resolve(): [old + ".md"]})
         self.assertEqual(digest(self.images / new_image), original)
+        # The swapped pair is refused while the recorded old note exists.
+        swapped = ["rename", "--attachments", self.images, "--sources",
+                   self.pdfs, "--owner-note", new_note, "--new-owner-note",
+                   note, "--old-slug", new, "--new-slug", old]
+        for phase in ("prepare", "repair", "finalize"):
+            refused = json.loads(self.run_script(
+                fetch, *swapped, "--phase", phase, "--dry-run",
+                expected=1).stdout)
+            self.assertIn(f"pending handoff from {old}.md", refused["error"])
 
         def vault_state():
             return {path: (path.read_bytes() if path.is_file() else None)
@@ -1937,7 +2066,8 @@ issues: ""
              investment.resolve(): ("would-rewrite", 1),
              log.resolve(): ("would-rewrite", 1),
              other.resolve(): ("would-rewrite", 1),
-             shared.resolve(): ("would-rewrite", 1)})
+             shared.resolve(): ("would-rewrite", 1),
+             raw.resolve(): ("would-rewrite", 1)})
         for row in planned["results"]:
             for reference in row["references"]:
                 self.assertEqual(reference["to"],
@@ -1978,9 +2108,12 @@ issues: ""
         self.assertEqual(finalized["results"][0]["action"], "retired")
         removed = json.loads(self.run_script(
             "shared/scripts/publish_files.py", "remove", "--vault", self.vault,
-            "--snapshots", snapshots, f"Articles/{old}.md").stdout)
-        self.assertEqual(removed["results"][0]["action"], "removed")
+            "--snapshots", snapshots, f"Articles/{old}.md",
+            f"Articles/{handoff.name}").stdout)
+        self.assertEqual([row["action"] for row in removed["results"]],
+                         ["removed", "removed"])
         self.assertFalse(note.exists())
+        self.assertFalse(handoff.exists())
         self.assertFalse((self.images / old_image).exists())
         self.assertEqual(digest(self.images / new_image), original)
         self.assertTrue(new_note.is_file())
@@ -2083,7 +2216,7 @@ issues: ""
         self.assertEqual(created["action"], "created")
         recorded = json.loads(self.run_script(
             publish, "snapshot", "--vault", self.vault, "-o", snapshots,
-            "--replace", f"Articles/{new}.md").stdout)
+            "--replace", f"Articles/{new}.md", created["handoff_record"]).stdout)
         self.assertEqual(recorded["snapshots"][0]["digest"], created["sha256"])
 
         rename = ["rename", "--attachments", self.images, "--sources", self.pdfs,
@@ -2097,7 +2230,20 @@ issues: ""
 
         # The run stops before old-note removal. Finishing the handoff names
         # the retired copy instead of asking for a restore, and goes from the
-        # clean re-probe straight to old-note removal.
+        # clean re-probe straight to old-note removal. The swapped pair reads
+        # the same, so its handoff record refuses it: guessing the direction
+        # would remove the reprocessed note.
+        handoff = f"Articles/.{new}.handoff.json"
+        swapped = json.loads(self.run_script(
+            fetch, "rename", "--attachments", self.images, "--sources",
+            self.pdfs, "--owner-note", new_note, "--new-owner-note", note,
+            "--old-slug", new, "--new-slug", old, "--phase", "prepare",
+            "--dry-run", expected=1).stdout)
+        self.assertIn(f"pending handoff from {old}.md", swapped["error"])
+        self.assertNotIn("already retired", swapped["error"])
+        self.run_script(fetch, "dependencies", "--attachments", self.images,
+                        "--owner-note", new_note, "--old-slug", new,
+                        expected=1)
         resumed = json.loads(self.run_script(
             fetch, *rename, "--phase", "prepare", "--dry-run", expected=1).stdout)
         self.assertIn("already retired", resumed["error"])
@@ -2108,12 +2254,15 @@ issues: ""
         self.assertTrue(dependency["ok"])
         resume_snapshots = scratch / "resume-snapshots.json"
         self.run_script(publish, "snapshot", "--vault", self.vault,
-                        "-o", resume_snapshots, f"Articles/{old}.md")
+                        "-o", resume_snapshots, f"Articles/{old}.md", handoff)
         removed = json.loads(self.run_script(
             publish, "remove", "--vault", self.vault,
-            "--snapshots", resume_snapshots, f"Articles/{old}.md").stdout)
-        self.assertEqual(removed["results"][0]["action"], "removed")
+            "--snapshots", resume_snapshots, f"Articles/{old}.md",
+            handoff).stdout)
+        self.assertEqual([row["action"] for row in removed["results"]],
+                         ["removed", "removed"])
         self.assertFalse(note.exists())
+        self.assertFalse((self.vault / handoff).exists())
         self.assertFalse((self.images / old_image).exists())
         self.assertEqual(digest(self.images / new_image), original)
         self.assertEqual(new_note.read_text(encoding="utf-8"), current.replace(old, new))
@@ -2948,6 +3097,47 @@ issues: ""
         self.assertEqual({path.name: path.read_bytes() for path in wiki.iterdir()},
                          before)
 
+    def test_user_text_after_the_card_is_reported_never_removed(self):
+        # A block after the card that is not a card, such as the user's own
+        # three-line note, is no extra card: a wiki-build merge review and
+        # the scanner each report it once, report-only, and keep its bytes.
+        wiki = self.vault / "Wiki"
+        entry = wiki / "geometric-mean.md"
+        existing = self.averages_entry(
+            "Geometric mean", "2026-09-05",
+            "The **geometric mean** of a collection of positive numbers is "
+            "the nth root of their product.",
+            "The nth root of the product of a collection of positive numbers."
+        ) + ("\nMy own note: compare it with the arithmetic mean.\n"
+             "It weighs every value alike.\n"
+             "Ask about this in the reading group.\n")
+        entry.write_text(existing, encoding="utf-8")
+        run = Path(self.scratch.name) / "note-run"
+        run.mkdir()
+        draft = run / "geometric-mean.md"
+        draft.write_text(existing.replace("updated: 2026-09-05",
+                                          "updated: 2026-09-06"),
+                         encoding="utf-8")
+        manifest = run / "manifest.json"
+        manifest.write_text(json.dumps([
+            {"path": "Wiki/geometric-mean.md", "draft": str(draft)},
+        ]), encoding="utf-8")
+        review = json.loads(self.run_script(
+            "skills/wiki-build/scripts/review_tree.py", "--vault", self.vault,
+            "--wiki", wiki, "--manifest", manifest, "--out", run / "review").stdout)
+        self.assertEqual(
+            [(row["severity"], row.get("inherited", False), row["evidence"])
+             for row in review["on_staged"] if row["item"] == "19-flashcards"],
+            [("warning", True, {"block": 2, "report_only": True})])
+        scan = json.loads(self.run_script(
+            "skills/wiki-lint/scripts/scan_vault.py", wiki,
+            "--images", self.images).stdout)
+        rows = [row["message"] for row in scan["problems"]
+                if row["slug"] == "geometric-mean" and row["item"] == "item19"]
+        self.assertEqual(len(rows), 1, rows)
+        self.assertTrue(rows[0].startswith("block 2 is not a card"), rows)
+        self.assertEqual(entry.read_text(encoding="utf-8"), existing)
+
     def test_root_without_card_and_parents_link_down(self):
         # A discipline root needs no Flashcards section, and the scanner lists
         # a parent whose prose and footer leave a child unlinked for Task 3.
@@ -3656,6 +3846,13 @@ A compact definition used only to exercise the shared contract.
                 '  - "https://example.org/unquoted"',
                 "  - https://example.org/unquoted", 1),
             encoding="utf-8")
+        # A split book is cited in one form: both checkers pair a chapter PDF
+        # with its whole-book PDF.
+        write_entry(
+            "book-beside-chapter", "Book beside chapter",
+            "**Book beside chapter** is a source-form fixture.",
+            sources=("[[Prince_UDL_2026.pdf#page=40]]",
+                     "[[Prince_UDL_2026_02_SupLearn.pdf#page=3]]"))
 
         lint = json.loads(self.run_script(
             "skills/wiki-build/scripts/lint_entry.py", wiki, "--compact").stdout)
@@ -3846,6 +4043,9 @@ A compact definition used only to exercise the shared contract.
         self.assertNotIn("4-duplicate-source", lint_items["web-file-beside-note"])
         self.assertNotIn("item4/source-identity",
                          scan_items.get("web-file-beside-note", set()))
+        self.assertIn("4-duplicate-source", lint_items["book-beside-chapter"])
+        self.assertIn("item4/source-identity",
+                      scan_items.get("book-beside-chapter", set()))
         # Obsidian's Properties editor strips the quotes from a URL source;
         # both validators accept the lossless plain spelling (CONVENTIONS §2a).
         self.assertNotIn("2-quoting", lint_items["unquoted-web-source"])
@@ -3913,9 +4113,10 @@ A compact definition used only to exercise the shared contract.
             self.assertNotIn(slug, clean_matches)
 
     def test_builder_and_linter_agree_on_parents_form_and_empty_sources(self):
-        # lint_entry's 2-parents-form mirrors the scanner's item2/parents-form
-        # and its moc-parent and root-parent-mismatch hierarchy findings, so
-        # a draft the builder's gate passes is one the next scan passes too.
+        # lint_entry's 2-parents-form agrees with the scanner's
+        # item2/parents-form and its moc-parent and root-parent-mismatch
+        # hierarchy findings on a value's form. Resolving a target's case or
+        # path spelling needs the vault inventory, so only the scan does it.
         # Both file an empty sources: under item 4 and a missing key under
         # item 2.
         wiki = self.vault / "Wiki"
@@ -3961,6 +4162,14 @@ A compact definition used only to exercise the shared contract.
                                'parents:\n  - "[[MOCs/mathematics-moc]]"\n',
                                canonical_sources, set(), {"moc-parent"},
                                {"2-parents-form"}),
+            "contraharmonic-mean": ("Contraharmonic mean",
+                                    'parents:\n  - "[[Mathematics]]"\n',
+                                    canonical_sources, {"item2/parents-form"},
+                                    set(), set()),
+            "heronian-mean": ("Heronian mean",
+                              'parents:\n  - "[[Wiki/mathematics]]"\n',
+                              canonical_sources, {"item2/parents-form"},
+                              set(), set()),
             "weighted-mean": ("Weighted mean", canonical_parents, "sources: []\n",
                               set(), set(), set()),
             "truncated-mean": ("Truncated mean", canonical_parents, "sources:\n",

@@ -194,6 +194,27 @@ class SummaryPublicationGateTests(unittest.TestCase):
             commented = check(good.replace("read: false", "read: false\n  # A user comment"))
             self.assertEqual(commented.returncode, 0, commented.stdout + commented.stderr)
 
+    def test_wiki_option_rejects_a_body_link_to_no_entry(self):
+        with tempfile.TemporaryDirectory(prefix="summary-gate-") as scratch:
+            wiki = Path(scratch) / "Wiki"
+            wiki.mkdir()
+            (wiki / "enzyme.md").write_text("", encoding="utf-8")
+            note = Path(scratch) / "Group_EventRecords_2025.md"
+            env = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(SHARED))
+            for link, status in (("[[enzyme|enzymes]]", 0), ("[[enzymex]]", 1)):
+                with self.subTest(link=link):
+                    note.write_text(argument_note().replace(
+                        "Each record must include",
+                        "Each record, like the %s that make it, must include" % link),
+                        encoding="utf-8")
+                    result = subprocess.run(
+                        [sys.executable, str(READING / "note_lint.py"), str(note),
+                         "--mode", "argument", "--wiki", str(wiki)],
+                        cwd=scratch, env=env, text=True, encoding="utf-8",
+                        capture_output=True, timeout=60)
+                    self.assertEqual(result.returncode, status,
+                                     result.stdout + result.stderr)
+
     def test_worked_example_note_lints_clean_without_an_image_inventory(self):
         text = worked_example_note()
         self.assertIsNotNone(text, "no untagged fence follows '## The output note'")

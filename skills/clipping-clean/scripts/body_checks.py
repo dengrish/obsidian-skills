@@ -15,17 +15,22 @@ are in references/review-checklist.md and references/nested-lists.md.
   outline PATH    the heading outline and coarse counts (list lines, quote
                   lines, links, image embeds, tables, code blocks) for
                   comparing the draft's structure with the source.
-  source PATH [--base-url URL]
+  source PATH [--base-url URL] [--text]
                   the same outline and counts for saved page markup, plus one
                   JSON row per figure-like element (image, picture, inline
                   SVG, video, canvas, iframe, Lottie player, figure): best
                   image URL resolved against URL, alt, figcaption, figure
                   number, nearest preceding heading and Lottie source. Counts
                   are elements outside nav/aside and page-level header/footer,
-                  whose headings and rows are tagged instead. A visually
-                  hidden (screen-reader-only) heading is tagged `hidden` and
-                  is never a row's nearest heading. Read-only: the stdlib
-                  html.parser reads the file; nothing is fetched or executed.
+                  whose headings and rows are tagged instead. A heading
+                  hidden from sight (the `hidden` attribute, a
+                  screen-reader-only class or an inline `display:none` or
+                  `visibility:hidden`, on it or an ancestor) is tagged
+                  `hidden` and is never a row's nearest heading. --text also
+                  prints the page's text, one block (paragraph, list item,
+                  heading, cell, caption) per line, tagged the same way.
+                  Read-only: the stdlib html.parser reads the file; nothing
+                  is fetched or executed.
   repair --op OP --lines RANGES PATH [--dry-run]
                   apply one confirmed nested-list repair to the listed lines
                   only (1-based, `12` or `12-18`, comma-separated), keeping any
@@ -59,6 +64,7 @@ import os
 import re
 import sys
 import tempfile
+import time
 import unicodedata
 import urllib.parse
 
@@ -97,16 +103,25 @@ UNESCAPED_DOLLAR_RE = re.compile(r"(?:^|[^\\])\$")
 DROPPED_DOLLAR_RE = re.compile(
     r"/[ =]|/1[KMB](?:[^A-Za-z0-9]|$)|/(?:GPU|hour|min|token)"
     r"|per (?:hour|GPU|min)|[0-9]+/[0-9]|\([^)]*in (?:1[89]|20)[0-9]{2}\)")
+#: A bare, autolinked or link-target URL, whose path is no currency rate.
+URL_RE = re.compile(
+    r"(?:https?://|www\.)[^\s<>()]*(?:\([^\s<>()]*\)[^\s<>()]*)*")
 #: Two indent steps (tabs or four-space runs) after an optional quote prefix.
 DEEP_INDENT_RE = re.compile(r"^(?:>[ \t]?)*(?:\t| {4}){2}")
 FOOTNOTE_DEF_RE = re.compile(r"^\[\^([0-9]+)\]:")
 FOOTNOTE_REF_RE = re.compile(r"\[\^([0-9]+)\]")
 TABLE_RE = re.compile(r"<table")
 #: A pipe table's delimiter row, which every Markdown table has exactly once.
+#: The indent and quote prefix is one character class, so no two whitespace
+#: runs overlap and a long blank or whitespace line is scanned in linear time.
 TABLE_DELIMITER_RE = re.compile(
-    r"^[ \t]*(?:>[ \t]?)*[ \t]*\|?(?:[ \t]*:?-+:?[ \t]*\|)+"
+    r"^[ \t>]*(?:\|[ \t]*)?:?-+:?[ \t]*\|(?:[ \t]*:?-+:?[ \t]*\|)*"
     r"(?:[ \t]*:?-+:?)?[ \t]*$", re.M)
-HR_RE = re.compile(r"^(?:[ ]{0,3}%s|<hr>%s*$)" % (RULE, SP))
+#: A text divider: three or more of one other glyph, optionally spaced or
+#: backslash-escaped (`+++++`, `\*\*\*`, `• • •`); never a word character,
+#: a table pipe, a quote marker or a code-fence character.
+TEXT_RULE = r"\\?(?P<glyph>[^\w\s\\|`~>])(?:[ \t]*\\?(?P=glyph)){2,}%s*$" % SP
+HR_RE = re.compile(r"^(?:[ ]{0,3}(?:%s|%s)|<hr>%s*$)" % (RULE, TEXT_RULE, SP))
 SEPARATOR_RE = re.compile(r"^___%s*$" % SP)
 #: A top-level bullet of the Summary callout.
 SUMMARY_BULLET_RE = re.compile(r"^>[ \t]?[-*+][ \t]+(.*)$")
@@ -135,6 +150,14 @@ SPLIT_TEXT_PUNCT = frozenset("\"'.,:;!?…")
 SPLIT_TEXT_CATEGORIES = ("Pi", "Pf", "Ps", "Pe", "Pd")
 #: The longest gap between two links that still counts as near-adjacent.
 SPLIT_GAP_MAX = 8
+#: A lone letter spaced off a link or emphasis span that opens with another
+#: lone letter and a space, as when Web Clipper puts a space where the source
+#: started the span inside a word: `I [t serves](url)`, `t *o promote*`. The
+#: words `a`, `A` and `I` do not open such a span, and a one-letter span such
+#: as the variable in `a *p*-value` is not one.
+MIDWORD_SPAN_RE = re.compile(
+    r"(?<![\w\\'’.])[A-Za-z] (?:\[|\*{1,3}|_{1,3})(?![aAI][\s\]*_])"
+    r"[A-Za-z](?=\s)")
 #: Emphasis markers, quotes and punctuation shown around a reported split.
 SPLIT_EDGE = frozenset("*_~=“”„‟‘’‚‛«»‹›") | SPLIT_TEXT_PUNCT
 
@@ -216,11 +239,17 @@ def snippet(line, start=0, end=None):
     return ("…" if left else "") + text + ("…" if left + SNIPPET < len(line) else "")
 
 
-def grep(body, rx):
-    """One ``L``-numbered line of context for each body line ``rx`` matches."""
+def mask(rx, line):
+    """``line`` with each ``rx`` match overwritten by as many ``x``."""
+    return rx.sub(lambda m: "x" * len(m.group(0)), line)
+
+
+def grep(body, rx, skip=None):
+    """One ``L``-numbered line of context for each body line ``rx`` matches
+    outside any ``skip`` match."""
     out = []
     for n, line in body:
-        m = rx.search(line)
+        m = rx.search(mask(skip, line) if skip else line)
         if m:
             out.append("L%d: %s" % (n, snippet(line, m.start(), m.end())))
     return out
@@ -301,7 +330,8 @@ def footnote_numbers(body):
 
 
 def decorative_rules(body):
-    """HR lines after the first Summary/body ``___`` separator."""
+    """Rule or text-divider lines after the first Summary/body ``___``
+    separator."""
     out, below = [], False
     for n, line in body:
         if below and HR_RE.match(line):
@@ -342,8 +372,10 @@ def summary_size(body):
             prev, end = n, end + 1
     words = sum(len(line.split()) for _n, line in body[end:]
                 if not SEPARATOR_RE.match(line))
-    out = ["bullets: %d, body words: %d (expect ~5-8 for a short post, 10-15 "
-           "for longform, at most 20)" % (len(bullets), words),
+    band = ("~5-8" if words < 1500 else "~9-15" if words <= 5000
+            else "at most 20")
+    out = ["bullets: %d, body words: %d (expect %s)" % (
+               len(bullets), words, band),
            "bullets over 30 words: %d" % sum(
                1 for _n, t in bullets if len(t.split()) > 30)]
     for n, t in bullets:
@@ -370,18 +402,21 @@ def punctuation_only(text):
 
 
 def split_links(body):
-    """Sweep item 17: one linked title split into adjacent links.
+    """Sweep item 17: one linked title split into adjacent links, or a link
+    or emphasis span split from the word it starts inside.
 
     Two consecutive inline links are a candidate when the gap between them
     holds only whitespace, emphasis markers or punctuation (no table pipe) and
     either link's text is only punctuation or both share one URL. A run of
     such links is one entry, widened over the emphasis, quotes and
-    punctuation around it.
+    punctuation around it. A lone letter spaced off a span that opens with
+    another lone letter and a space (`I [t serves](url)`) is a mid-word span
+    entry.
     Inline code is masked first, so a code span neither matches nor joins.
     """
     out = []
     for n, line in body:
-        masked = CODE_SPAN_RE.sub(lambda m: "x" * len(m.group(0)), line)
+        masked = mask(CODE_SPAN_RE, line)
         links = list(INLINE_LINK_RE.finditer(masked))
         runs, run = [], None
         for a, b in zip(links, links[1:]):
@@ -411,6 +446,9 @@ def split_links(body):
             if len(text) > 2 * SNIPPET:
                 text = text[:SNIPPET] + "…" + text[-SNIPPET // 2:]
             out.append("L%d: %s: %s" % (n, ", ".join(reasons), text))
+        out.extend("L%d: mid-word span: %s" % (n, snippet(line, m.start(),
+                                                          m.end()))
+                   for m in MIDWORD_SPAN_RE.finditer(masked))
     return out
 
 
@@ -453,8 +491,8 @@ def sweep_report(text):
         ("10 unescaped $ parity: must be EVEN after escaping",
          ["%d (%s)" % (dollars, "even" if dollars % 2 == 0 else
                        "ODD: an unpaired or unescaped $ remains")]),
-        ("11 dropped-$ candidates: compare with the source, NOISY",
-         grep(body, DROPPED_DOLLAR_RE)),
+        ("11 dropped-$ candidates outside URLs: compare with the source, "
+         "NOISY", grep(body, DROPPED_DOLLAR_RE, URL_RE)),
         ("12 nested-list deep indent — candidate, NOISY",
          grep(body, DEEP_INDENT_RE)),
         ("12b sibling indent split — candidate, NOISY",
@@ -464,12 +502,13 @@ def sweep_report(text):
          footnotes),
         ("14 leftover HTML <table> — NONE unless complex",
          grep(body, TABLE_RE)),
-        ("15 decorative HR below the ___ separator — NONE",
-         decorative_rules(body)),
+        ("15 decorative rule below the ___ separator — NONE except one "
+         "`---` before an unheaded postscript", decorative_rules(body)),
         ("16 Summary size — candidates, judge against SKILL.md step 4",
          summary_size(body)),
-        ("17 split links: adjacent links with punctuation-only text or one "
-         "URL — candidate, check the source", split_links(body)),
+        ("17 split links or mid-word spans: adjacent links with "
+         "punctuation-only text or one URL, or a lone letter spaced off a "
+         "span — candidate, check the source", split_links(body)),
     ]
     return report, notes
 
@@ -484,9 +523,10 @@ def outline_report(text):
     heads = [(len(m.group(1)), m.group(2).strip())
              for m in re.finditer(r"^(#{1,6})\s+(.*)$", prose, re.M)]
     counts = dict(
-        list_lines=len(re.findall(r"^\s*(?:>\s?)*\s*(?:[-*]|\d+\.)\s",
+        # One class for the indent and quote prefix keeps these linear.
+        list_lines=len(re.findall(r"^[ \t>]*(?:[-*]|\d+\.)(?:[ \t]|$)",
                                   prose, re.M)),
-        quote_lines=len(re.findall(r"^\s*>", prose, re.M)),
+        quote_lines=len(re.findall(r"^[ \t]*>", prose, re.M)),
         links=len(re.findall(r"\[[^\]]+\]\([^)]+\)", prose)),
         image_embeds=len(re.findall(r"!\[\[?", prose)),
         tables=len(TABLE_DELIMITER_RE.findall(prose))
@@ -502,19 +542,33 @@ def outline_report(text):
 TRACKED = frozenset((
     "a", "article", "aside", "blockquote", "button", "figcaption", "figure",
     "footer", "header", "main", "nav", "noscript", "picture", "script",
-    "section", "style", "svg", "template", "video",
+    "section", "style", "svg", "template", "title", "video",
     "h1", "h2", "h3", "h4", "h5", "h6"))
 HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 #: Sectioning elements that keep a header/footer from being page chrome.
 SECTIONING = ("article", "aside", "main", "nav", "section")
 CHROME = ("nav", "aside", "header", "footer")
-#: Element bodies that are not page content: no headings, counts or rows.
-INERT = ("script", "style", "template", "svg")
+#: Element bodies that are not page content: no headings, counts, rows or
+#: text.
+INERT = ("script", "style", "template", "svg", "title")
+#: Block elements whose start or end ends one `--text` block; inline spans
+#: such as links and emphasis join the text around them.
+TEXT_BREAKS = frozenset((
+    "address", "article", "aside", "blockquote", "body", "caption", "dd",
+    "details", "div", "dl", "dt", "figcaption", "figure", "footer", "form",
+    "header", "hr", "li", "main", "nav", "ol", "p", "pre", "section",
+    "summary", "table", "td", "th", "tr", "ul") + HEADING_TAGS)
 IMG_TAGS = ("img", "amp-img")
-#: Classes that hide a heading from sight but not from screen readers.
+#: Classes that hide an element from sight but not from screen readers.
 SR_ONLY_CLASSES = frozenset((
     "screen-reader-text", "sr-only", "visually-hidden", "visuallyhidden",
     "screen-reader-only"))
+HIDDEN_STYLE_RE = re.compile(r"display\s*:\s*none|visibility\s*:\s*hidden",
+                             re.I)
+#: Elements with no end tag, which can hold no hidden text.
+VOID_TAGS = frozenset((
+    "area", "base", "br", "col", "embed", "hr", "img", "input", "link",
+    "meta", "param", "source", "track", "wbr"))
 LOTTIE_TAGS = ("lottie-player", "dotlottie-player", "dotlottie-wc")
 LOTTIE_PATH_ATTRS = ("data-animation-path", "data-anim-path", "data-bm-path")
 LOTTIE_FILE_RE = re.compile(r"\.(?:json|lottie)(?:[?#]|$)", re.I)
@@ -588,11 +642,13 @@ def _text(parts):
 
 
 class SourceInventory:
-    """Headings, coarse counts and figure-like media of saved page markup.
+    """Headings, coarse counts, figure-like media and visible text blocks of
+    saved page markup.
 
     Script and style bodies are character data to html.parser, so markup in
-    them is never parsed; template and inline-SVG contents are skipped, and
-    inside `<noscript>` only an image not already listed is reported.
+    them is never parsed; template, title and inline-SVG contents are
+    skipped, and inside `<noscript>` only an image not already listed is
+    reported.
     """
 
     def __init__(self, base_url=None):
@@ -618,6 +674,10 @@ class SourceInventory:
         self.figure_count = 0
         self.video = None
         self.seen_urls = set()
+        self.text_parts, self.text_blocks = [], []
+        # [tag, open same-name tags] of each hidden element still open, and
+        # whether the current text block has any text outside them.
+        self.hidden, self.shown = [], False
 
     def resolve(self, url):
         url = (url or "").strip()
@@ -667,6 +727,19 @@ class SourceInventory:
             if tag in INERT:
                 self.depth[tag] += 1
             return
+        if tag in TEXT_BREAKS:
+            self.flush_text()
+            # A block start ends an open hidden `<p>`, as in HTML.
+            if self.hidden and self.hidden[-1][0] == "p":
+                self.hidden.pop()
+        # aria-hidden does not hide an element from sight, so it stays.
+        if self.hidden and tag == self.hidden[-1][0]:
+            self.hidden[-1][1] += 1
+        elif tag not in VOID_TAGS and tag not in INERT and (
+                "hidden" in attrs or HIDDEN_STYLE_RE.search(
+                    attrs.get("style", "")) or not SR_ONLY_CLASSES.isdisjoint(
+                    attrs.get("class", "").lower().split())):
+            self.hidden.append([tag, 1])
         if tag == "base" and not self.base_seen and attrs.get("href"):
             self.base_seen = True
             self.base = self.resolve(attrs["href"]) if self.base \
@@ -684,13 +757,12 @@ class SourceInventory:
         chrome = self.chrome()
         if tag in HEADING_TAGS:
             self.finish_heading()
-            # aria-hidden does not hide a heading from sight, so it stays.
-            hidden = "hidden" in attrs or not SR_ONLY_CLASSES.isdisjoint(
-                attrs.get("class", "").lower().split())
             self.heading = (int(tag[1]), [],
-                            chrome or ("hidden" if hidden else None))
-        elif tag == "br" and self.heading is not None:
-            self.heading[1].append(" ")
+                            chrome or ("hidden" if self.hidden else None))
+        elif tag == "br":
+            self.text_parts.append(" ")
+            if self.heading is not None:
+                self.heading[1].append(" ")
         elif tag == "a" and not chrome:
             href = attrs.get("href", "").strip()
             if href and not href.startswith("#") \
@@ -761,6 +833,12 @@ class SourceInventory:
             return
         if tag in TRACKED and not self.depth[tag]:
             return
+        if tag in TEXT_BREAKS:
+            self.flush_text()
+        if self.hidden and tag == self.hidden[-1][0]:
+            self.hidden[-1][1] -= 1
+            if not self.hidden[-1][1]:
+                self.hidden.pop()
         if not self.depth["noscript"]:
             if tag in HEADING_TAGS:
                 self.finish_heading()
@@ -782,12 +860,26 @@ class SourceInventory:
     def handle_data(self, data):
         if self.depth["noscript"] or any(self.depth[t] for t in INERT):
             return
-        if self.heading is not None and not (
-                self.depth["a"] and data.strip()
+        if not (self.depth["a"] and data.strip()
                 and set(data.strip()) <= PERMALINK_GLYPHS):
-            self.heading[1].append(data)
+            self.text_parts.append(data)
+            self.shown = self.shown or bool(data.strip() and not self.hidden)
+            if self.heading is not None:
+                self.heading[1].append(data)
         if self.depth["figcaption"] and self.figures:
             self.figures[-1]["caption"].append(data)
+
+    def flush_text(self):
+        """End the current text block; a heading's carries its level, and a
+        block whose text is all hidden is tagged `hidden`."""
+        text = _text(self.text_parts)
+        shown, self.text_parts, self.shown = self.shown, [], False
+        if text:
+            tag = self.chrome() or (None if shown else "hidden")
+            if self.heading is not None:
+                level, _parts, tag = self.heading
+                text = "#" * level + " " + text
+            self.text_blocks.append((tag, text))
 
     def finish_heading(self):
         if self.heading is not None:
@@ -818,6 +910,7 @@ class SourceInventory:
 
     def finish(self):
         """Close what the markup left open."""
+        self.flush_text()
         self.finish_heading()
         while self.pictures:
             self.finish_picture()
@@ -826,7 +919,8 @@ class SourceInventory:
 
 
 def source_report(text, base_url=None):
-    """``(headings, counts, media rows, notes)`` of saved page markup."""
+    """``(headings, counts, media rows, notes, text blocks)`` of saved page
+    markup; a text block is ``(chrome tag or None, text)``."""
     parser = SourceInventory(base_url)
     notes = [] if base_url else [
         "no --base-url: relative URLs are left unresolved"]
@@ -838,7 +932,7 @@ def source_report(text, base_url=None):
     parser.finish()
     media = [dict((k, r[k]) for k in ROW_FIELDS if k in r)
              for r in parser.media]
-    return parser.headings, parser.counts, media, notes
+    return parser.headings, parser.counts, media, notes, parser.text_blocks
 
 
 # --- region-scoped repairs --------------------------------------------------
@@ -1110,6 +1204,13 @@ def run_self_test():
           got["10"], ["1 (ODD: an unpaired or unescaped $ remains)"])
     check("dropped-$ candidates are listed", got["11"],
           ["L22: A 0.03/1K rate."])
+    check("a URL path is not a dropped-$ candidate; a fraction beside it is",
+          items("[DOI](https://doi.test/10.1101/2024.10.10) <https://x.test/"
+                "52/1/41> www.x.test/a/1/2 and a 3/4 split\n"
+                "[J](https://x.test/article/52/1/41/648968?login=false)")
+          ["11"],
+          ["L1: [DOI](https://doi.test/10.1101/2024.10.10) <https://x.test/"
+           "52/1/41> www.x.test/a/1/2 and a 3/4 split"])
     check("two-tab indent is a candidate", got["12"], ["L20: \t\t- deep"])
     check("eight spaces, or a tab and four spaces, are deep-indent "
           "candidates too; one step is not",
@@ -1127,6 +1228,12 @@ def run_self_test():
     check("spaced rules below the separator are decorative rules, not "
           "stacked markers", (spaced["15"], spaced["8"]),
           (["L6: * * *", "L8: - - -", "L10: _ _ _"], []))
+    check("text dividers below the separator are decorative rules; a table "
+          "delimiter row and a quote line are not",
+          items("> [!Summary]\n> - a\n\n___\n\n+++++++++\n\n"
+                "\\*\\*\\*\\*\\*\\*\n\n• • •\n\n| a | b |\n|---|---|\n\n"
+                "> > >")["15"],
+          ["L6: +++++++++", "L8: \\*\\*\\*\\*\\*\\*", "L10: • • •"])
     nested = items("1. Run it:\n\t```bash\n\techo $HOME costs $5 and $X<br>\n"
                    "\t\tindented\n\t```")
     check("a tab-indented fence in a list item is code to the sweep",
@@ -1188,6 +1295,10 @@ def run_self_test():
           ["L11: 6w,"])
     check("item 16 leaves a 31-word single sentence to the count alone",
           [e for e in size if e.startswith("L12:")], [])
+    check("item 16 prints the band the body's length implies",
+          [items(" ".join(["w"] * n))["16"][0].split("(expect ")[1]
+           for n in (1499, 1500, 5000, 5001)],
+          ["~5-8)", "~9-15)", "~9-15)", "at most 20)"])
     check("item 16 without a Summary counts the whole body",
           items("One two three.\n")["16"][0].split(" (")[0],
           "bullets: 0, body words: 3")
@@ -1223,6 +1334,17 @@ def run_self_test():
           items("Write `**[“](https://x.test)**[T](https://x.test)` "
                 "literally.\n[“](https://x.test)`**`[T](https://x.test)\n"
                 "```\n[“](https://x.test)[T](https://x.test)\n```")["17"], [])
+    check("item 17 finds a lone letter spaced off a link or emphasis span",
+          items("the pathway. I [t serves](https://x.test) as one.\n"
+                "trials—t *o promote or block* it")["17"],
+          ["L1: mid-word span: the pathway. I [t serves](https://x.test) "
+           "as one.", "L2: mid-word span: trials—t *o promote or block* it"])
+    check("item 17 leaves a one-letter word before a span, an apostrophe "
+          "and a code span alone",
+          items("a [study](https://x.test), I *said* so, There's "
+                "[incredibly good](https://x.test), `I [t x](u)`")["17"], [])
+    check("item 17 leaves a one-letter variable span alone",
+          items("a *p*-value of 0.05 and a _n_-gram model")["17"], [])
     long_line = "a" * 400 + " subscribe " + "b" * 400
     check("a long line is windowed around its match",
           "subscribe" in grep([(1, long_line)], CHROME_RE)[0]
@@ -1245,6 +1367,12 @@ def run_self_test():
           1)
     check("outline counts a tab-indented fenced block in a list item",
           outline_report("1. step\n\t```\n\tx\n\t```\n")[1]["code_blocks"], 1)
+    started = time.monotonic()
+    blank = outline_report("intro\n" + "\n" * 2000 + "    \n" * 2000
+                           + "\t" * 20000 + "x\n")[1]
+    check("outline stays linear on long blank and whitespace runs",
+          (blank["list_lines"], blank["tables"],
+           time.monotonic() - started < 1), (0, 0, True))
 
     check("srcset keeps commas inside a URL and reads descriptors",
           parse_srcset("https://c.test/w_400,h_300/a.jpg 400w,"
@@ -1290,11 +1418,22 @@ def run_self_test():
         "<ul><li>one<li>two</ul>",
         "<blockquote><p>q1</p><p>q2</p></blockquote>"
         "<blockquote>bare</blockquote><pre><code>x</code></pre>",
-        "</article><template><img src=\"tpl.png\"></template>",
-        "<footer><img src=\"f.png\"></footer></body></html>",
+        "</article><template><p>Later</p><img src=\"tpl.png\"></template>",
+        "<footer>© Site<img src=\"f.png\"></footer></body></html>",
     ])
-    heads, counts, media, notes = source_report(
+    heads, counts, media, notes, blocks = source_report(
         page, "https://site.test/post/1")
+    check("source text lists visible blocks in order and tags chrome; "
+          "title, script and template text are left out", blocks,
+          [("nav", "Home"), ("nav", "## Menu"), (None, "# Title"),
+           (None, "Intro link 1."), (None, "## Charts"),
+           (None, "Figure 1. Growth."), (None, "### Animation"),
+           (None, "1"), (None, "Table 1"), (None, "one"), (None, "two"),
+           (None, "q1"), (None, "q2"), (None, "bare"), (None, "x"),
+           ("footer", "© Site")])
+    check("source text joins a span that starts inside a word",
+          source_report("<p>I<a href=x>t serves</a> as<br>a sensor</p>")[4],
+          [(None, "It serves as a sensor")])
     check("source headings skip script text, tag chrome and drop a "
           "permalink glyph", heads,
           [(2, "Menu", "nav"), (1, "Title", None), (2, "Charts", None),
@@ -1360,6 +1499,15 @@ def run_self_test():
           "heading of later content",
           (hidden[0], [r.get("heading") for r in hidden[2]]),
           ([(1, "Title", None), (2, "Introduction", "hidden")], ["Title"]))
+    check("a text block hidden on itself or an ancestor is tagged hidden; "
+          "an unclosed hidden <p> ends at the next block",
+          source_report(
+              "<p class='sr-only'>A</p><p hidden>B</p><div style='display:"
+              "none'><p>C</p></div><div><span class='visually-hidden'>D"
+              "</span></div><p>E <span class='sr-only'>e</span></p>"
+              "<p hidden>F<p>G<div aria-hidden='true'>H</div>")[4],
+          [("hidden", "A"), ("hidden", "B"), ("hidden", "C"), ("hidden", "D"),
+           (None, "E e"), ("hidden", "F"), (None, "G"), (None, "H")])
     check("a gallery's nested figures give captioned media rows, no stub",
           [(r["tag"], r.get("caption")) for r in source_report(
               "<figure class=\"wp-block-gallery\"><figure><img src=a.jpg>"
@@ -1395,6 +1543,16 @@ def run_self_test():
                len([json.loads(x) for x in lines[media_at + 1:] if x]),
                os.stat(markup).st_mtime_ns == before),
               (0, "HEADINGS:", True, len(media), True))
+        out = io.StringIO()
+        with contextlib.redirect_stdout(out):
+            code = main(["source", markup, "--text"])
+        lines = out.getvalue().split("\n")
+        check("source --text prints one line per text block after the media "
+              "rows, chrome tagged, and leaves the file unchanged",
+              (code, lines[lines.index("TEXT:") + 1:lines.index("TEXT:") + 3],
+               lines[-2], os.stat(markup).st_mtime_ns == before),
+              (0, ["  [nav] Home", "  [nav] ## Menu"], "  [footer] © Site",
+               True))
 
     check("stacked collapse keeps the last marker",
           collapse_stacked_markers("- - **Q:** why"), "- **Q:** why")
@@ -1524,6 +1682,8 @@ def build_parser():
         "source", help="outline, counts and media rows of saved page markup")
     source.add_argument("--base-url", metavar="URL",
                         help="the capture URL relative sources resolve against")
+    source.add_argument("--text", action="store_true",
+                        help="also print the visible text, one block per line")
     source.add_argument("path", metavar="PATH")
     repair = sub.add_parser("repair", help="apply one confirmed list repair")
     repair.add_argument("--op", required=True, choices=sorted(REPAIRS))
@@ -1569,7 +1729,8 @@ def main(argv=None):
         print("COUNTS:", json.dumps(counts))
         return 0
     if args.command == "source":
-        heads, counts, media, notes = source_report(text, args.base_url)
+        heads, counts, media, notes, blocks = source_report(
+            text, args.base_url)
         for note in notes:
             print("[note] " + note)
         print("HEADINGS:")
@@ -1581,6 +1742,10 @@ def main(argv=None):
         for row in media or ["(none)"]:
             print("  " + (row if isinstance(row, str)
                           else json.dumps(row, ensure_ascii=False)))
+        if args.text:
+            print("TEXT:")
+            for chrome, block in blocks or [(None, "(none)")]:
+                print("  %s%s" % ("[%s] " % chrome if chrome else "", block))
         return 0
     report, notes = sweep_report(text)
     for note in notes:

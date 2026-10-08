@@ -137,6 +137,11 @@ class CiContractTests(unittest.TestCase):
             "github.event_name == 'push'")
         self.assertEqual(workflow.count(event_gate), 2)
         self.assertIn("--comparison \"$COMPARISON_MODE\"", workflow)
+        # Only pull-request runs share a cancellable group; each push run
+        # keeps its own version check.
+        self.assertIn(
+            "github.event.pull_request.number || github.run_id }}", workflow)
+        self.assertNotIn("|| github.ref }}", workflow)
 
     def test_workflow_runs_every_suite_and_caches_existing_requirements(self):
         root = HERE.parents[1]

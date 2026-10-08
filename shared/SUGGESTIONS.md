@@ -190,5 +190,6 @@ as the durable record; never edit the installed plugin or its cache. Without
 access to that repository, report the proposed fixes instead. Do not
 substitute suggestions for authorized source fixes. Do not create dated
 `obsidian-plugin-review-*` or `wiki-review-*` reports by default; the run
-response reports changes and checks. Leave existing reports untouched unless
-the user explicitly requests their migration or removal.
+response reports changes and checks. Leave existing reports untouched, apart
+from a rename's link respelling, unless the user explicitly requests their
+migration or removal.

@@ -51,7 +51,7 @@ This skill owns retrospective and vault-wide link decisions under its own closen
 
 ## Scope and order of a run
 
-Run Step 0 before any requested task. The default pass runs Task 1 → Task 1b → refresh the scan → Task 2 → Task 3. A request for only QC, only links, only MOCs, or some entries narrows the run; the scan grants no permission outside that scope. A request for one narrower task runs that task alone, with only the [user issues](#user-issues) it owns, and skips Task 1b; a request naming entries limits Task 1b to them and the neighbors a consolidation, split, merge or retitle must touch. **Task 3 cannot be narrowed to a subset:** it needs the connected closure defined in [hierarchy](references/hierarchy.md#scope-closure). Run it on each connected closure the request covers (a whole-wiki or all-MOCs request covers them all) or whose expansion the user explicitly authorizes; skip every other closure and report the exact disciplines, entries, and MOCs it would need.
+Run Step 0 before any requested task. The default pass runs Task 1 → Task 1b → refresh the scan → Task 2 → Task 3. A request for only QC, only links, only MOCs, or some entries narrows the run; the scan grants no permission outside that scope. A request for one narrower task runs that task alone, with only the [user issues](#user-issues) it owns, and skips Task 1b; a request naming entries limits Task 1b to them and the neighbors a consolidation, split, merge or retitle must touch. **Task 3 cannot be narrowed to a subset:** it needs the connected closure defined in [hierarchy](references/hierarchy.md#scope-closure). Run it on each connected closure the request covers (a whole-wiki or all-MOCs request covers them all) or whose expansion the user or an [explicit request](#explicit-requests) authorizes; skip every other closure and report its [required expansion](references/hierarchy.md#scope-closure).
 
 After an interrupted Task 1, 1b or 2 run, rescan and rebuild the worklists from
 the current files. Completed atomic repairs stay and become no-ops; re-plan a
@@ -75,13 +75,12 @@ outcome; generic maintenance (“lint and fix”, “clean up the wiki”) never
 activates one. Each request keeps its stated scope and postconditions, never
 widening into the default pass unless its protocol needs a wider closure or
 the user asks. A standalone retitle, alias-removal, split, merge or deletion
-request finishes with Tasks 1, 2 and 3 on the affected closure, without
-Task 1b. A request to fix the flagged issues (“fix the issues I flagged”)
-names the entries in `user_issues`. It runs the default order on them and
-the neighbors their repairs must touch, and it authorizes Task 3 on the
-connected closure of each entry whose issue concerns its tag or placement or
-is resolved by a retitle, split or merge, and of each missing entry it
-creates to resolve an issue.
+request finishes without Task 1b, with Tasks 1 and 2 on the entries it
+wrote. A request to fix the flagged issues (“fix the issues I flagged”)
+names the entries in `user_issues` and runs the default order on them and
+the neighbors their repairs must touch. Each of these requests authorizes
+Task 3 on the connected closure of its
+[seeds](references/hierarchy.md#scope-closure).
 
 ### User issues
 
@@ -92,7 +91,8 @@ blocked.
 
 - **Authority.** Each issue is the user's own request for that entry, the
   run's first worklist; beyond the entry it reaches only the neighbors a
-  consolidation, split, merge, retitle or link fix must touch.
+  consolidation, split, merge, retitle or link fix must touch, and a
+  [missing entry](references/refactors.md#create-a-missing-entry) it names.
 - **Repair.** Re-verify the problem against the note, its cited sources and
   the rules, then repair it under Task 1b's
   [evidence rule](#task-1b--content-repair), even with a change no builder
@@ -273,7 +273,7 @@ Read [link hygiene](references/link-hygiene.md) **before applying or rejecting a
 
 Apply one strict conceptual closeness bar to backfill and prune: an unambiguous reference or existing file is necessary but not sufficient, and passing mentions do not earn links. When unsure, leave text unlinked. Never auto-link a bare common noun to a bare slug or choose among ambiguous owners.
 
-**Prune only body-prose and Related-footer links, using the reference's removal triggers and dangler protocol; itemize every removal.** Preserve the label when unlinking. A genuine missing target is dropped to plain text, and Task 2 creates no replacement entry; when Task 1b ran, its [dangler hand-off](references/refactors.md#dangling-link-hand-off) already created every entry the missing-entry rule allows and glossed every remaining term a sentence needs. Report any other real knowledge gap as a missing-entry candidate with its creation routes. Case matches, aliases, unparsed on-disk files, ambiguous targets, a link to a real vault note outside `Wiki/` and `MOCs/` (`item10/non-entry`, kept and reported) and a missing root Task 3 creates are not genuine danglers; a link to such a root [waits for Task 3](references/link-hygiene.md#dangling-links-target-missing). Sources, parents, tags, MOC navigation links, embeds, and code samples remain outside this mechanism.
+**Prune only body-prose and Related-footer links, using the reference's removal triggers and dangler protocol; itemize every removal.** Preserve the label when unlinking. A genuine missing target is retargeted to an existing entry for its concept or dropped to plain text, and Task 2 creates no replacement entry; when Task 1b ran, its [dangler hand-off](references/refactors.md#dangling-link-hand-off) already found those entries, created every entry the missing-entry rule allows and glossed every remaining term a sentence needs. Report any other real knowledge gap as a missing-entry candidate with its creation routes. Case matches, aliases, unparsed on-disk files, ambiguous targets, a link to a real vault note outside `Wiki/` and `MOCs/` (`item10/non-entry`, kept and reported) and a missing root Task 3 creates are not genuine danglers; a link to such a root [waits for Task 3](references/link-hygiene.md#dangling-links-target-missing). Sources, parents, tags, MOC navigation links, embeds, and code samples remain outside this mechanism.
 
 ## Task 3 — Hierarchy: `parents:` and MOCs
 

@@ -420,8 +420,10 @@ _ENVIRONMENT_ARGUMENT_RE = re.compile(
     r"\s*\{\s*([A-Za-z]+)\*?\s*\}(?:\s*\{\d+\})?")
 _LATEX_TOKEN_RE = re.compile(r"\\(?:[A-Za-z]+|.)", re.DOTALL)
 _ENVIRONMENT_NAME_RE = re.compile(r"\s*\{[^{}]*\}")
+# Defining relations, and the update arrows an algorithm step assigns with.
 _DEFINING_RELATION_COMMANDS = frozenset(
-    (r"\coloneqq", r"\triangleq", r"\equiv", r"\defeq"))
+    (r"\coloneqq", r"\triangleq", r"\equiv", r"\defeq", r"\leftarrow",
+     r"\gets"))
 _RANGE_DOTS_COMMANDS = frozenset((r"\ldots", r"\dots", r"\cdots"))
 # Top-level gaps and connectives that end one equation on a line. A bare
 # ``\\`` outside a row layout starts no new line, so it joins two as well.
@@ -442,7 +444,7 @@ _CONJUNCTION_WORD_RE = re.compile(r"\s*\{\s*,?\s*and(?![A-Za-z])")
 # before the next one; a list or an index range (i = 1, \ldots, m) has none.
 _RELATION_AHEAD_RE = re.compile(
     r"(?:\\[,;:! ]|\\(?![,;:! ])|[^,;\\])*?(?:(?<![<>!=])=(?!=)|"
-    r"\\(?:coloneqq|triangleq|equiv|defeq)(?![A-Za-z]))")
+    r"\\(?:coloneqq|triangleq|equiv|defeq|leftarrow|gets)(?![A-Za-z]))")
 # A right side that only lists values (x = 0, 1 or i = 1, 2, 3) states an
 # index range or a domain, like a list closed by \ldots.
 _LIST_GAP = r"(?:\s|\\[,;:! ])*"
@@ -490,9 +492,10 @@ def _display_relation_segments(content):
     Braces (literal ``\\{`` too), parentheses, brackets and
     ``\\begin``...``\\end`` environments nest. Returns ``(text, lhs,
     range_qualifier, continued)`` per segment: ``lhs`` is the text before
-    the segment's first top-level ``=`` (or defining relation command), else
-    ``None``; ``range_qualifier`` marks an index range: a top-level ``,
-    \\ldots`` or a right side that only lists values (``x = 0, 1``);
+    the segment's first top-level ``=`` (or defining relation command or
+    update arrow), else ``None``; ``range_qualifier`` marks an index range:
+    a top-level ``, \\ldots`` or a right side that only lists values
+    (``x = 0, 1``);
     ``continued`` marks a segment opened by a comma, a semicolon or
     ``\\text{and}``, which carries on the condition before it.
     """
@@ -2076,6 +2079,11 @@ def run_self_test(verbose=False):
          "\\\\ 1 & x > 0 \\end{cases} \\end{gathered}\n$$\n\n"
          "$$\n\\begin{aligned} a &= 1, \\quad c = 2 \\end{aligned}\n$$",
          [10], ()),
+        ("update arrows beside another relation are two equations",
+         "$$\n\\theta \\leftarrow \\theta - \\eta g, \\qquad g = \\nabla J\n"
+         "$$\n\n$$\nw \\gets w - \\eta g_w, b \\gets b - \\eta g_b\n$$\n\n"
+         "$$\n\\theta \\leftarrow \\theta - \\eta \\nabla J(\\theta)\n$$",
+         [2, 6], ()),
         ("an inequality beside an equation is a condition, not an equation",
          "$$\na \\le 1, \\quad b = 2\n$$", [], ()),
         ("a display in a parsed table is outside body prose",

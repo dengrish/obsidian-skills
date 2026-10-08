@@ -2182,6 +2182,46 @@ runpy.run_path(script, run_name="__main__")
         finally:
             sys.path.remove(str(scripts))
 
+    def test_emitted_crop_command_runs_for_a_typed_variant(self):
+        """`auto_fig_bbox --emit extract` runs as printed and keeps the stored stem."""
+        import pymupdf
+
+        scripts = ROOT / "skills/figure-extract/scripts"
+        env = dict(os.environ, OBSIDIAN_VAULT_SHARED=str(ROOT / "shared/scripts"))
+        with tempfile.TemporaryDirectory(prefix="obsidian-emit-extract-") as tmp:
+            root = Path(tmp)
+            cases = (("Doe_Figs_2025", "doe_figs_2025"),
+                     ("Müller_Figs_2025", "Müller_Figs_2025"))
+            for number, (stored, typed) in enumerate(cases):
+                with self.subTest(stored=stored):
+                    folder = root / ("case%d" % number)
+                    folder.mkdir()
+                    with pymupdf.open() as document:
+                        page = document.new_page(width=612, height=792)
+                        page.draw_rect((100, 150, 500, 350), color=(0, 0, 1),
+                                       fill=(0.3, 0.5, 0.8))
+                        page.insert_text((100, 400), "Figure 1. A blue rectangle.")
+                        document.save(folder / (stored + ".pdf"))
+                    typed_path = folder / (typed + ".pdf")
+                    if not os.path.lexists(typed_path):
+                        self.skipTest("this filesystem does not resolve the variant")
+                    emitted = subprocess.run(
+                        [sys.executable, str(scripts / "auto_fig_bbox.py"),
+                         str(typed_path), "--emit", "extract"],
+                        env=env, capture_output=True, text=True,
+                        encoding="utf-8", timeout=60)
+                    self.assertEqual(emitted.returncode, 0, emitted.stderr)
+                    out = root / ("out%d" % number)
+                    command = [str(out) if token == "/EDIT-THIS/path/to/vault/Sources/Images"
+                               else token for token in
+                               shlex.split(emitted.stdout.replace("\\\n", " "))]
+                    result = subprocess.run(command, env=env, capture_output=True,
+                                            text=True, encoding="utf-8",
+                                            timeout=60)
+                    self.assertEqual(result.returncode, 0,
+                                     result.stdout + result.stderr)
+                    self.assertIn(stored + "_fig_1.png", os.listdir(out))
+
 
 if __name__ == "__main__":
     unittest.main()

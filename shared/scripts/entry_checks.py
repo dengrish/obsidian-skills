@@ -3,7 +3,7 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 7's description subject, item 9's acronym-title expansion and list
+item 4's source-identity pairs, item 7's description subject, item 9's acronym-title expansion and list
 indentation, item 17's single-word alias hint, and item 19's card set,
 primary answer on card line 3, primary card and Spaced Repetition markers in
 the body and on card lines) and the discipline-root test from this one
@@ -40,6 +40,7 @@ from entry_structure import (  # noqa: E402
     math_title_plain_text,
     normalized_answer_surface,
     source_reference_kind,
+    source_stem,
     strip_code,
     strip_fenced,
     strip_indented,
@@ -56,6 +57,7 @@ from organism_names import (  # noqa: E402
     organism_title_classification,
     scientific_abbreviation_matches,
 )
+from naming import chapter_book_stem, core_stem  # noqa: E402
 from plurals import pluralize, singular_forms, singular_keys  # noqa: E402
 from portable_names import portable_identity  # noqa: E402
 from slugify import SlugError, base_term, has_parenthetical, slug_stem  # noqa: E402
@@ -102,13 +104,62 @@ __all__ = [
     "primary_card_label",
     "primary_line3_faults",
     "pure_math_opener_markup",
+    "source_identity_pairs",
     "source_meta_findings",
     "sr_card_marker_faults",
+    "sr_card_syntax_fault",
     "sr_inline_marker",
     "sr_marker_findings",
     "source_reference_kind",
     "unenumerated_bold_findings",
 ]
+
+
+# ---------------------------------------------------------------------------
+# item 4: one document, one citation
+# ---------------------------------------------------------------------------
+
+def _source_filename(value):
+    """The unfolded filename a ``sources:`` item names: no ``[[ ]]``, display
+    pipe, anchor or folder.  naming.py reads the canonical capitals of its
+    ``_src`` rule, which :func:`source_stem` folds away."""
+    name = (value or "").strip()
+    if name.startswith("[[") and name.endswith("]]"):
+        name = name[2:-2]
+    name = name.split("|", 1)[0].split("#", 1)[0]
+    return name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+
+
+def source_identity_pairs(values):
+    """Item 4: ``(kind, first, second)`` index pairs of ``sources:`` items
+    that may name one document.
+
+    ``same-stem`` pairs a Markdown item (``second``) with the first PDF item
+    of the same folded stem (``first``): a PDF summary in ``Articles/`` takes
+    its PDF's stem, but a web clipping can share it, so the pair is a
+    provenance-review candidate.  ``book-and-chapter`` pairs a chapter PDF
+    (``second``) with the first PDF whose core stem (``_src`` removed, ``_N``
+    kept) is the book the chapter names: a split book is cited in one form.
+    URL items and items without an extension never pair.
+    """
+    pdfs, mds, books, chapters = {}, [], {}, []
+    for index, value in enumerate(values):
+        stem, ext = source_stem(value)
+        if not stem:
+            continue
+        if ext == "pdf":
+            pdfs.setdefault(stem, index)
+            name = _source_filename(value)
+            books.setdefault(portable_identity(core_stem(name)), index)
+            book = chapter_book_stem(name)
+            if book:
+                chapters.append((portable_identity(book), index))
+        elif ext == "md":
+            mds.append((stem, index))
+    return ([("book-and-chapter", books[book], index)
+             for book, index in chapters if book in books]
+            + [("same-stem", pdfs[stem], index)
+               for stem, index in mds if stem in pdfs])
 
 
 # ---------------------------------------------------------------------------
@@ -374,8 +425,7 @@ def description_subject_findings(description, title):
 _ACRONYM_TITLE_RE = re.compile(r"[A-Z0-9]+(?:-[A-Z0-9]+)*")
 
 #: An expansion parenthetical directly after the bold, past the noun
-#: ``algorithm`` and a date parenthetical as in :data:`BOLD_PAREN_RE`, but
-#: without its 60-character cap, which a long expansion exceeds.
+#: ``algorithm`` and a date parenthetical as in :data:`BOLD_PAREN_RE`.
 _EXPANSION_AFTER_BOLD_RE = re.compile(
     r"(?:\s+algorithm)?\s*"
     r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)[^()\n]*\)\s*)?"
@@ -432,19 +482,17 @@ def _line_of(text, offset):
     return text.count("\n", 0, offset) + 1
 
 
-def merge_scar_findings(prose, separator_line=None):
+def merge_scar_findings(prose):
     """Item 13's body scars: a schema key, a stray ``---`` or a digit line.
 
     Listings are masked first: a Software entry legitimately shows YAML in a
     fence, and deleting a line from the entry's own example is destructive.
-    ``separator_line`` is a zero-based prose line to ignore: the structural
-    separator before Flashcards when a missing Related footer leaves it inside
-    ``prose``. Each finding's ``line`` is one-based within ``prose``.
+    ``prose`` ends before the Related footer, or before the structural
+    separator above Flashcards when the footer is missing. Each finding's
+    ``line`` is one-based within ``prose``.
     """
-    lines = strip_code(prose or "").split("\n")
-    if separator_line is not None and 0 <= separator_line < len(lines):
-        lines[separator_line] = ""
-    scan = "\n".join(lines)
+    scan = strip_code(prose or "")
+    lines = scan.split("\n")
     findings = []
     key = _SCHEMA_KEY_LINE_RE.search(scan)
     if key:
@@ -529,28 +577,29 @@ def list_indent_findings(prose, display_spans=(), table_spans=None):
     """Item 9: a list item's display or paragraph left outside its item.
 
     A display block or a continuation paragraph belongs to the list item
-    above it when the list resumes after it with that item's next sibling:
-    the next number of an ordered list, or, when the gap opens with a
-    display, the same bullet or number again. A display also belongs to the
-    item when the item's text before it ends with a colon and the display
-    ends the whole list; inside an outer item it ends only a nested list,
-    and the numbered list goes on. Indented less than the item's text
-    column (3 spaces after ``1.``, 4 after ``10.``), the block ends the list
-    in Obsidian, so the remedy is to indent it. A nested list belongs to
-    the item when its first marker sits past the item's marker but short of
-    its text column, with another bullet or delimiter: CommonMark starts a
-    new list there, which ends the item's list.
+    above it when its ordered list resumes after it with that item's next
+    number, or, when the gap opens with a display, the same number again.
+    A display also belongs to the item when the item's text before it ends
+    with a colon and the display ends the whole list; inside an outer item
+    it ends only a nested list, and the numbered list goes on. Indented
+    less than the item's text column (3 spaces after ``1.``, 4 after
+    ``10.``), the block ends the list in Obsidian, so the remedy is to
+    indent it. A nested list belongs to the item when its first marker sits
+    past the item's marker but short of its text column, with another
+    bullet or delimiter or numbered from 1 again: CommonMark starts a new
+    list there, which ends the item's list, or numbers it as the list's
+    next items.
 
     ``display_spans`` are the paired displays of the code-masked prose, as
     ``equation_coverage.find_display_spans`` returns them for the equation
     checks, and ``table_spans`` its parsed tables (computed when ``None``).
-    A listing, table or quote in the gap is not reported, and a
-    heading or rule there ends the list on purpose, so the gap reports
-    nothing. A list inside a quote or callout is not checked. Each
-    finding's ``line`` and ``item_line`` are one-based within ``prose``;
-    ``kind`` is ``display``, ``paragraph`` or ``list``; ``indent`` is the
-    block's indentation and ``column`` the item's text column, both in
-    spaces.
+    A listing, table or quote in the gap is not reported, and a heading or
+    rule there ends the list on purpose, so of the gap before it only a
+    display after the item's colon is reported. A list inside a quote or
+    callout is not checked. Each finding's ``line`` and ``item_line`` are
+    one-based within ``prose``; ``kind`` is ``display``, ``paragraph`` or
+    ``list``; ``indent`` is the block's indentation and ``column`` the
+    item's text column, both in spaces.
     """
     lines = strip_code(prose or "").split("\n")
     visible = mask_body_comments(prose or "").split("\n")
@@ -573,7 +622,7 @@ def list_indent_findings(prose, display_spans=(), table_spans=None):
             "message": (
                 "%s belongs to the list item above it but is indented "
                 "%d space%s, short of the item's text column at %d, so "
-                "Obsidian ends the list there — indent it %d spaces"
+                "Obsidian renders it outside the item — indent it %d spaces"
                 % ({"display": "display block", "list": "nested list"}.get(
                        block["kind"], "continuation paragraph"),
                    block["indent"], "" if block["indent"] == 1 else "s",
@@ -619,17 +668,20 @@ def list_indent_findings(prose, display_spans=(), table_spans=None):
                     last = pending["item"]
                     sibling = (item["indent"] == last["indent"]
                                and item["kind"] == last["kind"])
-                    resolve(not sibling or not (
-                        (last["number"] is not None
-                         and item["number"] == last["number"] + 1)
+                    # A resumed bullet list proves nothing: a display
+                    # between two bullet lists may belong to neither.
+                    resolve(not sibling or last["number"] is None or not (
+                        item["number"] == last["number"] + 1
                         or (item["number"] == last["number"]
                             and pending["blocks"][0]["kind"] == "display")))
                 owner = open_items[-1] if open_items else None
                 if (owner is not None
                         and owner["indent"] < item["indent"] < owner["content"]
-                        and item["kind"] != owner["kind"]):
+                        and (item["kind"] != owner["kind"]
+                             or item["number"] == 1)):
                     # A nested list short of its item's text column starts
-                    # a new list, which ends the item's list.
+                    # a new list, which ends the item's list, or with the
+                    # same delimiter from 1 joins it as its next items.
                     report({"line": index, "kind": "list",
                             "indent": item["indent"]}, owner)
                 while open_items and item["indent"] < open_items[-1]["content"]:
@@ -673,7 +725,8 @@ def list_indent_findings(prose, display_spans=(), table_spans=None):
             block["reported"] = (block["reported"]
                                  and width < pending["item"]["content"])
             pending["blocks"].append(block)
-            pending["cancelled"] = pending["cancelled"] or kind == "break"
+            if kind == "break":
+                resolve(True)
         previous = "paragraph" if kind == "paragraph" else "other"
         if kind != "listing":
             last_text = lines[end]
@@ -1153,8 +1206,9 @@ def is_discipline_root(slug, tags, disciplines):
 def flashcard_set_faults(card_count):
     """Item 19: the card-set finding for a Flashcards section.
 
-    ``card_count`` counts the cards with at least three visible lines; a
-    malformed block keeps its own finding. An entry has one ``??`` definition
+    ``card_count`` counts the blocks ``card_block_numbers`` names that have
+    three or more lines; any other block keeps its own finding. An entry has
+    one ``??`` definition
     card, so every further card is an extra card to remove: a fixable
     finding. Returns the messages lint_entry and the scanner share, so the
     two tools agree. Position is not checked: the primary card is identified
@@ -1170,7 +1224,8 @@ def flashcard_set_faults(card_count):
 
 #: Message prefix for a per-card finding on an extra card, which the card's
 #: removal resolves; content after its line 3 that is not a recognized
-#: attachment stays and keeps its own finding. Both tools use it.
+#: attachment stays and keeps its own finding, unless it holds card syntax
+#: (``sr_card_syntax_fault``). Both tools use it.
 EXTRA_CARD_PREFIX = ("extra card %d (remove this extra card; it needs no "
                      "other repair): ")
 
@@ -1250,7 +1305,7 @@ BOLD_PAREN_RE = re.compile(
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
     r"(?:\((?:[?0-9]|b\.|c\.|fl\.|annual\b|ongoing\b)"
     r"[^()\n]{0,59}\)\s*)?"
-    r"\((?P<paren>[A-Za-z*][^()\n]{0,59})\)",
+    r"\((?P<paren>[A-Za-z*][^()\n]*)\)",
     re.IGNORECASE)
 
 #: A lexical marker LEADING a parenthetical name -- ``(singular,
@@ -1615,6 +1670,27 @@ def sr_card_marker_faults(card):
     return out
 
 
+def sr_card_syntax_fault(block, after=0):
+    """Item 19: Flashcards-section content the plugin reviews as a card.
+
+    ``block`` is one block from ``parse_flashcard_blocks``; its first
+    ``after`` lines, a card's three content lines, are context only. Past
+    them, a ``::`` or ``:::`` outside a backtick span, or a line that is
+    only ``?`` or ``??`` after text in its paragraph (``sr_marker_findings``),
+    makes the content an extra card to remove, not text to preserve. Returns
+    the fault, which completes "block N ..." or "the content after line 3
+    ...", or None. Both tools use it.
+    """
+    marker = next((row["marker"] for row in sr_marker_findings(
+        "\n".join(block or ())) if row["line"] > after
+        and row["marker"] in SR_INLINE_SEPARATORS + ("?", "??")), None)
+    if marker is None:
+        return None
+    return ("holds `%s`, Spaced Repetition card syntax, so the plugin reviews "
+            "it as a card: remove it as an extra card under the card set and "
+            "quote it verbatim in the report" % marker)
+
+
 # ---------------------------------------------------------------------------
 # Differential fixtures
 # ---------------------------------------------------------------------------
@@ -1798,6 +1874,11 @@ SHARED_QUIET = (
      "\n\n   Here $s$ is the scale.\n"
      "3. Repeat from step 1 until every run is weighed.",
      "item9/list-indent", "9-list-indent"),
+    ("item9 a display and its explanation between two bullet lists",
+     "The rate has two inputs:\n\n- the hits;\n- the runs.\n\n$$\n"
+     "r = \\frac{h}{n}\n$$\n\nHere $h$ counts the hits and $n$ the runs.\n\n"
+     "Two uses are common:\n\n- ranking runs;\n- picking a threshold.",
+     "item9/list-indent", "9-list-indent"),
 )
 
 
@@ -1841,6 +1922,20 @@ def run_self_test(verbose=False):
           [source_reference_kind(value) for value in (
               "https://example.org:1/", "https://example.org:65535/a")],
           ["url", "url"])
+    chapter = "[[Prince_UDL_2026_02_SupLearn.pdf#page=3]]"
+    check("a chapter beside its book, `_src` aside, is one document; two "
+          "chapters, a `_2` book and a URL are not",
+          [source_identity_pairs([book, chapter]) for book in (
+              "[[Sources/PDFs/Prince_UDL_2026.pdf#page=40]]",
+              "[[Prince_UDL_2026_src.pdf#page=40]]",
+              "[[Prince_UDL_2026_01_Intro.pdf#page=1]]",
+              "[[Prince_UDL_2026_2.pdf#page=4]]",
+              "https://example.org/Prince_UDL_2026.pdf")],
+          [[("book-and-chapter", 0, 1)]] * 2 + [[]] * 3)
+    check("a Markdown item beside a PDF of the same folded stem pairs",
+          source_identity_pairs(["[[Doe_X_2025.pdf#page=2]]",
+                                 "[[Doe_X_2026.md]]", "[[doe_x_2025.md]]"]),
+          [("same-stem", 0, 2)])
 
     # item 5
     check("a qualified slug and an unnamed bare word pass the floor",
@@ -1940,14 +2035,12 @@ def run_self_test(verbose=False):
           [finding["line"] for finding in merge_scar_findings(
               "Opener.\n\ntags: x\n\n---\n\n$$\nx\n$$\n\n7")],
           [3, 5, 11])
-    check("listings, Setext underlines, the ignored separator and display "
-          "math are not scars",
-          [merge_scar_findings(prose, separator) for prose, separator in (
-              ("Opener.\n\n```yaml\ntype: Software\n```", None),
-              ("Heading\n---", None),
-              ("Opener.\n\n---", 2),
-              ("Opener.\n\n$$\n2\n$$", None))],
-          [[], [], [], []])
+    check("listings, Setext underlines and display math are not scars",
+          [merge_scar_findings(prose) for prose in (
+              "Opener.\n\n```yaml\ntype: Software\n```",
+              "Heading\n---",
+              "Opener.\n\n$$\n2\n$$")],
+          [[], [], []])
     check("inside a list item, a key line is a scar and a digit in an "
           "indented display is not, as at the top level",
           [checks(merge_scar_findings(prose)) for prose in (
@@ -1993,6 +2086,11 @@ def run_self_test(verbose=False):
           "the end of the list, but its explanation is not",
           list_indent("1. Count.\n2. Sum:\n\n" + display + "\n\nHere x sums."),
           [(4, "display")])
+    check("a later heading or rule leaves that display reported",
+          [list_indent("1. Count.\n2. Sum:\n\n" + display + tail)
+           for tail in ("\n\nHere x sums.\n\n## Uses\n\nText.",
+                        "\n\nHere x sums.\n\n---\n\nText.", "\n\n## Uses")],
+          [[(4, "display")], [(4, "display")], [(4, "display")]])
     check("prose between two lists, a new list from 1, a heading or rule "
           "between steps and a lead-in sentence are not reported",
           [list_indent(prose) for prose in (
@@ -2002,11 +2100,15 @@ def run_self_test(verbose=False):
               "1. a\n\n---\n\n2. b",
               "1. a\n2. b.\n\nThen it predicts:\n\n" + display)],
           [[], [], [], [], []])
-    check("a bullet gap is reported only when it opens with a display",
+    check("a bullet gap is reported only for a display after a colon; a "
+          "display or text between two bullet lists is not",
           [list_indent(prose) for prose in (
+              "- a:\n\n" + display + "\n\nHere x is one.\n\n- b",
               "- a\n\n" + display + "\n\n- b",
+              "- a\n- b\n\n" + display + "\n\nHere x is one.\n\nOthers "
+              "are:\n\n- c\n- d",
               "- a\n\nText.\n\n- b")],
-          [[(3, "display")], []])
+          [[(3, "display")], [], [], []])
     check("a resumed step may interrupt a paragraph; a year opening a line "
           "starts no list",
           [list_indent(prose) for prose in (
@@ -2043,11 +2145,19 @@ def run_self_test(verbose=False):
               "1. a\n2. It combines:\n   - rounds, by:\n\n" + display
               + "\n\nHere x scales.")],
           [[], [], [(5, "display")]])
-    check("a step after a misplaced nested numbered list continues the "
-          "list, so a bullet short of that step's column is reported",
+    check("a misplaced nested numbered list is reported, and the step after "
+          "it continues the list, so a bullet short of that step's column "
+          "is reported too",
           list_indent("1. a\n2. b:\n\n  1. sub a\n  2. sub b\n3. c\n"
                       "  - sub c\n4. d"),
-          [(7, "list")])
+          [(4, "list"), (7, "list")])
+    check("a same-delimiter sub-list from 1 short of the step's text column "
+          "is reported, 2 spaces or 1; at the column it is not",
+          [list_indent(prose) for prose in (
+              "1. a\n2. b:\n  1. sub a\n  2. sub b\n3. c",
+              "1. a:\n 1. sub a\n2. b",
+              "1. a\n2. b:\n   1. sub a\n   2. sub b\n3. c")],
+          [[(3, "list")], [(2, "list")], []])
 
     # item 14
     check("source-meta phrases and the technical source compounds",
@@ -2269,8 +2379,14 @@ def run_self_test(verbose=False):
           [label_drops_head("ensemble", "Ensemble learning", (),
                             "A group of predictors is called an *ensemble*."),
            label_drops_head("ensemble", "Ensemble learning", (),
-                            "Ensemble learning combines predictors.")],
-          ["", "learning"])
+                            "Ensemble learning combines predictors."),
+           label_drops_head("transformers", "Transformer architecture", (),
+                            "The **transformer architecture**, or simply the "
+                            "*transformer*, is built on attention."),
+           label_drops_head("transformer", "Transformer architecture", (),
+                            "The **transformer architecture** is built on "
+                            "attention.")],
+          ["", "learning", "", "architecture"])
     check("a one-word surface folds to its cross-domain set word",
           [cross_domain_word(text) for text in (
               "target", "Targets", "attributes", "sensitivities",
@@ -2460,6 +2576,26 @@ def run_self_test(verbose=False):
               ["The $a :: b$ rule.", "??", "A::B"])],
           ["write a math `::` as `\\mathbin{:}\\mathbin{:}`",
            "the answer line holds no `::`"])
+    check("card syntax after a card's line 3, or in a block that is not a "
+          "card, is an extra card; other content, code and a comment are not",
+          [(sr_card_syntax_fault(block, after) or "")[:10] for block, after in (
+              (["Why square the errors::Large errors weigh more."], 0),
+              (["Why?", "?"], 0),
+              (["Cue.", "??", "Term", "Why?", "?", "Because."], 3),
+              (["Cue.", "??", "Term", "Q::A"], 3),
+              (["Cue.", "??", "Term", "?"], 3),
+              (["Cue.", "??", "Term::x"], 3),
+              (["A stray user line."], 0),
+              (["Cue.", "??", "Term", "<!--ordinary comment-->"], 3),
+              (["The `a::b` operator."], 0),
+              (["?"], 0))],
+          ["holds `::`", "holds `?`,", "holds `?`,", "holds `::`",
+           "holds `?`,", "", "", "", "", ""])
+    check("a card-syntax fault asks for the content's removal as an extra "
+          "card",
+          sr_card_syntax_fault(["Q::A"]).endswith(
+              "remove it as an extra card under the card set and quote it "
+              "verbatim in the report"), True)
     check("one card, or none, is a complete card set",
           [flashcard_set_faults(count) for count in (0, 1)], [[], []])
     extra = flashcard_set_faults(2)
@@ -2683,6 +2819,18 @@ def run_self_test(verbose=False):
            None,
            'the parenthetical "RC" is not an opener-established, alias-bound '
            "counterpart of the title"])
+    hdbscan_full = ("Hierarchical Density-Based Spatial Clustering of "
+                    "Applications with Noise")
+    hdbscan = ("HDBSCAN", ["hierarchical-density-based-spatial-clustering-of-"
+                           "applications-with-noise"],
+               "**HDBSCAN** (%s) clusters points." % hdbscan_full)
+    check("an expansion over 60 characters binds, and line 3 must carry it",
+          [flashcard_primary_answer(*hdbscan)[1]] +
+          [flashcard_line3_fault(line, *hdbscan)
+           for line in ("HDBSCAN (%s)" % hdbscan_full, "HDBSCAN")],
+          [hdbscan_full, None,
+           "the established counterpart must appear exactly as (%s)"
+           % hdbscan_full])
 
     failed = [case for case in cases if not case[1]]
     for label, ok, got, want in cases:
