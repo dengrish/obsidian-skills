@@ -8958,6 +8958,16 @@ def check_refactor_protocol(rep, _conv):
         # retitle beside the other retitles wiki-lint applies.
         (CONVENTIONS, "acronym-or-full-form choice breaks wiki-build's",
          "§4b no longer lists the acronym-or-full-form retitle"),
+        # 2026-10-08 (knowledge 1.24.1): an Organism titled by a common name
+        # is retitled to the scientific name the builder's Organism rule
+        # requires.
+        (refactors, "is titled by a common name where the builder's",
+         "no longer retitles an Organism titled by a common name"),
+        (os.path.join(refs, "qc-items.md"), "an `Organism` titled by a "
+         "common name where the", "item 5 no longer retitles an Organism "
+         "titled by a common name"),
+        (CONVENTIONS, "an `Organism` titled by a common name to the "
+         "scientific name", "§4b no longer lists the Organism retitle"),
         (refactors, "### Finish an interrupted retitle",
          "lost the section that finishes a half-published retitle"),
         (refactors, "Finish that retitle; do not merge",

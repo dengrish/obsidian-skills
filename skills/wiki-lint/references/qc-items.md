@@ -234,7 +234,9 @@ representable alternative.
 
 A title whose acronym-or-full-form choice breaks the
 [title rule](../../wiki-build/references/writing.md#title) is retitled the
-same way. The semantic pass checks every acronym or expanded title against
+same way, and so is an `Organism` titled by a common name where the
+[Organism rule](../../wiki-build/references/rare-types.md#the-ten-rare-types)
+requires its scientific name (`Zebrafish` takes `Danio rerio`). The semantic pass checks every acronym or expanded title against
 it: `PPO` takes `Proximal policy optimization`, and `Long short-term memory`
 takes `LSTM`. When the rule's form is determinate and its slug is free, Task
 1b retitles the entry, keeping the old form as an alias when it is a valid
