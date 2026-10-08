@@ -72,10 +72,10 @@ Keep each claim and its qualification together without packing design, populatio
 
 State the claim plainly and keep the scope, comparator, numbers and any needed
 design limit with it. Use one sentence when it remains clear, or adjacent
-sentences in the same paragraph or callout bullet. That unit must satisfy the
-four rules; each sentence need not repeat every element. The confidence ladder
-below determines whether a separate design limit is needed. Do not invent one
-merely to complete a two-sentence pattern.
+sentences in the same paragraph, list item or callout bullet. That unit must
+satisfy the four rules; each sentence need not repeat every element. The
+confidence ladder below determines whether a separate design limit is needed.
+Do not invent one merely to complete a two-sentence pattern.
 
 | A crowded sentence | The claim explained in adjacent sentences |
 |---|---|

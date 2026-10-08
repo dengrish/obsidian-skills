@@ -6047,11 +6047,18 @@ SELFTEST_MIN_CASES = {
     "shared/scripts/check_parsers.py": 28,
     # 2026-10-06 (knowledge 1.22.0): an ellipsis or range dot is not an
     # extension.
-    "shared/scripts/code_typography.py": 23,
+    # 2026-10-07 (knowledge 1.23.0): a display or caption indented inside a
+    # list item is excluded like a top-level one.
+    "shared/scripts/code_typography.py": 25,
     # 2026-10-06 (knowledge 1.22.0): bold readers stay linear on math spans.
     # 2026-10-06 (knowledge 1.22.0): plural floor words, and the opener is
     # the first prose paragraph.
-    "shared/scripts/entry_checks.py": 115,
+    # 2026-10-07 (knowledge 1.23.0): list indentation (item 9), and a body
+    # key or display indented inside a list item read as at the top level.
+    # 2026-10-07 (knowledge 1.23.0): a nested list short of its item's text
+    # column, a display after a nested item's colon, and a step after a
+    # misplaced nested list.
+    "shared/scripts/entry_checks.py": 126,
     # 2026-10-02: the cases for the removed prose-calculation cues
     # (averaged probability, majority vote, regression average) went with
     # them; the new cue and denominator cases still raise the floor net.
@@ -6060,7 +6067,9 @@ SELFTEST_MIN_CASES = {
     # 2026-10-06 (knowledge 1.22.0): display spans as the finders pair them.
     # 2026-10-07 (knowledge 1.22.0): a comma-opened list of values is an
     # index range.
-    "shared/scripts/equation_coverage.py": 225,
+    # 2026-10-07 (knowledge 1.23.0): displays and cues indented inside list
+    # items, and a cue that cannot bridge into a nested item.
+    "shared/scripts/equation_coverage.py": 231,
     # 2026-10-06 (knowledge 1.22.0): a BOM on line 1, unstorable stems, and
     # records that would read back as comments.
     "shared/scripts/figure_state.py": 17,
@@ -6069,7 +6078,9 @@ SELFTEST_MIN_CASES = {
     # 2026-10-07 (knowledge 1.22.0): a person's initials and surname are no
     # alias candidate.
     "shared/scripts/introduced_aliases.py": 42,
-    "shared/scripts/markdown_tables.py": 42,
+    # 2026-10-07 (knowledge 1.23.0): a table indented inside a list item
+    # ends at a block that starts at the item's text column.
+    "shared/scripts/markdown_tables.py": 44,
     "shared/scripts/naming.py": 228,
     "shared/scripts/note_provenance.py": 12,
     # 2026-10-06 (knowledge 1.22.0): the bold reader stays linear on math.
@@ -6080,7 +6091,11 @@ SELFTEST_MIN_CASES = {
     # that repeats the title.
     # 2026-10-07 (knowledge 1.22.0): the open floruit Person form.
     # 2026-10-07 (knowledge 1.22.0): an opener after a same-line comment.
-    "shared/scripts/entry_structure.py": 197,
+    # 2026-10-07 (knowledge 1.23.0): a fence on a list marker line, and
+    # content indented under 10. that is no indented listing.
+    # 2026-10-07 (knowledge 1.23.0): a lazy continuation line keeps its
+    # step's list context.
+    "shared/scripts/entry_structure.py": 200,
     "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
     # 2026-10-06 (knowledge 1.22.0): `move` respelling and `--owned-dir` cases.
@@ -6161,7 +6176,11 @@ SELFTEST_MIN_CASES = {
     # so a `$$` on the math's line or in inline code hides nothing.
     # 2026-10-07 (knowledge 1.22.0): per-item bullets sit under their
     # introducing sentence, and a Wiki entry link in body prose is clean.
-    "skills/paper-summarize/scripts/note_lint.py": 306,
+    # 2026-10-07 (knowledge 1.23.0): numbered lists outside Methods, and a
+    # display, paragraph or exhibit indented inside a step is step content.
+    # 2026-10-07 (knowledge 1.23.0): a paragraph inside a Methods step is
+    # Methods prose, and a `1)` list is reported.
+    "skills/paper-summarize/scripts/note_lint.py": 332,
     # 2026-10-06 (knowledge 1.22.0): a named split book lists its chapters' figures.
     # 2026-10-06 (knowledge 1.22.0): named inventory gaps, --vault previews,
     # stored stem spellings and the unorganized remedy's rename cost.
@@ -6250,7 +6269,11 @@ SELFTEST_MIN_CASES = {
     # 2026-10-06 (knowledge 1.22.0): a heading that repeats the title, a
     # leading non-title heading, and plural cross-domain aliases.
     # 2026-10-06 (knowledge 1.22.0): a frequency hedge in the description.
-    "skills/wiki-build/scripts/lint_entry.py": 494,
+    # 2026-10-07 (knowledge 1.23.0): 9-list-indent, and a numbered
+    # procedure's indented displays and paragraphs read as top-level ones.
+    # 2026-10-07 (knowledge 1.23.0): a nested list short of its step's text
+    # column, and a display after a nested item's colon stays quiet.
+    "skills/wiki-build/scripts/lint_entry.py": 510,
     # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
     # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
     # `.md` or path, and keep one another vault file needs.
@@ -6285,7 +6308,11 @@ SELFTEST_MIN_CASES = {
     # 2026-10-06 (knowledge 1.22.0): settle_keys and version-1 ledgers, a
     # case-variant WIKI, and qualified targets beside an outside twin.
     # 2026-10-07 (knowledge 1.22.0): a note in a symlinked outside folder.
-    "skills/wiki-lint/scripts/scan_vault.py": 707,
+    # 2026-10-07 (knowledge 1.23.0): item9/list-indent, and a numbered
+    # procedure's indented displays and paragraphs read as top-level ones.
+    # 2026-10-07 (knowledge 1.23.0): a nested list short of its step's text
+    # column, and a display after a nested item's colon stays quiet.
+    "skills/wiki-lint/scripts/scan_vault.py": 723,
 }
 
 
@@ -8947,10 +8974,57 @@ WRITING_RULE_PINS = (
         # unnamed neighbor glossed, never built.
         "a named-entity request builds only the entities it names",
         # 2026-10-06 (knowledge 1.22.0): only the listed acronyms override a
-        # full form with textbook usage; staged facts take one bullet each.
+        # full form with textbook usage.
         "only these listed acronyms override that usage",
-        "Time order alone does not make a chain",
-        "one bullet per stage",
+        "Time order alone does not make a causal chain",
+        # 2026-10-07 (knowledge 1.23.0): body content takes bullets, a
+        # numbered list or prose by its shape. A procedure of three or more
+        # steps, or the time-ordered stages of one process, is a numbered
+        # list whose steps keep their reasons; parallel facts by period stay
+        # bullets; a causal chain or argument stays prose; list content is
+        # indented to the item's text column.
+        "Bullets, numbered lists and prose",
+        "A list never replaces explanation: each item keeps its why",
+        "It needs three or more discrete steps",
+        "Introduce the list with one prose sentence",
+        "in the same grammatical form across the list",
+        "Repeat from step N until",
+        "follows the list in prose",
+        "take a numbered list, one item per stage",
+        "Parallel facts by period or age window stay bullets",
+        "Prose** carries a causal chain",
+        "A sequence of fewer than three steps is prose too",
+        "Number the items with sequential markers",
+        "to the item's text column (3 spaces after `1. `, 4 after `10. `)",
+        "Nest at most one level",
+        "never a bold lead word",
+        # 2026-10-07 (knowledge 1.23.0): shared notation precedes the list,
+        # unnamed stages open with the process's action, and a stage name
+        # keeps its first-mention link or italics.
+        "Notation and conditions that hold for every step go in the prose "
+        "before the list",
+        "each opened by its stage name when the source names the stages, and "
+        "otherwise by the process's action",
+        "a stage name keeps its first-mention wikilink",
+    )),
+    # 2026-10-07 (knowledge 1.23.0): a display inside a list item is
+    # indented to the item's text column and explained inside the item, and
+    # a numbered step never opens with a bold lead word.
+    (("wiki-build", "references", "equations.md"), (
+        "A display inside a list item belongs to that item",
+        "Indent both `$$` lines, the math between them and the explanation "
+        "to the item's text column",
+        "A display or paragraph left at the margin ends the list",
+        "Display blocks appear only in the body, in prose or inside a list "
+        "item",
+    )),
+    (("wiki-build", "references", "flashcards-and-emphasis.md"), (
+        "never opens with a bold lead word or label",
+        "Pattern 2 anchors bullets only",
+        "A stage name that opens a step keeps its first-mention wikilink",
+    )),
+    (("wiki-build", "references", "quality-checklist.md"), (
+        "as a numbered list whose steps keep their reasons",
     )),
     # 2026-10-06 (knowledge 1.22.0): citing another vault source for a date
     # or a version claim never marks an unbuilt source as built.
@@ -9009,10 +9083,27 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "qc-items.md"), (
         "An entry that conflates two concepts still gets one tag",
     )),
-    # 2026-10-06 (knowledge 1.22.0): time-ordered stages that each carry
-    # their own facts stay bullets.
+    # 2026-10-07 (knowledge 1.23.0): item 9 judges each passage's form by
+    # its shape; Task 1 turns an explicit procedure or the stages of one
+    # process into a numbered list, and a listed causal chain or argument
+    # into prose.
     (("wiki-lint", "references", "qc-items.md"), (
-        "never time-ordered stages whose bullets each stand alone",
+        "a numbered list for a procedure or the time-ordered stages of one "
+        "process",
+        "Every list item keeps its reason",
+        "Convert an already explicit causal chain or argument from bullets "
+        "or a numbered list to prose",
+        "Rewrite an already explicit procedure or the time-ordered stages "
+        "of one process, with three or more steps",
+        "from prose or unnumbered bullets as a numbered list",
+        "A display moves into its step with its math unchanged",
+        # 2026-10-07 (knowledge 1.23.0): the conversion keeps period facts as
+        # bullets, opens unnamed stages with the process's action, and keeps
+        # shared notation before the list.
+        "Parallel facts by period or age window stay bullets",
+        "naming unnamed stages is Task 1b work, from the cited source",
+        "Notation and conditions that hold for every step stay in the prose "
+        "before the list",
     )),
     # Reading notes explain each equation and bound, and check equations on
     # the page image, never the text capture.
@@ -9027,9 +9118,69 @@ WRITING_RULE_PINS = (
         "one self-contained bullet per item",
         "Give every such bound a one-sentence intuitive reason",
         "A concept that has its own Wiki entry is linked to that entry",
+        # 2026-10-07 (knowledge 1.23.0): reading-note body content takes
+        # bullets, a numbered list or prose by its shape. A procedure of
+        # three or more steps, or the stages of one process, is a numbered
+        # list whose steps keep their reasons, a procedure the document
+        # introduces may be one outside Methods, and list content is indented
+        # to the item's text column.
+        "Body content takes one of three forms, chosen by its shape",
+        "A list never replaces explanation: each item keeps its why",
+        "It needs three or more discrete steps",
+        "Introduce the list with one prose sentence",
+        "in the same grammatical form across the list",
+        "Repeat from step N until",
+        "follows the list in prose",
+        "keeps its own rule in [body content](#body-content)",
+        "A sequence of fewer than three steps is prose too",
+        "take a numbered list, one item per stage",
+        "Parallel facts by period or age window stay bullets",
+        "to the item's text column: 3 spaces after `1. `, 4 after `10. `",
+        "Nest at most one level",
+        "never a bold lead word",
+        "inside a numbered step, that explanation stays in the step",
+        "An algorithm or procedure the document introduces may take a "
+        "[numbered list](#prose-and-key-messages)",
+        "[per-item bullets or a numbered list](#prose-and-key-messages)",
+        # 2026-10-07 (knowledge 1.23.0): shared notation precedes the list,
+        # and unnamed stages open with the process's action.
+        "Notation and conditions that hold for every step go in the prose "
+        "before the list",
+        "each opened by its stage name when the document names the stages",
     )),
     (("paper-summarize", "references", "review-checklist.md"), (
         "symbol by symbol on its source page image",
+        # 2026-10-07 (knowledge 1.23.0): verification checks each passage's
+        # form against its shape, and the reported procedure keeps its own
+        # rule.
+        "Each passage takes the [form its shape needs]",
+        "each step keeps its reason",
+        "The document's reported procedure in the second section follows its "
+        "own rule",
+    )),
+    # 2026-10-07 (knowledge 1.23.0): a display or paragraph indented short of
+    # its list item's text column is item 9's list-indent finding, which
+    # Task 1 and the builder resolve by indenting it.
+    (("wiki-lint", "references", "scanner.md"), (
+        "lint_entry reports it as `9-list-indent`",
+        # 2026-10-07 (knowledge 1.23.0): a nested list short of the column is
+        # the same finding; lists inside quotes are not checked.
+        "A nested list belongs to the item when its first marker sits past "
+        "the item's marker but short of its text column",
+        "A list inside a quote or callout is not checked",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "indent the reported display block or continuation paragraph to its "
+        "list item's text column",
+        # 2026-10-07 (knowledge 1.23.0): a display's explanation moves into
+        # the item with it.
+        "For a reported display, also indent the paragraph after it that "
+        "explains it",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "Resolve `9-list-indent` by indenting the reported display block",
+        "For a reported display, also indent the paragraph after it that "
+        "explains it",
     )),
 )
 
@@ -9066,6 +9217,15 @@ WRITING_RULE_RETIRED = (
     # reason, and reading notes link Wiki entries instead of glossing them.
     "give the takeaway alone",
     "The note is self-contained",
+    # 2026-10-07 (knowledge 1.23.0): a procedure and the time-ordered stages
+    # of one process are numbered lists, not prose or one bullet per stage.
+    "Bullets are parallel, not a causal or procedural chain",
+    "never time-ordered stages whose bullets each stand alone",
+    "Don't bullet expository or argumentative content",
+    "one bullet per stage",
+    # 2026-10-07 (knowledge 1.23.0): a step's opener bans a bold lead word,
+    # not a link or italics.
+    "opens with plain words",
 )
 
 

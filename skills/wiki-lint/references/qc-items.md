@@ -52,6 +52,7 @@ ownership.
 | `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or accurate background, and integrates the link. |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or accurate background, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
+| `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
@@ -351,9 +352,12 @@ close call stays unapplied under
 to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
 Judge a concrete defect, not a preference for different wording. Inspect
 equation lead-ins and paragraph endings as well as the opening sentences.
-Bullets are parallel, not a causal or procedural chain (time-ordered stages
-that each carry their own facts are parallel); body links sit in sentences
-that state their relationships. Task 1b trims source/tutorial scaffolding and
+Each passage takes the builder's
+[form for its shape](../../wiki-build/references/writing.md#body-structure):
+bullets for parallel items, a numbered list for a procedure or the
+time-ordered stages of one process, and prose for a causal chain or an
+argument. Every list item keeps its reason; body links sit in sentences that
+state their relationships. Task 1b trims source/tutorial scaffolding and
 application catalogs that do not serve the entry, after checking the cited
 source. It consolidates a definition, explanation, argument, worked example
 or property with its justification duplicated across entries into its owner
@@ -417,9 +421,21 @@ establishes an unambiguous meaning:
 - Clarify a transition only from a relationship already established in the
   entry. Do not infer causation, contrast, chronology, or generality from
   proximity; use a paragraph boundary when no bridge is supported.
-- Convert an already explicit causal or procedural chain from bullets to prose
-  (never time-ordered stages whose bullets each stand alone), or integrate a
-  navigation-only link when adjacent prose already states the relationship.
+- Convert an already explicit causal chain or argument from bullets or a
+  numbered list to prose, or integrate a navigation-only link when adjacent
+  prose already states the relationship.
+- Rewrite an already explicit procedure or the time-ordered stages of one
+  process, with three or more steps, from prose or unnumbered bullets as a
+  numbered list in the builder's
+  [Markdown form](../../wiki-build/references/writing.md#body-structure): one
+  item per step or stage, each keeping its reason and every claim. A stage
+  item opens with its stage name when the entry names the stages, and
+  otherwise with the process's action, in the same form across the list;
+  naming unnamed stages is Task 1b work, from the cited source. Notation and
+  conditions that hold for every step stay in the prose before the list,
+  which ends with the introducing sentence. A display moves into its step
+  with its math unchanged, indented to the item's text column. Parallel facts
+  by period or age window stay bullets.
 - Rewrite parallel facts about several items (the same gene in several
   organisms, one property per variant) as one bullet per item, keeping every
   claim.

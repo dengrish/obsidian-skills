@@ -1190,7 +1190,8 @@ need backticks in prose), `introduced_aliases.py` (alternate names that body
 prose introduces for the entry's subject), `entry_checks.py` (the per-entry
 Wiki floors both Wiki linters apply: the cross-domain common-noun slug, non-`Software`
 API surface, the description's entity subject, an acronym title's missing
-full form in the opener, merge scars, source-meta phrasing, emphasis, display
+full form in the opener, a list item's display, paragraph or nested list
+indented short of its text column, merge scars, source-meta phrasing, emphasis, display
 labels (including a label that drops its target title's head word), the
 single-word alias hint, the card-set shape, the primary flashcard among
 several and its answer on card line 3, Spaced

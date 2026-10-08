@@ -231,7 +231,9 @@ to reconstruct.
   the document visible.
   Notice notes say exactly what changed without restating withdrawn claims as
   findings. A secondary contribution earns at most a sentence when it changes
-  the main contribution's reading. Put every exhibit here, beneath its supporting
+  the main contribution's reading. An algorithm or procedure the document
+  introduces may take a [numbered list](#prose-and-key-messages) here, under
+  the sentence that introduces it. Put every exhibit here, beneath its supporting
   claim; cite load-bearing numbers. The cap is **2,400 characters of prose**,
   excluding embeds, captions, tables and citation markup.
 - **Interpretation / consequence position:** state the authors' or issuer's own
@@ -272,16 +274,63 @@ concept that has its own Wiki entry instead of explaining it
 no entry once, briefly, in its own sentence. Use active voice, simple tenses and
 one topic per paragraph, with at most six sentences per paragraph.
 
-Parallel facts about several items (the same measure for each organism, site or
-variant) go one self-contained bullet per item, under the prose sentence that
-introduces them. Open each bullet with the item's bold name and state the same
-property for every item. A causal or procedural chain, where each step follows
-from or acts on the previous one, or an argument stays prose (a reported
-procedure keeps its numbered steps), and a prose section never holds bullets
-alone. Time order alone does not make a chain:
-stages or periods that each carry their own facts take one bullet per stage,
-in order, each opened by its stage or period. The bullets count toward the
-section's length limits.
+Body content takes one of three forms, chosen by its shape. A list never
+replaces explanation: each item keeps its why.
+
+- **Bullets.** Parallel facts about several items (the same measure for each
+  organism, site or variant) go one self-contained bullet per item, under the
+  prose sentence that introduces them. Open each bullet with the item's bold
+  name and state the same property for every item.
+- **A numbered list.** An ordered procedure or sequence, such as an
+  algorithm's steps, a protocol, a pipeline or the ordered stages of one
+  process, takes a numbered list. It needs three or more discrete steps, where
+  order matters and a reader may follow the steps or refer to one of them.
+  Introduce the list with one prose sentence. Notation and conditions that
+  hold for every step go in the prose before the list, which ends with the
+  introducing sentence. Each item is one step: it opens with its action, in
+  the same grammatical form across the list, and keeps its reason (what the
+  step achieves or why), plus any display equation and that display's
+  explanation. A loop ends with a "Repeat from step N until …" item.
+  What happens after the procedure, such as prediction after training, follows
+  the list in prose. The document's reported procedure in the second section
+  keeps its own rule in [body content](#body-content).
+- **Prose.** A causal chain (mechanism, then condition, then consequence) and
+  an argument stay prose, where the connecting words carry the explanation. A
+  sequence of fewer than three steps is prose too.
+
+Time order alone does not make a causal chain. Time-ordered stages of one
+process that each carry their own facts take a numbered list, one item per
+stage, each opened by its stage name when the document names the stages, and
+otherwise by the process's action, in the same form across the list. Parallel
+facts by period or age window stay bullets, each opened by its period. A prose
+section never holds a list alone, and a list counts toward the section's length
+limits.
+
+Number a list with sequential markers (`1.`, `2.`, `3.`). Indent a display, or
+an extra paragraph inside a step, to the item's text column: 3 spaces after
+`1. `, 4 after `10. `. Leave a blank line above and below a display. A block
+left at the margin ends the list there in Obsidian, and lint reports it when
+the next step carries on the numbering. Nest at most one level. A step opens
+with its action or stage name, never a bold lead word or label; a stage name
+with a Wiki entry keeps its first-mention link. The display rules below apply
+inside a step too:
+
+```markdown
+The fitting procedure lowers the error by small steps downhill:
+
+1. Set every weight to zero, so no feature starts with any influence.
+2. Compute the gradient of the squared error, which points uphill:
+
+   $$
+   g = 2 X^\top (X w - y)
+   $$
+
+   Each entry of $g$ is the error's slope along one weight, from
+   differentiating the squared error.
+
+3. Move the weights a small step against the gradient, which lowers the error.
+4. Repeat from step 2 until the error stops falling.
+```
 
 Aim for at most **25 words per prose sentence and 20 per numbered step**,
 including callout bullets and exhibit captions. These are strong brevity targets.
@@ -298,7 +347,8 @@ definitions). Lint reports a likely pair as an advisory. Transcribe each
 equation from its page image, not the text capture, which drops accents such
 as hats and loses grouping and indices;
 [verification](review-checklist.md#locate-the-claims) checks it there. Beside
-each display, say what each term means and where the relation comes from. Use
+each display, say what each term means and where the relation comes from;
+inside a numbered step, that explanation stays in the step. Use
 the document's own derivation or reasoning when it gives one. Otherwise give a
 one-sentence intuitive account in standard terms, glossed like a term (the
 normal equation solves for the point where the error's slope is zero in every
@@ -483,9 +533,9 @@ starts immediately after the closing YAML fence. Put one blank line on each
 side of the single `___` separator. Use six `##` headings with blank lines
 around them, no H1 or H3, no other horizontal rules, and no empty sections.
 The fifth and Availability sections are bullet lists. The other sections are
-prose, apart from a reported procedure in the second, exhibits in the third and
-[per-item bullets](#prose-and-key-messages) under the sentence that introduces
-them.
+prose, apart from a reported procedure in the second, exhibits in the third,
+and [per-item bullets or a numbered list](#prose-and-key-messages) under the
+sentence that introduces them.
 Every embed/table has its italic caption on the next line. No figure or table
 number appears in the prose or captions. End after Availability with a single
 newline.

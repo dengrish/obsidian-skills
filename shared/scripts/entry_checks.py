@@ -3,13 +3,14 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 7's description subject, item 9's acronym-title expansion, item 17's
-single-word alias hint, and item 19's card set, primary answer on card line
-3, primary card and Spaced Repetition markers in the body and on card lines)
-and the discipline-root test from this one copy, so an entry that passes the
-builder gate does not fail the next scan on the same mechanical rule. Each
-check returns dictionaries with a ``check`` name, a ``message`` and evidence,
-or a fault message; callers choose the finding key and severity.
+item 7's description subject, item 9's acronym-title expansion and list
+indentation, item 17's single-word alias hint, and item 19's card set,
+primary answer on card line 3, primary card and Spaced Repetition markers in
+the body and on card lines) and the discipline-root test from this one
+copy, so an entry that passes the builder gate does not fail the next scan on
+the same mechanical rule. Each check returns dictionaries with a ``check``
+name, a ``message`` and evidence, or a fault message; callers choose the
+finding key and severity.
 ``prose`` is an entry's comment-masked explanatory body (up to the Related
 footer or the Flashcards section), without the blank lines after the
 frontmatter. Stdlib only (plus sibling shared helpers), Python 3.10+.
@@ -44,7 +45,11 @@ from entry_structure import (  # noqa: E402
     strip_indented,
     title_display_form,
 )
-from markdown_tables import markdown_block_start, mask_line_spans  # noqa: E402
+from markdown_tables import (  # noqa: E402
+    markdown_block_start,
+    markdown_table_spans,
+    mask_line_spans,
+)
 from organism_names import (  # noqa: E402
     bound_common_names,
     first_sentence,
@@ -89,6 +94,7 @@ __all__ = [
     "label_drops_head",
     "label_shares_surface",
     "line3_parts",
+    "list_indent_findings",
     "merge_scar_findings",
     "organism_common_name_bound",
     "organism_common_name_surfaces",
@@ -411,12 +417,14 @@ def acronym_expansion_missing(title, opener):
 # `importance` is a legacy key, so a legacy entry's stacked-merge scar can
 # still be an `importance:` line stranded in the body. `read:` and `issues:`
 # end the schema, so a partial scar plausibly leaves exactly a `read: false`
-# or `issues: ""` line.
+# or `issues: ""` line. Listings are masked before these run, so leading
+# whitespace is a list item's indentation, and a line or display indented
+# inside an item is read like a top-level one.
 _SCHEMA_KEY_LINE_RE = re.compile(
-    r"(?m)^(title|type|aliases|sources|created|updated|description|tags|"
-    r"importance|parents|read|issues):")
+    r"(?m)^[ \t]*(title|type|aliases|sources|created|updated|description|"
+    r"tags|importance|parents|read|issues):")
 _DISPLAY_MATH_BLOCK_RE = re.compile(
-    r"(?ms)^ {0,3}\$\$[ \t]*(?:\n.*?\n|.*?) {0,3}\$\$[ \t]*$")
+    r"(?ms)^[ \t]*\$\$[ \t]*(?:\n.*?\n|.*?)[ \t]*\$\$[ \t]*$")
 _DIGIT_LINE_RE = re.compile(r"(?m)^[^\S\n]*[0-9]+[^\S\n]*$")
 
 
@@ -463,6 +471,214 @@ def merge_scar_findings(prose, separator_line=None):
             "message": "standalone bare digit line in explanatory body prose "
                        "— stacked-merge scar; remove it or restore the content "
                        "it was detached from"})
+    return findings
+
+
+# ---------------------------------------------------------------------------
+# item 9: list-item indentation
+# ---------------------------------------------------------------------------
+
+_LIST_MARKER_RE = re.compile(
+    r"(?P<indent>[ \t]*)(?P<marker>[-*+]|(?P<number>[0-9]{1,9})[.)])"
+    r"(?P<gap>[ \t]+|$)")
+_LIST_RULE_RE = re.compile(
+    r"[ \t]*(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})")
+_LIST_HEADING_RE = re.compile(r"[ \t]*#{1,6}(?:[ \t]|$)")
+_LIST_QUOTE_RE = re.compile(r"[ \t]*>")
+
+
+def _list_width(line):
+    """The column of a line's first character, a tab counting four."""
+    return len(line[:len(line) - len(line.lstrip(" \t"))].expandtabs(4))
+
+
+def _list_item(line, open_items, interrupts, resumable=None):
+    """The list item ``line`` opens inside ``open_items``, or ``None``.
+
+    Each item is a dict: ``indent`` (the marker's column), ``content`` (its
+    text column: the marker plus one to four spaces), ``kind`` (the bullet
+    character, or the ordered delimiter) and ``number``. A marker indented
+    four or more columns past the open text column is text, as one is at
+    the top level. When ``interrupts`` (the line follows paragraph text) and
+    the line reaches the innermost open text column, so that it could
+    continue that text, an ordered marker other than 1 opens no new list, as
+    in CommonMark, unless it continues an open item's list or that of
+    ``resumable``, the item a misplaced block closed.
+    """
+    match = _LIST_MARKER_RE.match(line)
+    if not match or _LIST_RULE_RE.fullmatch(line):
+        return None
+    indent = _list_width(line)
+    column = open_items[-1]["content"] if open_items else 0
+    if indent >= column + 4:
+        return None
+    marker, number = match.group("marker"), match.group("number")
+    number = int(number) if number is not None else None
+    if (interrupts and indent >= column and number not in (None, 1)
+            and not any(item["indent"] == indent and item["kind"] == marker[-1]
+                        for item in open_items + [resumable] if item)):
+        return None
+    gap = (len(line[:match.end()].expandtabs(4)) - indent - len(marker))
+    if not line[match.end():].strip() or gap > 4:
+        gap = 1
+    return {"indent": indent, "content": indent + len(marker) + gap,
+            "kind": marker[-1], "number": number}
+
+
+def list_indent_findings(prose, display_spans=(), table_spans=None):
+    """Item 9: a list item's display or paragraph left outside its item.
+
+    A display block or a continuation paragraph belongs to the list item
+    above it when the list resumes after it with that item's next sibling:
+    the next number of an ordered list, or, when the gap opens with a
+    display, the same bullet or number again. A display also belongs to the
+    item when the item's text before it ends with a colon and the display
+    ends the whole list; inside an outer item it ends only a nested list,
+    and the numbered list goes on. Indented less than the item's text
+    column (3 spaces after ``1.``, 4 after ``10.``), the block ends the list
+    in Obsidian, so the remedy is to indent it. A nested list belongs to
+    the item when its first marker sits past the item's marker but short of
+    its text column, with another bullet or delimiter: CommonMark starts a
+    new list there, which ends the item's list.
+
+    ``display_spans`` are the paired displays of the code-masked prose, as
+    ``equation_coverage.find_display_spans`` returns them for the equation
+    checks, and ``table_spans`` its parsed tables (computed when ``None``).
+    A listing, table or quote in the gap is not reported, and a
+    heading or rule there ends the list on purpose, so the gap reports
+    nothing. A list inside a quote or callout is not checked. Each
+    finding's ``line`` and ``item_line`` are one-based within ``prose``;
+    ``kind`` is ``display``, ``paragraph`` or ``list``; ``indent`` is the
+    block's indentation and ``column`` the item's text column, both in
+    spaces.
+    """
+    lines = strip_code(prose or "").split("\n")
+    visible = mask_body_comments(prose or "").split("\n")
+    displays = {span["open_line"]: span["close_line"]
+                for span in display_spans or ()}
+    if table_spans is None:
+        table_spans = markdown_table_spans(
+            strip_indented(strip_fenced(prose or "")))
+    tables = dict(table_spans)
+    findings = []
+    open_items = []
+    state = {"pending": None}
+
+    def report(block, item):
+        """Record ``block`` as indented short of ``item``'s text column."""
+        findings.append({
+            "check": "list-indent", "line": block["line"] + 1,
+            "kind": block["kind"], "indent": block["indent"],
+            "column": item["content"], "item_line": item["line"] + 1,
+            "message": (
+                "%s belongs to the list item above it but is indented "
+                "%d space%s, short of the item's text column at %d, so "
+                "Obsidian ends the list there — indent it %d spaces"
+                % ({"display": "display block", "list": "nested list"}.get(
+                       block["kind"], "continuation paragraph"),
+                   block["indent"], "" if block["indent"] == 1 else "s",
+                   item["content"], item["content"]))})
+
+    def resolve(colon_only):
+        """Report the pending gap's blocks, or only a display after a colon."""
+        pending = state["pending"]
+        state["pending"] = None
+        if pending is None or pending["cancelled"]:
+            return
+        blocks = [block for block in pending["blocks"] if block["reported"]]
+        if colon_only:
+            # Inside an outer item, the display ends only a nested list.
+            first = pending["blocks"][0]
+            if not (pending["colon"] and pending["left"]
+                    and first["kind"] == "display" and first["reported"]):
+                return
+            blocks = [first]
+        for block in blocks:
+            report(block, pending["item"])
+
+    index, count = 0, len(lines)
+    previous, last_text = None, ""
+    while index < count:
+        line = lines[index]
+        if not line.strip() and not visible[index].strip():
+            previous = None
+            index += 1
+            continue
+        end, kind = index, "paragraph"
+        if not line.strip():
+            # A listing line: never reported, but it ends what it outdents.
+            kind, line = "listing", visible[index]
+        else:
+            item = _list_item(
+                line, open_items, previous == "paragraph",
+                state["pending"] and state["pending"]["item"])
+            if item is not None:
+                item["line"] = index
+                pending = state["pending"]
+                if pending is not None:
+                    last = pending["item"]
+                    sibling = (item["indent"] == last["indent"]
+                               and item["kind"] == last["kind"])
+                    resolve(not sibling or not (
+                        (last["number"] is not None
+                         and item["number"] == last["number"] + 1)
+                        or (item["number"] == last["number"]
+                            and pending["blocks"][0]["kind"] == "display")))
+                owner = open_items[-1] if open_items else None
+                if (owner is not None
+                        and owner["indent"] < item["indent"] < owner["content"]
+                        and item["kind"] != owner["kind"]):
+                    # A nested list short of its item's text column starts
+                    # a new list, which ends the item's list.
+                    report({"line": index, "kind": "list",
+                            "indent": item["indent"]}, owner)
+                while open_items and item["indent"] < open_items[-1]["content"]:
+                    open_items.pop()
+                open_items.append(item)
+                previous, last_text = "paragraph", line
+                index += 1
+                continue
+            if index in displays:
+                end = max(index, displays[index])
+                if line.lstrip().startswith("$$"):
+                    kind = "display"
+            elif index in tables:
+                end, kind = tables[index], "table"
+                if end + 1 < count and _CAPTION_LINE_RE.match(lines[end + 1]):
+                    end += 1  # the table's caption goes with it
+            elif _LIST_HEADING_RE.match(line) or _LIST_RULE_RE.fullmatch(line):
+                kind = "break"
+            elif _LIST_QUOTE_RE.match(line):
+                kind = "quote"
+            elif previous == "paragraph":
+                # A lazy continuation line of the paragraph above.
+                last_text = line
+                index += 1
+                continue
+        width = _list_width(line)
+        closed = []
+        while open_items and width < open_items[-1]["content"]:
+            closed.append(open_items.pop())
+        block = {"line": index, "kind": kind, "indent": width,
+                 "reported": kind in ("display", "paragraph")}
+        if closed:
+            resolve(True)
+            state["pending"] = {
+                "item": closed[-1], "blocks": [block],
+                "cancelled": kind == "break",
+                "colon": last_text.rstrip().endswith(":"),
+                "left": not open_items}
+        elif state["pending"] is not None:
+            pending = state["pending"]
+            block["reported"] = (block["reported"]
+                                 and width < pending["item"]["content"])
+            pending["blocks"].append(block)
+            pending["cancelled"] = pending["cancelled"] or kind == "break"
+        previous = "paragraph" if kind == "paragraph" else "other"
+        if kind != "listing":
+            last_text = lines[end]
+        index = end + 1
+    resolve(True)
     return findings
 
 
@@ -1463,7 +1679,61 @@ SHARED_MUTATIONS = (
     ("item19 a line holding only the multi-line card separator",
      "Why do the rates compare\n?\nAs a ratio.",
      "item19/sr-marker", "19-sr-marker", False),
+    ("item9 a display outside its numbered step",
+     "The rate is found in steps.\n\n1. Count the hits:\n\n$$\nh = 1\n"
+     "$$\n\n2. Divide the hits by the total.",
+     "item9/list-indent", "9-list-indent", False),
+    ("item9 an explanation outside its numbered step",
+     "The rate is found in steps.\n\n1. Count the hits.\n\nEach hit is a "
+     "true positive.\n\n2. Divide the hits by the total.",
+     "item9/list-indent", "9-list-indent", False),
+    ("item9 a display short of a two-digit step's text column",
+     "The rate is found in steps.\n\n10. Count the hits:\n\n   $$\n"
+     "   h = 1\n   $$\n\n11. Divide the hits by the total.",
+     "item9/list-indent", "9-list-indent", False),
+    ("item9 a navigation cue in a step's indented paragraph",
+     "The rate is found in steps.\n\n10. Count the hits.\n\n    See "
+     "[[precision]] for details.\n11. Divide the hits by the total.",
+     "item9/imperative-link", "9-link-integration", False),
+    ("item10 a repeated link indented under a two-digit step",
+     "The rate is found in steps.\n\n10. Count the [[precision]] hits.\n\n"
+     "    The [[precision]] hits are true positives.\n"
+     "11. Divide the hits by the total.",
+     "item10/dup", "10-duplicate-wikilink", False),
+    ("item12 boilerplate in a step's indented paragraph",
+     "The rate is found in steps.\n\n10. Count the hits.\n\n    For a "
+     "nonempty dataset of $m \\ge 1$ instances, the rate is averaged.\n"
+     "11. Divide the hits by the total.",
+     "item12/boilerplate-candidate", "12-boilerplate-candidate", False),
+    ("item12 a one-line display inside a step",
+     "The rate is found in steps.\n\n10. Count the hits:\n\n    $$h = 1$$"
+     "\n\n11. Divide the hits by the total.",
+     "item12/equation-format", "12-equation-format", False),
+    ("item13 a body key inside a step",
+     "The rate is found in steps.\n\n1. Count the hits.\n\n   read: false"
+     "\n2. Divide the hits by the total.", "item13", "13-merge-scar", False),
+    ("item9 a nested list short of a two-digit step's text column",
+     "The rate is found in steps.\n\n10. Count the hits. They are:\n"
+     "   - the true positives;\n   - the false positives.\n"
+     "11. Divide the hits by the total.",
+     "item9/list-indent", "9-list-indent", False),
 )
+
+#: A numbered procedure whose displays and paragraphs sit at their steps'
+#: text columns: 3 spaces under ``1.``, 4 under ``10.``, with a nested bullet.
+_QUIET_STEPS = (
+    "The rate is found in steps.\n\n"
+    "1. Count the hits, which are the true positives:\n\n"
+    "   $$\n   h = \\sum_{i=1}^{n} t_i\n   $$\n\n"
+    "   Here $t_i$ is one for a true positive and zero otherwise.\n"
+    "2. Choose a threshold. Common choices are:\n"
+    "   - the median score;\n   - a fixed cut-off.\n\n"
+    "   A fixed cut-off keeps runs comparable.\n"
+    "10. Divide the hits by the predicted positives:\n\n"
+    "    $$\n    r = \\frac{h}{p}\n    $$\n\n"
+    "    Here $p$ counts the predicted positives.\n"
+    "11. Repeat from step 1 until every threshold is scored.\n\n"
+    "After scoring, the best threshold is kept.")
 
 #: Body paragraphs that neither linter may flag under the named keys:
 #: ``(name, paragraph, scan_vault key, lint_entry id)``, checked in folder
@@ -1513,6 +1783,21 @@ SHARED_QUIET = (
     ("item19 a line that starts with an HTML comment is skipped",
      "<!-- The rates compare as a::b here. -->",
      "item19/sr-marker", "19-sr-marker"),
+    ("item9 displays and paragraphs at their steps' text columns",
+     _QUIET_STEPS, "item9/list-indent", "9-list-indent"),
+    ("item12 canonical displays at their steps' text columns",
+     _QUIET_STEPS, "item12/equation-format", "12-equation-format"),
+    ("item13 a digit in a display indented under a two-digit step",
+     "The rate is found in steps.\n\n10. Count the hits:\n\n    $$\n    1\n"
+     "    $$\n\n11. Divide the hits by the total.",
+     "item13", "13-merge-scar"),
+    ("item9 a display after a nested item's colon stays in its step",
+     "The rate is found in steps.\n\n1. Count the hits.\n"
+     "2. Weigh them. The weight combines:\n   - the hit count;\n"
+     "   - the run count, scaled by:\n\n   $$\n   s = \\frac{1}{2}\n   $$"
+     "\n\n   Here $s$ is the scale.\n"
+     "3. Repeat from step 1 until every run is weighed.",
+     "item9/list-indent", "9-list-indent"),
 )
 
 
@@ -1663,6 +1948,106 @@ def run_self_test(verbose=False):
               ("Opener.\n\n---", 2),
               ("Opener.\n\n$$\n2\n$$", None))],
           [[], [], [], []])
+    check("inside a list item, a key line is a scar and a digit in an "
+          "indented display is not, as at the top level",
+          [checks(merge_scar_findings(prose)) for prose in (
+              "Opener.\n\n1. Step.\n\n   read: false",
+              "Opener.\n\n10. Step:\n\n    $$\n    2\n    $$",
+              "Opener.\n\n- Item:\n\n  $$\n  2\n  $$")],
+          [["frontmatter-key"], [], []])
+
+    # item 9: list-item indentation
+    def list_indent(prose):
+        """``(line, kind)`` per finding, displays paired as `$$` lines."""
+        lines = prose.split("\n")
+        marks = [index for index, line in enumerate(lines)
+                 if line.strip() == "$$"]
+        spans = [{"open_line": start, "close_line": end}
+                 for start, end in zip(marks[0::2], marks[1::2])]
+        return [(finding["line"], finding["kind"])
+                for finding in list_indent_findings(prose, spans)]
+
+    display = "$$\nx = 1\n$$"
+
+    def indented(text, spaces):
+        return "\n".join(" " * spaces + line if line else line
+                         for line in text.split("\n"))
+
+    check("displays and paragraphs at the item's text column stay in it, "
+          "four spaces under 10., with a nested bullet and its parent's "
+          "paragraph",
+          list_indent(
+              "Steps run in order.\n\n1. Count:\n\n" + indented(display, 3)
+              + "\n\n   Here x counts.\n2. Fit. Learners are:\n"
+              "   - a stump;\n   - a tree.\n\n   A tree overfits.\n"
+              "10. Sum:\n\n" + indented(display, 4) + "\n\n"
+              "    Here x sums.\n11. Repeat from step 1 until done.\n\n"
+              "After training, it predicts:\n\n" + display), [])
+    check("an unindented display and paragraph between consecutive steps "
+          "are reported; a display short of 10.'s column is too",
+          list_indent(
+              "1. Count:\n\n" + display + "\n\nHere x counts.\n2. Sum.\n"
+              "10. Sum:\n\n" + indented(display, 3) + "\n\n11. Stop."),
+          [(3, "display"), (7, "paragraph"), (11, "display")])
+    check("a display after an item that ends with a colon is reported at "
+          "the end of the list, but its explanation is not",
+          list_indent("1. Count.\n2. Sum:\n\n" + display + "\n\nHere x sums."),
+          [(4, "display")])
+    check("prose between two lists, a new list from 1, a heading or rule "
+          "between steps and a lead-in sentence are not reported",
+          [list_indent(prose) for prose in (
+              "- a\n- b\n\nProse between.\n\n- c",
+              "1. a\n2. b\n\nProse between.\n\n1. c",
+              "1. a\n\n## Section\n\n2. b",
+              "1. a\n\n---\n\n2. b",
+              "1. a\n2. b.\n\nThen it predicts:\n\n" + display)],
+          [[], [], [], [], []])
+    check("a bullet gap is reported only when it opens with a display",
+          [list_indent(prose) for prose in (
+              "- a\n\n" + display + "\n\n- b",
+              "- a\n\nText.\n\n- b")],
+          [[(3, "display")], []])
+    check("a resumed step may interrupt a paragraph; a year opening a line "
+          "starts no list",
+          [list_indent(prose) for prose in (
+              "1. a\n\nText.\n2. b",
+              "It began in\n2026. That year it grew.\n\n" + display)],
+          [[(3, "paragraph")], []])
+    check("a listing, or a table with its caption, in the gap is not "
+          "reported, but a paragraph beside it is",
+          [list_indent(prose) for prose in (
+              "1. a\n\n```\ncode\n```\n\n2. b",
+              "1. a\n\n| x | y |\n| --- | --- |\n| 1 | 2 |\n*Two values.*\n\n"
+              "Text.\n\n2. b")],
+          [[], [(8, "paragraph")]])
+    steps = "".join("%d. Run stage %d.\n" % (i, i) for i in range(1, 10))
+    check("a nested list short of its item's text column is reported, 3 "
+          "spaces under 10. and 2 under 1.; one at the column, a sibling "
+          "and a bullet list after the steps are not",
+          [list_indent(prose) for prose in (
+              steps + "10. Fit. Learners are:\n   - a stump;\n   - a tree.\n"
+              "11. Stop.",
+              "1. Fit:\n  - a stump;\n  - a tree.\n2. Next.",
+              steps + "10. Fit. Learners are:\n    - a stump;\n    - a tree.\n"
+              "11. Stop.",
+              "1. a\n 2. b\n3. c",
+              "1. a\n2. b\n- c\n- d")],
+          [[(11, "list")], [(2, "list")], [], [], []])
+    check("a display after a nested item's colon stays in the outer step, "
+          "inside or after the list; one at the margin ends the list",
+          [list_indent(prose) for prose in (
+              "1. a\n2. It combines:\n   - the error;\n   - rounds, by:\n\n"
+              + indented(display, 3) + "\n\n   Here x scales.\n3. Stop.",
+              "1. a\n2. It combines:\n   - rounds, by:\n\n"
+              + indented(display, 3) + "\n\n   Here x scales.",
+              "1. a\n2. It combines:\n   - rounds, by:\n\n" + display
+              + "\n\nHere x scales.")],
+          [[], [], [(5, "display")]])
+    check("a step after a misplaced nested numbered list continues the "
+          "list, so a bullet short of that step's column is reported",
+          list_indent("1. a\n2. b:\n\n  1. sub a\n  2. sub b\n3. c\n"
+                      "  - sub c\n4. d"),
+          [(7, "list")])
 
     # item 14
     check("source-meta phrases and the technical source compounds",
