@@ -177,11 +177,14 @@ MAX_PARAGRAPH_SENTENCES = 6
 
 #: Methods carries the experiment as numbered steps.  Fewer than three is not a
 #: procedure; more than eight is the paper's methods section copied across.
+#: A numbered list elsewhere also needs three steps; a shorter sequence is prose.
 MIN_STEPS = 3
 MAX_STEPS = 8
 
 #: A numbered step: `1. The team measured 24 mutants.`
 _STEP = re.compile(r"\A(\d+)\.\s+(.*)\Z")
+#: A `1)` list item, which renders as a list but none of the step checks see.
+_PAREN_STEP = re.compile(r"\A\s*(\d{1,9})\)\s+\S")
 
 #: Results prose -- what is left after the embeds, the captions and the rebuilt
 #: tables -- over this many characters is a Results carrying more than one
@@ -370,9 +373,10 @@ def _is_caption(line):
     The close is the fiddly half.  A caption legitimately ends on an emphasised
     term -- a species name, a bolded value -- so the last run of asterisks may
     be longer than one; what disqualifies a line is opening with `**`, which is
-    bold rather than a caption.
+    bold rather than a caption.  An exhibit inside a list item keeps the
+    item's indentation, so a caption may be indented too.
     """
-    s = line.rstrip()
+    s = line.strip()
     if not s.startswith("*") or s.startswith("**") or not s.endswith("*"):
         return False
     return len(s.strip("*").strip()) > 0
@@ -958,15 +962,21 @@ def _check_structure(note, body_start, fenced, mode):
                 note.fail(start + 1, "the %s section is prose, not a bullet list"
                                      % name)
                 continue
-            # Per-item bullets sit under the prose sentence that introduces
-            # them (references/note-format.md).  An exhibit and the caption
-            # on its next line are not that sentence.
+            # Per-item bullets and a numbered list sit under the prose
+            # sentence that introduces them (references/note-format.md).  An
+            # exhibit and the caption on its next line are not that sentence.
             after_exhibit = False
             for l in content:
                 if l.startswith("- "):
                     note.fail(start + 1, "bullets open the %s section before "
                                          "any prose; per-item bullets sit under "
                                          "the sentence that introduces them "
+                                         "(references/note-format.md)" % name)
+                    break
+                if _STEP.match(l):
+                    note.fail(start + 1, "a numbered list opens the %s section "
+                                         "before any prose; introduce it with "
+                                         "one prose sentence "
                                          "(references/note-format.md)" % name)
                     break
                 exhibit = bool(_EMBED.match(l.strip()) or _TABLE_ROW.match(l))
@@ -1139,46 +1149,84 @@ def _list_column(raw):
     return None if m is None else len(raw) - len(m.group(m.lastindex))
 
 
-def _opens_step(raw, prev):
-    """The `_STEP` match for `raw` where CommonMark starts a list item there.
+def _list_walk(lines, start, end, fenced, resets):
+    """Yield `(n, item, stack)` for each non-blank line in [start, end).
 
-    `prev` is None after a block boundary, "prose" after paragraph text, or
-    the text column of the list item the previous line belongs to. A number
-    other than 1 cannot interrupt a paragraph, so a wrapped `2021. ...`
-    continues its sentence; indented to an item's text, it continues the item.
+    `item` is the list item the line opens, or None. An item is a dict with
+    its `line`, `number` (None for a `- ` bullet), text column `col`,
+    `depth` (0 at the top level) and `text`. `stack` holds the items whose
+    content the line is, outermost first; it is empty outside every list.
+    A line in `resets`, such as a heading, ends every list.
+
+    This follows CommonMark closely enough for a note. After a blank line,
+    a display or a fence, a line indented to an item's text column stays in
+    that item, so a display or paragraph inside a step is step content; a
+    line indented less ends the item. A wrapped line directly after
+    paragraph text continues it at any indentation. A number other than 1
+    cannot interrupt a paragraph, so a wrapped `2021. ...` continues its
+    sentence, but a line indented short of the item's text column cannot be
+    that paragraph and starts the next item.
     """
-    m = _STEP.match(raw.strip())
-    if not m or prev is None or m.group(1) == "1":
-        return m
-    if prev == "prose":
-        return None
-    return None if len(raw) - len(raw.lstrip()) >= prev else m
+    stack, fresh = [], True
+    for n in range(start, end):
+        raw = lines[n]
+        s = raw.strip()
+        if n in resets:
+            stack, fresh = [], True
+            continue
+        if not s:
+            fresh = True
+            continue
+        indent = len(raw) - len(raw.lstrip())
+        if fresh:
+            while stack and indent < stack[-1]["col"]:
+                stack.pop()
+        if n in fenced:
+            yield n, None, tuple(stack)
+            # The display's own lines stay where its opening line put them,
+            # and the line after it starts a new block.
+            fresh = n + 1 not in fenced
+            continue
+        m = _STEP.match(s)
+        bullet = s.startswith("- ")
+        opens = bool(bullet or m and (fresh or m.group(1) == "1"))
+        if m and not opens and stack and indent < stack[-1]["col"]:
+            opens = True
+        if opens:
+            while stack and indent < stack[-1]["col"]:
+                stack.pop()
+            item = {"line": n, "number": int(m.group(1)) if m else None,
+                    "col": _list_column(raw), "depth": len(stack),
+                    "text": m.group(2) if m else s[2:]}
+            stack.append(item)
+            yield n, item, tuple(stack)
+        else:
+            yield n, None, tuple(stack)
+        fresh = False
 
 
 def _step_lines(note, start, end, fenced):
-    """(step start lines, every step line) in [start, end), wrapped included.
+    """(step start lines, every step's own text line) in [start, end).
 
-    A line directly after a step continues it, as Markdown renders it; a
-    blank line, heading, bullet, exhibit or fence ends the step. A wrapped
-    number other than 1 continues its paragraph or step (`_opens_step`).
+    Only a top-level numbered item is a step, and a nested list is part of
+    its step (`_list_walk`). A step's own text is its item lines and their
+    wrapped lines. A paragraph inside the step, after a blank line or a
+    display, is prose like a top-level one, and counts toward the Methods
+    prose target.
     """
-    starts, out, in_step, prev = [], set(), False, None
-    for n in range(start, end):
-        raw = note.raw_lines[n]
-        s = raw.strip()
-        if (n in fenced or not s or s.startswith("## ")
-                or _EMBED.match(s) or _TABLE_ROW.match(s)):
-            in_step, prev = False, None
+    starts, out, own = [], set(), False
+    lines = note.raw_lines
+    for n, item, stack in _list_walk(lines, start, end, fenced, {start}):
+        top = stack[0] if stack else None
+        if top is None or top["number"] is None:
             continue
-        if s.startswith("- "):
-            in_step, prev = False, _list_column(raw)
-            continue
-        if _opens_step(raw, prev):
-            starts.append(n)
-            in_step, prev = True, _list_column(raw)
-        elif prev is None:
-            prev = "prose"
-        if in_step:
+        if item is not None:
+            own = True
+            if item is top:
+                starts.append(n)
+        elif n in fenced or not lines[n - 1].strip() or n - 1 in fenced:
+            own = False
+        if own:
             out.add(n)
     return starts, out
 
@@ -1189,12 +1237,21 @@ def _prose_blocks(note, body_start, captions, fenced):
     A soft-wrapped sentence is still one sentence, and seven adjacent lines
     are still one paragraph. Blank lines, exhibits, headings, fences and new
     list items separate blocks; wrapped numbered steps retain their 20-word
-    target. A wrapped number other than 1 continues its paragraph or step.
+    target. A wrapped number other than 1 continues its paragraph or step
+    (`_list_walk`).
     """
+    lines = note.raw_lines
+    # A callout marker is presentation, not part of the sentence.
+    unquoted = [re.sub(r"\A\s*>\s?", "", l) for l in lines]
+    resets = {n for n in range(body_start, len(lines))
+              if lines[n].strip() in ("___", "> [!Summary]")
+              or lines[n].strip().startswith("## ")}
+    opened = {n: item for n, item, _stack in _list_walk(
+        unquoted, body_start, len(lines), fenced, resets) if item is not None}
     pending = []
-    first, is_step, prev = 0, False, None
-    for n in range(body_start, len(note.raw_lines)):
-        s = note.raw_lines[n].strip()
+    first, is_step = 0, False
+    for n in range(body_start, len(lines)):
+        s = lines[n].strip()
         boundary = (n in fenced or not s or s == "___"
                     or s.startswith("## ") or s == "> [!Summary]"
                     or _TABLE_ROW.match(s) or _EMBED.match(s))
@@ -1202,29 +1259,100 @@ def _prose_blocks(note, body_start, captions, fenced):
             if pending:
                 yield first, " ".join(pending), is_step
                 pending = []
-            prev = None
             continue
-        # A callout marker is presentation, not part of the sentence.
-        raw = re.sub(r"\A\s*>\s?", "", note.raw_lines[n])
-        s = raw.strip()
-        step = _opens_step(raw, prev)
-        bullet = s.startswith("- ")
-        if step or bullet or n in captions:
+        s = unquoted[n].strip()
+        item = opened.get(n)
+        if item is not None or n in captions:
             if pending:
                 yield first, " ".join(pending), is_step
                 pending = []
         if not pending:
-            first, is_step = n, bool(step)
-        pending.append(step.group(2) if step else s[2:] if bullet else s)
+            first = n
+            is_step = item is not None and item["number"] is not None
+        pending.append(item["text"] if item is not None else s)
         if n in captions:
             yield first, " ".join(pending), is_step
             pending = []
-        if step or bullet:
-            prev = _list_column(raw)
-        elif prev is None or n in captions:
-            prev = "prose"
     if pending:
         yield first, " ".join(pending), is_step
+
+
+def _check_lists(note, bounds, fenced):
+    """Numbered lists in the prose sections (references/note-format.md).
+
+    A display or paragraph that belongs to a step sits at the step's text
+    column; indented less, it ends the list, and Obsidian restarts the
+    numbering after it.  A block counts as a step's when the next step
+    carries on the numbering.  Outside the Methods procedure, which keeps its
+    own count, a list runs 1..n with at least three steps.  Every list nests
+    at most one level, and no step opens with a bold lead word.  A list is
+    numbered with `1.` markers: a `1)` item opens a list where a new block
+    starts or with the number 1, and the step checks would miss it.
+    """
+    lines = note.raw_lines
+    for name, start, stop in bounds:
+        if name in BULLET_ROLES:
+            continue
+        for n in range(start + 1, stop):
+            m = None if n in fenced else _PAREN_STEP.match(lines[n])
+            if m and (m.group(1) == "1" or not lines[n - 1].strip()
+                      or n - 1 in fenced):
+                note.fail(n + 1, "a list item in the %s section is numbered "
+                                 "`%s)`; number a list with `1.` markers "
+                                 "(references/note-format.md)"
+                          % (name, m.group(1)))
+        lists, prev, broke = [], None, None
+        for n, item, stack in _list_walk(note.raw_lines, start, stop, fenced,
+                                         {start}):
+            if item is not None and item["depth"] > 1:
+                note.fail(n + 1, "a list nests more than one level in the %s "
+                                 "section; keep at most one nested level "
+                                 "(references/note-format.md)" % name)
+            if (item is not None and item["number"] is not None
+                    and item["text"].startswith("**")):
+                note.fail(n + 1, "numbered step %d opens with bold text; a step "
+                                 "opens with its action or stage name, never a "
+                                 "bold lead word (references/note-format.md)"
+                          % item["number"])
+            top = stack[0] if stack else None
+            if item is not None and item is top and item["number"] is not None:
+                if prev is not None and (broke is None or item["number"]
+                                         == prev["number"] + 1):
+                    if broke is not None:
+                        raw = note.raw_lines[broke]
+                        note.fail(broke + 1, "a block between numbered steps %d "
+                                             "and %d is indented %d space(s), "
+                                             "short of step %d's text column "
+                                             "(%d); indent it to that column, "
+                                             "or the list ends here "
+                                             "(references/note-format.md)"
+                                  % (prev["number"], item["number"],
+                                     len(raw) - len(raw.lstrip()),
+                                     prev["number"], prev["col"]))
+                    lists[-1].append(item)
+                else:
+                    lists.append([item])
+                prev, broke = item, None
+            elif (prev is not None and broke is None
+                  and (top is None or top["number"] is None)):
+                broke = n
+        if name == "Methods":
+            continue
+        for steps in lists:
+            numbers = [step["number"] for step in steps]
+            if numbers != list(range(1, len(numbers) + 1)):
+                note.fail(steps[0]["line"] + 1, "a numbered list in the %s "
+                                                "section is numbered %s; number "
+                                                "its steps 1..%d in order"
+                          % (name, ", ".join(str(x) for x in numbers),
+                             len(numbers)))
+            elif len(steps) < MIN_STEPS:
+                note.fail(steps[0]["line"] + 1, "a numbered list in the %s "
+                                                "section has %d step(s); a "
+                                                "sequence of fewer than %d "
+                                                "steps stays prose "
+                                                "(references/note-format.md)"
+                          % (name, len(steps), MIN_STEPS))
 
 
 def _source_figure_inventory(images, source):
@@ -1491,13 +1619,14 @@ def _check_citations(note, body_start, captions, fenced, source=None):
                                  "so it renders full size: write "
                                  "`<sup>[[%s|%s]]</sup>`"
                           % (target, page))
-            elif open_at > 0 and l[open_at - 1].isspace():
+            elif not l[:open_at].strip():
+                # Indentation inside a list item is not text to attach to.
+                note.fail(n + 1, "citation opens the line; it attaches to the end "
+                                 "of the text it supports")
+            elif l[open_at - 1].isspace():
                 note.fail(n + 1, "space before the citation; a superscript "
                                  "attaches to the character it follows, with no "
                                  "gap -- `…planned 220.<sup>…</sup>`")
-            elif open_at == 0:
-                note.fail(n + 1, "citation opens the line; it attaches to the end "
-                                 "of the text it supports")
             if not valid_page:
                 note.fail(n + 1, "page citations use physical pages starting at 1; "
                                  "page %s does not exist" % page)
@@ -1595,6 +1724,7 @@ def lint(text, path="<note>", images=None, *, mode,
     after = _check_callout(note, body_start, fenced)
     _check_rule(note, after)
     bounds = _check_structure(note, body_start, fenced, mode)
+    _check_lists(note, bounds, fenced)
     src = note.source
     captions = _check_figures(note, bounds, images, fenced, src)
     captions |= _check_tables(note, bounds, fenced)
@@ -1689,6 +1819,20 @@ def _cases():
     M_ALL = (M_H + "\n\nProse.\n\n1. The team enrolled 219 adults.\n"
              "2. The team gave capsules or placebo.\n"
              "3. The team counted recurrences.")
+    # The fixture's last Results paragraph, and a procedure the document
+    # introduces: an introducing sentence, a display inside step 2 at its
+    # text column, a closing loop and the prose that follows the list.
+    R_END = "More prose.<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>"
+    R_LIST = ("The fitting procedure runs in four steps.\n\n"
+              "1. Set the weights to zero, so no feature starts with "
+              "influence.\n"
+              "2. Compute the gradient of the loss, which points uphill:\n\n"
+              "   $$\n   g = X^\\top (X w - y)\n   $$\n\n"
+              "   Here g holds one slope per weight, from the squared "
+              "error's derivative.\n\n"
+              "3. Step against the gradient, which lowers the loss.\n"
+              "4. Repeat from step 2 until the loss stops falling.\n\n"
+              "Prediction then applies the final weights to new rows.")
     return [
         ("clean", GOOD, CLEAN),
         ("foreign figure despite a plausible filename",
@@ -2650,6 +2794,151 @@ def _cases():
          _mutate("- **Code.** github.example/x\n",
                  "- **Code.** github.example/x\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"),
          "the table is the last block"),
+
+        # --- numbered lists outside Methods ----------------------------------
+        # 2026-10-07 (knowledge 1.23.0): a procedure the document introduces
+        # may be a numbered list under its introducing sentence. A display
+        # or paragraph indented to a step's text column is step content and
+        # is checked like a top-level one.
+        ("a numbered procedure in Results with an indented display",
+         _mutate(R_END, R_END + "\n\n" + R_LIST), CLEAN),
+        ("a display indented four spaces under step 10 is step content, "
+         "not code",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe pipeline runs in ten "
+                 "stages.\n\n" + "\n".join(
+                     "%d. Run stage %d on the batch." % (i, i)
+                     for i in range(1, 10))
+                 + "\n10. Write the batch out, so later runs can reuse it:"
+                 "\n\n    $$\n    y = f(x)\n    $$\n\n    Here f is the "
+                 "whole pipeline and y its output."), CLEAN),
+        ("an unindented display between two steps ends the list",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "   $$\n   g = X^\\top (X w - y)\n   $$\n\n   Here",
+             "$$\ng = X^\\top (X w - y)\n$$\n\n   Here")),
+         "__ONLY__a block between numbered steps 2 and 3 is indented 0"),
+        ("a paragraph indented three spaces under step 10 ends the list",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe pipeline runs in eleven "
+                 "stages.\n\n" + "\n".join(
+                     "%d. Run stage %d on the batch." % (i, i)
+                     for i in range(1, 11))
+                 + "\n\n   Stage ten feeds the checker.\n\n"
+                 "11. Check the batch."),
+         "__ONLY__a block between numbered steps 10 and 11 is indented 3"),
+        ("the same block under a step in Methods ends the procedure",
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n1. The team enrolled 219 adults."
+                 "\n2. The team gave capsules at a fixed rate:\n\n$$\n"
+                 "d = 4 / 2\n$$\n\n3. The team counted recurrences."),
+         "__ONLY__a block between numbered steps 2 and 3"),
+        ("NEAR MISS: prose after the last step ends the list",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. Set the weights to zero.\n2. Fit them to the data."
+                 "\n3. Check them on held-out rows.\n\nPrediction then "
+                 "applies the weights."), CLEAN),
+        ("NEAR MISS: two procedures with prose between them",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. Set the weights.\n2. Fit them.\n3. Check them.\n\n"
+                 "Prediction runs in three more.\n\n1. Load the weights.\n"
+                 "2. Apply them.\n3. Report the output."), CLEAN),
+        ("a numbered list before its introducing sentence",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\n1. Set the weights.\n"
+                 "2. Fit them.\n3. Check them.\n\nThe fit runs in three "
+                 "steps."),
+         "__ONLY__a numbered list opens the Interpretation section"),
+        ("two steps outside Methods stay prose",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in two steps."
+                 "\n\n1. Set the weights.\n2. Fit them."),
+         "__ONLY__a sequence of fewer than 3 steps stays prose"),
+        ("a list outside Methods is numbered 1..n",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. Set the weights.\n1. Fit them.\n1. Check them."),
+         "__ONLY__is numbered 1, 1, 1"),
+        ("a step opens with a bold lead word",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. **Initialise.** Set the weights.\n2. Fit them.\n"
+                 "3. Check them."),
+         "__ONLY__numbered step 1 opens with bold text"),
+        ("a list nested two levels",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. Set the weights.\n   1. Set the first.\n"
+                 "      1. Set its sign.\n2. Fit them.\n3. Check them."),
+         "__ONLY__a list nests more than one level"),
+        ("NEAR MISS: one nested level under a step",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three steps."
+                 "\n\n1. Set the weights.\n   - Set the first to zero.\n"
+                 "   - Set the second to one.\n2. Fit them.\n3. Check them."),
+         CLEAN),
+        ("a nested list under a Methods step adds no steps",
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n1. The team enrolled 219 adults."
+                 "\n2. The team gave two doses.\n   1. The first came on day "
+                 "one.\n   2. The second came on day two.\n"
+                 "3. The team counted recurrences."), CLEAN),
+        ("a step after a paragraph inside the previous step is a new step",
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n1. The team enrolled 219 adults."
+                 "\n2. The team gave capsules at a fixed rate:\n\n   $$\n"
+                 "   d = 4 / 2\n   $$\n\n   Here d counts capsules per day."
+                 "\n3. The team counted recurrences."), CLEAN),
+        ("a paragraph inside a Methods step counts as Methods prose",
+         _mutate(M_ALL, M_H + "\n\n"
+                 + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200))
+                 + "\n\n1. The team enrolled 219 adults.\n\n   "
+                 + "The team measured every sample twice. " * 6
+                 + "\n\n2. The team gave capsules or placebo.\n"
+                 "3. The team counted recurrences."),
+         "__ADVISORY__Methods/basis section holds"),
+        ("NEAR MISS: a short paragraph inside a Methods step stays under the "
+         "prose target",
+         _mutate(M_ALL, M_H + "\n\nProse.\n\n1. The team enrolled 219 "
+                 "adults.\n\n   The team measured every sample twice.\n\n"
+                 "2. The team gave capsules or placebo.\n"
+                 "3. The team counted recurrences."), CLEAN),
+        ("NEAR MISS: a step's wrapped line and nested list are step text",
+         _mutate(M_ALL, M_H + "\n\n"
+                 + "\n\n".join(["P" * 200] * (MAX_METHODS_CHARS // 200))
+                 + "\n\n1. The team enrolled 219 adults\n   from two sites."
+                 "\n2. The team gave two doses.\n   - The first came on day "
+                 "one.\n   - The second came on day two.\n"
+                 "3. The team counted recurrences."), CLEAN),
+        ("a list numbered with `1)` markers",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit runs in three "
+                 "steps.\n\n1) Set the weights.\n2) Fit them.\n"
+                 "3) Check them."),
+         "__ONLY__a list item in the Interpretation section is numbered "
+         "`1)`"),
+        ("NEAR MISS: a wrapped `2)` inside a paragraph is no list",
+         _mutate(I_H + "\n\nProse.", I_H + "\n\nThe fit has two parts: "
+                 "1) setting the weights and\n2) fitting them."), CLEAN),
+        ("one equation per line holds inside a step",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "g = X^\\top (X w - y)",
+             "g = X^\\top r \\qquad w' = w - \\eta g")),
+         "__ADVISORY__a display line holds more than one equation"),
+        ("an absolute value in a display inside a step is not a table",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "g = X^\\top (X w - y)", "|f(x) - f(y)| \\le L |x - y|")),
+         CLEAN),
+        ("an exhibit inside a step keeps its indented caption",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "   $$\n   g = X^\\top (X w - y)\n   $$\n\n   Here g holds "
+             "one slope per weight, from the squared error's derivative.",
+             "   ![[Doe_X_2025_fig_3.png]]\n   *The loss fell in ten "
+             "rounds. Loss against round.*")), CLEAN),
+        ("a citation opening an indented line opens the line",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "1. Set the weights to zero, so no feature starts with "
+             "influence.",
+             "1. Set the weights to zero, so no feature starts with "
+             "influence.\n   <sup>[[Doe_X_2025.pdf#page=6|6]]</sup>")),
+         "__ONLY__citation opens the line"),
+        ("a paragraph inside a step keeps the paragraph cap",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "   Here g holds", "   One. Two. Three. Four. Five. Six. "
+             "Here g holds")),
+         "__ONLY__a paragraph holds 7 sentences"),
+        ("a step sentence keeps the 20-word step target outside Methods",
+         _mutate(R_END, R_END + "\n\n" + R_LIST.replace(
+             "3. Step against the gradient, which lowers the loss.",
+             "3. " + " ".join(["Step"] * (MAX_STEP_WORDS + 1)) + ".")),
+         "__ADVISORY__a step runs %d words" % (MAX_STEP_WORDS + 1)),
     ]
 
 

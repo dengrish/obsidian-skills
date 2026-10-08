@@ -164,6 +164,13 @@ _MASK_ITEM_FENCE_RE = re.compile(
 _MASK_LEADING_SPACE_RE = re.compile(r"^[ \t]*")
 _MASK_INDENTED_RE = re.compile(r"^(?: {4}|\t)")
 _MASK_LIST_ITEM_RE = re.compile(r"^ {0,3}(?:[-*+]|\d{1,9}[.)])(?:\s|$)")
+# A line that opens a block of its own. Any other unindented line directly
+# after paragraph text is that paragraph's lazy continuation, so it keeps the
+# list context of the line that opened the paragraph.
+_BLOCK_START_RE = re.compile(
+    r" {0,3}(?:#{1,6}(?:[ \t]|$)|>|`{3,}|~{3,}|\$\$|\||"
+    r"(?:[-*+]|\d{1,9}[.)])(?:[ \t]|$)|"
+    r"(?:(?:-[ \t]*){3,}|(?:_[ \t]*){3,}|(?:\*[ \t]*){3,})$)")
 _MASK_BACKTICKS_RE = re.compile(r"`+")
 # Inline code may cross a soft newline, but the block parser ends its
 # paragraph before a blank line or a new structural block.
@@ -274,9 +281,10 @@ def _mask_body_comments(text, mask_code, mask_unclosed_comments):
                 index = end + 1
                 continue
             indented_code = False
-            previous_blank = not line.strip()
-            if line.strip():
+            if line.strip() and (previous_blank or line[:1].isspace()
+                                 or _BLOCK_START_RE.match(line)):
                 previous_nonblank = line
+            previous_blank = not line.strip()
         char = text[index]
         if char == "`" and not _escaped_at(text, index):
             run = _MASK_BACKTICKS_RE.match(text, index)[0]
@@ -1497,9 +1505,19 @@ def blank_fences(masked):
 
     A caller that also needs the comment-masked view masks once and passes
     that view here instead of paying for ``mask_body_comments`` twice.
+
+    A fence opened on a list item's marker line, as in ``1. ```python``,
+    belongs to that item, as in :func:`mask_body_comments`: it closes at its
+    closer at any indentation, or where a less indented line ends the item,
+    and the marker itself stays visible.
     """
     out, fence = [], None            # fence = the opening run, e.g. "````"
+    fence_item = 0                   # an item fence's text column
     for ln in (masked or "").split("\n"):
+        if (fence is not None and fence_item and ln.strip()
+                and len(_MASK_LEADING_SPACE_RE.match(ln)[0].expandtabs(4))
+                < fence_item):
+            fence, fence_item = None, 0
         m = _FENCE_RE.match(ln)
         # Backticks are forbidden in a backtick fence's info string. A prose
         # line such as `````code``` is inline`` therefore contains an inline
@@ -1514,10 +1532,18 @@ def blank_fences(masked):
             fence_indent = max(3, len(ln[:m.start(1)].expandtabs(4)))
             out.append("")
             continue
+        item = (None if m or fence is not None
+                else _MASK_ITEM_FENCE_RE.match(ln))
+        if item and not (item[2][0] == "`" and "`" in item[3]):
+            # Its closer may sit at any indentation.
+            fence, fence_indent = item[2], float("inf")
+            fence_item = len(item[1].expandtabs(4))
+            out.append(item[1])
+            continue
         if (fence is not None and m and m.group(1)[0] == fence[0]
                 and len(m.group(1)) >= len(fence) and not m.group(2).strip()
                 and len(ln[:m.start(1)].expandtabs(4)) <= fence_indent):
-            fence = None
+            fence, fence_item = None, 0
             out.append("")
             continue
         out.append("" if fence is not None else ln)
@@ -1545,10 +1571,12 @@ def strip_indented(text):
     lines = (text or "").split("\n")
     out = list(lines)
     prev_nonblank = None
+    in_paragraph = False             # the line above is paragraph text
     i, n = 0, len(lines)
     while i < n:
         ln = lines[i]
         if not ln.strip():
+            in_paragraph = False
             i += 1
             continue
         starts_block = (i == 0) or (not lines[i - 1].strip())
@@ -1569,9 +1597,13 @@ def strip_indented(text):
             for k in range(i, last + 1):
                 out[k] = ""
             prev_nonblank = lines[last]
+            in_paragraph = False
             i = last + 1
             continue
-        prev_nonblank = ln
+        # A lazy continuation line keeps its paragraph's list context.
+        if not in_paragraph or ln[:1].isspace() or _BLOCK_START_RE.match(ln):
+            prev_nonblank = ln
+        in_paragraph = True
         i += 1
     return "\n".join(out)
 
@@ -1781,6 +1813,32 @@ def run_self_test(verbose=False):
              "Para.\n\n```\ncode\n```\n    [[x]] indented\n",
              "- item\n\n    ```\n    code\n    ```\n    [[x]] continues\n")],
          [False, True]),
+        ("a fence opened on a step's marker line belongs to the step: its "
+         "indented closer ends it, and so does the end of the step",
+         [strip_fenced(value).split("\n") for value in (
+             "1. ```python\n   x = 1\n   ```\n2. Next step.\n\n**Related:**",
+             "10. ```\n    x = 1\n11. Next step.",
+             "1. Install:\n\n   ```bash\n   pip install x\n   ```\n2. Run.")],
+         [["1. ", "", "", "2. Next step.", "", "**Related:**"],
+          ["10. ", "", "11. Next step."],
+          ["1. Install:", "", "", "", "", "2. Run."]]),
+        ("a display or paragraph indented under 10. is no indented listing",
+         ["$$" in strip_code(value) and "[[x]]" in strip_code(value)
+          for value in (
+              "10. Sum:\n\n    $$\n    x = 1\n    $$\n\n    It sums [[x]].",
+              "1. Sum:\n   - nested\n\n     $$\n     x = 1\n     $$\n\n"
+              "     It sums [[x]].")],
+         [True, True]),
+        ("after a step's lazy continuation line, a display indented under "
+         "10. is still no listing; after a wrapped plain paragraph it is",
+         [["$$" in view(value) and "[[x]]" in view(value)
+           for view in (strip_code, strip_indented)]
+          for value in (
+              "10. Normalize the weights so they\nsum to one:\n\n    $$\n"
+              "    x = 1\n    $$\n\n    It sums [[x]].",
+              "The weights are normalized so they\nsum to one:\n\n    $$\n"
+              "    x = 1\n    $$\n\n    It sums [[x]].")],
+         [[True, True], [False, False]]),
         ("the masked view is cached without changing its answer",
          [mask_body_comments("a <!-- b --> `c`", mask_code=flag)
           for flag in (False, True, False, 1)]

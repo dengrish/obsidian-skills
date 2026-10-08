@@ -151,6 +151,12 @@ def run_self_test(verbose=False):
          "Sum the terms 1..r and stop.", 0),
         ("a Unicode ellipsis then a period is punctuation",
          "It ended….so it goes.", 0),
+        ("a display indented under a two-digit step is excluded; the step's "
+         "paragraph is prose",
+         "10. Encode it:\n\n    $$\n    h_{[CLS]} = .csv\n    $$\n\n"
+         "    Then save .csv.", 1),
+        ("a caption indented under a step is excluded",
+         "1. Plot it.\n\n   ![[plot.png]]\n   *Outputs saved as .csv.*", 0),
     ]
     failed = 0
     for case in cases:

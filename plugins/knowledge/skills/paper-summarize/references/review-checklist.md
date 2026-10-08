@@ -80,8 +80,8 @@ Walk the callout, headings, body and captions with their supporting pages open:
   non-evidential statements and qualitative descriptions use their correct
   [off-ladder forms](summary-standards.md#the-hedge-ladder-and-what-sets-its-ceiling).
 - [ ] The finding and its necessary qualification remain together in the same
-  paragraph/bullet. Rung 1 still needs scope; it does not require an invented
-  design weakness. A modal verb alone does not explain a weaker design.
+  paragraph, bullet or step. Rung 1 still needs scope; it does not require an
+  invented design weakness. A modal verb alone does not explain a weaker design.
 - [ ] A concept with its own Wiki entry is linked to that entry at its first
   body-prose mention and not explained again; each link resolves to an entry
   for the same concept ([links to Wiki entries](note-format.md#links-to-wiki-entries)).
@@ -91,10 +91,14 @@ Walk the callout, headings, body and captions with their supporting pages open:
   complexity, scaling and iteration bound carries the explanation
   [note format](note-format.md#prose-and-key-messages) requires, with no
   invented derivation or reason.
-- [ ] Parallel facts about several items sit one bullet per item under the
-  sentence that introduces them, each stating the same property, as do
-  time-ordered stages that each carry their own facts; causal or procedural
-  chains and arguments stay prose.
+- [ ] Each passage takes the [form its shape needs](note-format.md#prose-and-key-messages).
+  Parallel facts about several items sit one bullet per item under the
+  sentence that introduces them, each stating the same property. A procedure
+  of three or more steps, or the time-ordered stages of one process, is a
+  numbered list under its introducing sentence, and each step keeps its
+  reason. Causal chains, arguments and shorter sequences stay prose. The
+  document's reported procedure in the second section follows its own rule in
+  [body content](note-format.md#body-content).
 - [ ] The selected [body mode](note-format.md#choose-the-body-mode) matches the
   document's main contribution. Empirical notes identify the design and walk an
   actual procedure where one exists. Argument/synthesis notes state the real

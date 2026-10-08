@@ -166,6 +166,7 @@ from organism_names import (  # noqa: E402
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_boilerplate_candidates,
+    find_display_spans,
     find_missing_display_equation_candidates,
     find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
@@ -239,6 +240,7 @@ from entry_checks import (  # noqa: E402
     kept_card_label,
     label_drops_head,
     label_shares_surface,
+    list_indent_findings,
     merge_scar_findings,
     organism_common_name_bound as _organism_common_name_bound,
     organism_common_name_surfaces as _organism_common_name_surfaces,
@@ -559,8 +561,10 @@ def markdown_tables(body):
         strip_indented(strip_fenced(body)))
 
 
+# A cue may open a line, a list item's text or its indented continuation.
 _NAVIGATION_ONLY_LINK_RE = re.compile(
-    r"(?:^|[.!?,;:]\s+|\(\s*|[—–-]\s+)"
+    r"(?:^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?|"
+    r"[.!?,;:]\s+|\(\s*|[—–-]\s+)"
     r"(?:see(?:\s+also)?|refer\s+to|consult|"
     r"for\s+(?:more\s+)?details,?\s+see)\s+\[\[", re.IGNORECASE)
 
@@ -2093,8 +2097,9 @@ def inventory_mocs(vault_root, entry_counts):
     return states, legacy, findings, texts
 
 
+# Listings are masked first, so indentation here is a list item's.
 _DUPLICATE_DISPLAY_RE = re.compile(
-    r"(?ms)^ {0,3}\$\$[ \t]*\n.*?\n {0,3}\$\$[ \t]*$")
+    r"(?ms)^[ \t]*\$\$[ \t]*\n.*?\n[ \t]*\$\$[ \t]*$")
 _DUPLICATE_MARKDOWN_LINK_RE = re.compile(
     r"!?\[([^\]\n]*)\]\([^\n)]*\)")
 _DUPLICATE_MARKDOWN_IMAGE_RE = re.compile(
@@ -3866,6 +3871,18 @@ def scan(wiki, images=None, vault=None, settled=None):
                     "Setext body heading ending on prose line %d is "
                     "noncanonical; use a plain-text `##` heading"
                     % line_no))
+        # A display or paragraph that a list item owns but that is indented
+        # short of the item's text column ends the list in Obsidian. Shared
+        # with lint_entry's 9-list-indent.
+        _list_tables = markdown_tables(e["prose"])[1]
+        for _indent in list_indent_findings(
+                e["prose"], find_display_spans(strip_code(e["prose"]),
+                                               _list_tables), _list_tables):
+            problems.append((
+                sl, "item9/list-indent",
+                "prose line %d (list item on prose line %d): %s"
+                % (_indent["line"] + _line_off,
+                   _indent["item_line"] + _line_off, _indent["message"])))
         # ---- item 12 (format): unescaped literal $ and remote image embeds ----
         _pure_math_opener_markup = None
         nd = leftover_dollars(e["prose"])
@@ -7257,6 +7274,16 @@ def run_self_test():
         check("duplicate evidence keeps readable inline math",
               duplicate_sentence_surfaces(math_a)[0][1].find("$x+y$") >= 0,
               True)
+        step_sentence = (
+            "This deliberately long sentence explains how the weighted error "
+            "counts the weight that sits on misclassified examples.")
+        check("a display indented under 10. is masked like a top-level one, "
+              "so the step's sentence matches its top-level copy",
+              [surface for _normalized, surface in duplicate_sentence_surfaces(
+                  "10. Compute it.\n\n    $$\n    e = 1\n    $$\n\n    "
+                  + step_sentence)],
+              [surface for _normalized, surface in duplicate_sentence_surfaces(
+                  "Compute it.\n\n$$\ne = 1\n$$\n\n" + step_sentence)])
 
         # special-titles.md's cross-domain corpus, its words and its phrases,
         # is the scanner's mechanical minimum.  A single fixture over every
@@ -11732,6 +11759,46 @@ def run_self_test():
                and p["item"] == "item12/boilerplate-candidate"],
               [True])
 
+        # A numbered procedure: a display or paragraph at its step's text
+        # column (3 spaces under 1., 4 under 10.) reads like a top-level one.
+        v = os.path.join(tmp, "list-steps")
+        procedure = (
+            "**Steps** run in order.\n\n"
+            "1. Set every weight to one over the count, so all examples "
+            "count.\n"
+            "2. Fit a weak classifier. Common choices are:\n"
+            "   - a decision stump;\n   - a shallow tree.\n\n"
+            "   A deeper tree fits the weights too closely.\n"
+            "3. Compute the weighted error:\n\n"
+            "   $$\n   \\epsilon = \\sum_{i=1}^{n} w_i\n   $$\n\n"
+            "   Here $\\epsilon$ is the weight on mistakes.\n"
+            + "".join("%d. Record round %d.\n" % (n, n) for n in range(4, 10))
+            + "10. Normalize the weights:\n\n"
+            "    $$\n    w_i \\leftarrow \\frac{w_i}{Z}\n    $$\n\n"
+            "    Here $Z$ is the total weight.\n"
+            "11. Repeat from step 2 until every round has run.")
+        _st_write(v, "steps.md", _st_entry("Steps", procedure))
+        _st_write(v, "loose-steps.md", _st_entry(
+            "Loose steps", procedure.replace("**Steps**", "**Loose steps**")
+            .replace("   $$\n   \\epsilon = \\sum_{i=1}^{n} w_i\n   $$\n\n"
+                     "   Here",
+                     "$$\n\\epsilon = \\sum_{i=1}^{n} w_i\n$$\n\nHere")
+            .replace("    $$\n    w_i \\leftarrow \\frac{w_i}{Z}\n    $$",
+                     "   $$\n   w_i \\leftarrow \\frac{w_i}{Z}\n   $$")))
+        res = scan(v)
+        check("a numbered procedure with indented displays, a nested bullet "
+              "and a two-digit step scans clean",
+              _st_keys(res, "steps"), [])
+        check("a display and paragraph left outside a step, and a display "
+              "short of 10.'s text column, are item9/list-indent",
+              [(p["item"], p["message"].split(":", 1)[0])
+               for p in res["problems"] if p["slug"] == "loose-steps"],
+              [("item9/list-indent",
+                "prose line 11 (list item on prose line 9)"),
+               ("item9/list-indent",
+                "prose line 15 (list item on prose line 9)"),
+               ("item9/list-indent",
+                "prose line 24 (list item on prose line 22)")])
         # The per-entry checks shared with wiki-build's lint_entry.py: its
         # self-test runs the same rows, so each moved mutation is flagged by
         # both tools.

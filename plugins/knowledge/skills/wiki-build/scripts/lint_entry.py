@@ -95,6 +95,18 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               acronym, resolves it)
       9-link-integration      navigation-only cue points directly at a body
                               wikilink (listings/displays masked)
+      9-list-indent           a display block or continuation paragraph that
+                              belongs to a list item is indented short of the
+                              item's text column (3 spaces after `1.`, 4
+                              after `10.`), so Obsidian ends the list there:
+                              the list resumes after it with the item's next
+                              number, or with the same bullet or number after
+                              a display, or a display follows item text that
+                              ends with a colon and ends the whole list; a
+                              nested list whose first marker sits past the
+                              item's marker but short of its text column,
+                              with another bullet or delimiter, too; indent
+                              it (lists inside quotes are not checked)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
                               (counted by target, not display text; the
                               Related footer and self-links, which are
@@ -235,13 +247,13 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               the target defines in italics passes (warning)
 
 Items 5, 6, 13, 14, 16 and 18, item 7's description subject, item 9's
-acronym-title expansion, and item 19's card set, primary answer (card line
-3), primary card, Spaced Repetition marker floor and discipline-root test,
-share their per-entry rules with wiki-lint's scanner through
-``shared/scripts/entry_checks.py``; the Related/Flashcards section markers
-come from ``entry_structure.py``. Item 10's self-link rule is implemented
-here and in the scanner; ``SHARED_MUTATIONS`` holds both to the same
-fixtures.
+acronym-title expansion and list indentation, and item 19's card set, primary
+answer (card line 3), primary card, Spaced Repetition marker floor and
+discipline-root test, share their per-entry rules with wiki-lint's scanner
+through ``shared/scripts/entry_checks.py``; the Related/Flashcards section
+markers come from ``entry_structure.py``. Item 10's self-link rule is
+implemented here and in the scanner; ``SHARED_MUTATIONS`` holds both to the
+same fixtures.
 
 NOT implemented (out of scope by design): item 4's file existence and page
 correctness, item 9's semantic flow/atomicity judgments, item 10's dangling
@@ -389,6 +401,7 @@ from organism_names import (  # noqa: E402
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_boilerplate_candidates,
+    find_display_spans,
     find_missing_display_equation_candidates,
     find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
@@ -459,6 +472,7 @@ from entry_checks import (  # noqa: E402
     label_drops_head,
     label_shares_surface,
     line3_parts,
+    list_indent_findings,
     merge_scar_findings,
     organism_common_name_bound,
     primary_line3_faults,
@@ -1725,7 +1739,9 @@ def _check_table_cell_wikilinks(fm, sections, findings):
         for line_i in range(header_i, end_i + 1):
             # Inline-code examples render literally and are not links.  Fenced
             # and indented listings cannot be table spans in _markdown_tables.
-            for target, _label in extract_wikilinks(strip_code(lines[line_i])):
+            # A row indented inside a list item is no indented listing.
+            for target, _label in extract_wikilinks(
+                    strip_code(lines[line_i].lstrip(" \t"))):
                 findings.append(_f(
                     "10-table-cell-wikilink", "error",
                     "wikilinks are not allowed in Markdown table cells; use "
@@ -1734,8 +1750,10 @@ def _check_table_cell_wikilinks(fm, sections, findings):
                      "text": lines[line_i].strip()[:160]}))
 
 
+# A cue may open a line, a list item's text or its indented continuation.
 _NAVIGATION_ONLY_LINK_RE = re.compile(
-    r"(?:^|[.!?,;:]\s+|\(\s*|[—–-]\s+)"
+    r"(?:^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?|"
+    r"[.!?,;:]\s+|\(\s*|[—–-]\s+)"
     r"(?:see(?:\s+also)?|refer\s+to|consult|"
     r"for\s+(?:more\s+)?details,?\s+see)\s+\[\[", re.IGNORECASE)
 _REDUNDANT_PIPE_RE = re.compile(
@@ -1810,7 +1828,10 @@ def _body_wikilink_occurrences(sections):
     for offset, line in enumerate(masked_lines):
         if offset in skip:
             continue
-        for target, label in extract_wikilinks(line):
+        # The body view above already masked every listing; read the line
+        # without its indentation, which alone would re-read a line indented
+        # inside a list item (four spaces under ``10.``) as an indented one.
+        for target, label in extract_wikilinks(line.lstrip(" \t")):
             key = _link_key(target)
             # Explicit MOC navigation is outside entry-link pruning. The
             # Wiki-only folder inventory cannot validate or own those notes.
@@ -1977,6 +1998,21 @@ def _check_api_surface(fm, sections, findings):
             message += ("; review-only: a recorded author-test decision "
                         "that it is no API use resolves it (api-surface.md)")
         findings.append(_f("6-api-surface", severity, message, evidence))
+
+
+def _check_list_indent(fm, sections, findings):
+    """Item 9: a list item's display or paragraph indented short of its text."""
+    prose, first_line = _shared_prose(fm, sections)
+    tables = _markdown_tables(prose)[1]
+    spans = find_display_spans(strip_code(prose), tables)
+    for finding in list_indent_findings(prose, spans, tables):
+        findings.append(_f(
+            "9-list-indent", "error", finding["message"],
+            {"line": _file_line(first_line, finding),
+             "item_line": _file_line(
+                 first_line, {"line": finding["item_line"]}),
+             "kind": finding["kind"], "indent": finding["indent"],
+             "column": finding["column"]}))
 
 
 def _check_merge_scars(fm, sections, findings):
@@ -2684,6 +2720,7 @@ def lint_text(text, filename):
     _check_integrated_wikilinks(fm, sections, findings)
     _check_person_event_date(fm, sections, findings)
     _check_acronym_expansion(fm, sections, findings)
+    _check_list_indent(fm, sections, findings)
     _check_image_captions(fm, sections, findings)
     _check_equation_coverage_candidates(fm, sections, findings, extras)
     _check_literal_dollars("\n".join(sections["prose_lines"]), findings)
@@ -5259,6 +5296,53 @@ def run_self_test():
           items(mutate("\n**Related:**",
                        "\n\n```markdown\nsee [[precision]]\n```\n\n**Related:**")),
           ["6-api-surface"])
+    # A numbered procedure: a display or paragraph at its step's text column
+    # (3 spaces under 1., 4 under 10.) is read like a top-level one.
+    procedure = (
+        "Training runs these steps.\n\n"
+        "1. Set every weight to one over the count, so all examples count.\n"
+        "2. Fit a weak classifier. Common choices are:\n"
+        "   - a decision stump;\n   - a shallow tree.\n\n"
+        "   A deeper tree fits the weights too closely.\n"
+        "3. Compute the weighted error:\n\n"
+        "   $$\n   \\epsilon = \\sum_{i=1}^{n} w_i\n   $$\n\n"
+        "   Here $\\epsilon$ is the weight on mistakes.\n"
+        + "".join("%d. Record round %d.\n" % (n, n) for n in range(4, 10))
+        + "10. Normalize the weights:\n\n"
+        "    $$\n    w_i \\leftarrow \\frac{w_i}{Z}\n    $$\n\n"
+        "    Here $Z$ is the total weight.\n"
+        "11. Repeat from step 2 until every round has run.")
+
+    def after_opener(paragraph):
+        return mutate("decision threshold moves.\n",
+                      "decision threshold moves.\n\n" + paragraph + "\n")
+
+    check("a numbered procedure with indented displays, a nested bullet and "
+          "a two-digit step lints clean",
+          items(after_opener(procedure)), [])
+    unindented = (procedure
+                  .replace("   $$\n   \\epsilon = \\sum_{i=1}^{n} w_i\n   $$"
+                           "\n\n   Here",
+                           "$$\n\\epsilon = \\sum_{i=1}^{n} w_i\n$$\n\nHere")
+                  .replace("    $$\n    w_i \\leftarrow \\frac{w_i}{Z}\n    $$",
+                           "   $$\n   w_i \\leftarrow \\frac{w_i}{Z}\n   $$"))
+    check("a display and paragraph left outside a step, and a display short "
+          "of 10.'s text column, are 9-list-indent at their file lines",
+          [(f["item"], f["evidence"]["kind"], f["evidence"]["indent"],
+            f["evidence"]["column"], f["evidence"]["line"])
+           for f in lint_text(after_opener(unindented),
+                              "roc-curve.md")["findings"]],
+          [("9-list-indent", "display", 0, 3, 29),
+           ("9-list-indent", "paragraph", 0, 3, 33),
+           ("9-list-indent", "display", 3, 4, 42)])
+    check("a navigation cue or a table-cell link in a step reads like a "
+          "top-level one",
+          [items(after_opener(paragraph)) for paragraph in (
+              "1. Count the hits.\n\n   See [[precision]] for details.\n"
+              "2. Divide them.",
+              "10. Compare:\n\n    | Name | Value |\n    | --- | --- |\n"
+              "    | [[precision]] | 2 |\n    *Two values.*\n11. Stop.")],
+          [["9-link-integration"], ["10-table-cell-wikilink"]])
     images = mutate(
         "\n**Related:**",
         "\n\n![[figure.png]]\n"

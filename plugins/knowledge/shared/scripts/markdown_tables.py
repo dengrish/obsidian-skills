@@ -98,10 +98,17 @@ def _is_caption_candidate(line):
                 and not _has_table_separator(line))
 
 
-def _is_table_body_row(line):
-    """Whether a non-header line continues a detected GFM table."""
+def _is_table_body_row(line, indent=0):
+    """Whether a non-header line continues a detected GFM table.
+
+    ``indent`` is the header row's indentation: inside a list item, a new
+    block starts at the item's text column, as one starts at column 0 at the
+    top level.
+    """
     if not (line or "").strip() or _is_caption_candidate(line):
         return False
+    expanded = line.expandtabs(4)
+    line = expanded[min(indent, len(expanded) - len(expanded.lstrip(" "))):]
     if _TABLE_BLOCK_START_RE.match(line):
         return False
     if _THEMATIC_BREAK_RE.fullmatch(line):
@@ -141,7 +148,10 @@ def markdown_table_spans(masked_body):
         if _table_cell_count(lines[index - 1]) != _table_cell_count(lines[index]):
             continue
         end = index
-        while end + 1 < len(lines) and _is_table_body_row(lines[end + 1]):
+        header = lines[index - 1].expandtabs(4)
+        indent = len(header) - len(header.lstrip(" "))
+        while end + 1 < len(lines) and _is_table_body_row(lines[end + 1],
+                                                          indent):
             end += 1
         tables.append((index - 1, end))
         consumed_through = end
@@ -299,6 +309,17 @@ def _self_test():
         ("an empty invalid link-reference prefix remains a table row",
          markdown_table_spans("A | B\n--- | ---\nvalue | other\n[ref]:"),
          [(0, 3)]),
+        ("a table indented under 10. ends at a nested item or rule, as at "
+         "the top level",
+         [markdown_table_spans(
+             "10. Compare:\n\n    A | B\n    --- | ---\n    value | other\n"
+             + tail) for tail in ("    - next", "    ---", "    *Caption.*")],
+         [[(2, 4)]] * 3),
+        ("an indented table keeps an indented row of its own",
+         markdown_table_spans(
+             "1. Compare:\n\n   | A | B |\n   | --- | --- |\n   | 1 | 2 |\n"
+             "   | 3 | 4 |\n   *Caption.*"),
+         [(2, 5)]),
         ("span masking preserves offsets",
          mask_line_spans("alpha\nbeta\ngamma", [(1, 1)]),
          "alpha\n    \ngamma"),

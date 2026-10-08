@@ -28,7 +28,24 @@ These rules govern the body; card line 1 follows its [own rule](flashcards-and-e
 
 **The equation that defines the entry's subject or a named quantity sits in a `$$…$$` display block**: each `$$` alone on its line, with a blank line above and below. **One equation per line:** never set two equations side by side in one display line (`a = …, \qquad b = …`, `a = …, b = …`, `a = … \text{ and } b = …`, a derivation joined by `\Rightarrow`, or a `\text{where}` clause defining another quantity). Give each its own line: a separate display beside the prose that introduces it, or a row of an `aligned` or `gathered` display. A second source line inside one display is not a new line; it renders beside the first. A condition such as an index range (`i = 1, \ldots, m` or `x = 0, 1`) or `\text{for } i = 1` is not a second equation. **Inline `$…$` is for math woven into a sentence** (symbols such as $\sigma$, short expressions, bounds such as $0 \le p \le 1$), never the defining equation: `Min-max scaling` written inline as `$(x - \min)/(\max - \min)$` hides the key result at text height. A display may sit mid-sentence or close its sentence, right after the prose introducing the quantity. Display math uses `\frac{…}{…}`, `\left( … \right)` around tall content, `\sqrt{…}` and `\sum_{i=1}^{m}`; the slash form stays fine inline.
 
-Display blocks appear only in body prose. `description:` is plain text; captions and card line 1 allow **inline** math only, and card line 3 (the answer) allows none ([card math](flashcards-and-emphasis.md#line-1-equation-coverage)).
+Display blocks appear only in the body, in prose or inside a list item. `description:` is plain text; captions and card line 1 allow **inline** math only, and card line 3 (the answer) allows none ([card math](flashcards-and-emphasis.md#line-1-equation-coverage)).
+
+**A display inside a list item belongs to that item.** A step of a [numbered list](writing.md#body-structure) keeps its display and the display's explanation inside the item. Indent both `$$` lines, the math between them and the explanation to the item's text column: 3 spaces after `1. `, 4 after `10. `. Leave a blank line above and below the display. Every rule in this section still applies there, one equation per line included. A display or paragraph left at the margin ends the list in Obsidian, and the following steps start a new list.
+
+```markdown
+Gradient descent lowers a cost by repeated small steps downhill:
+
+1. Initialize the parameter vector $\boldsymbol{\theta}$, for example with small random values, so the search has a starting point.
+2. Compute the gradient $\nabla_{\boldsymbol{\theta}} J(\boldsymbol{\theta})$ on the training set, which points in the direction of steepest increase of the cost.
+3. Move the parameters a small step against the gradient, which lowers the cost:
+
+   $$
+   \boldsymbol{\theta} \leftarrow \boldsymbol{\theta} - \eta \nabla_{\boldsymbol{\theta}} J(\boldsymbol{\theta})
+   $$
+
+   The learning rate $\eta$ sets the step size: a small enough step against the gradient lowers $J(\boldsymbol{\theta})$, and a step too large overshoots the minimum.
+4. Repeat from step 2 until the cost stops decreasing.
+```
 
 ### Multi-form equations
 

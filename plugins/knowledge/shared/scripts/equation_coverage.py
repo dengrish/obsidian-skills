@@ -163,11 +163,13 @@ _FOLLOWING_REJECTION_RE = re.compile(
     r"inappropriate\b)",
     re.IGNORECASE,
 )
+# Listings are masked before these run, so any indentation is a list
+# item's: a block starts at the item's text column as at column 0.
 _MARKDOWN_BLOCK_START_RE = re.compile(
-    r"(?m)(?:^|\n)[ \t]{0,3}(?:#{1,6}[ \t]+|>[ \t]*|"
+    r"(?m)(?:^|\n)[ \t]*(?:#{1,6}[ \t]+|>[ \t]*|"
     r"[-+*][ \t]+|\d+[.)][ \t]+|`{3,}|~{3,}|---[ \t]*$)")
 _MARKDOWN_BLOCK_LINE_RE = re.compile(
-    r"^[ \t]{0,3}(?:#{1,6}[ \t]+|>[ \t]*|[-+*][ \t]+|"
+    r"^[ \t]*(?:#{1,6}[ \t]+|>[ \t]*|[-+*][ \t]+|"
     r"\d+[.)][ \t]+|`{3,}|~{3,}|---[ \t]*$)")
 
 # Every pattern below is an observed, self-contained calculation shape. The
@@ -246,7 +248,7 @@ def _fold_hard_wraps(text):
             continue
         if _MARKDOWN_BLOCK_LINE_RE.match(next_line):
             continue
-        if re.match(r"^[ \t]{0,3}(?:#{1,6}[ \t]+|`{3,}|~{3,}|"
+        if re.match(r"^[ \t]*(?:#{1,6}[ \t]+|`{3,}|~{3,}|"
                     r"---[ \t]*$)", previous_line):
             continue
         chars[index] = " "
@@ -1943,6 +1945,16 @@ def run_self_test(verbose=False):
         ("a preceding display does not satisfy a later prose definition",
          "$$\n\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$\n"
          "The scale is the square root of variance.", 1, ()),
+        ("a display indented inside a numbered step covers its step's cue",
+         "10. Its scale is the square root of variance.\n\n"
+         "    $$\n    \\sigma = \\sqrt{\\operatorname{Var}(X)}\n    $$\n\n"
+         "11. Report it.", 0, ()),
+        ("a cue in a numbered step's text without a display is reported",
+         "1. Its scale is the square root of variance.\n"
+         "2. Report it.", 1, ()),
+        ("a cue cannot bridge into a nested item under a two-digit step",
+         "10. Subtract the mean,\n    - then divide by the standard "
+         "deviation.", 0, ()),
     ]
     failed = 0
     total = len(cases)
@@ -1975,6 +1987,12 @@ def run_self_test(verbose=False):
          [], ()),
         ("an escaped dollar opens no display",
          "It costs \\$$5$ in total.", [], ()),
+        ("displays indented to a numbered step's text column read like "
+         "top-level ones",
+         "1. Count:\n\n   $$\n   x = 1\n   $$\n\n   Here x counts.\n"
+         "10. Sum:\n\n    $$\n    y = 2\n    $$\n\n11. Sum:\n    $$\n"
+         "    z = 3\n    $$\n\n12. Sum:\n\n    $$w = 4$$",
+         ["missing-blank-line", "one-line-display"], ()),
         ("a one-line aligned display is one form finding",
          "Prose.\n\n$$\\begin{aligned} a &= 1 \\\\ &= 2 \\end{aligned}$$",
          ["one-line-display"], ()),
@@ -2102,6 +2120,9 @@ def run_self_test(verbose=False):
          "$$a = b, \\qquad c = d\n$$", [1], ()),
         ("a display in a blockquote is read without its markers",
          "> Prose.\n>\n> $$\n> a = 1, \\quad b = 2\n> $$", [4], ()),
+        ("a display indented under a two-digit step is read",
+         "10. Set both:\n\n    $$\n    a = 1, \\quad b = 2\n    $$", [4],
+         ()),
     ]
     total += len(split_cases)
     for name, prose, expected, spans in split_cases:
@@ -2125,6 +2146,9 @@ def run_self_test(verbose=False):
          "$$\nr = 1\n$$\n\nProse.\n\n$$\nProse.", [(0, 2)], ()),
         ("a delimiter on an excluded line is skipped",
          "X | $$\n\n$$\nr = 1\n$$", [(2, 4)], ((0, 0),)),
+        ("displays indented inside list items are paired",
+         "1. Set:\n\n   $$\n   r = 1\n   $$\n10. Set:\n\n    $$\n"
+         "    s = 1\n    $$", [(2, 4), (7, 9)], ()),
     ]
     total += len(span_cases)
     for name, prose, expected, spans in span_cases:
