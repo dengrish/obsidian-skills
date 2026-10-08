@@ -1,7 +1,7 @@
 # Body cleaning rules
 
 - [Remove clipping chrome](#remove-clipping-chrome) — chrome, backlink panels,
-  orphaned credits, nav fragments, horizontal rules, hidden AI-directed text
+  orphaned credits, nav fragments, decorative rules, hidden AI-directed text
 - [Repair structure and markup](#repair-structure-and-markup) — heading
   hierarchy, split and scrambled emphasis, split links, mangled nested lists
   ([nested-list repair](nested-lists.md)), HTML, code, footnotes, tables,
@@ -78,17 +78,16 @@ treating a detector match as permission to rewrite.
 - Banner-ad text that got scraped as prose ("ADVERTISEMENT", sponsored-content
   disclosures unrelated to the article).
 - Cookie/GDPR notices.
-- **Horizontal rules** — any line that is just three or more of one of `-`,
-  `*` or `_`, optionally separated by spaces (`---`, `***`, `___`, `* * *`,
-  `- - -`), or `<hr>`, with blank lines around it. Articles often use them as
-  decorative section breaks; the heading hierarchy normalization (under [Repair
-  structure and markup](#repair-structure-and-markup) below) already gives the
-  note clear structure, so the rules are redundant noise. **Important
-  exception**: don't strip `---` or `___` that appears inside a fenced code
-  block (between its fence markers) — that's code/data content, not a markdown
-  horizontal rule. And don't confuse this with the structural `___` between
-  the generated Summary callout and the body; that boundary stays in the
-  assembled note.
+- **Decorative rules** — any line that is just three or more of one glyph,
+  optionally spaced or backslash-escaped: Markdown rules (`---`, `***`, `___`,
+  `* * *`, `- - -`), `<hr>` and text dividers (`+++++`, `\*\*\*`, `• • •`).
+  Remove them; the heading hierarchy normalization (under [Repair structure
+  and markup](#repair-structure-and-markup) below) already gives the note clear
+  structure. The one exception is a rule that is the only boundary before an
+  unheaded postscript: it becomes a single `---` with blank lines around it,
+  so the postscript does not merge into the section above. A `---` or `___`
+  inside a fenced code block is code, and the structural `___` between the
+  generated Summary callout and the body stays.
 - **Hidden text aimed at AI tools** — a passage addressed to AI systems that the
   fetched source markup shows readers never saw (for example `display:none`,
   `visibility:hidden`, zero-size, off-screen or same-colour text). Remove it and
@@ -163,16 +162,21 @@ treating a detector match as permission to rewrite.
   pair matching clean siblings (`***Label***:`), checking the live source when
   the weight is unclear; sweep item 7 lists odd `*`-run lines (a literal `5 * 3`
   is a benign hit).
-- **Split links** — Web Clipper can break one linked title into a link holding
-  only punctuation and a second link to the same or a related URL, such as
-  `**[“](url)**[A New Record…](url)”`, or into two links to one URL, such as
-  `[in](url) *[Science](url),*`. Sweep item 17 lists these candidates. When the
-  pieces form one linked title or phrase, merge them into one link over the
-  whole text, keeping quotes and other punctuation outside it:
-  `“[A New Record…](url)”`. Keep the publisher's URL, from the piece over the
-  title text when the two differ, and drop emphasis that wrapped only the
+- **Split links and mid-word spans** — Web Clipper can break one linked title
+  into a link holding only punctuation and a second link to the same or a
+  related URL, such as `**[“](url)**[A New Record…](url)”`, or into two links
+  to one URL, such as `[in](url) *[Science](url),*`. Sweep item 17 lists these
+  candidates. When the pieces form one linked title or phrase, merge them into
+  one link over the whole text, keeping quotes and other punctuation outside
+  it: `“[A New Record…](url)”`. Keep the publisher's URL, from the piece over
+  the title text when the two differ, and drop emphasis that wrapped only the
   punctuation; emphasis on words stays, as in `[in *Science*](url),`. Adjacent
-  links to different documents stay separate.
+  links to different documents stay separate. Web Clipper also inserts a space
+  where the source starts a link or emphasis inside a word, so
+  `I<a>t serves…</a>` becomes `I [t serves…](url)`; item 17 lists these as
+  mid-word spans. When the source markup confirms one, delete the space
+  (`I[t serves…](url)`, `t*o promote…*`), writing an `_` marker as `*`, since
+  `_` cannot open inside a word.
 - **Mangled nested lists — stacked markers (`- - text`), orphaned deep
   indentation, or a single tab that splits sibling items so peers render as
   nested.** Web Clipper routinely wrecks deep lists, especially Q&A pairs and

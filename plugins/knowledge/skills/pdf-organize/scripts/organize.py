@@ -146,9 +146,11 @@ from naming import (                       # noqa: E402  (after the bootstrap)
     looks_canonical,
     split_tail,
 )
-from figure_state import (MANIFEST_FILE, REVIEW_FILE, rewrite_sidecar,
+from figure_state import (ED_PENDING_FILE, MANIFEST_FILE, REVIEW_FILE,
+                          rewrite_sidecar,
                           read_manifest, manifest_key, file_digest,
-                          check_manifest_writable)  # noqa: E402
+                          check_manifest_writable, deck_crop,
+                          other_tool_label)  # noqa: E402
 import atomic_move as _atomic_move          # noqa: E402
 from atomic_move import (LinkUnavailable, MoveIncomplete, PublicationConflict,
                          move_noreplace, publish_new,
@@ -511,8 +513,10 @@ _MARKDOWN_ESCAPE = re.compile(r"\\([!-/:-@\[-`{-~])")
 
 #: The opening of a reference-style definition, up to its destination. It may
 #: sit inside a blockquote or an Obsidian callout (`> [p]: path`). A footnote
-#: (`[^1]:`) is prose, not a destination. Use with `re.M`.
-_REFERENCE_DEFINITION = (r"^(?:[ ]{0,3}>[ ]?)*[ ]{0,3}\[(?!\^)[^\]\n]+\]:"
+#: (`[^1]:`) is prose, not a destination. Use with `re.M`. Each repetition
+#: starts with `>`, so every space has one owner and a deeply quoted line
+#: that fails to match backtracks in linear time.
+_REFERENCE_DEFINITION = (r"^[ ]{0,3}(?:>[ ]{0,4})*\[(?!\^)[^\]\n]+\]:"
                          r"[ \t]*")
 #: The opening of an HTML `src` or `href` value, up to its quote if any.
 _HTML_ATTRIBUTE = r"\b(?i:src|href)[ \t]*=[ \t]*"
@@ -1423,8 +1427,10 @@ def _distinctive(name):
 
 #: A folder path in plain text that abuts a matched basename, as in
 #: `failed on Sources/PDFs/download.pdf.`  No link syntax opens it, so it
-#: starts after whitespace or punctuation and holds no space.
-_PATH_BEFORE = re.compile(r"(?<![\w./\\-])((?:[^\s/\\\[\]()<>\"'`*|]+/)+)\Z")
+#: starts after whitespace or punctuation and holds no space. An opening
+#: typographic quote or strikethrough before it is not part of the path.
+_PATH_BEFORE = re.compile(
+    r"(?<![\w./\\-])[“‘„«~]*((?:[^\s/\\\[\]()<>\"'`*|]+/)+)\Z")
 
 
 def _qualifies_at(body, start, name, dirs, note_dir):
@@ -1891,6 +1897,46 @@ def _carry_transform(matcher, note_dir):
     return carry
 
 
+def _prose_path_transform(path_moves, note_dir):
+    """The per-part transform that moves a plain-text path with its file.
+
+    `path_moves` is {old vault path: new vault path} for each file whose
+    folder changes. A plain-text folder path that leads to one from the vault
+    root or from the note becomes its new vault path, so the mention never
+    pairs the old folder with the new name. A link stays with the other
+    passes.
+    """
+    by_name = {}
+    for old, new in path_moves.items():
+        by_name.setdefault(old.rsplit("/", 1)[-1], []).append((old, new))
+    pat, lut, _slut, _stems = _reference_re(set(by_name))
+
+    def move(part):
+        urls = _external_url_spans(part)
+        out, cursor = [], 0
+        for m in pat.finditer(part):
+            if _stem_match(m) is not None or _inside_span(m.start(), urls):
+                continue
+            window = max(0, m.start() - 400)
+            if (_QUAL_BEFORE.search(part, window, m.start())
+                    or _OPEN_BEFORE.search(part, window, m.start())):
+                continue
+            path = _PATH_BEFORE.search(part, window, m.start())
+            if not path or path.start(1) < cursor:
+                continue
+            target = path.group(1) + m.group("name")
+            for old, new in by_name.get(_canonical_name(lut, m.group("name")), ()):
+                if local_link_matches(target, old, note_dir=note_dir,
+                                      allow_suffix=False):
+                    out.append(part[cursor:path.start(1)] + new)
+                    cursor = m.end("name")
+                    break
+        out.append(part[cursor:])
+        return "".join(out)
+
+    return move
+
+
 def carried_links(vault, carried):
     """{note path: [vault-relative paths]} for links that reach a `Carried`
     file through its chapter folder's current name.
@@ -1948,9 +1994,10 @@ def carried_links(vault, carried):
 #: re-probe cannot catch it, because it searches for the OLD name and this link
 #: already carries the new one.  The folder class forbids `[` for the reason
 #: `_reference_re` does: a `[` inside it means the match started in the wrong
-#: place.
+#: place. The name matches in both Unicode normalizations, as the rewrite's
+#: does (`_name_variants`).
 def _debase_res(name):
-    esc = re.escape(name)
+    esc = "(?:%s)" % _alternation(_name_variants(name))
     # Only local destinations may lose their old folder. Include padded
     # wikilinks and the angle form used for decoded Markdown paths, while
     # retaining each syntax's own whitespace rules.
@@ -2390,47 +2437,78 @@ def _recorded_crop(manifest, image_path, image_name):
         return False
 
 
-def _foreign_image_paths(vault, keyed, names):
-    """({path}, blockers) for a rename's `--foreign-image` names.
+def _foreign_image_paths(vault, keyed, names, target):
+    """({path}, {shared path}, blockers) for a rename's `--foreign-image`.
 
-    Each name is another source's image under this PDF's current stem, such
-    as a clipping-clean image or a slide deck's crop, which the caller
-    compared with the PDF's pages. It keeps its name and leaves the owned
-    family. A name that is no image keyed to this stem, or that the figure
-    manifest records as a crop, is refused, whether or not its bytes still
-    match the record.
+    Each name is an image another source made, which the caller compared
+    with the PDF's pages. Under the current stem, such as a clipping-clean
+    image, it keeps its name and leaves the owned family. Another tool's
+    crop of this same PDF, one `other_tool_label` accepts or any unrecorded
+    crop beside a `deck_crop`, shares the stem: under the
+    `target` stem it is no occupant. A name under neither stem, a crop the
+    figure manifest records (whether or not its bytes still match), and any
+    other image under the target stem alone are refused.
     """
     if not vault or not os.path.isdir(vault):
-        return set(), ["--foreign-image needs the vault passed as --vault."]
+        return set(), set(), ["--foreign-image needs the vault passed as "
+                              "--vault."]
     images = os.path.join(vault, "Sources", "Images")
     found = {_nfc_low(name): path for path, name in keyed.items()
              if os.path.abspath(os.path.dirname(path)) == os.path.abspath(images)
              and "_fig" in _nfc_low(name)}
     try:
+        at_target = {_nfc_low(os.path.basename(path)): path for path in
+                     inventory_source_figures(images, target).candidates}
+    except ValueError:
+        at_target = {}
+    try:
         manifest = read_manifest(os.path.join(images, MANIFEST_FILE))
     except (OSError, UnicodeError, ValueError) as exc:
-        return set(), ["Cannot read the figure records to check "
-                       "--foreign-image (%s). Repair them before renaming."
-                       % exc]
-    paths, blockers = set(), []
+        return set(), set(), ["Cannot read the figure records to check "
+                              "--foreign-image (%s). Repair them before "
+                              "renaming." % exc]
+
+    def is_recorded(path):
+        try:
+            return manifest_key(manifest, os.path.basename(path)) is not None
+        except ValueError:          # ambiguous records still claim the name
+            return True
+
+    # A deck's `_fig_1` is told from figure-extract's by the deck's other
+    # crops: an uppercase panel letter beside it under the target stem.
+    deck_stem = deck_crop([os.path.basename(p) for p in at_target.values()],
+                          manifest) is not None
+    paths, shared, blockers = set(), set(), []
     for name in names:
-        path = found.get(_nfc_low(name))
+        key = _nfc_low(name)
+        path = found.get(key) or at_target.get(key)
         if path is None:
             blockers.append("--foreign-image %s names no image under this "
-                            "PDF's stem in %s." % (name, images))
+                            "PDF's current or target stem in %s."
+                            % (name, images))
             continue
-        try:
-            recorded = manifest_key(manifest, os.path.basename(path)) is not None
-        except ValueError:          # ambiguous records still claim the name
-            recorded = True
-        if recorded:
+        recorded = is_recorded(path)
+        other_tool = (not recorded
+                      and (deck_stem
+                           or other_tool_label(os.path.basename(path))))
+        if key in found and recorded:
             blockers.append("--foreign-image %s is a crop the figure manifest "
                             "records, so it moves with this PDF. A changed "
                             "recorded crop needs figure-extract's repair "
                             "first." % name)
-        else:
+            continue
+        if key in found:
             paths.add(path)
-    return paths, blockers
+        elif not other_tool:
+            blockers.append("--foreign-image %s under the target stem %s is "
+                            "no other tool's crop of this PDF: the figure "
+                            "manifest records it, or its label is one "
+                            "figure-extract writes and no unrecorded crop "
+                            "there has an uppercase panel letter. It stays "
+                            "an occupant." % (name, target))
+        if other_tool and key in at_target:
+            shared.add(path)
+    return paths, shared, blockers
 
 
 def _image_ownership_blockers(vault, source, keyed):
@@ -2449,24 +2527,43 @@ def _image_ownership_blockers(vault, source, keyed):
         # single refusal under dozens of copies of the same remedy.
         if not unowned:
             return []
-        # Adoption works under the current stem, before this rename.
+        # Adoption works, before this rename, under the current stem of the
+        # keyed PDF each crop is named after: in a split book, a chapter's or
+        # the other copy's crop is not the selected PDF's.
         stem = os.path.splitext(os.path.basename(source))[0]
+        owners = {p: os.path.splitext(n)[0] for p, n in keyed.items()
+                  if _nfc_low(n).endswith(".pdf")}
+        owners[source] = stem
+        needed = set()
+        for image_name in unowned:
+            matches = [p for p, s in owners.items()
+                       if _nfc_low(image_name).startswith(_nfc_low(s) + "_fig")]
+            needed.add(max(matches, key=lambda p: len(owners[p]))
+                       if matches else source)
+        commands = " and ".join(
+            "batch_extract.py --src %s --out %s --adopt-legacy %s"
+            % (shlex.quote(p), shlex.quote(images),
+               shlex.quote(owners[p] + ":<label>"))
+            for p in sorted(needed, key=lambda p: _nfc_low(owners[p])))
         return ["%d derived image(s) in %s have no matching current PDF "
                 "ownership record: %s. Matching a source stem is not "
-                "ownership. Compare each with its page, record each confirmed "
-                "legacy crop with figure-extract's batch_extract.py --src %s "
-                "--out %s --adopt-legacy %s (repeat the option per figure), "
-                "then re-plan the rename. Another source's file, such as a "
-                "clipping-clean image or a slide deck's crop, is no crop of "
-                "this PDF: re-plan with --foreign-image NAME (repeat the "
-                "option per file), which leaves it under its own name and "
-                "out of this PDF's family, and under a distinguishing "
-                "abbreviated title when this PDF would keep the stem %s. A "
-                "changed recorded crop needs that skill's repair instead; an "
-                "unconfirmed crop stays a blocker."
+                "ownership. Record each legacy extractor crop, one whose "
+                "label ends in a digit or a lowercase panel letter and that "
+                "matches its page, with figure-extract's %s (repeat the "
+                "option per figure), then re-plan the rename. Any other file "
+                "is not this PDF's extractor output, whatever it shows, and "
+                "neither is any unrecorded crop beside one with an uppercase "
+                "panel letter, as a slide deck's _fig_1A_B has: re-plan with "
+                "--foreign-image NAME (repeat the option per file), which "
+                "leaves it under its own name and out of this PDF's family. "
+                "Another tool's crop of this PDF shares the stem; a "
+                "clipping-clean "
+                "image or another document's file also needs a "
+                "distinguishing abbreviated title when this PDF would keep "
+                "the stem %s. A changed recorded crop needs that skill's "
+                "repair instead; an unconfirmed crop stays a blocker."
                 % (len(unowned), images, ", ".join(sorted(unowned)),
-                   shlex.quote(source), shlex.quote(images),
-                   shlex.quote(stem + ":<label>"), stem)]
+                   commands, stem)]
     except (OSError, UnicodeError, ValueError) as exc:
         return ["Cannot establish PDF ownership of derived images (%s). "
                 "Repair the figure records before renaming." % exc]
@@ -2534,12 +2631,7 @@ def _family_basename_blockers(path, keyed, existing):
 
 
 def _citing_notes(vault, names, pronoun):
-    """One blocker sentence naming the vault notes that cite `names`.
-
-    An occupied target stem's remedy starts from those notes: a clipping's
-    note embeds its own images, and another tool's crops move to the stem of
-    the note that embeds them.
-    """
+    """One blocker sentence naming the vault notes that cite `names`."""
     try:
         hits = references(vault, set(names))
     except InventoryFailed as exc:
@@ -2552,13 +2644,17 @@ def _citing_notes(vault, names, pronoun):
         for md, found in sorted(hits.items())))
 
 
-def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
+def _target_stem_blockers(vault, stem, mine, action=None, alternative=None,
+                          shared=None):
     """Block a PDF rename (or a split's new chapter) onto a note/image
     namespace owned by another source.
 
     This same document's own crops or reading note wait for the user's
     clear-and-restore answer. Any other occupant keeps the name: the run
-    continues now under a distinguishing name and reports the question.
+    continues now under a distinguishing name and reports it. `shared`
+    (real paths), given for the selected PDF's own target, holds the other
+    tools' crops of this same PDF that `--foreign-image` named: they share
+    the stem and occupy nothing.
     """
     clear_before = action or "filing"
     access_before = action or "renaming"
@@ -2580,15 +2676,9 @@ def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
                 "Otherwise re-plan now under %s and continue. A "
                 "clipping-clean note, whatever it captures, keeps its own "
                 "name, and so does another document's note. Report the "
-                "natural name %s, this note and the question for the user: "
-                "ask whether they want to move the note so this PDF can "
-                "later take %s. A clipping moves with its images to a free "
-                "slug through clipping-clean, never back to Articles/%s.md or "
-                "under %s_fig*; another document's note moves only with that "
-                "document. If the user moves the note and then asks for this "
-                "name, that rename repairs links itself."
+                "natural name %s and this note."
                 % (path, stem, _citing_notes(vault, [name], "it"),
-                   clear_before, alternative, stem, stem, stem, stem))
+                   clear_before, alternative, stem))
 
     images = os.path.join(vault, "Sources", "Images")
     if os.path.isdir(images):
@@ -2602,7 +2692,7 @@ def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
         occupants = sorted(
             os.path.relpath(path, images)
             for path in inventory.candidates + inventory.blocked_matches
-            if os.path.realpath(path) not in mine)
+            if os.path.realpath(path) not in mine | (shared or set()))
         if occupants:
             blockers.append(
                 "The target figure stem %s_fig* is already occupied outside "
@@ -2612,22 +2702,26 @@ def _target_stem_blockers(vault, stem, mine, action=None, alternative=None):
                 "figure-extract cropped one from this same document, do not "
                 "rename around it: ask the user whether to clear it from "
                 "that name before %s and restore it afterward, and wait for "
-                "the answer. Otherwise re-plan now under %s and continue. "
-                "Report the natural name %s, its occupants and the question "
-                "for the user: ask whether they want to move these files so "
-                "this PDF can later take %s. Each moves to a free name, never "
-                "back under %s_fig* or Articles/%s.md: a clipping-clean image, "
-                "whatever it captures, stays with its note and is renamed "
-                "with it to a free slug through clipping-clean; another "
-                "tool's images, such as a slide deck's crops, move "
-                "permanently to the embedding note's own stem with its "
-                "embeds updated; another document's files move only with "
-                "that document. If the user moves them and then asks for "
-                "this name, that rename repairs links itself."
+                "the answer. Its crop is one the manifest records, or one "
+                "whose label ends in a digit or a lowercase panel letter and "
+                "that matches this PDF's page, when no unrecorded crop here "
+                "has an uppercase panel letter. %sOtherwise re-plan now under "
+                "%s and continue. A clipping-clean image, whatever it "
+                "captures, and another document's file keep their names. "
+                "Report the natural name %s and its occupants."
                 % (stem, len(occupants), images, ", ".join(occupants),
                    _citing_notes(vault, [os.path.basename(occupant)
                                          for occupant in occupants], "them"),
-                   clear_before, alternative, stem, stem, stem, stem))
+                   clear_before,
+                   "" if shared is None else
+                   "Another tool's crop of this PDF, whose label is none "
+                   "figure-extract writes or that sits beside an unrecorded "
+                   "crop with an uppercase panel letter, such as a slide "
+                   "deck's _fig_1A_B, shares the name: re-plan with "
+                   "--foreign-image "
+                   "NAME (repeat the option per file), and it keeps its name "
+                   "outside this PDF's family. ",
+                   alternative, stem))
     return blockers
 
 
@@ -2668,6 +2762,13 @@ def _chapter_rename_blockers(path, written_basename, dest=None):
             "chapter name, or its number within its neighbours' order."
             % (os.path.basename(path), old.book, old.book, written_basename))
         return blockers
+    # `_src` is checked before this; a `_N` marks a different document.
+    if new.tail.replace("_src", "", 1) != old.tail.replace("_src", "", 1):
+        blockers.append(
+            "%s cannot become %s: a chapter of a split book never gains or "
+            "loses a `_N` disambiguator. Change only the chapter name, or "
+            "its number within its neighbours' order."
+            % (os.path.basename(path), written_basename))
     try:
         names = _listdir(folder)
     except InventoryFailed as exc:
@@ -2790,7 +2891,8 @@ def _plan_figure_state(vault, ren):
     stems = {os.path.splitext(old)[0]: os.path.splitext(new)[0]
              for old, new in ren.items() if old.lower().endswith(".pdf")}
     for filename, kind, mapping in ((MANIFEST_FILE, "manifest", ren),
-                                     (REVIEW_FILE, "review", stems)):
+                                     (REVIEW_FILE, "review", stems),
+                                     (ED_PENDING_FILE, "review", stems)):
         path = os.path.join(vault, "Sources", "Images", filename)
         if not os.path.lexists(path):
             continue
@@ -2826,8 +2928,8 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
     every keyed file, source included, is renamed in place — the behaviour
     every caller had before a destination existed.
 
-    `foreign` names images under the current stem that another source owns
-    (`_foreign_image_paths`); they keep their names.
+    `foreign` names images another source made under the current or target
+    stem (`_foreign_image_paths`); they keep their names.
 
     Writes nothing.  `moves` is [(src, dst)] deepest path first, so a chapter
     folder is renamed after its contents; `edits` is an `Edits` — a
@@ -2992,10 +3094,11 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
             "a distinct name first." % (
                 src_basename, existing[_nfc_low(src_basename + ".md")][0],
                 src_basename)]
-    # Another source's images under this stem keep their names.
-    foreign_paths, foreign_blockers = (
-        _foreign_image_paths(vault, keyed, foreign) if foreign
-        else (set(), []))
+    # Another source's images under this stem keep their names; another
+    # tool's crops of this PDF share the target stem.
+    foreign_paths, shared_paths, foreign_blockers = (
+        _foreign_image_paths(vault, keyed, foreign, new_stem) if foreign
+        else (set(), set(), []))
     keyed = {p: b for p, b in keyed.items() if p not in foreign_paths}
     ren = {b: _derive(old_stem, b, new_stem) for b in keyed.values()}
     directory_ren = {b: ren[b] for p, b in keyed.items()
@@ -3057,7 +3160,8 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
         blockers.extend(_target_stem_blockers(
             vault, new_stem, mine,
             alternative=("another chapter name"
-                         if _book_folder_chapter(path) else None)))
+                         if _book_folder_chapter(path) else None),
+            shared={os.path.realpath(p) for p in shared_paths}))
     blockers.extend(foreign_blockers)
     # A book rename re-stems every chapter; each new chapter stem needs the
     # same note/figure namespace check a direct chapter rename gets.
@@ -3282,11 +3386,24 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
             holders = []
         markdown_files = [p for p in holders if not _is_canvas(p)]
         canvases = [p for p in holders if _is_canvas(p)]
+        path_map = _path_map(vault, moves)
+        # Each file whose folder changes: a filed source, or a chapter or
+        # carried file in a renamed chapter folder.
+        prose_moves = {}
+        for src in [src for src, _dst in moves] + [r.path for r in carried]:
+            old = _vault_relative(vault, src)
+            if not old or (os.path.isdir(src) and not os.path.islink(src)):
+                continue
+            new = _moved_path(old, path_map)
+            if _dirkey(old.rpartition("/")[0]) != _dirkey(new.rpartition("/")[0]):
+                prose_moves[old] = new
 
         def _repair(note_dir):
             """One masked parse per note: debasing, then rewriting, each
             decoded part is what the two separate passes produced."""
             steps = [step for step in (
+                _prose_path_transform(prose_moves, note_dir)
+                if prose_moves else None,
                 _debase_transform(moved_source_names, dirs, note_dir)
                 if moved_source_names else None,
                 _rewrite_transform(reference_ren, stem_ren, dirs, note_dir,
@@ -3404,7 +3521,6 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
         # path, so it follows every move, a filing move under the same
         # basename included. A text card is Markdown and is repaired like a
         # note. Only the changed JSON strings are rewritten.
-        path_map = _path_map(vault, moves)
         mentioned = dict.fromkeys(set(ren) | moved_source_names
                                   | {record.name for record in carried})
         for canvas in canvases:
@@ -3523,7 +3639,7 @@ def _write(path, text, expected=None):
     mode = stat.S_IMODE(previous.st_mode)
     logical_dir = os.path.abspath(os.path.dirname(path) or ".")
     is_image_sidecar = (
-        os.path.basename(path) in (MANIFEST_FILE, REVIEW_FILE)
+        os.path.basename(path) in (MANIFEST_FILE, REVIEW_FILE, ED_PENDING_FILE)
         and os.path.basename(logical_dir) == "Images"
         and os.path.basename(os.path.dirname(logical_dir)) == "Sources"
     )
@@ -6113,6 +6229,8 @@ def _selftest():
         _review_body = "# checked manually\nDoe_Old_2025\t1\tkeep my note\nOther:2\n"
         _manifest = _put(_v, "Sources/Images/" + MANIFEST_FILE, _manifest_body)
         _review = _put(_v, "Sources/Images/" + REVIEW_FILE, _review_body)
+        _pending = _put(_v, "Sources/Images/" + ED_PENDING_FILE,
+                        "Doe_Old_2025\tS1\n")
         _stage_parents = []
         _real_mkdtemp = tempfile.mkdtemp
 
@@ -6130,7 +6248,7 @@ def _selftest():
                if n.startswith(".organize-stage-")], [])
         _moves, _edits, _blockers = plan_rename(_v, _pdf, "Doe_New_2025.pdf")
         check("sidecar changes appear separately in a rename plan",
-              (len(_edits), len(_edits.sidecars), _blockers), (0, 2, []))
+              (len(_edits), len(_edits.sidecars), _blockers), (0, 3, []))
         with open(_manifest, encoding="utf-8") as _fh:
             check("a sidecar dry run writes nothing", _fh.read(), _manifest_body)
         # Force a move failure after the state updates to exercise rollback.
@@ -6160,6 +6278,9 @@ def _selftest():
                   parse_reviewed(_body), {("Doe_New_2025", "1"), ("Other", "2")})
             check("sidecar rename preserves comments and annotation columns",
                   _body, _review_body.replace("Doe_Old_2025", "Doe_New_2025"))
+        with open(_pending, encoding="utf-8") as _fh:
+            check("successful rename carries pending Extended Data S crops",
+                  _fh.read(), "Doe_New_2025\tS1\n")
         _put(_v, "Sources/Images/" + MANIFEST_FILE, "malformed ownership\n")
         _new_pdf = os.path.join(_v, "Sources/PDFs/Doe_New_2025.pdf")
         _moves, _edits, _blockers = rename_all(_v, _new_pdf, "Doe_Next_2025.pdf", apply=True)
@@ -6634,6 +6755,26 @@ def _selftest():
            '[x]: ../Inbox/xa.pdf\n'
            '<img src="https://example.org/Inbox/a.pdf">\n'
            '`[r]: ../Inbox/a.pdf`\n'))
+    # A name stored NFD on disk and cited NFC, or the reverse, loses its old
+    # folder in every link syntax, as the basename rewrite finds it.
+    _nfc = unicodedata.normalize("NFC", "Müller.pdf")
+    _nfd = unicodedata.normalize("NFD", _nfc)
+    for _cite, _disk in ((_nfc, _nfd), (_nfd, _nfc)):
+        _text = ("[[Inbox/%s]] ![[ Inbox/%s|x]] [a](Inbox/%s) [b](<My Inbox/%s>)\n"
+                 "[r]: Inbox/%s\n[s]: <My Inbox/%s>\n"
+                 "<img src='Inbox/%s'> <a href=Inbox/%s>x</a>\n" % ((_cite,) * 8))
+        _got = debase_links(_text, {_disk})
+        check("filing debases a link whose Unicode form differs from the file's",
+              (_got, "Inbox/" in _got),
+              (debase_links(_text, {_cite}), False))
+    import time as _time
+    _deep = "> " * 24
+    _t0 = _time.perf_counter()
+    _got = debase_links(_deep + "[r]: ../Inbox/a.pdf\n" + _deep + "See a.pdf.\n",
+                        {"a.pdf"})
+    check("deeply quoted lines parse in linear time",
+          (_got, _time.perf_counter() - _t0 < 1.0),
+          (_deep + "[r]: a.pdf\n" + _deep + "See a.pdf.\n", True))
     check("filing debases reference definitions inside a blockquote or callout",
           debase_links("> [r]: ../Inbox/a.pdf\n"
                        '>> [s]: <../My Inbox/a.pdf> "t"\n'
@@ -7198,6 +7339,48 @@ def _selftest():
               (0, True, "- figure-extract failed on Sources/PDFs/Smith_X_2020.pdf.\n"
                         "- see ../Sources/PDFs/Smith_X_2020.pdf, page 3\n"
                         "- see download.pdf and Downloads/download.pdf\n"))
+
+    # When the file changes folder, a plain-text path to it becomes its new
+    # vault path, never the old folder with the new name: on filing, and for
+    # a chapter or carried file in a renamed chapter folder.
+    with _tf.TemporaryDirectory(prefix="org-filed-path-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf", b"original PDF bytes")
+        _log = _put(_v, "Reviews/figure-extract-suggestions.md",
+                    "- figure-extract failed on Inbox/download.pdf.\n"
+                    "- see ../Inbox/download.pdf, page 3\n"
+                    "- see download.pdf and Downloads/download.pdf\n"
+                    "- [[Inbox/download.pdf]]\n")
+        _code, _stdout, _ = _run_cli([
+            "rename", _pdf, "--vault", _v, "--to", "Smith_X_2020.pdf",
+            "--dest", os.path.join(_v, "Sources/PDFs"), "--apply"])
+        check("filing moves a plain-text folder path with the file",
+              (_code, "Verified" in _stdout,
+               Path(_log).read_text(encoding="utf-8")),
+              (0, True, "- figure-extract failed on Sources/PDFs/Smith_X_2020.pdf.\n"
+                        "- see Sources/PDFs/Smith_X_2020.pdf, page 3\n"
+                        "- see download.pdf and Downloads/download.pdf\n"
+                        "- [[Smith_X_2020.pdf]]\n"))
+    with _tf.TemporaryDirectory(prefix="org-folder-path-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2020.pdf")
+        _put(_v, "Sources/PDFs/Doe_Book_2020/Doe_Book_2020_01_Intro.pdf")
+        _put(_v, "Sources/PDFs/Doe_Book_2020/errata.pdf")
+        _log = _put(_v, "Reviews/pdf-organize-suggestions.md",
+                    "- wrote Sources/PDFs/Doe_Book_2020/Doe_Book_2020_01_Intro.pdf;"
+                    " errata at Sources/PDFs/Doe_Book_2020/errata.pdf.\n"
+                    "- see Other/Doe_Book_2020/errata.pdf and "
+                    "`Sources/PDFs/Doe_Book_2020/errata.pdf`\n"
+                    "- “Sources/PDFs/Doe_Book_2020/Doe_Book_2020_01_Intro.pdf”\n")
+        _code, _stdout, _ = _run_cli(["rename", _book, "--vault", _v,
+                                      "--to", "Doe_Handbook_2020.pdf", "--apply"])
+        check("a renamed chapter folder moves plain-text paths into it",
+              (_code, "Verified" in _stdout,
+               Path(_log).read_text(encoding="utf-8")),
+              (0, True,
+               "- wrote Sources/PDFs/Doe_Handbook_2020/Doe_Handbook_2020_01_Intro.pdf;"
+               " errata at Sources/PDFs/Doe_Handbook_2020/errata.pdf.\n"
+               "- see Other/Doe_Book_2020/errata.pdf and "
+               "`Sources/PDFs/Doe_Book_2020/errata.pdf`\n"
+               "- “Sources/PDFs/Doe_Handbook_2020/Doe_Handbook_2020_01_Intro.pdf”\n"))
 
     # Filing can keep a canonical basename or change it. In either case,
     # strip only qualifications that resolved to the selected old source.
@@ -7906,6 +8089,29 @@ def _selftest():
                 "--adopt-legacy 'Doe_Old_2025:<label>'" in item)
                for item in _unowned], [(1, True, True, True)])
 
+    # A split book's rename keys its chapters' and its other copy's crops,
+    # so each unrecorded crop is adopted under the PDF it is named after.
+    with _tf.TemporaryDirectory(prefix="org-unowned-split-image-") as _v:
+        _book = _put(_v, "Sources/PDFs/Doe_Book_2025.pdf", b"%PDF-1.4\n")
+        _scan = _put(_v, "Sources/PDFs/Doe_Book_2025_src.pdf", b"%PDF-1.4\n")
+        _chapter = _put(_v, "Sources/PDFs/Doe_Book_2025/"
+                        "Doe_Book_2025_01_Intro.pdf", b"%PDF-1.4\n")
+        for _stem in ("Doe_Book_2025", "Doe_Book_2025_src",
+                      "Doe_Book_2025_01_Intro"):
+            _put(_v, "Sources/Images/%s_fig_1.png" % _stem, _stem.encode())
+        _unowned = [item for item in plan_rename(
+            _v, _book, "Doe_Volume_2025.pdf")[2] if "ownership record" in item]
+        check("each unowned crop of a split book names its own PDF's "
+              "adoption command",
+              [tuple("--src %s --out %s --adopt-legacy %s" % (
+                  shlex.quote(_p), shlex.quote(os.path.join(
+                      _v, "Sources", "Images")),
+                  shlex.quote(_s + ":<label>")) in item
+                  for _p, _s in ((_book, "Doe_Book_2025"),
+                                 (_scan, "Doe_Book_2025_src"),
+                                 (_chapter, "Doe_Book_2025_01_Intro")))
+               for item in _unowned], [(True, True, True)])
+
     with _tf.TemporaryDirectory(prefix="org-clipping-image-test-") as _v:
         _pdf = _put(_v, "Inbox/download.pdf")
         _body = ("---\nsources: # capture\n- 'https://example.org/O''Reilly'\n---\n"
@@ -8163,10 +8369,9 @@ def _selftest():
                 "Otherwise re-plan now under a distinguishing abbreviated "
                 "title (_2 only as a last resort, never for a book) and "
                 "continue." in item,
-                "Report the natural name Doe_Study_2025, this note and the "
-                "question for the user" in item,
-                "never back to Articles/Doe_Study_2025.md" in item)
-               for item in _note_blockers], [(True, True, True, True, True)])
+                "Report the natural name Doe_Study_2025 and this note." in item,
+                "ask whether they want to move" in item)
+               for item in _note_blockers], [(True, True, True, True, False)])
         _put(_v, "Articles/Deck_Note.md", "![[Doe_Study_2025_fig_2.png]]\n")
         _stem_blockers = [item for item in plan_rename(
             _v, _pdf, "Doe_Study_2025.pdf")[2] if "target figure stem" in item]
@@ -8175,23 +8380,28 @@ def _selftest():
               [("Notes citing them: Articles/Deck_Note.md "
                 "(Doe_Study_2025_fig_2.png)." in item,
                 "If figure-extract cropped one from this same document" in item,
-                "through clipping-clean" in item,
-                "never back under Doe_Study_2025_fig* or "
-                "Articles/Doe_Study_2025.md" in item)
+                "Its crop is one the manifest records, or one whose label "
+                "ends in a digit or a lowercase panel letter" in item,
+                "A clipping-clean image, whatever it captures, and another "
+                "document's file keep their names." in item)
                for item in _stem_blockers], [(True, True, True, True)])
-        # Another tool's crops keep the name: the run files the PDF now
-        # under a distinguishing name and reports the question.
-        check("a target figure stem another tool's crops occupy continues "
-              "now under a distinguishing name and reports the question",
+        # Other occupants keep the name: the run files the PDF now under a
+        # distinguishing name and reports them; another tool's crops of
+        # this same PDF share the name instead.
+        check("a target figure stem other files occupy continues now under "
+              "a distinguishing name, reports them and names the "
+              "shared-crop remedy",
               [("Otherwise re-plan now under a distinguishing abbreviated "
                 "title (_2 only as a last resort, never for a book) and "
                 "continue." in item,
-                "such as a slide deck's crops, move permanently" in item,
-                "Report the natural name Doe_Study_2025, its occupants and "
-                "the question for the user" in item,
-                "that rename repairs links itself." in item,
+                "Report the natural name Doe_Study_2025 and its "
+                "occupants." in item,
+                "such as a slide deck's _fig_1A_B, shares the name: re-plan "
+                "with --foreign-image NAME" in item,
+                "ask whether they want to move" in item
+                or "embedding note" in item,
                 "Do either" in item)
-               for item in _stem_blockers], [(True, True, True, True, False)])
+               for item in _stem_blockers], [(True, True, True, False, False)])
         # This same document's crops are no reason for another name.
         check("this same document's figure-extract crops wait for the "
               "user's clear-and-restore answer",
@@ -8199,14 +8409,105 @@ def _selftest():
                 "clear it from that name before filing and restore it "
                 "afterward, and wait for the answer." in item)
                for item in _stem_blockers], [(True, True)])
-        # The question for the user is spelled out, not left implied.
-        check("both occupied-stem blockers state the question for the user",
-              [("ask whether they want to move the note so this PDF can "
-                "later take Doe_Study_2025." in item)
-               for item in _note_blockers]
-              + [("ask whether they want to move these files so this PDF "
-                  "can later take Doe_Study_2025." in item)
-                 for item in _stem_blockers], [True, True])
+        # The occupants are reported, never offered a move no skill makes.
+        check("neither occupied-stem blocker offers to move its occupants",
+              [("move" in item.split("Report the natural name")[1])
+               for item in _note_blockers + _stem_blockers], [False, False])
+
+    # Another tool's crops of this same PDF, such as a slide deck's, share
+    # its natural name: they neither block filing nor join the family.
+    with _tf.TemporaryDirectory(prefix="org-shared-crop-test-") as _v:
+        _pdf = _put(_v, "Inbox/glm.pdf", b"%PDF-1.4\n")
+        _dest = os.path.join(_v, "Sources", "PDFs")
+        _deck = ["Hwang_gLM_2024_fig_1.png", "Hwang_gLM_2024_fig_1A_B.png",
+                 "Hwang_gLM_2024_fig_5DEF.png"]
+        for _name in _deck:
+            _put(_v, "Sources/Images/" + _name, b"deck crop " + _name.encode())
+        _slides_body = ("![[Hwang_gLM_2024_fig_1.png]]\n"
+                        "![[Hwang_gLM_2024_fig_1A_B.png]]\n")
+        _slides = _put(_v, "Slides/Hwang_gLM_2024_Slides.md", _slides_body)
+        check("another tool's crops on the natural name block it until "
+              "--foreign-image names them",
+              [all(_name in item for _name in _deck)
+               for item in plan_rename(_v, _pdf, "Hwang_gLM_2024.pdf",
+                                       _dest)[2]
+               if "target figure stem" in item], [True])
+        check("another tool's crops named with --foreign-image share the "
+              "natural name",
+              plan_rename(_v, _pdf, "Hwang_gLM_2024.pdf", _dest,
+                          foreign=_deck)[2], [])
+        # The deck's `_fig_1` carries a label figure-extract writes too; its
+        # uppercase-panel neighbours make it the deck's.
+        check("a figure-extract label beside an uppercase panel letter stays "
+              "an occupant only until --foreign-image names it",
+              [("Hwang_gLM_2024_fig_1.png" in item,
+                "Hwang_gLM_2024_fig_1A_B.png" in item,
+                "when no unrecorded crop here has an uppercase panel "
+                "letter." in item)
+               for item in plan_rename(_v, _pdf, "Hwang_gLM_2024.pdf", _dest,
+                                       foreign=_deck[1:])[2]
+               if "target figure stem" in item], [(True, False, True)])
+        _fig_2 = _put(_v, "Sources/Images/Hwang_gLM_2024_fig_2.png", b"png")
+        _records = _put(_v, "Sources/Images/" + MANIFEST_FILE,
+                        "Hwang_gLM_2024_fig_2.png\t" + file_digest(_fig_2)
+                        + "\n")
+        _blockers = plan_rename(_v, _pdf, "Hwang_gLM_2024.pdf", _dest,
+                                foreign=_deck + ["Hwang_gLM_2024_fig_2.png"])[2]
+        check("a recorded crop beside another tool's crops is refused as "
+              "--foreign-image and stays an occupant",
+              (any("--foreign-image Hwang_gLM_2024_fig_2.png under the target "
+                   "stem Hwang_gLM_2024 is no other tool's crop" in item
+                   for item in _blockers),
+               [("Hwang_gLM_2024_fig_2.png" in item,
+                 "Hwang_gLM_2024_fig_1A_B.png" in item)
+                for item in _blockers if "target figure stem" in item]),
+              (True, [(True, False)]))
+        os.remove(_fig_2)
+        os.remove(_records)
+        _moves, _edits, _blockers = rename_all(
+            _v, _pdf, "Hwang_gLM_2024.pdf", apply=True, dest=_dest,
+            foreign=_deck)
+        check("filing beside another tool's crops leaves them, their note "
+              "and the figure records untouched",
+              (_blockers, os.path.isfile(os.path.join(_dest,
+                                                      "Hwang_gLM_2024.pdf")),
+               [os.path.isfile(os.path.join(_v, "Sources/Images", _name))
+                for _name in _deck],
+               Path(_slides).read_text(encoding="utf-8"),
+               os.path.exists(os.path.join(_v, "Sources/Images",
+                                           MANIFEST_FILE))),
+              ([], True, [True] * len(_deck), _slides_body, False))
+        # Under the current stem they are no figure-extract output either.
+        _pdf = os.path.join(_dest, "Hwang_gLM_2024.pdf")
+        check("another tool's crop under the current stem is not this PDF's "
+              "figure-extract output",
+              [("is not this PDF's extractor output" in item,
+                "neither is any unrecorded crop beside one with an uppercase "
+                "panel letter" in item,
+                "shares the stem" in item)
+               for item in plan_rename(_v, _pdf, "Hwang_GenomicLM_2024.pdf")[2]
+               if "ownership record" in item], [(True, True, True)])
+        _moves = plan_rename(_v, _pdf, "Hwang_GenomicLM_2024.pdf",
+                             foreign=_deck)[0]
+        check("a renamed PDF leaves another tool's crops under their names",
+              ([os.path.basename(_dst) for _src, _dst in _moves],),
+              (["Hwang_GenomicLM_2024.pdf"],))
+
+    # With no uppercase panel letter beside it, a figure-extract label under
+    # the target stem stays figure-extract's crop.
+    with _tf.TemporaryDirectory(prefix="org-lone-label-test-") as _v:
+        _pdf = _put(_v, "Inbox/doe.pdf", b"%PDF-1.4\n")
+        _put(_v, "Sources/Images/Doe_Study_2025_fig_2.png", b"png")
+        _blockers = plan_rename(_v, _pdf, "Doe_Study_2025.pdf",
+                                os.path.join(_v, "Sources", "PDFs"),
+                                foreign=["Doe_Study_2025_fig_2.png"])[2]
+        check("a lone figure-extract label under the target stem is refused "
+              "as --foreign-image and stays an occupant",
+              (any("--foreign-image Doe_Study_2025_fig_2.png under the target "
+                   "stem Doe_Study_2025 is no other tool's crop" in item
+                   for item in _blockers),
+               sum("target figure stem" in item for item in _blockers)),
+              (True, 1))
 
     # Filing a canonical PDF under its unchanged stem takes that name too:
     # another source's note or images there get a distinguishing name now.
@@ -8880,6 +9181,11 @@ def _selftest():
                (False, True, False), (False, True, False)])
         check("a chapter's own name may change in place",
               plan_rename(_v, _alpha, "Doe_Book_2012_01_AlphaIntro.pdf")[2], [])
+        check("a chapter never gains a `_N` disambiguator",
+              [any("never gains or loses" in _b for _b in
+                   plan_rename(_v, _alpha, _to)[2])
+               for _to in ("Doe_Book_2012_01_AlphaIntro_2.pdf",
+                           "Doe_Book_2012_01_Alpha_2.pdf")], [True, True])
         check("a chapter is never filed out of its book folder",
               _why("Doe_Book_2012_01_AlphaIntro.pdf",
                    dest=os.path.join(_v, "Sources", "PDFs")),
@@ -9138,8 +9444,10 @@ def main(argv=None):
     r.add_argument("--foreign-image", action="append", default=[],
                    metavar="NAME",
                    help="an image under the current stem that another source "
-                        "owns, such as a clipping-clean image; it keeps its "
-                        "name and leaves this PDF's family. Repeat per file.")
+                        "owns, such as a clipping-clean image, or another "
+                        "tool's crop of this PDF under the current or target "
+                        "stem, such as a slide deck's; it keeps its name "
+                        "outside this PDF's family. Repeat per file.")
     r.add_argument("--apply", action="store_true",
                    help="write it. Without this, nothing is written.")
     r.set_defaults(fn=_cmd_rename)

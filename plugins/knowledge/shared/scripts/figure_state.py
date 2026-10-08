@@ -30,6 +30,10 @@ from portable_names import portable_identity as figure_identity
 
 MANIFEST_FILE = ".figure-manifest.tsv"
 REVIEW_FILE = ".figure-review.txt"
+#: `_fig_S<N>` crops that still hold an Extended Data figure, in the review
+#: ledger's row grammar, the note column holding the crop's digest
+#: (`parse_ed_pending`, `write_review`).
+ED_PENDING_FILE = ".figure-ed-pending.txt"
 
 #: The header every writer of the ownership manifest publishes. Both
 #: extraction helpers use this one copy, so whichever wrote last keeps the
@@ -53,6 +57,14 @@ REVIEW_HEADER = (
     "# that PDF with --unmark-reviewed STEM:FIG; do not hand-edit this file.\n"
 )
 
+#: The header of the Extended Data switch's pending S crops.
+ED_PENDING_HEADER = (
+    "# figure-extract: _fig_S<N> crops that still hold an Extended Data figure.\n"
+    "# One per line: <pdf_stem><TAB><S label><TAB><sha256 of that crop>\n"
+    "# Their links move to _fig_ED<N> before any run replaces them; a row\n"
+    "# holds only while the crop keeps those bytes. Do not hand-edit this file.\n"
+)
+
 
 class SidecarConflict(FileExistsError):
     """A sidecar no longer matches the version a caller read and edited."""
@@ -73,6 +85,43 @@ def manifest_key(manifest, filename):
     if len(keys) > 1:
         raise ValueError("duplicate/ambiguous ownership for %r" % filename)
     return keys[0] if keys else None
+
+
+#: An on-disk label figure-extract writes (CONVENTIONS §8b, §8c): a caption
+#: label ending in a digit, or a legacy lowercase panel letter after one.
+#: An uppercase panel letter, as in a slide deck's `_fig_1A_B`, is never
+#: one: the unrecorded crops beside such a crop are that other tool's too.
+_CAPTION_LABEL = (r"_?(?:(?:SI|ED|S)?[0-9]+(?:[.-][0-9]+)*"
+                  r"|(?:ED|S)?(?:SI|[A-Z]-?)[0-9]+(?:[.-][0-9]+)*)")
+_EXTRACTOR_LABEL = re.compile(_CAPTION_LABEL + r"[a-z]?")
+_UPPERCASE_PANEL = re.compile(_CAPTION_LABEL + r"[A-Z]")
+
+
+def _fig_label(name):
+    """Image `name`'s label after its last `_fig`, extension dropped."""
+    base = os.path.splitext(unicodedata.normalize("NFC", name))[0]
+    return base.rpartition("_fig")[2]
+
+
+def other_tool_label(name):
+    """Whether image `name`'s label, after its last `_fig`, is none
+    figure-extract writes, as in a slide deck's `_fig_1A_B`."""
+    return not _EXTRACTOR_LABEL.fullmatch(_fig_label(name))
+
+
+def deck_crop(names, manifest):
+    """The first of one stem's image `names` the manifest does not record
+    whose label has an uppercase panel letter, as a slide deck's `_fig_1A_B`
+    has, or None. Every unrecorded crop beside it is that tool's file."""
+    for name in names:
+        if not _UPPERCASE_PANEL.match(_fig_label(name)):
+            continue
+        try:
+            if manifest_key(manifest, name) is None:
+                return name
+        except ValueError:          # ambiguous records still claim the name
+            continue
+    return None
 
 
 def file_digest(path):
@@ -134,6 +183,18 @@ def parse_manifest(text):
 
 def parse_reviewed(text):
     return {(key, label) for _i, key, label, _span in _records(text, "review")}
+
+
+def parse_ed_pending(text):
+    """The `ED_PENDING_FILE` rows as {(stem, S label, sha256)}. A row with no
+    valid digest is dropped: nothing shows which bytes it vouched for."""
+    lines = text.splitlines()
+    rows = set()
+    for index, key, label, _span in _records(text, "review"):
+        digest = (lines[index].split("\t") + ["", ""])[2].strip().lower()
+        if re.fullmatch(r"[0-9a-f]{64}", digest):
+            rows.add((key, label, digest))
+    return rows
 
 
 def sidecar_stem_problem(stem):
@@ -422,6 +483,12 @@ def self_test():
             self.assertTrue(all(line.startswith("#")
                                 for line in REVIEW_HEADER.splitlines()))
 
+        def test_ed_pending_rows_need_the_crop_digest(self):
+            # A pending row vouches only for the bytes it records, so a row
+            # with no digest is dropped. The header stays comments.
+            text = ED_PENDING_HEADER + "Doe\tS1\t" + "A" * 64 + "\nDoe\tS2\n"
+            self.assertEqual(parse_ed_pending(text), {("Doe", "S1", "a" * 64)})
+
         def test_hand_written_review_allows_space_after_colon(self):
             # The spelling --mark-reviewed accepts ('Doe: 2') stays a valid
             # ledger row, so an older hand-typed ledger keeps parsing.
@@ -430,6 +497,16 @@ def self_test():
             self.assertEqual(parse_reviewed("A:B: 10-5\n"), {("A:B", "10-5")})
             self.assertEqual(
                 rewrite_sidecar("Doe: 2\n", {"Doe": "Roe"}, "review"), "Roe: 2\n")
+
+        def test_deck_crop_is_an_unrecorded_uppercase_panel(self):
+            # A slide deck's `_fig_1A_B` marks the stem's unrecorded crops as
+            # the deck's; a legacy lowercase panel or a recorded name does not.
+            names = ["Doe_fig_1.png", "Doe_fig_1a.png", "Doe_fig_1A_B.png"]
+            self.assertEqual(deck_crop(names, {}), "Doe_fig_1A_B.png")
+            self.assertIsNone(deck_crop(names[:2], {}))
+            self.assertIsNone(deck_crop(names, {"Doe_fig_1A_B.png": "a" * 64}))
+            self.assertTrue(other_tool_label("Doe_fig_1A_B.png"))
+            self.assertFalse(other_tool_label("Doe_fig_1a.png"))
 
         def test_bom_stays_out_of_the_first_key(self):
             # An editor's UTF-8 BOM on line 1 neither blocks every run nor

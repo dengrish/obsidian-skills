@@ -31,10 +31,11 @@ or under the [input-safety rules](../../shared/INPUT_SAFETY.md).
 - A bare URL or pasted link is not a capture. Ask the user to clip it into
   `Inbox/` with Web Clipper or to name the saved capture. Never write a raw
   capture yourself or publish fetched page text as a cleaned clipping.
-- `Inbox/` is read-only. Do not move, delete or rewrite raws. This skill
-  processes only `.md` captures. An inbox-wide request also runs `pdf-organize`
-  to name and file the PDFs; a clippings-only request names any PDFs and leaves
-  them. Send a PDF to `paper-summarize` (reading note) or `figure-extract`
+- `Inbox/` is read-only: do not move, delete or rewrite raws, except that a
+  changed slug's link repair respells their links to the renamed note and its
+  images. This skill processes only `.md` captures. An inbox-wide request
+  also runs `pdf-organize` to name and file the PDFs; a clippings-only request
+  names any PDFs and leaves them. Send a PDF to `paper-summarize` (reading note) or `figure-extract`
   (figures) only when the user asked for that deliverable. Name unsupported
   files and leave them.
 - An explicitly named `Articles/` note may be reprocessed only when this skill
@@ -76,7 +77,7 @@ attachment work.
 
 | Verdict | Action |
 |---|---|
-| `new` | Continue. |
+| `new` | Continue, unless `variant_matches` lists a path: read it, and when it is the [same article](references/duplicates-and-reprocessing.md#settle-a-slug-before-writing-images), act as for a `duplicate` (a note) or `duplicate-of-earlier-input` (a capture). |
 | `duplicate` | Ordinary batch: skip and keep the raw. Named file: name the existing note and get the user's explicit overwrite-or-skip decision before changing it, honoring one already given. Explicit reprocess intent supplies that decision only for a note this skill owns; [reprocessing](references/duplicates-and-reprocessing.md#reprocessing-an-existing-note) covers it and resume. Always skip a `research_extracts` match and report its path. |
 | `duplicate-of-earlier-input` | This is a pending capture, not a published owner. Skip only after the earlier capture publishes successfully. If it fails or is deferred, recheck the later capture against the current Articles index and process it when still new. |
 | `no-source` | Recover a labeled origin or skip, under the rules below. |
@@ -119,8 +120,7 @@ as unverified. Without usable title evidence, retain the raw, skip that input
 and report the missing title: there is no stable identity to publish. A missing
 publication year keeps the note explicitly undated (`published: null`, filename
 suffix `nd`) and is reported. Never substitute `created`, the site name, or
-memory. Keep the fetched markup and text for body cleaning and the
-completeness audit.
+memory. Keep the fetched markup for body cleaning and the completeness audit.
 
 Choose 2–4 identifying words from the corrected title, then run:
 
@@ -237,9 +237,9 @@ recommendations the same way; state reported facts directly, never with “the
 article says” framing. Bold only terms that could be their own wiki entry (a
 named model, method, dataset, organization, person or defined concept), never
 generic words or whole phrases.
-Use roughly 5–8 bullets for a short post, 10–15 for longform and at most 20 for
-a very long piece; merge overlap. No URLs, inline links or footnote markers in
-the summary; escape literal currency dollars as `\$`.
+Use roughly 5–8 bullets under about 1,500 body words, 9–15 up to about 5,000
+and at most 20 beyond; merge overlap. No URLs, inline links or footnote
+markers in the summary; escape literal currency dollars as `\$`.
 
 ```text
 ---

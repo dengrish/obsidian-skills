@@ -192,8 +192,8 @@ claiming success.
 
 Report created filenames and physical page ranges, any adjusted start/end
 pages, uncovered pages, and unresolved boundaries. For a chapter named around
-another source's files, also report its natural name, those occupants and the
-question for the user. Say explicitly that the original book was kept. A refused or unreadable book is a per-file batch
+another source's files, also report its natural name and those occupants.
+Say explicitly that the original book was kept. A refused or unreadable book is a per-file batch
 outcome; report its message in plain language and continue other independent
 files.
 

@@ -13,13 +13,11 @@ the user's captured prose with fetched text.
 
 ## Fetch and declare the audit scope
 
-Keep two views for different jobs: raw/rendered markup exposes media, while the
-host's extracted article text exposes prose gaps. Reuse the markup and extracted
-text saved during [metadata verification](metadata-verification.md#verify-against-the-captured-url).
-Refetch only a missing one: the markup with a permitted static fetch using a
-browser User-Agent, following [host tool rules](../../../shared/RUNTIME.md#use-the-hosts-available-tools),
-and the text with an available web tool, not a hand-written readability
-extractor.
+Reuse the page markup saved during [metadata verification](metadata-verification.md#verify-against-the-captured-url).
+Refetch it only when missing, with a permitted static fetch using a browser
+User-Agent, following [host tool rules](../../../shared/RUNTIME.md#use-the-hosts-available-tools).
+The one file serves both jobs: `source` inventories its media and
+`source --text` lists its visible text.
 
 Upgrade once to an available browser when the static page is suspiciously
 sparse: roughly fewer than 15 paragraphs, under 10 KB of article body after
@@ -43,7 +41,9 @@ Every capture needs one explicit verdict in the final report:
 
 - `Completeness audit: <N> recovered, <M> flagged, <K> decoratives skipped`, with
   the items listed.
-- `Completeness audit: no gaps found`, after a usable comparison.
+- `Completeness audit: no gaps found`, after comparing the draft with the
+  page's media rows and text blocks; a web tool's summary or outline is not a
+  comparison.
 - `Completeness audit: SKIPPED — <reason>` when there is no reliable comparison:
   failed fetch/404, paywall stub, required browser/network access unavailable,
   or an unusable rendered page. A sparse static page alone triggers the browser
@@ -157,10 +157,13 @@ the helper when `place` fails.
 
 ## Compare article text
 
-Compare the draft body with the fetched **extracted article text**, not raw
-markup. Flag missing sections or substantial paragraph runs with a heading or
-opening words and a location the user can find. Do not auto-insert large blocks:
-the capture may intentionally omit them.
+Compare the draft body with the text blocks that
+`python3 '<skill>/scripts/body_checks.py' source '<saved markup file>' --text`
+prints from the saved static or rendered markup, or with the browser's visible
+text when it gives no markup. Blocks tagged `nav`, `aside`, `header`, `footer`
+or `hidden` are usually chrome. Flag missing sections or substantial paragraph
+runs with a heading or opening words and a location the user can find. Do not
+auto-insert large blocks: the capture may intentionally omit them.
 
 Ignore removed navigation/ads/share chrome and small extraction artifacts.
 Respect known intentional omissions from a prior review; mention them at most

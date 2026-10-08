@@ -65,7 +65,13 @@ The chapter synthesizes 14 published case studies of shared resources in nine Eu
 
 ## Moreau argues three features mark the user rules that lasted
 
-Where rules lasted, Moreau finds that users wrote and monitored the access rules, and sanctions rose step by step from a warning to exclusion.<sup>[[Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf#page=6|6]]</sup> By the case authors' accounts, rules were still in force more than five years after adoption in 11 of the 14 cases.<sup>[[Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf#page=7|7]]</sup> She reads each of the three lapsed cases as missing one feature.<sup>[[Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf#page=8|8]]</sup>
+In the rules that lasted, Moreau finds three features:<sup>[[Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf#page=6|6]]</sup>
+
+- **User-written rules.** The users, not the city, wrote the access rules.
+- **User monitoring.** The users themselves monitored who used the resource.
+- **Graduated sanctions.** Sanctions rose step by step from a warning to exclusion.
+
+By the case authors' accounts, rules were still in force more than five years after adoption in 11 of the 14 cases.<sup>[[Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf#page=7|7]]</sup> She reads each of the three lapsed cases as missing one feature.<sup>[[Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf#page=8|8]]</sup>
 
 ## The chapter recommends leasing rule-making rights to user groups
 
@@ -84,6 +90,8 @@ Moreau advises city officials to lease rule-making rights to user groups for fix
 
 - **Mode.** The chapter synthesizes other authors' cases and reports no
   procedure of its own, so the second section is prose with no numbered steps.
+  The three features are parallel items, so they take bullets under the
+  sentence that introduces them; the argument around them stays prose.
 - **Attribution.** The opening claim is prior work the chapter restates; the
   thesis and advice are Moreau's and the counts the case authors'. None takes
   an effect rung.
@@ -108,7 +116,7 @@ each page:
 ```bash
 python3 '<skill>/scripts/note_lint.py' \
     '<scratch>/Moreau_UrbanCommons_2023_03_WhyFencesFail.md' \
-    --mode argument --images '<vault>/Sources/Images'
+    --mode argument --images '<vault>/Sources/Images' --wiki '<vault>/Wiki'
 python3 '<skill>/scripts/paper_text.py' \
     '<vault>/Sources/PDFs/Moreau_UrbanCommons_2023/Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf' \
     --find '11 of the 14' --find 'nine European cities'

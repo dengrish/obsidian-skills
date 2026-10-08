@@ -38,7 +38,7 @@ diff in one call:
      unmirrored paths or unread aliases leave uncertain). A ``path``
      replacement keeps a path that another entry, a MOC, a note outside the
      Wiki or an unmirrored file or folder may need, and qualifies a bare
-     ``.md`` link whose name an outside note shares. For ``case``, ``path``
+     link whose name an outside note shares. For ``case``, ``path``
      and ``alias``, ``replacement`` is the whole link to write, keeping its
      anchor and, in body prose, its displayed text; a Related-footer label
      becomes the owner's canonical title. An unmirrored ``.md`` file owns a
@@ -52,7 +52,9 @@ diff in one call:
      own, lists under ``unmirrored`` the unmirrored file matching its stem
      (otherwise every unmirrored file and, for a dangling link, every entry
      whose aliases are unread) and every unmirrored folder it
-     may live in; an unmirrored folder or unread alias list adds a note.
+     may live in; an unmirrored folder or unread alias list adds a note. A
+     dangling link the path's baseline copy already had also lists every
+     unread vault folder outside the Wiki, which adds a note too.
      ``non_entry`` lists a target that names no entry or MOC but a real
      vault note outside the Wiki and ``MOCs``, as wiki-lint's
      ``item10/non-entry`` resolves it: a bare basename, a ``./`` or ``../``
@@ -172,6 +174,7 @@ from vault_index import (  # noqa: E402
     parse_frontmatter,
     split_sections,
 )
+from vault_artifacts import within_folder  # noqa: E402
 
 __all__ = ["ReviewError", "review"]
 
@@ -180,32 +183,6 @@ SENTINEL = ".review-tree"
 
 class ReviewError(Exception):
     """The review could not run; nothing it reports would be trustworthy."""
-
-
-def _within(path, root):
-    """Whether ``path`` is the existing folder ``root`` or lies below it.
-
-    Compares ``(st_dev, st_ino)`` identities rather than strings: realpath
-    keeps the caller's letter case and Unicode normalization, which a case-
-    or normalization-insensitive filesystem treats as the same folder.
-    """
-    try:
-        info = os.stat(root)
-    except OSError:
-        return False
-    target, path = (info.st_dev, info.st_ino), os.path.realpath(path)
-    while True:
-        try:
-            info = os.stat(path)
-        except OSError:
-            pass                           # not created yet; check its parent
-        else:
-            if (info.st_dev, info.st_ino) == target:
-                return True
-        parent = os.path.dirname(path)
-        if parent == path:
-            return False
-        path = parent
 
 
 def _read_regular(path):
@@ -267,7 +244,7 @@ def load_manifest(path, wiki_parts, out):
             raise ReviewError("manifest names %r and %r, one portable path"
                               % (seen[fold_name(rel)], rel))
         seen[fold_name(rel)] = rel
-        if _within(draft, out):
+        if within_folder(draft, out):
             raise ReviewError("draft for %s lies inside --out %s, which each "
                               "run rebuilds; keep drafts elsewhere"
                               % (rel, out))
@@ -297,7 +274,7 @@ def load_manifest(path, wiki_parts, out):
 def prepare_out(out, tree_name, forbidden):
     """Create or reuse ``out`` and return a fresh, empty ``<out>/<tree_name>``."""
     for root in forbidden:
-        if _within(out, root) or _within(root, out):
+        if within_folder(out, root) or within_folder(root, out):
             raise ReviewError("--out %s overlaps the vault or Wiki (%s)"
                               % (out, root))
     try:
@@ -451,7 +428,7 @@ def _moc_stems(vault):
 
 
 def _outside_notes(vault, wiki):
-    """``(paths, complete)`` for the vault's notes outside the Wiki and MOCs.
+    """``(paths, unread)`` for the vault's notes outside the Wiki and MOCs.
 
     ``paths`` holds the folded vault-relative paths, without ``.md``, of the
     ``.md`` notes elsewhere in the vault, such as ``Articles/`` reading
@@ -459,29 +436,26 @@ def _outside_notes(vault, wiki):
     vault-root ``MOCs`` folder are skipped. Folder symlinks are followed, as
     Obsidian indexes them, with a loop guard; one that points back into the
     vault is not walked, because the real folder already covers its files.
-    ``complete`` is false when a folder could not be read.
+    ``unread`` lists, sorted, the vault-relative folders that could not be
+    read.
     """
-    paths, complete = set(), True
+    paths, unread = set(), set()
     seen = set()
-    inside_vault = os.path.realpath(vault).rstrip(os.sep) + os.sep
     try:
         wiki_id = os.stat(wiki)
         wiki_id = (wiki_id.st_dev, wiki_id.st_ino)
     except OSError:
         wiki_id = None
 
-    def failed(_exc):
-        nonlocal complete
-        complete = False
+    def failed(path):
+        unread.add(os.path.relpath(path, vault).replace(os.sep, "/"))
 
     def skipped(dirpath, name):
         path = os.path.join(dirpath, name)
         if name.startswith(".") or (dirpath == vault
                                     and fold_name(name) == "mocs"):
             return True
-        if (os.path.islink(path)
-                and (os.path.realpath(path) + os.sep).startswith(
-                    inside_vault)):
+        if os.path.islink(path) and within_folder(path, vault):
             return True
         try:
             info = os.stat(path)
@@ -490,11 +464,12 @@ def _outside_notes(vault, wiki):
         return (info.st_dev, info.st_ino) == wiki_id
 
     for dirpath, dirnames, filenames in os.walk(
-            vault, followlinks=True, onerror=failed):
+            vault, followlinks=True,
+            onerror=lambda exc: failed(exc.filename or vault)):
         try:
             info = os.stat(dirpath)
         except OSError:
-            complete = False
+            failed(dirpath)
             dirnames[:] = []
             continue
         if (info.st_dev, info.st_ino) in seen:
@@ -508,7 +483,7 @@ def _outside_notes(vault, wiki):
                     and os.path.isfile(os.path.join(dirpath, name))):
                 rel = os.path.relpath(os.path.join(dirpath, name), vault)
                 paths.add(fold_name(rel.replace(os.sep, "/")[:-3]))
-    return paths, complete
+    return paths, sorted(unread)
 
 
 def _names_outside(target, outside, note=None):
@@ -678,8 +653,8 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
     A ``path`` record drops an explicit ``.md`` suffix, and a Wiki or folder
     path once the inventory proves no other file owns the bare name: no
     other entry, MOC, unmirrored file or outside note has it, no folder is
-    unmirrored, and ``others_complete`` holds. A bare ``.md`` link whose
-    name an outside note shares takes the qualified path instead.
+    unmirrored, and ``others_complete`` holds. A bare link whose name an
+    outside note shares takes the qualified path instead.
 
     ``unmirrored`` lists the unmirrored ``.md`` files and ``folders`` the
     unmirrored folders, as reported paths; ``aliases_complete`` is false
@@ -785,6 +760,7 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                 if kind == "alias":
                     name = owner.rsplit("/", 1)[-1]
                     shared = (fold_name(name) in mocs
+                              or fold_name(name) in other_stems
                               or len(stems.get(fold_name(name), ())) > 1)
                     dest = ("/".join(list(wiki_parts) + [owner]) if shared
                             else name)
@@ -795,7 +771,7 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
                     name = owner.rsplit("/", 1)[-1]
                     if bare:
                         dest = ("/".join(list(wiki_parts) + [owner])
-                                if suffix and stem in other_stems else name)
+                                if stem in other_stems else name)
                     elif (others_complete and not folders and not occupied
                           and len(files) == 1 and stem not in mocs
                           and stem not in other_stems):
@@ -935,14 +911,21 @@ def review(wiki, manifest, out, vault=None):
         unmirrored_stems.setdefault(
             fold_name(leaf.rsplit("/", 1)[-1][:-3]), leaf)
     mocs, dangling, noncanonical, non_entry = _moc_stems(vault), [], [], []
-    others, others_complete = _outside_notes(vault, wiki)
+    others, others_unread = _outside_notes(vault, wiki)
+    if others_unread:
+        notes.append("notes outside the Wiki are incomplete (unread "
+                     "folder(s): %s); a dangling link the entry already had "
+                     "may name a note there" % ", ".join(others_unread))
     for rel, inner, data in staged:
         text = data.decode("utf-8-sig", errors="replace")
         note = rel[:-3]
         # A link the path's baseline copy already had is the user's to keep.
-        before = (non_entry_links(
-            replaced[rel].decode("utf-8-sig", errors="replace"), entry_paths,
-            mocs, wiki_parts, others, note) if rel in replaced else [])
+        old = (replaced[rel].decode("utf-8-sig", errors="replace")
+               if rel in replaced else "")
+        before = non_entry_links(old, entry_paths, mocs, wiki_parts, others,
+                                 note)
+        kept = (dangling_links(old, known, mocs, entry_paths, wiki_parts,
+                               others, note) if others_unread else [])
         for section, target in non_entry_links(text, entry_paths, mocs,
                                                wiki_parts, others, note):
             record = {"file": rel, "section": section, "target": target}
@@ -956,6 +939,8 @@ def review(wiki, manifest, out, vault=None):
             # A file outranks an alias; otherwise every unmirrored leaf and
             # every entry whose aliases are unread may own the name.
             where = ([occupant] if occupant else leaves + unread) + folders
+            if (section, target) in kept:
+                where += others_unread
             if where:
                 record["unmirrored"] = where
             dangling.append(record)
@@ -967,7 +952,7 @@ def review(wiki, manifest, out, vault=None):
                                             folders=folders,
                                             aliases_complete=not unread,
                                             others=others,
-                                            others_complete=others_complete)]
+                                            others_complete=not others_unread)]
 
     return {
         "ok": True,
@@ -1387,7 +1372,7 @@ def run_self_test():
                False))
 
         # A path stays where another vault file owns the bare name: a note
-        # outside the Wiki or a previous-layout MOC. A bare `.md` link
+        # outside the Wiki or a previous-layout MOC. A bare link or an alias
         # beside an outside note takes the qualified path.
         shared_vault = os.path.join(tmp, "shared-path", "vault")
         for folder in ("Articles", "MOCs"):
@@ -1396,15 +1381,19 @@ def run_self_test():
             "A reading note.\n")
         put(os.path.join(shared_vault, "MOCs", "statistics.md"), "- x\n")
         _shared, shared_links = links_review(
-            "shared-path", {"variance.md": measure("Variance"),
+            "shared-path", {"variance.md": measure("Variance", ["var-alias"]),
                             "statistics.md": measure("Statistics"),
                             "mean.md": measure("Mean")},
-            " It uses [[Wiki/variance|variance]], [[variance.md|variance]], "
+            " It uses [[variance]], [[var-alias|var]], "
+            "[[Wiki/variance|variance]], [[variance.md|variance]], "
             "[[Wiki/variance.md|variance]], [[Wiki/statistics|statistics]] "
             "and [[Wiki/mean|mean]].")
         check("a path another vault file needs is kept, less its .md",
               shared_links,
-              [("body", "variance.md", "path", "[[Wiki/variance|variance]]",
+              [("body", "variance", "path", "[[Wiki/variance|variance]]",
+                None),
+               ("body", "var-alias", "alias", "[[Wiki/variance|var]]", None),
+               ("body", "variance.md", "path", "[[Wiki/variance|variance]]",
                 None),
                ("body", "Wiki/variance.md", "path",
                 "[[Wiki/variance|variance]]", None),
@@ -1433,7 +1422,7 @@ def run_self_test():
               (linked_links, _outside_notes(
                   os.path.join(tmp, "linked-path", "vault"),
                   os.path.join(tmp, "linked-path", "vault", "Wiki"))),
-              ([], ({"shared/mean"}, True)))
+              ([], ({"shared/mean"}, [])))
 
         # A link to a real note outside the Wiki is not dangling, and the
         # note outranks an entry alias of its name (wiki-lint's
@@ -1472,6 +1461,34 @@ def run_self_test():
         check("an inherited non_entry link leaves the review clean",
               (kept_rows, outside_kept["clean"]),
               ([("body", "doe-paper", True)], True))
+        # A note in an unreadable folder outside the Wiki may own a link the
+        # merged entry already had: that dangling link lists the folder, so
+        # it is kept. A new dangling link does not list it.
+        private = os.path.join(tmp, "unread-outside", "vault", "Private")
+        os.makedirs(private)
+        put(os.path.join(private, "doe-paper.md"), "A reading note.\n")
+        unread_want = ([("doe-paper", ["Private"]), ("nowhere", None)],
+                       [True])
+        os.chmod(private, 0)
+        try:
+            if os.access(private, os.R_OK):
+                unread_seen = unread_want        # a superuser reads it
+            else:
+                unread_new, _unread_links = links_review(
+                    "unread-outside", {"f1-score.md": _st_entry(
+                        "F1 score", "F1 score is the harmonic mean of "
+                        "precision and recall.", "The harmonic mean of the "
+                        "two error-rate shares.",
+                        body=" It cites [[doe-paper|Doe]].")},
+                    " It cites [[doe-paper|Doe]] and [[nowhere]].")
+                unread_seen = ([(r["target"], r.get("unmirrored"))
+                                for r in unread_new["dangling"]],
+                               ["Private" in n for n in unread_new["notes"]])
+        finally:
+            os.chmod(private, 0o755)
+        check("a dangling link the entry already had lists an unread "
+              "folder outside the Wiki, with a note", unread_seen,
+              unread_want)
 
         # An online page's URL is a valid source item (CONVENTIONS section 7),
         # and a frontmatter URL is never a link, even when its last path

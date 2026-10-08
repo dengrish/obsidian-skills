@@ -35,7 +35,7 @@ from one of the relaxed matches listed below and still requires opening the page
 |---|---|
 | `FOUND` | Record the physical page and read it before citing. A match can be quoted prior work or a reference-list entry, not this document's claim or finding. |
 | `loose` | Open the page: removed spacing/hyphens can recover a broken word or accidentally join unrelated text, a number followed by `.digits` or `,digits` can be a decimal or a citation mark, and a number after a minus sign may be a sign the claim dropped. It is not a verified claim yet. |
-| `MISSING` | Retry once using the source's actual short tokens. A phrase assembled as “hazard ratio 0.62” will miss “hazard ratio of 0.62”; try `0.62`. If the finder names pages without text, or the claim came from a figure or table image, check it on that page image instead ([page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)). Correct or cut an unsupported claim, never make it vaguer. |
+| `MISSING` | Retry once using the source's actual short tokens. A phrase assembled as “hazard ratio 0.62” will miss “hazard ratio of 0.62”; try `0.62`. If the finder names pages without text, or the claim came from an image on the page, such as a figure, a table or a stamped title-page date, check it on that page image instead ([page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)). Correct or cut an unsupported claim, never make it vaguer. |
 
 Every number, named drug/gene/organism/model/instrument/cohort, sample size,
 comparator and scope clause needs source evidence. A found number does not
@@ -96,9 +96,7 @@ Walk the callout, headings, body and captions with their supporting pages open:
   sentence that introduces them, each stating the same property. A procedure
   of three or more steps, or the time-ordered stages of one process, is a
   numbered list under its introducing sentence, and each step keeps its
-  reason. Causal chains, arguments and shorter sequences stay prose. The
-  document's reported procedure in the second section follows its own rule in
-  [body content](note-format.md#body-content).
+  reason. Causal chains, arguments and shorter sequences stay prose.
 - [ ] The selected [body mode](note-format.md#choose-the-body-mode) matches the
   document's main contribution. Empirical notes identify the design and walk an
   actual procedure where one exists. Argument/synthesis notes state the real
@@ -124,12 +122,12 @@ Walk the callout, headings, body and captions with their supporting pages open:
 ## Check provenance and exhibits
 
 - [ ] The title, author order, format and date components come from this PDF
-  or, for a chapter that does not print a byline or date, from its parent book
-  as [note format](note-format.md#frontmatter) describes. Only unstated
-  month/day components are padded. Any second `sources:` URL is this
-  document's own printed DOI/arXiv identifier (title page, header or footer),
-  not a cited or affected work's, and not inferred; Book has none. An
-  undated PDF uses `published: null` with its canonical `_nd` stem, or the
+  or, for a chapter, as [note format](note-format.md#frontmatter) describes: a
+  missing byline or date from its parent book, and always its book edition's
+  year. Only unstated month/day components are padded. Any second `sources:`
+  URL is this document's own printed DOI/arXiv identifier (title page, header
+  or footer), not a cited or affected work's, and not inferred; Book has none.
+  An undated PDF uses `published: null` with its canonical `_nd` stem, or the
   deliberately preserved noncanonical name recorded at intake; a chapter with
   a dated stem never does.
 - [ ] The first `sources:` PDF exists with the selected unique stem, and the
@@ -161,8 +159,9 @@ Walk the callout, headings, body and captions with their supporting pages open:
   was checked on its source page; captioned trims do not hide contrary rows.
 - [ ] Captions lead with the message, stand alone and state scope/comparator.
   Where error bars or intervals are drawn, they identify them or the paper's
-  failure to define them. Each exhibit sits under its supporting claim; nothing
-  points at an unavailable figure, table, appendix or supplement.
+  failure to define them. Each exhibit sits under a claim it supports and does
+  not contradict; nothing points at an unavailable figure, table, appendix or
+  supplement.
 
 ## Report separate outcomes
 

@@ -28,12 +28,12 @@ The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
 entries. It edits a note only to move links during an Extended Data switch
 (step 2). An unspecified “process this PDF” request needs a stated
 deliverable before selecting a workflow. Only captioned, numbered figures are
-extracted; unnumbered exhibits are reported, not cropped. A request for one
-specific figure runs the normal batch on that PDF (for a split book, on its
-chapter folder; see step 1): it adds that PDF's missing crops and leaves
-existing ones in place, and the report names the requested label's outcome.
-A request to re-crop a bad figure uses the repair in
-[step 3](#3-inspect-the-summary-and-verify-crops).
+extracted; unnumbered exhibits are reported, not cropped. A request about one
+specific figure, a re-crop included, runs the normal batch on that PDF (for a
+split book, on its chapter folder; see step 1): it adds that PDF's missing
+crops and leaves existing ones in place, a crop the user calls bad is then
+repaired in [step 3](#3-inspect-the-summary-and-verify-crops), and the report
+names the requested label's outcome.
 
 Normally read `Sources/PDFs/` recursively and write to the **flat**, shared
 `Sources/Images/` folder. Use the paths the task establishes; do not infer an
@@ -82,12 +82,12 @@ gives the scan scope and what a refusal blocks. When another vault file
 shares a PDF basename, report both paths and give the user the
 [shared-basename remedy](../../shared/CONVENTIONS.md#shared-pdf-basenames).
 
-**In a recursive run containing both a book and its chapters, extract the
-chapters and skip the whole book.** The skip is scoped to this run, not a
-standing fact about the vault. A split book's figures are its chapters'
-figures: a request that names a split book, or one of its figures, runs on
-its chapter folder and reports the requested figures from the chapter crops.
-The batch refuses a named book whose chapters are in the vault and names that
+**A split book's figures are its chapters' figures: extract the chapters and
+skip the whole book.** With canonical `Sources/Images/` output, a sweep skips
+a book whose chapters are anywhere in the vault, even outside `--src`. A
+request that names a split book, or one of its figures, runs on its chapter
+folder and reports the requested figures from the chapter crops. The batch
+and the explicit crop command refuse a named split book and name its chapter
 folder; a run that only [adopts](references/review-and-repair.md#adopt-legacy-crops)
 the book's legacy crops records them and extracts nothing.
 Only `--include-split-books` deliberately selects both representations
@@ -95,6 +95,17 @@ and may produce duplicate figures. Pass it only when the user explicitly asks
 for the book's duplicate figures, never for a request that names a split book
 or one of its figures. Existing whole-book figures are reported,
 never automatically deleted.
+
+A request for one chapter of a book runs on that chapter's PDF alone. For an
+unsplit book, it authorizes
+[pdf-organize](../pdf-organize/SKILL.md#5-test-for-a-book-and-split-only-when-justified)
+to split that one book, keeping the original; a `--dry-run` preview splits
+nothing and reports the proposed split. If pdf-organize finds no chapter
+structure, or the split is blocked, extract nothing from the book and report
+the blocker and the proposed split. A requested part that is none of the
+book's chapters (a preface, an introduction not labeled as a chapter, an
+appendix) authorizes no split: extract nothing and report the book's chapters
+or proposed split.
 
 ### 2. Extract with the shipped batch command
 
@@ -136,12 +147,11 @@ in the ED namespace by itself (the batch prints `Using --ed-prefix ED`);
 adopt an unrecorded one only after comparing it with its page. Pass
 `--ed-prefix ED` explicitly only for a single PDF with no `<stem>_fig*` crop
 yet whose captions (the `raw` column of `auto_fig_bbox.py`) number Extended
-Data figures separately; otherwise switch a PDF only through the rerun its
-summary prints, following
-[Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures).
-In a vault, the switch relinks notes and canvases in the same run, as a
-rename does
-([details](references/review-and-repair.md#extended-data-and-supplementary-figures)).
+Data figures separately. Switch a PDF that already has crops only when its
+summary prints an `--ed-prefix ED` rerun or the user asks, following
+[Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures);
+in a vault, the switch relinks notes and canvases in the same run, as a
+rename does.
 
 Output is `[pdf_stem]_fig_<label>.png`, with the exact PDF stem including
 `_src` and disambiguators. The label comes from the caption, **not extraction
@@ -182,12 +192,14 @@ Caption text in a crop must be removed before a note embeds it. Repair a bad
 crop, including one the user asks to re-crop, with the reference's
 [explicit repair procedure](references/review-and-repair.md#set-and-verify-an-explicit-crop)
 for coordinate units, naming exceptions, scratch copies, review marks and
-cleanup.
+cleanup. A crop written from a false caption names no figure and has no
+repair: follow the [Unclaimed crops](references/review-and-repair.md#interpret-the-diagnostics)
+row.
 
 Record `--mark-reviewed '<stem>:<fig>'` only after viewing the crop against
-its page: for every flagged crop confirmed correct as written and every
-explicitly repaired crop, flagged or not. Leave unviewed or doubtful crops
-unmarked and report them. The mark verifies nothing, silences its warnings
+its page: for every flagged or adopted crop confirmed correct as written
+and every explicitly repaired crop, flagged or not. Leave unviewed or
+doubtful crops unmarked and report them. The mark verifies nothing, silences its warnings
 and protects the crop from a later batch `--overwrite` until
 `--unmark-reviewed` removes it. Preserve every recovery path named by a
 failed write.
@@ -196,11 +208,12 @@ failed write.
 
 Give the source scope, output folder, figures written, verified skips, and any
 legacy adoptions. For a one-figure request, state the requested label's
-outcome. Name skipped whole books and feed-owned attachments, unnumbered
-exhibits, refused sources, conflicting occupants, failed PDFs, remaining
-warnings, and explicit crop repairs. After an Extended Data switch, name the
-relinked notes, each S crop kept because a link could not move, and each
-leftover S crop. State what visual review was completed,
+outcome; for a chapter of an unsplit book, the split pdf-organize made or its
+blocker. Name skipped whole books and feed-owned attachments, unnumbered
+exhibits, mislabelled crops, refused sources, conflicting occupants, failed
+PDFs, remaining warnings, and explicit crop repairs. After an Extended Data
+switch, name the relinked notes, each S crop kept because a link could not
+move, and each leftover S crop. State what visual review was completed,
 the review marks recorded, and the unviewed or doubtful crops left unmarked. After a
 nonzero run, report the PDFs that succeeded without calling the whole request
 complete. Preserve originals, legacy panels, and all unrelated images.

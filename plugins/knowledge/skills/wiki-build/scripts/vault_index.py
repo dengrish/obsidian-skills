@@ -58,7 +58,7 @@ Per-entry record:
     slug, path, relpath, title, type, aliases[], sources[], created, updated,
     description, tags[], parents[],
     body_wikilink_targets[], related_wikilink_targets[], errors[],
-    identity_complete
+    identity_complete, common_names[]
 
 ``identity_complete`` is false when an error can hide the entry's slug, title
 or alias ownership: an unread, unsafe or unparsed file, an unclosed or
@@ -67,6 +67,10 @@ closes included), or a malformed title or aliases field. Date, source,
 tag, type, description and filename/title errors leave it true. So does a
 readable plain note whose text does not begin ``---`` (after a BOM): it claims
 no title or alias, and its "no YAML frontmatter" error stays in ``errors``.
+
+``common_names`` holds the common names an Organism's description or opening
+sentence binds to its title. They are link labels, never aliases;
+find_collisions probes them for adjudication only.
 
 ``errors`` leaves out the parser errors on the ``issues:`` value's lines. That
 value is the user's text; lint_entry reports it as item 2. When only the
@@ -94,7 +98,9 @@ import stat
 import sys
 
 _OBSIDIAN_SHARED_MODULES = (
-    "entry_structure", "markdown_tables", "portable_names", "slugify", "vault_artifacts", "yaml_scalars",
+    "code_typography", "entry_checks", "entry_structure", "markdown_tables",
+    "naming", "organism_names", "plurals", "portable_names", "slugify",
+    "vault_artifacts", "yaml_scalars",
 )
 
 # --- obsidian shared-layer bootstrap (canonical; see shared/RUNTIME.md) ---
@@ -135,7 +141,7 @@ if _here != _shared:
 # --- end bootstrap ---
 
 from yaml_scalars import (parse_scalar, split_flow as _split_flow,
-                          strip_comment)  # noqa: E402
+                          strip_comment, text_scalar)  # noqa: E402
 from entry_structure import (  # noqa: E402
     FLASH_HEAD_LINE_RE,
     RELATED_HEAD_LINE_RE,
@@ -146,7 +152,9 @@ from entry_structure import (  # noqa: E402
 )
 from slugify import SlugError, slug_stem  # noqa: E402
 from portable_names import portable_identity  # noqa: E402
-from vault_artifacts import inventory_sources, local_link_matches  # noqa: E402
+from vault_artifacts import (inventory_sources, local_link_matches,  # noqa: E402
+                             within_folder)
+from entry_checks import organism_common_name_surfaces  # noqa: E402
 
 
 def fold_name(s):
@@ -283,8 +291,14 @@ class Frontmatter(object):
         return f.scalar if f else None
 
 
-def unquote_scalar(raw):
-    """Return a validated scalar and its quoting style, or raise ValueError."""
+def unquote_scalar(raw, key=None):
+    """Return a validated scalar and its quoting style, or raise ValueError.
+
+    A title, description or alias that decodes to a non-printing character,
+    such as a single-backslash ``\\tau``, is unparseable too.
+    """
+    if key in ("title", "description", "aliases"):
+        return text_scalar(raw)
     return parse_scalar(raw)
 
 
@@ -348,7 +362,7 @@ def parse_frontmatter(text):
             current.kind = "block_list"
             raw_item = (item_m.group("val") or "").strip()
             try:
-                val, _style = unquote_scalar(raw_item)
+                val, _style = unquote_scalar(raw_item, current.key)
             except ValueError as exc:
                 fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
                 val = None
@@ -405,7 +419,7 @@ def parse_frontmatter(text):
                 flow_items = []
             for raw_item in flow_items:
                 try:
-                    val, _style = unquote_scalar(raw_item)
+                    val, _style = unquote_scalar(raw_item, key)
                 except ValueError as exc:
                     fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
                     val = None
@@ -415,7 +429,7 @@ def parse_frontmatter(text):
         else:
             field = Field(key, "scalar", raw_value, lineno)
             try:
-                val, _style = unquote_scalar(raw_value)
+                val, _style = unquote_scalar(raw_value, key)
             except ValueError as exc:
                 fm.errors.append("line %d: unparseable YAML scalar: %s" % (lineno, exc))
                 val = None
@@ -431,6 +445,16 @@ def parse_frontmatter(text):
         if key not in _IDENTITY_KEYS:
             fm.non_identity_errors += len(fm.errors) - before
 
+    # An aliases list indented uniformly with spaces (PyYAML writes `- x`) is
+    # valid YAML that decodes to these same items: its two-space finding is
+    # item 1's format fix and hides no alias.  Mixed or tab indents still can.
+    aliases = fm.fields.get("aliases")
+    if aliases is not None and aliases.kind == "block_list":
+        indents = {_ITEM_RE.match(lines[n - 1]).group("indent")
+                   for n in aliases.item_lines}
+        if len(indents) == 1 and indents != {"  "} \
+                and not indents.pop().strip(" "):
+            fm.non_identity_errors += len(aliases.item_lines)
     return fm
 
 
@@ -608,6 +632,7 @@ def index_entry(path, text=None, root=None):
         "errors": [],
         # Stays false on every early return: unread bytes can hide aliases.
         "identity_complete": False,
+        "common_names": [],
     }
 
     if text is None:
@@ -736,6 +761,8 @@ def index_entry(path, text=None, root=None):
     sections = split_sections(fm.body)
     prose = "\n".join(sections["prose_lines"])
     record["body_wikilink_targets"] = [t for t, _l in extract_wikilinks(prose)]
+    record["common_names"] = organism_common_name_surfaces(
+        record["type"], record["title"], record["description"], prose.lstrip())
     if sections["related_line"]:
         record["related_wikilink_targets"] = [
             t for t, _l in extract_wikilinks(sections["related_line"])]
@@ -764,15 +791,10 @@ def iter_markdown_files(root, on_error=None):
     root = os.path.abspath(root)
     found = []
     seen = set()
-    real_root = os.path.realpath(root)
-    inside_root = real_root.rstrip(os.sep) + os.sep
 
     def links_back(dirpath, name):
         path = os.path.join(dirpath, name)
-        if not os.path.islink(path):
-            return False
-        real = os.path.realpath(path)
-        return real == real_root or real.startswith(inside_root)
+        return os.path.islink(path) and within_folder(path, root)
 
     for dirpath, dirnames, filenames in os.walk(root, followlinks=True, onerror=on_error):
         try:
@@ -1137,6 +1159,28 @@ def run_self_test():
         check("a symlinked folder back into the wiki is not walked "
               "(skipped where symlink creation is unavailable)",
               back_seen, ["topics/mean.md"])
+        # Folder identity, not spelling: a link back whose absolute target
+        # spells the wiki in another case or Unicode form is pruned too. On
+        # a case- or normalization-sensitive filesystem that target dangles.
+        accented = os.path.join(tmp, "WikiBäck")
+        os.makedirs(os.path.join(accented, "topics"))
+        with open(os.path.join(accented, "topics", "mean.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_st_entry_text("Mean"))
+        variants = []
+        for wiki_root, target in (
+                (back, os.path.join(tmp, "wikiback", "topics")),
+                (accented, os.path.join(tmp, "WikiBäck", "topics"))):
+            try:
+                os.symlink(target, os.path.join(wiki_root, "alias-spelled"))
+            except (OSError, NotImplementedError, AttributeError):
+                variants.append(["topics/mean.md"])
+            else:
+                variants.append(
+                    [os.path.relpath(path, wiki_root).replace(os.sep, "/")
+                     for path in iter_markdown_files(wiki_root)])
+        check("a link back spelled in another case or Unicode form is not "
+              "walked", variants, [["topics/mean.md"]] * 2)
 
         # -- the shape the other two scripts consume ------------------------
         check("the top-level index keys are the documented ones",
@@ -1150,7 +1194,7 @@ def run_self_test():
                       "sources", "created", "updated", "description", "tags",
                       "parents", "body_wikilink_targets",
                       "related_wikilink_targets", "errors",
-                      "identity_complete"]))
+                      "identity_complete", "common_names"]))
         check("`importance` is deliberately absent from the record",
               "importance" in anchor, False)
         check("a clean entry has complete identity metadata",
@@ -1163,6 +1207,14 @@ def run_self_test():
              ("updated: 2026-01-02", "updated: 2026-01-02\nupdated: 2026-01-03"), True),
             ("an over-indented alias item",
              ('  - "anchor-second"', '    - "anchor-second"'), False),
+            ("a uniformly unindented aliases list",
+             ('  - "anchor-alias"\n  - "anchor-second"',
+              '- "anchor-alias"\n- "anchor-second"'), True),
+            ("a mixed-indent aliases list",
+             ('  - "anchor-alias"', '- "anchor-alias"'), False),
+            ("a tab-indented aliases list",
+             ('  - "anchor-alias"\n  - "anchor-second"',
+              '\t- "anchor-alias"\n\t- "anchor-second"'), False),
             ("a filename/title mismatch", ('title: "Anchor"', 'title: "Renamed"'), True),
             ("a scalar aliases field",
              ('aliases:\n  - "anchor-alias"\n  - "anchor-second"',
@@ -1179,6 +1231,27 @@ def run_self_test():
                                    root=wiki)["identity_complete"])
                for label, edit, _want in identity_cases],
               [(label, want) for label, _edit, want in identity_cases])
+        flat = index_entry(os.path.join(wiki, "anchor.md"),
+                           text=_st_entry_text("Anchor").replace(
+                               '  - "anchor-alias"\n  - "anchor-second"',
+                               '- "anchor-alias"\n- "anchor-second"'),
+                           root=wiki)
+        check("...an unindented aliases list keeps its aliases and its "
+              "two-space findings",
+              (flat["aliases"], [e.endswith("two spaces before '-'")
+                                 for e in flat["errors"]]),
+              (["anchor-alias", "anchor-second"], [True, True]))
+        mouse = _st_entry_text("Mus musculus", body=(
+            "\n***Mus musculus***, the house mouse, is a small rodent.\n"))
+        check("an Organism record holds the common names its description or "
+              "opener binds; another type holds none",
+              [index_entry(os.path.join(wiki, "mus-musculus.md"), root=wiki,
+                           text=mouse.replace("type: Concept", kind).replace(
+                               "A worked example used by the self-test.",
+                               "Mus musculus is the mouse, a rodent."))
+               ["common_names"]
+               for kind in ("type: Organism", "type: Concept")],
+              [["mouse", "house mouse"], []])
         check("relpath is relative to the wiki root",
               [r["relpath"] for r in idx["entries"] if r["slug"] == "nested"],
               [os.path.join("sub", "nested.md")])
@@ -1384,6 +1457,11 @@ def run_self_test():
               [unquote_scalar(r) for r in ('"a"', "'a'", "a", "", None)],
               [("a", "double"), ("a", "single"), ("a", "bare"), ("", "empty"),
                (None, "empty")])
+        fm = parse_frontmatter('---\ntitle: "$\\tau$-leaping"\naliases:\n'
+                               '  - "$\\nu$"\nsources: ["a\\tb"]\n---\nbody\n')
+        check("a title or alias decoding to a control character is unparseable",
+              (fm.scalar("title"), fm.values("aliases"), fm.values("sources"),
+               len(fm.errors)), (None, [None], ["a\tb"], 2))
         fm = parse_frontmatter('---\ntitle: "A"\nparents:\n---\nbody\n')
         check("a bare key is `blank`, not a scalar",
               (fm.get("parents").kind, fm.values("parents")), ("blank", []))

@@ -21,9 +21,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               (parents: present, `[]` when empty; read:
                               then issues: last)
   2   2-parents-form          parents: is `[]` or a block list of distinct
-                              canonical wikilinks (no label, heading, block
+                              well-formed wikilinks (no label, heading, block
                               anchor or `.md`), never a MOC; a discipline
-                              root's parents: is `[]`
+                              root's parents: is `[]`; resolving a target's
+                              spelling is the scanner's
   2   2-obsidian-key          an Obsidian-owned appearance/publish key; info,
                               report only, preserved on merge
   2   2-provenance            a legacy skill-provenance footer that does not
@@ -60,7 +61,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               NFC-insensitively, anchor and folder stripped);
                               also a chapter PDF beside its whole-book PDF
                               (review only)
-  5   5-slug                  re-run slugify on title:; must equal the filename
+  5   5-slug                  re-run slugify on title:; must equal the filename;
+                              a mismatch is report-only, since an existing
+                              entry's retitle is wiki-lint's
   5   5-bare-common-noun      the filename is a bare term from
                               special-titles.md's cross-domain corpus (shared
                               COMMON_NOUNS and CROSS_DOMAIN_PHRASES);
@@ -100,13 +103,14 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               item's text column (3 spaces after `1.`, 4
                               after `10.`), so Obsidian ends the list there:
                               the list resumes after it with the item's next
-                              number, or with the same bullet or number after
-                              a display, or a display follows item text that
+                              number, or with the same number after a
+                              display, or a display follows item text that
                               ends with a colon and ends the whole list; a
                               nested list whose first marker sits past the
                               item's marker but short of its text column,
-                              with another bullet or delimiter, too; indent
-                              it (lists inside quotes are not checked)
+                              with another bullet or delimiter or numbered
+                              from 1 again, too; indent it (lists inside
+                              quotes are not checked)
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
                               (counted by target, not display text; the
                               Related footer and self-links, which are
@@ -126,7 +130,7 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   11  11-related-footer       exactly one terminal `**Related:**` line (bare
                               label or ` · `-separated whole wikilinks) before
                               the Flashcards separator, with a blank line
-                              before `---`
+                              on each side
   11  11-related-display      every Related-footer link except a self-link
                               (reported only as 10-self-link) is piped;
                               folder mode also requires the resolved target's
@@ -419,6 +423,7 @@ from entry_structure import (  # noqa: E402
     strip_indented,
     answer_surface_match,
     body_opens_with_prose,
+    card_block_numbers,
     count_sentences,
     ends_with_sentence_period,
     flashcard_brevity_hints,
@@ -427,7 +432,6 @@ from entry_structure import (  # noqa: E402
     flashcard_line1_faults,
     first_prose_paragraph,
     heading_repeats_title,
-    is_review_metadata_block,
     math_title_plain_text,
     normalized_answer_surface,
     opener_subject_date_status,
@@ -441,7 +445,6 @@ from markdown_tables import (  # noqa: E402
     markdown_table_spans,
     mask_line_spans,
 )
-from naming import chapter_book_stem, core_stem  # noqa: E402
 # Per-entry checks shared with wiki-lint's scanner (one copy).
 from entry_checks import (  # noqa: E402
     BARE_WORD_ALIAS_HINT,
@@ -477,13 +480,15 @@ from entry_checks import (  # noqa: E402
     organism_common_name_bound,
     primary_line3_faults,
     pure_math_opener_markup,
+    source_identity_pairs,
     source_meta_findings,
     source_reference_kind,
     sr_card_marker_faults,
+    sr_card_syntax_fault,
     sr_marker_findings,
     unenumerated_bold_findings,
 )
-from yaml_scalars import strip_comment  # noqa: E402
+from yaml_scalars import plain_string_allowed, strip_comment  # noqa: E402
 from vault_index import (  # noqa: E402
     SCHEMA_ORDER,
     _KEY_RE,
@@ -533,10 +538,6 @@ QUOTED_LIST_FIELDS = ["sources", "tags", "parents"]
 DESCRIPTION_MAX = 110
 
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-_YAML_TYPED_PLAIN_RE = re.compile(
-    r"^(?:null|~|true|false|yes|no|on|off|\.nan|[+-]?\.inf|"
-    r"[+-]?(?:0|[1-9][0-9_]*)(?:\.[0-9_]*)?(?:e[+-]?[0-9]+)?|"
-    r"[0-9]{4}-[0-9]{2}-[0-9]{2})$", re.IGNORECASE)
 
 
 def _f(item, severity, message, evidence=None):
@@ -564,20 +565,6 @@ def _style_of(raw):
         return "invalid"  # The parser already reports the malformed scalar.
 
 
-def _plain_string_allowed(value, style):
-    """Whether a conservative plain scalar remains a YAML string.
-
-    Requiring a Unicode letter first excludes every numeric/timestamp family
-    (including YAML 1.1 octal, sexagesimal, and prefixed integers) without
-    trying to emulate competing YAML schemas. Colon-space/end and space-hash
-    are the two interior forms that change plain-scalar structure.
-    """
-    return (style == "bare" and isinstance(value, str) and bool(value)
-            and value[:1].isalpha()
-            and not _YAML_TYPED_PLAIN_RE.fullmatch(value.strip())
-            and not re.search(r":(?:\s|$)|\s#", value))
-
-
 def parse_flashcards(flashcard_lines):
     """Group card content, excluding protected review metadata from the view.
 
@@ -587,6 +574,19 @@ def parse_flashcards(flashcard_lines):
     The source text is never changed; only the linting view omits that state.
     """
     return parse_flashcard_blocks("\n".join(flashcard_lines))
+
+
+def _cards(sections):
+    """``(block number, lines)`` of each block item 19 checks as a card.
+
+    The shared ``card_block_numbers`` names them, as for the scanner. Every
+    other block, such as a detached schedule or the user's own text after
+    the card, is not a card and gets only its report-only finding.
+    """
+    blocks = parse_flashcards(sections["flashcard_lines"])
+    numbers = card_block_numbers(blocks)
+    return [(number, block) for number, block in enumerate(blocks, 1)
+            if number in numbers]
 
 
 # --------------------------------------------------------------------------
@@ -634,6 +634,10 @@ def _check_field_order(fm, findings):
                 "2-field-order", "error",
                 "mandatory key %r is missing (the key is never omitted, even "
                 "when the value is blank)" % key))
+    # A blank title is item 2, as in scan_vault.py; item 5 cannot run on it.
+    if "title" in fm.fields and not fm.scalar("title"):
+        findings.append(_f("2-field-order", "error",
+                           "title: is blank; it is mandatory"))
 
     # `importance` is no longer mandatory (it left the schema) but is still in
     # SCHEMA_ORDER, so a legacy entry that carries it in its historical slot
@@ -689,10 +693,10 @@ def _check_type(fm, findings):
 def _check_quoting(fm, findings):
     for key in PLAIN_OR_DOUBLE_SCALARS:
         field = fm.get(key)
-        if field is None:
-            continue
+        if field is None or field.kind == "blank":
+            continue  # items 2 and 7 report a blank title or description
         style = _style_of(field.raw_value)
-        if style != "double" and not _plain_string_allowed(
+        if style != "double" and not plain_string_allowed(
                 field.scalar, style):
             findings.append(_f(
                 "2-quoting", "error",
@@ -725,7 +729,7 @@ def _check_quoting(fm, findings):
             # Properties editor strips its quotes on save (CONVENTIONS §2a).
             if (key == "sources" and isinstance(value, str)
                     and re.match(r"https?://", value)
-                    and _plain_string_allowed(value, style)):
+                    and plain_string_allowed(value, style)):
                 continue
             if style != "double":
                 findings.append(_f(
@@ -739,7 +743,7 @@ def _check_quoting(fm, findings):
         for raw, value, line in zip(
                 aliases.raw_items, aliases.values, aliases.item_lines):
             style = _style_of(raw)
-            if style != "double" and not _plain_string_allowed(value, style):
+            if style != "double" and not plain_string_allowed(value, style):
                 findings.append(_f(
                     "2-quoting", "error",
                     "aliases: items must be double-quoted unless their plain "
@@ -976,7 +980,8 @@ def _check_slug(fm, findings, filename):
             "5-slug", "error",
             "filename does not match the slug of title: (expected %s.md)" % expected,
             {"title": title, "expected_filename": expected + ".md",
-             "actual_filename": os.path.basename(filename)}))
+             "actual_filename": os.path.basename(filename),
+             "report_only": True}))
 
 
 def _check_description(fm, findings, title=None):
@@ -1156,6 +1161,12 @@ def _check_related_footer(sections, findings, own=frozenset()):
             % len(indexes), {"body_lines": [index + 1 for index in indexes]}))
     index = indexes[0]
     line = visible[index].rstrip()
+    if index and visible[index - 1].strip():
+        findings.append(_f(
+            "11-related-footer", "error",
+            "leave a blank line before the Related footer; without one it "
+            "joins the paragraph, list item or table above",
+            {"body_line": index + 1}))
     form_bad = not line.startswith("**Related:**")
     if not form_bad:
         tail = line[len("**Related:**"):]
@@ -1445,7 +1456,9 @@ def _check_alias_completeness(fm, sections, findings, filename):
 # wiki-lint's Task 3 writes that field on every entry -- so _check_parents
 # never flags a value as such.  It checks only the value's form, as the
 # scanner's item2/parents-form does (with its moc-parent and
-# root-parent-mismatch hierarchy findings).  A missing or bare key is
+# root-parent-mismatch hierarchy findings).  A staged draft has no vault
+# inventory, so a case, alias or unneeded Wiki/ spelling of a real target,
+# and a repeat through two spellings, stay the scanner's.  A missing or bare key is
 # _check_field_order's, an item's quote style is _check_quoting's, and an
 # item that does not parse is item 1's.
 _PARENT_LINK_RE = re.compile(r"\[\[([^\\\[\]\|#^]+)\]\]")
@@ -1646,8 +1659,7 @@ def _check_equation_coverage_candidates(fm, sections, findings,
     for candidate in boilerplate:
         candidate["line"] += fm.body_start_line - 1
     extra_matches = {}
-    for card_no, card in enumerate(
-            parse_flashcards(sections["flashcard_lines"]), 1):
+    for card_no, card in _cards(sections):
         for candidate in find_boilerplate_candidates(
                 strip_code(card[0] if card else ""), card_line=True):
             candidate.pop("line", None)
@@ -1714,8 +1726,7 @@ def _check_unicode_math(fm, sections, findings, extras=frozenset()):
             "raw ℓ-norm notation in description must use plain words such "
             "as `ell-one` or `ell-two`; YAML descriptions do not render LaTeX",
             {"field": "description", "text": description[:160]}))
-    for card_no, card in enumerate(
-            parse_flashcards(sections["flashcard_lines"]), 1):
+    for card_no, card in _cards(sections):
         line1 = card[0] if card else ""
         if re.search(r"ℓ(?:[0-9₀-₉])", line1):
             findings.append(_card_f(
@@ -2283,16 +2294,14 @@ def _extra_cards(fm, sections):
     complete card after the first is an extra: the no-primary finding asks
     to rewrite the first card into the definition card and remove the rest.
     With fewer than two complete cards, no title or no primary answer, no
-    card is an extra and per-card findings stay ordinary. A block of only
-    schedule state is never a card.
+    card is an extra and per-card findings stay ordinary. A block that is not
+    a card (``_cards``) is never an extra card.
     """
     if sections["flashcards_index"] is None or not fm.scalar("title"):
         return frozenset()
     rows = [(card_no, card[2].strip(),
              _flashcard_line3_fault(card[2].strip(), fm, sections))
-            for card_no, card in enumerate(
-                parse_flashcards(sections["flashcard_lines"]), 1)
-            if len(card) >= 3 and not is_review_metadata_block(card)]
+            for card_no, card in _cards(sections) if len(card) >= 3]
     if len(rows) < 2:
         return frozenset()
     primary = kept_card_label(rows, *_flashcard_primary_answer(fm, sections))
@@ -2372,19 +2381,16 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 "line 1",
                 {"line": fm.body_start_line + flashcards_index}))
     cards = parse_flashcards(sections["flashcard_lines"])
-    # A block of only schedule state, which a blank line separates from its
-    # card, is neither a card nor an attachment; block numbers stay as parsed.
-    schedules = {card_no for card_no, card in enumerate(cards, 1)
-                 if is_review_metadata_block(card)}
-    if len(cards) == len(schedules) and not root:
+    # Only the blocks _cards names are cards; block numbers stay as parsed.
+    checked = dict(_cards(sections))
+    if not checked and not root:
         findings.append(_f(
             "19-flashcards", "error",
             "the `## Flashcards` section holds no card -- item 19 requires "
             "the `??` definition card"))
     # The card count comes from the complete cards only; a malformed block
     # keeps its own finding below. The scanner shares this helper.
-    complete = sum(1 for card_no, card in enumerate(cards, 1)
-                   if len(card) >= 3 and card_no not in schedules)
+    complete = sum(1 for card in checked.values() if len(card) >= 3)
     for message in flashcard_set_faults(complete):
         findings.append(_f("19-flashcards", "error",
                            "the `## Flashcards` section holds " + message,
@@ -2401,15 +2407,25 @@ def _check_flashcards_present(fm, sections, findings, filename,
     title = fm.scalar("title")
     line3_checks, brevity, hedges = [], [], []
     for card_no, card in enumerate(cards, 1):
-        if card_no in schedules:
-            # Report only: the user's schedule stays where it is (scan_vault
-            # reports the same; the two tools must agree).
+        syntax = sr_card_syntax_fault(card, 0 if card_no not in checked
+                                      else 3)
+        if card_no not in checked and syntax:
+            # The plugin reviews card syntax as a card, so the block is an
+            # extra card to remove (scan_vault reports the same).
+            findings.append(_f(
+                "19-flashcards", "error",
+                "flashcard block %d %s" % (card_no, syntax),
+                {"block": card_no}))
+            continue
+        if card_no not in checked:
+            # Report only: the user's schedule or text stays where it is
+            # (scan_vault reports the same; the two tools must agree).
             findings.append(_f(
                 "19-flashcards", "warning",
-                "flashcard block %d is a Spaced Repetition schedule that a "
-                "blank line separates from the card -- it is neither a card "
-                "nor an attachment; preserve it byte-for-byte, never delete, "
-                "move or reattach it, and report it" % card_no,
+                "flashcard block %d is not a card, such as a schedule a blank "
+                "line separates from the card or the user's own text -- "
+                "preserve it byte-for-byte, never delete, move or reattach "
+                "it, and report it" % card_no,
                 {"block": card_no, "report_only": True}))
             continue
         if len(card) < 3:
@@ -2426,7 +2442,14 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 "lines 1-3 breaks the card)" % (card_no, len(card)),
                 {"card": card_no, "lines": len(card)}))
             continue
-        if len(card) > 3:
+        if len(card) > 3 and syntax:
+            # Card syntax after line 3 is a card of its own to remove.
+            findings.append(_card_f(
+                "19-flashcards", "error",
+                "flashcard %d has %d visible lines, and the content after "
+                "line 3 %s" % (card_no, len(card), syntax),
+                {"card": card_no, "lines": len(card)}, card_no, extras))
+        elif len(card) > 3:
             # Removing an extra card never takes the content after its line
             # 3 that is not a recognized attachment (flashcards.md).
             findings.append(_card_f(
@@ -2535,9 +2558,7 @@ def _check_flashcard_leak(fm, sections, findings, extras=frozenset()):
     # ``bias/variance`` to ``bias – variance``. The two tools must agree.
     expected_term, _counterpart = _flashcard_primary_answer(fm, sections)
     aliases = [alias for alias in fm.values("aliases") if alias]
-    for card_no, card in enumerate(parse_flashcards(sections["flashcard_lines"]), 1):
-        if is_review_metadata_block(card):
-            continue
+    for card_no, card in _cards(sections):
         line1 = card[0]
         term_main, paren = line3_parts(card[2] if len(card) >= 3 else "")
         paren_is_discipline = False
@@ -2608,55 +2629,35 @@ def _check_source_duplicates(fm, findings):
     A split book and its chapters are one document too, so a chapter PDF
     cited beside its whole-book PDF is a review candidate.  The book's core
     stem (``_src`` removed, ``_N`` kept) is what a chapter names.
+    entry_checks.source_identity_pairs finds both kinds for both checkers.
     """
     field = fm.get("sources")
     if field is None:
         return
-    pdfs, mds, books, chapters = {}, [], {}, []
-    for value, line in zip(field.values, field.item_lines):
-        stem, ext = source_stem(value)
-        if not stem:
-            continue
-        if ext == "pdf":
-            pdfs.setdefault(stem, (value, line))   # keep the first spelling
-            # naming.py needs the unfolded filename: its `_src` rule reads
-            # the canonical capitals that source_stem folds away.
-            name = value.strip()
-            if name.startswith("[[") and name.endswith("]]"):
-                name = name[2:-2]
-            name = name.split("|", 1)[0].split("#", 1)[0]
-            name = name.replace("\\", "/").rsplit("/", 1)[-1].strip()
-            books.setdefault(fold_name(core_stem(name)), (value, line))
-            book = chapter_book_stem(name)
-            if book:
-                chapters.append((fold_name(book), value, line))
-        elif ext == "md":
-            mds.append((stem, value, line))
-    for book, chapter_value, chapter_line in chapters:
-        if book in books:
-            book_value, book_line = books[book]
+    values, lines = list(field.values), list(field.item_lines)
+    for kind, first, second in source_identity_pairs(values):
+        if kind == "book-and-chapter":
             findings.append(_f(
                 "4-duplicate-source", "warning",
                 "%s is a chapter of %s; a split book is cited in one form, "
                 "never both its whole-book PDF and its chapter PDFs. Review "
                 "which citation the entry keeps"
-                % (chapter_value, book_value),
-                {"kind": "book-and-chapter", "book": book_value,
-                 "book_line": book_line, "chapter": chapter_value,
-                 "chapter_line": chapter_line, "review_only": True}))
-    for stem, md_value, md_line in mds:
-        if stem not in pdfs:
+                % (values[second], values[first]),
+                {"kind": "book-and-chapter", "book": values[first],
+                 "book_line": lines[first], "chapter": values[second],
+                 "chapter_line": lines[second], "review_only": True}))
             continue
-        pdf_value, pdf_line = pdfs[stem]
         findings.append(_f(
             "4-duplicate-source", "warning",
             "%s and %s share a filename stem; review the markdown note's "
             "decoded sources: (or legacy source:) to establish whether it "
             "summarizes that PDF. A URL-origin clipping can be independent. "
             "Preserve both sources until their identity is confirmed"
-            % (md_value, pdf_value),
-            {"stem": stem, "markdown": md_value, "markdown_line": md_line,
-             "pdf": pdf_value, "pdf_line": pdf_line, "review_only": True}))
+            % (values[second], values[first]),
+            {"stem": source_stem(values[second])[0],
+             "markdown": values[second], "markdown_line": lines[second],
+             "pdf": values[first], "pdf_line": lines[first],
+             "review_only": True}))
 
 
 # --------------------------------------------------------------------------
@@ -3147,7 +3148,8 @@ def _check_folder_link_targets(results, root, parses):
                         "wikilink [[%s|%s]]: the label keeps only modifiers of "
                         "the target's title %r and omits its head word %r -- "
                         "reword so the label names the target (its title, an "
-                        "alias, an inflection or a derived form), or review "
+                        "alias, an inflection, a derived form or a word it "
+                        "introduces in italics), or review "
                         "whether it names a different entity; do not "
                         "auto-retarget"
                         % (link["target"], display, target["title"], head),
@@ -3400,6 +3402,14 @@ def run_self_test():
                                   + closing + "\n\n**Related:**", 1)
         check("hidden links cannot trigger duplicate repairs: " + opening,
               items(duplicated), [])
+    check("a Related footer directly under a paragraph or list item joins it",
+          [items(mutate("moves.\n\n**Related:**", "moves." + block
+                        + "\n**Related:**"))
+           for block in ("", "\n\nIt takes three steps:\n\n1. Sort the "
+                         "scores.\n2. Sweep the threshold.\n3. Plot each "
+                         "rate pair.", "\n\nIt has two axes:\n\n- The true "
+                         "positive rate.\n- The false positive rate.")],
+          [["11-related-footer"]] * 3)
     check("CRLF and LF entries have the same lint result",
           items(good.replace("\n", "\r\n")), [])
     started = time.perf_counter()
@@ -3642,6 +3652,35 @@ def run_self_test():
                for f in detached_findings],
               [('19-flashcards', 'warning',
                 {'block': 2, 'report_only': True})])
+    check("the user's text after the card is a report-only block, not an "
+          "extra or malformed card",
+          [[(f['item'], f['severity'], f['evidence'])
+            for f in lint_text(review_base + '\n' + note,
+                               'roc-curve.md')['findings']]
+           for note in ('My own note: compare with $\\ell_1$ and ℓ1.\n'
+                        'It boosts trees on the same gradients.\n'
+                        'Ask about this in the reading group.\n',
+                        '- [ ] Read the paper\n- [ ] Ask\n- [ ] Write\n',
+                        'One line of my own.\n')],
+          [[('19-flashcards', 'warning',
+             {'block': 2, 'report_only': True})]] * 3)
+    check("a block after the card that holds card syntax is an extra card "
+          "to remove, not text to keep",
+          [[(f['item'], f['severity'], f['evidence'],
+             'remove it as an extra card' in f['message'])
+            for f in lint_text(review_base + '\n' + note,
+                               'roc-curve.md')['findings']]
+           for note in ('Why square the errors::Large errors weigh more.\n',
+                        'Why square the errors?\n?\n')],
+          [[('19-flashcards', 'error', {'block': 2}, True)]] * 2)
+    check("card syntax after the card's line 3 is an extra card to remove",
+          [[(f['severity'], 'the content after line 3 holds `%s`' % marker
+             in f['message'])
+            for f in lint_text(review_base.rstrip('\n') + '\n' + joined,
+                               'roc-curve.md')['findings']]
+           for joined, marker in (('Q::A\n', '::'),
+                                  ('Why?\n?\nBecause.\n', '?'))],
+          [[('error', True)]] * 2)
     broken = lint_text(review_base.replace('\n!!\nROC curve\n',
                                            '\n!!\n\nROC curve\n'),
                        'roc-curve.md')['findings']
@@ -3649,6 +3688,14 @@ def run_self_test():
           [(f['evidence'].get('card'), f['evidence'].get('report_only'))
            for f in broken if 'is malformed' in f['message']],
           [(1, None), (2, None)])
+    check("a blank inside the primary card breaks it before a full block too",
+          [[(f['evidence'].get('card'), f['evidence'].get('report_only'))
+            for f in lint_text(review_base.replace(
+                '\n!!\nROC curve\n', '\n!!\n\nROC curve\n') + '\n' + after,
+                'roc-curve.md')['findings']
+            if 'is malformed' in f['message'] or 'block' in f['evidence']]
+           for after in (why_card, 'My note.\nIt goes on.\nAsk about it.\n')],
+          [[(1, None), (2, None)]] * 2)
     for trailing_form, trailing in (
             ("a block ID", '^roc-card\n'),
             ("three user lines", 'User line a.\nUser line b\nUser line c\n')):
@@ -3821,6 +3868,13 @@ def run_self_test():
 
     # -- item 1: valid YAML ------------------------------------------------
     check("no frontmatter at all", items("just prose\n"), ["1-valid-yaml"])
+    tau = lint_text(mutate('title: "ROC curve"', r'title: "$\tau$-leaping"'),
+                    "tau-leaping.md")["findings"]
+    check("a single-backslash LaTeX title is unparseable, never a tab-bearing "
+          "title that lint fits a slug and card to",
+          (sorted({f["item"] for f in tau}),
+           any("au-leaping" in f["message"] for f in tau)),
+          (["1-valid-yaml", "2-field-order", "5-slug"], False))
     check("an unterminated fence",
           items('---\ntitle: "ROC curve"\nnever closed\n'), ["1-valid-yaml"])
     # A lost, `----` or `--- text` closing fence leaves the separator above
@@ -3933,10 +3987,17 @@ def run_self_test():
           ["2-quoting" in items(mutate(
               'title: "ROC curve"', "title: " + value))
            for value in ("true", "0x10", "0o10", "0b10", "0123", ".5",
-                         "12:34:56", "2026-09-03T10:00:00Z")],
-          [True] * 8)
+                         "12:34:56", "2026-09-03T10:00:00Z", "1984", "1_000",
+                         "1:20", "09", "y", "2026-01-01 10:00:00")],
+          [True] * 14)
     check("a lossless plain alias is accepted after a Properties edit",
           items(mutate('  - "auroc"', "  - auroc")), [])
+    check("digit- and dollar-led plain titles and aliases are lossless too",
+          ["2-quoting" in items(mutate(
+              'title: "ROC curve"', "title: " + value))
+           for value in ("3D printing", "2-opt", "$k$-means clustering")]
+          + ["2-quoting" in items(mutate('  - "auroc"', "  - 3d-cnn"))],
+          [False] * 4)
     check("type: quoted (it is a bare enum value)",
           items(mutate("type: Concept", 'type: "Concept"')), ["2-quoting"])
     check("read: quoted -- the string Obsidian renders as permanently checked",
@@ -4025,6 +4086,11 @@ def run_self_test():
     # -- item 5: slug ------------------------------------------------------
     check("the filename does not match slug(title:)",
           items(good, "roc-curves.md"), ["5-slug"])
+    check("a title/filename mismatch is report-only, so a merge into an "
+          "entry the user retitled reports the rename it may not apply",
+          [f["evidence"].get("report_only") for f in lint_text(
+              good, "roc-curves.md")["findings"] if f["item"] == "5-slug"],
+          [True])
     check("a title that cannot be slugged at all",
           sorted(set(items(mutate('title: "ROC curve"', 'title: "機械学習"'),
                            "roc-curve.md"))),
@@ -4034,10 +4100,18 @@ def run_self_test():
           ["16-bold-opener", "19-flashcards", "5-slug", "7-description"])
 
     # -- item 7: description ----------------------------------------------
-    check("a blank description",
-          items(mutate('description: "A ROC curve plots true positive rate '
-                       'against false positive rate."', 'description: ""')),
-          ["7-description"])
+    check("a blank description, quoted or bare, is item 7 alone",
+          [items(mutate('description: "A ROC curve plots true positive rate '
+                        'against false positive rate."', blank))
+           for blank in ('description: ""', "description:")],
+          [["7-description"]] * 2)
+    check("a bare title: is item 2's blank title, as in scan_vault.py, "
+          "never a quoting fault",
+          items(mutate('title: "ROC curve"', "title:")),
+          ["2-field-order", "5-slug"])
+    check("a quoted empty title is the same blank title",
+          items(mutate('title: "ROC curve"', 'title: ""')),
+          ["2-field-order", "5-slug"])
     check("a description over the 110-character cap",
           items(mutate("false positive rate.", "false positive rate, written "
                        "out at rather more length than the hundred and ten "
@@ -5467,8 +5541,9 @@ def run_self_test():
         "threshold moves.\n??\nROC curve\n",
         "One identifying statement.\n??\nROC curve\n"
         "A second definition.\n??\nSecond term\n")
-    check("a second card joined without a blank line is malformed visible content",
-          "visible lines" in " ".join(
+    check("a second card joined without a blank line is an extra card to "
+          "remove",
+          "the content after line 3 holds `??`" in " ".join(
               finding["message"] for finding in
               lint_text(joined_cards, "roc-curve.md")["findings"]
               if finding["item"] == "19-flashcards"),
@@ -6249,6 +6324,18 @@ def run_self_test():
                                   "looks like a vault root" in buf.getvalue()))
         check("a vault root with Wiki/ or .obsidian/ is refused with exit 2",
               root_runs, [(2, True), (2, True)])
+        own_wiki = os.path.join(obsidian_root, "Wiki")
+        os.makedirs(os.path.join(own_wiki, ".obsidian"))
+        os.makedirs(os.path.join(own_wiki, "Wiki"))
+        with open(os.path.join(own_wiki, "roc-curve.md"), "w",
+                  encoding="utf-8") as handle:
+            handle.write(good)
+        buf = io.StringIO()
+        with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+            rc = main([own_wiki])
+        check("the vault's own Wiki/ holding a stray .obsidian/ or Wiki/ is "
+              "linted", (rc, "looks like a vault root" in buf.getvalue()),
+              (0, False))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -6309,8 +6396,13 @@ def main(argv=None):
         return 2
     # A wiki folder and its vault differ only by `/Wiki`. Given the vault
     # root, every Articles/, Slides/ or Investments/ note would be linted as a
-    # broken entry in an exit-0 report.
-    if os.path.isdir(args.target) and (
+    # broken entry in an exit-0 report. A stray .obsidian/ or Wiki/ inside
+    # the vault's own Wiki folder is only a nested folder.
+    target_abs = os.path.abspath(args.target)
+    own_wiki = (os.path.basename(target_abs).casefold() == "wiki"
+                and os.path.isdir(os.path.join(os.path.dirname(target_abs),
+                                               ".obsidian")))
+    if os.path.isdir(args.target) and not own_wiki and (
             os.path.isdir(os.path.join(args.target, ".obsidian"))
             or os.path.isdir(os.path.join(args.target, "Wiki"))):
         print(json.dumps({"ok": False,

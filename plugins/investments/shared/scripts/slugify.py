@@ -17,8 +17,9 @@ character and would erase meaning):
                                           en, em, figure, horbar, minus)
   4.  arrows           -> "-"
   5.  super/subscript digits -> plain digits
-  5b. vulgar fractions -> their digits; fraction slash U+2044 and
-      division slash U+2215 -> "-"      ("½" -> "1-2", like "1/2")
+  5b. vulgar fractions -> "-" + their digits; fraction slash U+2044 and
+      division slash U+2215 -> "-"      ("½" -> "1-2", like "1/2";
+                                          "2½" -> "2-1-2", like "2 1/2")
   6.  superscript charges  U+207A -> "-plus", U+207B -> "-minus"
   7.  prime U+2032 and apostrophes -> dropped
   8.  middle dot U+00B7 -> "-"
@@ -59,8 +60,10 @@ FIX-A  ASCII charge notation is normalised so that a plain-text source and
        ordinary hyphenated titles ("Cross-validation", "X-ray", "T-cell",
        "Smith-Waterman") are untouched.  A suspended hyphen is not a charge
        either: when the list it opens ends in a hyphen compound, the token
-       is left alone ("N- and C-terminal" -> "n-and-c-terminal"), while an
-       ion list still converts ("Cl- and Br- ions" ->
+       is left alone ("N- and C-terminal" -> "n-and-c-terminal"), even when
+       the compound repeats the token's head word ("class I- and class
+       II-restricted" -> "class-i-and-class-ii-restricted"), while an ion
+       list still converts ("Cl- and Br- ions" ->
        "cl-minus-and-br-minus-ions").
 
 FIX-C  Curly apostrophes U+2018 / U+2019 are dropped alongside the ASCII
@@ -198,12 +201,17 @@ SYMBOL_WORDS = {"+": "-plus", "#": "-sharp", "*": "-star"}
 # lookahead skips a suspended hyphen: a list of "X-" words that ends in a
 # hyphen compound ("N- and C-terminal", "N-, C- and O-linked").  A comma or a
 # conjunction must open that compound, so a lone ion before a hyphen compound
-# ("Cl- co-transporter") still converts.
+# ("Cl- co-transporter") still converts.  The list's items may repeat the
+# token's head word, in any case ("class I- and class II-restricted"); a match
+# takes that word as ``head``, and only a token with no word and space before
+# it may match without one.
 _ASCII_ANION_RE = re.compile(
-    r"(?<![A-Za-z0-9-])([A-Z][a-z]?[0-9]*)-(?![A-Za-z0-9-])"
-    r"(?!(?:,?\s+(?:(?:and|or|nor|to)\s+)?[A-Za-z0-9]+-(?=[,\s]))*"
+    r"(?:(?<![A-Za-z0-9])(?P<head>[A-Za-z0-9]+\s+)|(?<![A-Za-z0-9]\s))"
+    r"(?<![A-Za-z0-9-])(?P<ion>[A-Z][a-z]?[0-9]*)-(?![A-Za-z0-9-])"
+    r"(?!(?:,?\s+(?:(?:and|or|nor|to)\s+)?(?i:(?P=head))?"
+    r"[A-Za-z0-9]+-(?=[,\s]))*"
     r"(?:,\s*(?:(?:and|or|nor|to)\s+)?|\s+(?:and|or|nor|to)\s+)"
-    r"[A-Za-z0-9]+-[A-Za-z])")
+    r"(?i:(?P=head))?[A-Za-z0-9]+-[A-Za-z])")
 
 #: Step 5b: the slashes inside a fraction.  ascii-ignore would drop them and
 #: fuse the digits ("½" -> "12").
@@ -239,9 +247,10 @@ def preprocess(title: str) -> str:
     # 5. super/subscript digits
     s = "".join(SUPERSUB_DIGITS.get(ch, ch) for ch in s)
 
-    # 5b. vulgar fractions -> digits around a fraction slash, then every
-    #     fraction or division slash -> "-", so "½" slugs like "1/2"
-    s = "".join(unicodedata.normalize("NFKD", ch)
+    # 5b. vulgar fractions -> "-" + digits around a fraction slash, then
+    #     every fraction or division slash -> "-", so "½" slugs like "1/2"
+    #     and "2½" like "2 1/2"
+    s = "".join("-" + unicodedata.normalize("NFKD", ch)
                 if unicodedata.decomposition(ch).startswith("<fraction>")
                 else ch for ch in s)
     s = "".join("-" if ch in FRACTION_SLASHES else ch for ch in s)
@@ -262,7 +271,7 @@ def preprocess(title: str) -> str:
     s = "".join(NON_DECOMPOSING.get(ch, ch) for ch in s)
 
     # 10. FIX-A: ASCII anion notation ("Cl-" -> "Cl-minus", "Ca2-" -> "Ca2-minus")
-    s = _ASCII_ANION_RE.sub(r"\1-minus", s)
+    s = _ASCII_ANION_RE.sub(r"\g<head>\g<ion>-minus", s)
 
     # 11. FIX-B: "+" / "#" / "*" become words (covers ASCII cations too)
     s = "".join(SYMBOL_WORDS.get(ch, ch) for ch in s)
@@ -426,12 +435,22 @@ TEST_CASES = [
      "FIX-A negative control: suspended hyphen"),
     ("N-, C- and O-linked glycans", "n-c-and-o-linked-glycans.md",
      "FIX-A negative control: suspended-hyphen list"),
+    ("MHC class I- and class II-restricted T cells",
+     "mhc-class-i-and-class-ii-restricted-t-cells.md",
+     "FIX-A negative control: the compound repeats the head word"),
+    ("Type I- and type II-interferon", "type-i-and-type-ii-interferon.md",
+     "FIX-A negative control: a repeated head word in another case"),
+    ("Class I-, class II- and class III-restricted",
+     "class-i-class-ii-and-class-iii-restricted.md",
+     "FIX-A negative control: each list item repeats the head word"),
     ("Cl- and Br- ions", "cl-minus-and-br-minus-ions.md",
      "FIX-A still fires in an ion list"),
     ("Cl- and K+ channels", "cl-minus-and-k-plus-channels.md",
      "FIX-A still fires before a cation"),
     ("Cl- co-transporter", "cl-minus-co-transporter.md",
      "FIX-A still fires on a lone ion before a hyphen compound"),
+    ("TMEM16A Cl- channel", "tmem16a-cl-minus-channel.md",
+     "FIX-A still fires after a word with digits"),
     ("F- ion-selective electrode", "f-minus-ion-selective-electrode.md",
      "FIX-A still fires on a lone ion before a hyphen compound"),
     ("K+ and Cl- co-transport", "k-plus-and-cl-minus-co-transport.md",
@@ -485,6 +504,8 @@ TEST_CASES = [
     ("Spin-1/2", "spin-1-2.md", "ASCII fraction, same slug as the above"),
     ("1⁄2-integer spin", "1-2-integer-spin.md",
      "U+2044 FRACTION SLASH maps to -, never fuses"),
+    ("2½-dimensional graphics", "2-1-2-dimensional-graphics.md",
+     "mixed number keeps its whole part apart, like 2 1/2"),
 
     # --- the filename budget: an over-long stem must STOP, not ENAMETOOLONG --
     ("A " + "very " * 60 + "long title", None,

@@ -19,9 +19,9 @@ renames unrelated notes or images.
   or without `_src`, belongs to the family only when it holds at least one
   chapter PDF of this book. A topic folder that merely shares the name is
   never renamed. The folder's other files, such as an errata PDF or a
-  reading plan, keep their names and move with it. The plan renames the
-  folder in every link to one of them, and verification fails if a link
-  still names the old folder.
+  reading plan, keep their names in the book's rename and move with it.
+  The plan renames the folder in every link to one of them, and
+  verification fails if a link still names the old folder.
 - **Other representation.** When the book is split, its other copy (the
   same stem with or without `_src`) belongs to the family too, with its own
   figures and note, because both copies pair with one chapter set. Each copy
@@ -55,20 +55,35 @@ Resolve each blocker at its cause, then re-plan:
 - **Figures.** A `_fig*` candidate moves only when the figure manifest
   records its exact current digest; any other candidate blocks the rename. A
   same-stem clipping, a deleted note, or no visible rival does not prove
-  ownership. Compare each unrecorded legacy crop with its page. Record each
-  confirmed one under the PDF's current stem with
-  `python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' --src '<current PDF>' --out '<vault>/Sources/Images' --adopt-legacy '<current stem>:<label>'`
-  (repeat the option per figure; the PDF needs no `--allow-unorganized` for
-  this), then re-plan the rename. A candidate the comparison shows is another
-  source's file, such as a clipping-clean image or a slide deck's crop, is
-  no crop of this PDF: pass `--foreign-image '<name>'` for it (repeat the
-  option per file), and it keeps its name outside the family. When the PDF
-  would keep that stem, re-plan it under a distinguishing abbreviated title
-  by the
-  [target-stem rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan).
-  An unconfirmed crop stays a blocker. Never
-  infer ownership from the `_fig` name, delete a conflicting occupant, or
-  reset the manifest to make the plan pass.
+  ownership. The label test decides who made an unrecorded crop under the
+  current or target stem, and so whether the PDF may take that stem:
+  - *A legacy figure-extract crop* has a label figure-extract writes (a
+    caption label ending in a digit, or a legacy lowercase panel letter
+    after one;
+    [§8b](../../../shared/CONVENTIONS.md#8b-the-producer-conventions)) and
+    matches its page, and no unrecorded crop under that stem has an
+    uppercase panel letter. Record it under the current stem of the PDF it
+    is named after, such as a chapter of a split book (the blocker prints
+    one command per PDF), with
+    `python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' --src '<current PDF>' --out '<vault>/Sources/Images' --adopt-legacy '<current stem>:<label>'`
+    (repeat the option per figure; the PDF needs no `--allow-unorganized`
+    for this), then re-plan the rename.
+  - *Another tool's crop of this PDF* matches a figure on these pages, as
+    each of a slide deck's crops does (one with an uppercase panel letter,
+    such as `_fig_1A_B`, and every crop beside it); a note outside
+    `Sources/` that embeds it, such as a `Slides/` deck, supports this. It shares the stem, current or target: the PDF
+    still takes its natural name.
+  - *Any other image*, such as a clipping-clean image or an image these
+    pages do not show, sends a PDF that would keep that stem to a
+    distinguishing abbreviated title by the
+    [target-stem rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan).
+
+  A crop of either of the last two kinds is not this PDF's figure-extract
+  output, whatever it shows: pass `--foreign-image '<name>'` for it (repeat
+  the option per file), and it keeps its name outside the family. An
+  unconfirmed crop stays a blocker. Never infer ownership from the `_fig`
+  name, delete a conflicting occupant, or reset the manifest to make the
+  plan pass.
 - **Aliases and symlinks.** Vault containment follows the logical path: a PDF
   beneath a linked source directory is in scope, but the link target's
   physical path is not. A case or normalization spelling counts only when
@@ -90,9 +105,10 @@ Resolve each blocker at its cause, then re-plan:
   rewrites the filename in plain text, so the mention follows the file, when
   the name is canonical (a PDF or its figure) or when a plain-text folder path
   leads to it from the vault root or from the note, as in
-  `Sources/PDFs/download.pdf`. Any other name in plain text,
-  such as a download's bare `main.pdf`, can be ordinary prose: it is not a
-  reference and stays unchanged. All other issue text stays unchanged. Never
+  `Sources/PDFs/download.pdf`. When the file changes folder (filing, or a
+  renamed chapter folder), that path becomes its new vault path. Any other
+  name in plain text, such as a download's bare `main.pdf`, can be ordinary
+  prose: it is not a reference and stays unchanged. All other issue text stays unchanged. Never
   replace this with whole-body substring matching.
 - **Canvas boards.** In an Obsidian `.canvas` board, a file card or a group
   background holds the file's full vault path, so it follows every move,
@@ -130,9 +146,9 @@ apply once nothing below blocks it.
   not be read as UTF-8, and canvases that could not be read as UTF-8 JSON.
   They remain untouched and must be reported as unread, not verified clean.
   An unreadable note or canvas that cites this rename is a blocker.
-- **Figure sidecar updates** covers only the default figure ownership and
-  review files in `Sources/Images/`; their changes are planned, applied, and
-  rolled back with the rename. A custom figure-extract `--review-file` ledger
+- **Figure sidecar updates** covers only the default figure ownership,
+  review and pending Extended Data files in `Sources/Images/`; their changes
+  are planned, applied, and rolled back with the rename. A custom figure-extract `--review-file` ledger
   is never updated and must not be hand-edited: report any known one as still
   holding old-stem marks.
 - **Publication-date updates** gives the old and new `published` values of

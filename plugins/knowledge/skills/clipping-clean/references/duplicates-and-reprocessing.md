@@ -51,8 +51,8 @@ file; it must record `absent`. These JSON records are the expected versions
 through publication and cleanup; never re-record them at commit time. The old
 note is recorded afresh only after an approved rewrite before publication (a
 legacy-origin migration or a missing-attachment placeholder) or when finishing
-a pending handoff. The new note gets a fresh record right after step 4 creates
-it. Exclude this one note from its own dedup scan.
+a pending handoff. The new note and its handoff file get fresh records right
+after step 4 creates them. Exclude this one note from its own dedup scan.
 
 **Legacy origin.** Every `fetch_images.py` command that takes `--owner-note`
 refuses a note whose only origin is a legacy scalar `source:`. That includes a
@@ -86,10 +86,11 @@ restored becomes a reported `<!-- missing attachment: … -->` placeholder;
 **Block IDs and linked headings.** Block IDs (an `^id` at the end of a
 block, or on its own line after a table, quote or list) are anchors for links
 from other notes, and a raw capture has none. Before drafting, list the old
-note's block IDs and the notes that link a heading or block of it
-(`<old_slug>#`). Carry each block ID byte-for-byte onto the matching block of
-the draft, and never invent one. Report each block ID or linked heading the
-draft cannot match, with the notes that link it.
+note's block IDs and the notes and Canvas boards that link a heading or block
+of it (`<old_slug>#`, or a file card on the old note with a `subpath`). Carry
+each block ID byte-for-byte onto the matching block of the draft, and never
+invent one. Report each block ID or linked heading the draft cannot match,
+with the notes that link it.
 
 **Origin.** The draft keeps the existing note's first current `sources:` URL,
 even when the capture's URL is a scheme, `m.`/AMP, path-alias or query variant
@@ -104,8 +105,9 @@ migration. Either restore it with
 publish an approved same-slug rewrite of the old note that replaces that embed
 with the `<!-- missing attachment: … -->` placeholder, then record the old note
 afresh with `snapshot --replace` and re-read it. An `<old_slug>_fig*` file that
-the old note does not embed exactly once as a filename-only embed also blocks
-the handoff; deleting an embed in Obsidian leaves its attachment behind. Never
+the old note does not embed as a filename-only embed, or embeds under two case
+or Unicode spellings, also blocks the handoff; deleting an embed in Obsidian
+leaves its attachment behind. Never
 move, rename or delete that file yourself. Stop with nothing published, keep
 the old note and every attachment, and report the file as ownership-unproven so
 the user can re-embed, move or delete it. `rename --phase publish-note`
@@ -154,8 +156,7 @@ wrong owner.
 ## Publish an approved replacement
 
 This sequence applies to same-name rewrites and changed-slug reprocesses. The
-original note remains intact until successful publication. `Inbox/` raws are
-never moved, deleted or rewritten, including after a successful reprocess.
+original note remains intact until successful publication.
 
 1. Complete the replacement at a unique scratch path outside the vault, using
    planned new image names. Finish the completeness audit and review against
@@ -206,17 +207,22 @@ never moved, deleted or rewritten, including after a successful reprocess.
    ([kept spelling](#settle-a-slug-before-writing-images)). At a free destination recorded `absent`, it calls
    `atomic_move.publish_new(staged, target, atomic_move.regular_file_snapshot, stage_parent)`
    with the old note's recorded mode and leaves the old note in place. Any
-   occupant of the portable name is refused. Its JSON `action` is `created`,
+   occupant of the portable name is refused. Just before the note, it writes
+   the hidden handoff file `Articles/.<new_slug>.handoff.json` (its JSON
+   `handoff_record`), which names the old and the new note. Its JSON `action` is `created`,
    or `unchanged` on a rerun. A `failed` publication attempt names its
    retained `stage_dir` and any `recovery_path`. Never recheck and then call `os.replace`, and never
    publish through a private driver. If publication fails, no attachment has
-   moved and the unchanged old note still resolves.
+   moved and the unchanged old note still resolves. If the note did not
+   publish, the run also withdraws the handoff file it wrote.
 
-   When publish-note reports `created`, record the new note at once:
+   When publish-note reports `created`, record the new note and the handoff
+   file at once:
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
-       -o '<scratch>/clipping-snapshots.json' --replace 'Articles/<new_slug>.md'
+       -o '<scratch>/clipping-snapshots.json' --replace 'Articles/<new_slug>.md' \
+       'Articles/.<new_slug>.handoff.json'
    ```
 
    Its `digest` must equal the result's `sha256`. A mismatch means another
@@ -249,13 +255,15 @@ never moved, deleted or rewritten, including after a successful reprocess.
    dependents are listed in `dependency.blockers` (with `dependency.ok: false`),
    each a `path` and its `references`. Step 6 repairs them.
    A refusal is not permission to copy by hand. Retain the old note and its
-   images. Withdraw the new note only when publish-note reported `created` in
-   this run, its step-4 record matched, `verify` still reports the old note
-   `unchanged`, and no `Sources/Images/<new_slug>_fig*` file exists:
+   images. Withdraw the new note and its handoff file only when
+   publish-note reported `created` in this run, its step-4 record matched,
+   `verify` still reports the old note `unchanged`, and no
+   `Sources/Images/<new_slug>_fig*` file exists:
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' remove --vault '<vault>' \
-       --snapshots '<scratch>/clipping-snapshots.json' 'Articles/<new_slug>.md'
+       --snapshots '<scratch>/clipping-snapshots.json' 'Articles/<new_slug>.md' \
+       'Articles/.<new_slug>.handoff.json'
    ```
 
    If `remove` refuses or a new-slug image exists, keep both notes and report
@@ -285,7 +293,8 @@ never moved, deleted or rewritten, including after a successful reprocess.
    Repair refuses to run until prepare has published the new names. It
    recomputes prepare's dependency inventory over every visible Markdown note
    outside the old owner, never editing either owner, including Wiki entries,
-   MOCs, `Reviews/` logs and notes under `Articles/` and `Investments/`. A
+   MOCs, `Reviews/` logs, `Inbox/` raws and notes under `Articles/` and
+   `Investments/`. A
    note reached through a vault folder link is repaired like any other. A
    dated `Investments/*-stock-research.md` or `*-market-research.md` record
    is immutable; repair reports it `blocked`. In each other dependent note it
@@ -297,10 +306,10 @@ never moved, deleted or rewritten, including after a successful reprocess.
    touched. In a Canvas board it rewrites a file card or group background
    whose vault path names the old note or an old image in its own folder,
    and a text card's Markdown as in a note; every other byte of the board
-   stays, and a board that is not valid JSON but holds an old name is
-   `blocked`. It snapshots each note or board before reading it and
-   publishes the rewrite against that snapshot through the shared
-   safe-write API. Apart
+   stays. A note or board that is not UTF-8, or a board that is not valid
+   JSON, is `blocked` only when it holds an old name. It snapshots each
+   note or board before reading it and publishes the rewrite against that
+   snapshot through the shared safe-write API. Apart
    from a `sources:` copy it removes (below), nothing else changes: a Wiki
    entry keeps `created:`, `updated:` and `read:` byte-for-byte. Its JSON has one row per note: the `path`, a `status`
    (`rewritten`, which the dry-run shows as `would-rewrite`; `unchanged`; or
@@ -308,8 +317,9 @@ never moved, deleted or rewritten, including after a successful reprocess.
    and new target text. A `blocked` row adds its `reason`, the old names
    found (`dependencies`) and any retained `recovery` path. A row adds
    `missing_anchors`, each `{line, reference}`, for a rewritten note link
-   whose `#heading` or `#^block` anchor the new note lacks. It does not
-   block; report each one. When an entry's `sources:` cites both the old and
+   or Canvas file card whose `#heading` or `#^block` anchor (a card's
+   `subpath`) the new note lacks. It does not block; report each one. When
+   an entry's `sources:` cites both the old and
    the new note, the rewrite would list one document twice. In a block list,
    repair removes the rewritten line and keeps the item already there; the
    row adds `deduplicated`, each `{line, source}`. Duplicate items that
@@ -362,12 +372,14 @@ never moved, deleted or rewritten, including after a successful reprocess.
    external dependencies around every retirement. A newly introduced link causes
    rollback. If any check fails, it retains both sets and reports the blocker or
    recovery path.
-9. After finalize succeeds, conditionally remove the distinct old note against
-   its record (made before the rewrite, or when finishing a pending handoff):
+9. After finalize succeeds, conditionally remove the distinct old note and
+   the handoff file against their records (made before the rewrite and in
+   step 4, or when finishing a pending handoff):
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' remove --vault '<vault>' \
-       --snapshots '<scratch>/clipping-snapshots.json' 'Articles/<old_slug>.md'
+       --snapshots '<scratch>/clipping-snapshots.json' 'Articles/<old_slug>.md' \
+       'Articles/.<new_slug>.handoff.json'
    ```
 
    It refuses a path with no record or one whose bytes, identity or mode
@@ -391,10 +403,15 @@ and the new note could not be withdrawn, when a run stopped after finalize but
 before step 9 removed the old note (or step 9 refused), or when a run
 stopped before repairing links. A resume, a request to
 finish it, or a reprocess request naming either note finishes it without a
-separate question. Confirm that both notes share the web origin, the old note
-embeds the old-slug images and the new note embeds their mapped names. Record
-the old note with `publish_files.py snapshot --replace` in this run's snapshot
-file before reading it for this check; step 9 removes it against that record.
+separate question. Take the direction from the pair's
+`Articles/.<new_slug>.handoff.json`, which names the old and the new note;
+never infer it from the notes or their images, which read the same both
+ways. Each `rename` phase refuses the two notes given in the reverse of the
+handoff file's order. A pair with no handoff file is finished only after the
+user says which note replaced which. Record the old note and the handoff file
+with `publish_files.py snapshot --replace` in
+this run's snapshot file before reading the note; step 9 removes both
+against those records.
 If its only origin is a legacy `source:`, migrate it first as under
 [Legacy origin](#reprocessing-an-existing-note); that is not a redraft.
 Rerun `rename --phase prepare --dry-run` with the original paths and slugs,

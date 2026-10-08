@@ -79,7 +79,7 @@ always gets the step-5 book test:
 | PDF state | Steps 1–4 | Step 5 book test in a batch |
 |---|---|---|
 | Feed-owned attachment | Skip it (`feed-owned, skipped`) | None |
-| In a book folder that already holds canonical chapter files | Skip the whole folder | None: the existing split stands |
+| A canonical chapter in its book's folder | Skip it | None: the existing split stands |
 | Found unreadable, corrupt, or encrypted | Leave it unchanged and record it | None |
 | Not canonical, in `Inbox/` | Name it and file it in `Sources/PDFs/` (`--dest`) | After filing |
 | Canonical, in `Inbox/` | Keep its basename and file it from step 3, unless another source's files occupy its stem | After filing |
@@ -142,11 +142,13 @@ Name the PDF `AuthorLastName_AbbreviatedTitle_Year.pdf`:
   ambiguous acronyms. A recognized work nickname such as `CLRS` is suitable.
   Prefer a meaningful heading to a generic invented title, and report
   uncertainty.
-- Use the publication year printed in the document (for a book, the specific
-  edition's year; for a preprint, the year this version was posted, as
-  printed on it, not the date inside its DOI). A periodic report uses its
-  release year; put the covered period in the abbreviated title. Do not take the year from outside the
-  document; if none is printed, use `nd`.
+- Use the publication year printed in the document (for an article, the year
+  published online, else the issue year, never a received or accepted year;
+  for a book, the specific edition's year; for a preprint, the year this
+  version was posted, as printed on it, not the date inside its DOI). A
+  periodic report uses its release year; put the covered period in the
+  abbreviated title. Do not take the year from outside the document; if none
+  is printed, use `nd`.
 - For non-English sources, use an English title provided by the document;
   otherwise transliterate the original rather than inventing a translation.
 
@@ -214,7 +216,7 @@ edition, bytes):
 - **Proposed name taken.** A same-document copy is a duplicate: leave both in
   place, report both paths, and ask the user to remove the redundant copy. A
   different document gets a distinguishing abbreviated title, or `_2`, `_3`
-  as a last resort (never for a book); then re-plan.
+  as a last resort (never for a book or its chapters); then re-plan.
 - **Own basename shared.** When another vault file shares the basename of
   the selected PDF or of a chapter in its family, the helper blocks the plan
   unless [conventions §1a](../../shared/CONVENTIONS.md#shared-pdf-basenames)
@@ -229,15 +231,18 @@ edition, bytes):
     same PDF are no reason for another name: the PDF stays where it is
     under **Blocked or failed**. Ask the user whether to clear those files
     from that name before the rename or filing and restore them afterward.
+  - *Another tool's crops of this same PDF*, such as a slide deck's, share
+    its natural name by
+    [rename repair's label test](references/rename-repair.md#establish-the-owned-family):
+    pass `--foreign-image '<name>'` for each, and file the PDF under that
+    name. They stay that tool's files, never adopted, moved or overwritten.
   - *Any other occupant*, such as a clipping-clean note or its images,
-    another tool's images (a slide deck's crops) or another document's
-    files, keeps its name: re-plan the PDF now under a distinguishing
-    abbreviated title, as for a proposed name taken (never `_2` for a
-    book), and file it. Report the natural name it could not take and its
-    occupants, and ask whether the user wants to move those files so the
-    PDF can take that name later. That later rename repairs links itself.
+    another document's files or images these pages do not show, keeps its
+    name: re-plan the PDF now under a distinguishing abbreviated title, as
+    for a proposed name taken (never `_2` for a book), and file it. Report
+    the natural name it could not take and its occupants.
   - *Another source's images under the PDF's current stem* block it as
-    unowned crops. Once a comparison with its pages shows they are not its
+    unowned crops. Once the label test shows they are not its figure-extract
     crops, re-plan: pass `--foreign-image '<name>'` for each in that
     re-plan, and they keep their names.
 
@@ -278,9 +283,10 @@ it, not the wording of a hand-off from another skill:
   asks to organize or file PDFs (one, several, a folder or the inbox, as in
   "rename and file the PDFs in my Inbox"), to process or clean the inbox, or
   to split a book. A request for one chapter of an unsplit book, handed off
-  by wiki-build or paper-summarize ("build chapter 3 into my wiki",
-  "summarize chapter 3 of this book"), counts as a request to split that
-  one book.
+  by wiki-build, paper-summarize or figure-extract ("build chapter 3 into my
+  wiki", "summarize chapter 3 of this book", "extract the figures of
+  chapter 3"), counts as a request to split that one book. A request for a
+  part the split leaves out, such as a preface or an appendix, does not.
 - **Report the book and its proposed split, and create no chapters,** for
   any other request: one that asks only to rename or identify PDFs, one or
   several, and a paper-summarize or figure-extract run that hands this
@@ -299,8 +305,9 @@ Report in these groups, leaving out empty ones:
 
 - **Renamed and filed:** old and new paths, with any uncertain metadata
   choice explained; for a PDF filed under a distinguishing name, the
-  natural name it could not take, its occupants and the question for the
-  user; outside the vault, say that vault-wide checks did not run.
+  natural name it could not take and its occupants; for one filed beside
+  another tool's crops of it, those crops; outside the vault, say that
+  vault-wide checks did not run.
 - **Repairs:** note, canvas and sidecar repairs, and any notes or canvases
   that could not be read.
 - **Dates:** when the year changed, the planned old and new `published`

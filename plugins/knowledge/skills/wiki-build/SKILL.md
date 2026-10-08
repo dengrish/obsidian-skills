@@ -76,7 +76,7 @@ protocol; this workflow does not read SAFE_WRITES.md.
   final reviewed version, never an intermediate draft. List every staged
   create and replacement in one manifest, `<scratch>/manifest.json`: a JSON
   array of `{"path": "Wiki/<slug>.md", "draft": "<absolute draft path>"}`
-  objects, written with the host's file-writing tool.
+  objects, started as `[]` and written with the host's file-writing tool.
 
 ## The entry
 
@@ -114,7 +114,7 @@ Accept a named entity or technical concept, for **both creates and merges**, onl
 - **(b) Require substance.** The source explains, defines, motivates, contrasts, or analyzes it enough for a self-contained atomic entry; a definition plus a load-bearing equation, condition, or limitation can suffice, even inside a dense paragraph. Pure use, attribution, status, parameter listing, bibliographic mention, or one thin sentence is insufficient.
 - **(c) For secondary sources, require durability too.** A lasting method explained in an earnings article may pass; that quarter's result does not. If none pass, skip the source as having no durable content.
 
-A rejected mention is never appended to an entry's `sources:` and bumps no date. Record thin but plausible future entities under *Entities deferred*; make borderline calls in-run and report why.
+A rejected mention is never appended to an entry's `sources:` and bumps no date. A thin entity this run's prose uses (each use counted as under *Load-bearing terms* below) goes under *Entities deferred*; filter (b) rejects any other thin mention. Make borderline calls in-run and report why.
 
 **Load-bearing terms.** A term is load-bearing when three or more entries, this run's included, use it without a resolving link, counting each use as wiki-lint's [missing-entry rule](../wiki-lint/references/refactors.md#create-a-missing-entry) defines it. For each term this run's prose glosses in a clause or leaves unlinked:
 
@@ -201,7 +201,7 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
    - every `non_entry` link without `inherited: true`: this run's links name entries, so link the entry the prose means or leave bare text;
    - every `noncanonical` link: apply its `replacement`; retarget an `ambiguous` one to the entry the prose means, or report an inherited one the prose leaves open.
 
-   Stop when `clean` is true or only what step 7.2 reports, `dangling` links kept under the [`unmirrored` disposition](references/review.md#lint-dispositions) (their target exists in the real vault), and adjudicated review-only candidates remain. Exit 2 blocks dependent drafts like any unusable helper result; a prose-only review is not a clean lint.
+   Stop when `clean` is true or only what step 7.2 reports, `dangling` links kept under the [`unmirrored` disposition](references/review.md#lint-dispositions) (their target exists, or may exist unread, in the real vault), and adjudicated review-only candidates remain. Exit 2 blocks dependent drafts like any unusable helper result; a prose-only review is not a clean lint.
 2. **Report, never repair or block on,** what this run may not change ([lint dispositions](references/review.md#lint-dispositions)):
    - an unmodified copy's link or Related label that now names a new entry;
    - a merged entry's inherited state the [merge rules](references/merge.md#merge-logic) preserve, including its `report_only: true` findings, such as `2-user-issues` or `2-issues-malformed` on the user's `issues:` text, which stays byte-for-byte;
@@ -216,7 +216,7 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
 4. **Review-only candidates need no edit to silence them:** a supported, recorded decision resolves one even if `clean` stays false ([lint dispositions](references/review.md#lint-dispositions)). Never add notation or rewrite clear prose to force a zero-finding report; errors, incomplete checks, unresolved candidates and new findings in the published bytes are never waived.
 5. **Renaming or deleting a pre-existing entry, or removing a semantic-invalid alias, is never a review fix.** Report it with evidence and log it in `Reviews/wiki-notes-suggestions.md`: wiki-lint's ordinary run retitles a bare cross-domain title, a title whose acronym-or-full-form choice breaks the [title rule](references/writing.md#title) and a title its filename does not match, and removes a semantic-invalid alias through the [retitle](../wiki-lint/references/refactors.md#retitle-an-entry) and [alias-removal](../wiki-lint/references/refactors.md#remove-a-semantic-invalid-alias) protocols, while a deletion needs an [explicit request](../wiki-lint/SKILL.md#explicit-requests). Renaming an entry created this run must keep every reference written this run resolving; duplicate spellings within one alias list stay format fixes.
 6. **Audits.** Run the three [audits](references/review.md#the-three-audits) in order.
-7. **Revalidate.** Rewrite `<scratch>/candidates.json` with the final title of every entry this run staged, once each, from all its sources and audit recoveries. In one shell, re-run step 3's `mktemp`, `vault_index.py` and `find_collisions.py` commands against the real Wiki (an empty scratch folder while Wiki is absent), then verify every original snapshot:
+7. **Revalidate.** A run that still has nothing staged after the audits goes straight to the report (step 7.10). Otherwise rewrite `<scratch>/candidates.json` with the final title of every entry this run staged, once each, from all its sources and audit recoveries. In one shell, re-run step 3's `mktemp`, `vault_index.py` and `find_collisions.py` commands against the real Wiki (an empty scratch folder while Wiki is absent), then verify every original snapshot:
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' verify --vault '<vault>' \

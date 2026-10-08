@@ -60,7 +60,8 @@ creation, and it is limited to a concept the wiki already relies on.
    source origins, distinct targets, image embeds, and literal suggestion-log examples;
    token equality never authorizes a rewrite. The rewrite scope covers
    references in `Wiki/`, `MOCs/` and `parents:`, and in every other vault
-   note, `Articles/` notes and `Reviews/` logs included. A link, embed or
+   note, including `Articles/` notes, `Inbox/` captures, every `Reviews/`
+   log with its Fixed section, and older dated reports. A link, embed or
    transclusion there that resolves to the retiring name is rewritten under
    these rules, even inside a claim sentence or a log item's heading,
    **Issue** or **Verified** line; only the link changes. The wording of
@@ -68,13 +69,10 @@ creation, and it is limited to a concept the wiki already relies on.
    Canvas board, a file card's path takes the destination's vault path and
    a text card's link is rewritten as in a note; every other byte of the
    board stays, and a board that is not valid JSON but may cite the name is
-   a dependency this protocol cannot write. A
-   suggestion log, its Fixed section included, is not a historical record.
-   A dated historical record, such as a `wiki-review-*.md` report, stays
-   untouched: report its links as now unresolved; they do not retain the old
-   entry. The ordinary run's or the request's authorization covers these
-   rewrites, with no additional approval. Notes in vault-root `Investments/`
-   remain outside this repair scope, including through linked-folder aliases.
+   a dependency this protocol cannot write. The ordinary run's or the
+   request's authorization covers these rewrites, with no additional
+   approval. Notes in vault-root `Investments/` remain outside this repair
+   scope, including through linked-folder aliases.
    If one references an identity being retired, preserve that record and retain
    the referenced old entry; report the unresolved dependency. Any other
    dependency owner this protocol cannot write is reported the same way.
@@ -110,8 +108,11 @@ creation, and it is limited to a concept the wiki already relies on.
   [title rule](../../wiki-build/references/writing.md#title), its
   acronym-or-full-form choice included. Preserve that entry's `created:` and
   user-owned appearance fields, integrate nonduplicate claims, and union only valid source
-  contributions and same-entity aliases. The survivor gets today's
-  `updated:` and `read: false`, whatever its prior `read:`, in place of the builder's
+  contributions, each document in one form
+  ([merge rule 1](../../wiki-build/references/merge.md#frontmatter-and-related-footer)),
+  and same-entity aliases. The survivor gets today's
+  `updated:` and `read: false`, whatever any merged entry's prior `read:`,
+  in place of the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset),
   because it holds combined content the user has not read in that form.
   Carry every merged entry's unresolved
@@ -119,8 +120,9 @@ creation, and it is limited to a concept the wiki already relies on.
   verbatim, carrying a text that several merged entries hold identically
   once. When several entries hold text, write a block list with one item
   per original list item or string, unless every value is a string: join
-  their texts with a space into one double-quoted string, escaping `\` and
-  `"`, so the property stays Text. When none holds text, the survivor keeps
+  their texts as sentences into one double-quoted string, ending each text
+  that lacks closing punctuation with a period, escaping `\` and `"`, so the
+  property stays Text. When none holds text, the survivor keeps
   its blank spelling, or gets `issues: ""` when the key is missing. Report
   conflicting user-owned metadata from an entry that may be removed rather
   than silently selecting a value.
@@ -143,8 +145,8 @@ creation, and it is limited to a concept the wiki already relies on.
   facets need. Otherwise move the fullest version into the owner, verified
   against the owner's cited sources or accurate background and carrying each
   source-specific claim's existing citation (adding that source to the
-  owner's `sources:` when needed), then trim the others. A trimmed copy may
-  lose links that served only the removed passage. A worked example lives in
+  owner's `sources:` when it cites no form of that document), then trim the
+  others. A trimmed copy may lose links that served only the removed passage. A worked example lives in
   one entry; the others state its consequence and link the owner. Resolve a
   conflicting claim in the passage before consolidating it; while it stays
   unresolved, leave every copy unchanged and keep the conflict open, and never
@@ -192,14 +194,17 @@ filesystem transaction, so order prevents a disappearing target:
    Verify that every changed link or transclusion resolves, keeping its
    anchor unless that anchor was a removed card's block ID, which becomes a
    plain link; that every moved source-specific claim keeps its source; and
-   that no obsolete destination remains referenced outside untouched historical records; the
-   Wiki scan alone cannot establish this postcondition.
+   that no obsolete destination remains referenced; the Wiki scan alone
+   cannot establish this postcondition.
 4. Only then conditionally remove an obsolete entry. Every substantive claim,
    equation, exhibit, card (including its scheduling attachments and block ID),
    citation, and user-owned metadata value must either survive in an identified
    destination or, on an explicit request, be named by that request as content
-   to delete. A merged-away primary card counts as accounted for once it is
-   quoted in the report, because the survivor's primary card tests the same
+   to delete. A merged-away entry's `read:` and `issues:` are accounted for
+   by the survivor's `read: false` and carried issue text under the
+   [merge rule](#build-the-refactored-entries) above. A merged-away primary
+   card counts as accounted for once it is quoted in the report, because the
+   survivor's primary card tests the same
    entity; so does an extra card removed under the
    [card set](flashcards.md#card-set) rule. Step 2 has already rewritten each
    link or embed to a removed card's block ID, the merged-away primary card's
@@ -213,12 +218,11 @@ filesystem transaction, so order prevents a disappearing target:
    restores only files whose published bytes are still unchanged.
 
 Inside a default pass, that pass's refresh, Task 2 and Task 3 finish the
-refactor, with no nested pass; a standalone request finishes with Tasks 1, 2
-and 3 on the affected closure, without Task 1b. Either way, re-scan until all fixable findings
+refactor, with no nested pass; a standalone request finishes as
+[explicit requests](../SKILL.md#explicit-requests) defines. Either way, re-scan until all fixable findings
 introduced by the refactor are gone. Report source evidence, created,
-retained, and removed paths, every inbound rewrite, untouched historical
-records with their now-unresolved links, review-state decisions, unresolved
-content, and the final scan counts.
+retained, and removed paths, every inbound rewrite, review-state decisions,
+unresolved content, and the final scan counts.
 
 ## Retitle an entry
 
@@ -270,8 +274,8 @@ retitle also activates this protocol.
 3. Inventory the references to the old filename and its aliases under
    [step 3 above](#establish-evidence-and-complete-scope), whose write scope
    applies: inbound links in `Wiki/`, `MOCs/`, `parents:`, other vault
-   notes and Canvas boards are rewritten, a dated historical record stays untouched and is
-   reported, and an `Investments/` reference blocks the retitle. Rewrite only
+   notes and Canvas boards are rewritten, and an `Investments/` reference
+   blocks the retitle. Rewrite only
    references that resolve to this exact owner, preserving display labels,
    headings, block anchors and surrounding bytes; a Related-footer label
    becomes the target's canonical title. Source evidence and external URLs
@@ -281,8 +285,8 @@ retitle also activates this protocol.
    file conditionally, re-reading every result. Before removing the exact old
    entry version with `publish_files.py remove` against step 1's source
    record, re-scan: every changed link must resolve uniquely to the new entry, the
-   old slug must have no unresolved inbound surface apart from untouched
-   historical records, and the new entry must pass the current entry rules.
+   old slug must have no unresolved inbound surface, and the new entry must
+   pass the current entry rules.
    Then rebuild the connected Task 3 closure from the resulting tree, which a
    default pass's Task 3 does, and re-scan.
 
@@ -342,7 +346,8 @@ rewritten link keeps its dates and `read:` under the
 
 Task 1b creates a missing entry for a concept with a stable identity that
 passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities)
-when an open note-content item names it, or when it is a load-bearing term:
+when a [user issue](../SKILL.md#user-issues) asks for its entry, when an
+open note-content item names it, or when it is a load-bearing term:
 one at least three entries use without a resolving link. A one-clause inline
 gloss still counts as a use, and so does a dangling body-prose link to the
 term. A use is a sentence that needs the term's meaning to make its point; a
@@ -358,8 +363,9 @@ evidence.
    [title](../../wiki-build/references/writing.md#title) and
    [special-title](../../wiki-build/references/special-titles.md) rules, run
    [its step-3 probes](../../wiki-build/SKILL.md#3-resolve-against-existing-entries),
-   and snapshot the free slug. A same-entity owner means the term needs a
-   link, which Task 2 adds; an occupied or ambiguous slug is reported.
+   and snapshot the free slug. A same-entity owner gets no entry: Task 2
+   links the term to it, or retargets its dangling links there; an occupied
+   or ambiguous slug is reported.
 2. Choose the evidence. When a document that the entries using the term
    already cite teaches it, cite that document at the page that teaches the
    term. Otherwise follow wiki-add's [research rules](../../wiki-add/references/research.md)
@@ -399,20 +405,23 @@ each target before Task 2 drops any link. A target with a
 `missing-discipline-root` finding is not settled here; it
 [waits for Task 3](link-hygiene.md#dangling-links-target-missing).
 
-1. A target that meets the missing-entry rule above gets its entry, so its
+1. Probe every target as the missing-entry rule's step 1 does, whatever its
+   use count. A target whose concept has exactly one same-entity owner gets
+   no entry and no gloss; Task 2 retargets its links to that owner.
+2. A target that meets the missing-entry rule above gets its entry, so its
    links resolve.
-2. For every target that gets no entry, including one whose creation is
-   reported or blocked, each dangling mention whose sentence needs the
-   term's meaning, and that the entry does not already explain, gets a
+3. For every other target, including one whose creation is reported or
+   blocked, each dangling mention whose sentence needs the term's meaning,
+   and that the entry does not already explain, gets a
    one-clause gloss at that mention ("leaf nodes, the nodes with no
    children"), from the entry's cited sources or accurate background as
    [item 14](qc-items.md#14-self-containment) requires. The entry's dates
    follow [Dates](../SKILL.md#dates).
-3. Task 2 then drops only the remaining genuine danglers to plain text under
+4. Task 2 then drops only the remaining genuine danglers to plain text under
    its [dangler protocol](link-hygiene.md#dangling-links-target-missing).
 
 Never create an entry merely to keep a link; only the missing-entry rule
-above (three uses, or an open note-content item) decides.
+above (three uses, a user issue, or an open note-content item) decides.
 
 ## Delete an entry
 
@@ -430,8 +439,7 @@ as blocked by those entries.
    ([publishing](../SKILL.md#publishing)) before reading its bytes, then
    inventory its references under
    [step 3](#establish-evidence-and-complete-scope), whose write scope
-   applies: a dated historical record stays untouched and is reported.
-   Record each file to rewrite before reading it.
+   applies. Record each file to rewrite before reading it.
 2. Retarget each inbound link to a successor the request names, keeping its
    label. Otherwise unlink it to its visible label and remove its Related
    item, as for a
@@ -462,6 +470,7 @@ as blocked by those entries.
    (not the `parents:` values and active generated-MOC links step 5
    re-derives),
    retains the file; report the mixed state.
-5. Tasks 1, 2 and 3 on the affected closure then re-derive the children's
-   `parents:` and the MOCs; inside a default pass, its own refresh, Task 2 and
-   Task 3 do this.
+5. The request's closing Task 3
+   ([explicit requests](../SKILL.md#explicit-requests)) then re-derives the
+   children's `parents:` and the MOCs; inside a default pass, its own
+   refresh, Task 2 and Task 3 do this.

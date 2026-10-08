@@ -49,15 +49,31 @@ _SYN_CUE_RE = re.compile(
 
 # A date marker (b., c., d., fl., r.) excludes a parenthetical when it is
 # lowercase or a year or "?" follows it. A one-letter-genus abbreviation such
-# as *C. elegans* stays an alias candidate. Two or more initials before a
-# surname (C. S. Peirce) attribute a person and are excluded.
+# as *C. elegans* stays an alias candidate.
 _NON_NAME_PAREN_RE = re.compile(
     r"^(?:(?-i:b|c|d|fl|r)\.|(?:b|c|d|fl|r)\.\s*[\d?]|"
-    r"(?-i:(?:[A-Z]\.\s*){2,}[A-Z][a-z])|"
     r"e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
     r"annual|ongoing|born\b|died\b|founded\b|established\b|launched\b|"
     r"acquired\b|renamed\b|now\b|figure\s+[A-Za-z0-9])|\d{3,4}",
     re.IGNORECASE)
+
+# Two or more initials before a surname (C. S. Peirce) attribute a person and
+# are excluded, unless they abbreviate consecutive words of the subject's name
+# (U.S. Army for United States Army).
+_INITIALS_NAME_RE = re.compile(r"((?:[A-Z]\.\s*){2,})[A-Z][a-z]")
+
+
+def _person_initials(candidate, subject_forms):
+    """Whether a candidate is a person's initials and surname."""
+    match = _INITIALS_NAME_RE.match(candidate)
+    if not match:
+        return False
+    letters = re.sub(r"[^A-Z]", "", match.group(1))
+    return not any(
+        letters in "".join(word[0] for word in re.findall(
+            r"[^\W\d_]+", form or "")).upper()
+        for form in subject_forms or ())
+
 
 # A parenthetical that is only italic names joined by a comma, semicolon or
 # "or": "(*A*, *B*)", "(also called *A* or the *B*)". Only "or" may take an
@@ -191,7 +207,8 @@ def introduced_alias_candidates(prose_lines, subject_forms=None):
 
     def add(candidate, where):
         candidate = " ".join(candidate.split()).strip(" ,;:.")
-        if not candidate or _NON_NAME_PAREN_RE.match(candidate):
+        if (not candidate or _NON_NAME_PAREN_RE.match(candidate)
+                or _person_initials(candidate, subject_forms)):
             return
         key = candidate.lower()
         if key not in seen:
@@ -428,8 +445,11 @@ def run_self_test(verbose=False):
              ("The Art of Computer Programming",
               "***The Art of Computer Programming*** (D.E. Knuth) is a "
               "book series."),
-             ("United States", "**United States** (U.S.) is a country."))],
-        [[], [], [], [], [("U.S", "opener parenthetical")]])
+             ("United States", "**United States** (U.S.) is a country."),
+             ("United States Army",
+              "**United States Army** (U.S. Army) is a land force."))],
+        [[], [], [], [], [("U.S", "opener parenthetical")],
+         [("U.S. Army", "opener parenthetical")]])
     add("marker date parentheticals stay excluded",
         [introduced_alias_candidates([line], [title])
          for title, line in (
@@ -460,6 +480,15 @@ def run_self_test(verbose=False):
             ["A **ROC curve** (receiver plot) shows rates."],
             "ROC curve", [], "roc-curve"),
         [("receiver plot", "opener parenthetical", "receiver-plot")])
+    add("an opener expansion over 60 characters is a missing alias",
+        missing_introduced_aliases(
+            ["**HDBSCAN** (Hierarchical Density-Based Spatial Clustering of "
+             "Applications with Noise) clusters points."],
+            "HDBSCAN", [], "hdbscan"),
+        [("Hierarchical Density-Based Spatial Clustering of Applications "
+          "with Noise", "opener parenthetical",
+          "hierarchical-density-based-spatial-clustering-of-applications-"
+          "with-noise")])
     add("existing alias covers introduced name",
         missing_introduced_aliases(
             ["A **ROC curve**, also called *receiver plot*, shows rates."],

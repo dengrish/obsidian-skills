@@ -47,7 +47,7 @@ ownership.
 | `item2/obsidian-key` | Report and preserve exactly; it is valid user configuration. |
 | `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Legacy metadata is read-only compatibility data; do not add or refresh it or infer a historical creator. |
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
-| `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source; otherwise report. |
+| `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source (a chapter beside its whole book is proven by its name); otherwise report. |
 | `item7/hedge-candidate` | Review the description under [item 7](#7-description) and item 9's [caveat review](#9-body-structure-coherence-flow-and-scope): Task 1 drops a hedge whose plain claim the note establishes for the ordinary case; otherwise Task 1b names the condition from the cited source, or keeps evidence-bearing uncertainty. Keep the description, opener and card aligned; the candidate alone is never an order. |
 | `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or accurate background, and integrates the link. |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
@@ -59,7 +59,7 @@ ownership.
 | `item10/unparsed` | Report only: [item 10](#10-wikilinks); the target file's `item0` or `item1` governs repair. |
 | `item10/non-entry` | Report only: preserve the link, its path, anchor and display text. Never unlink it as a dangler, retarget it to an entry or alias, or count it toward the [missing-entry rule](refactors.md#create-a-missing-entry). |
 | `item10/moc` | Preserve the original bare or explicit destination for an unknown MOC target, and preserve missing/unsafe explicit `MOCs/` targets. Report and route resolution to authorized Task 3 work; never automatically qualify an unknown owner, unlink it as an entry dangler, or redirect it to a Wiki alias. |
-| `item10/dangling` | Task 1b first settles the target under its [dangler hand-off](refactors.md#dangling-link-hand-off): the entry the [missing-entry rule](refactors.md#create-a-missing-entry) allows, or a gloss for each mention that needs the term; Task 2 resolves the rest under its [dangler protocol](link-hygiene.md#dangling-links-target-missing), which leaves a link to a missing root for Task 3. |
+| `item10/dangling` | Task 1b first settles the target under its [dangler hand-off](refactors.md#dangling-link-hand-off): an existing entry for its concept, the entry the [missing-entry rule](refactors.md#create-a-missing-entry) allows, or a gloss for each mention that needs the term. Task 2 points the link at an existing or new entry and resolves the rest under its [dangler protocol](link-hygiene.md#dangling-links-target-missing), which leaves a link to a missing root for Task 3. |
 | `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
@@ -72,7 +72,7 @@ ownership.
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
 | `item18/partial-label` | Task 1 repair; a label naming another entity goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item18/cross-domain-alias` | The alias is a bare cross-domain term, which is never an alias. Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
-| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Remove each extra card under the [card set](flashcards.md#card-set) rule; a finding on an extra card, its line-1 `item12` findings included, needs no repair beyond that removal. Content after a card's line 3 that is not a recognized attachment is report-only. |
+| `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Remove each extra card under the [card set](flashcards.md#card-set) rule; a finding on an extra card, its line-1 `item12` findings included, needs no repair beyond that removal. Content after a card's line 3 that is not a recognized attachment, and any other block in the section, is report-only unless it holds [card syntax](../../wiki-build/references/flashcards-and-emphasis.md#card-set), which makes it an extra card to remove. |
 | `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#improving-the-card) and shorten it when the shorter cue is clearer and still rules out its rivals; the candidate alone is never an order. |
 | `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
@@ -185,7 +185,11 @@ Remove an exact repeated list item, URL items included. A same-stem PDF/Markdown
 `item4/source-identity` until decoded `sources:` or legacy `source:` in the
 Markdown note proves that it summarizes that PDF. Only then keep the anchored
 PDF citation, remove the duplicate Markdown citation, and report the evidence.
-Preserve an independent clipping and every uncertain pair. The linter checks
+Preserve an independent clipping and every uncertain pair. A chapter PDF
+cited beside its whole-book PDF is one
+[split book](../../wiki-build/references/source-intake.md#books-and-chapters)
+in two forms: Task 1 removes the chapter item, since the whole-book citation
+covers each chapter, and reports it. The linter checks
 page-anchor form; the physical page's factual correctness needs the source.
 
 ### 5. Filename, collision, and disambiguation
@@ -384,8 +388,8 @@ the source teaches is explanation. Task 1 removes empty rhetoric and repetition
 (the local repairs below) and well-definedness boilerplate (item 12). Task 1b
 removes every hedge and caveat principle 3 excludes, its full "Leave out" list
 included (defensive terminology distinctions, implementation and numerical
-details such as a routine's tolerance, rare failure modes, troubleshooting
-about neighbors), under
+details such as a library's default tolerance, rare failure modes,
+troubleshooting about neighbors), under
 [*Hedges*](source-backed-corrections.md#correct-and-publish). It keeps a limit
 only when the plain claim is false for the ordinary case, naming the condition
 instead of a hedge word, and keeps evidence-bearing uncertainty in research
@@ -421,21 +425,26 @@ establishes an unambiguous meaning:
 - Clarify a transition only from a relationship already established in the
   entry. Do not infer causation, contrast, chronology, or generality from
   proximity; use a paragraph boundary when no bridge is supported.
-- Convert an already explicit causal chain or argument from bullets or a
-  numbered list to prose, or integrate a navigation-only link when adjacent
-  prose already states the relationship.
+- Convert an already explicit causal chain, argument or sequence of fewer
+  than three steps from bullets or a numbered list to prose, or integrate a
+  navigation-only link when adjacent prose already states the relationship.
 - Rewrite an already explicit procedure or the time-ordered stages of one
-  process, with three or more steps, from prose or unnumbered bullets as a
-  numbered list in the builder's
+  process, with three or more steps stated anywhere in the entry, from prose
+  or unnumbered bullets as a numbered list in the builder's
   [Markdown form](../../wiki-build/references/writing.md#body-structure): one
-  item per step or stage, each keeping its reason and every claim. A stage
-  item opens with its stage name when the entry names the stages, and
-  otherwise with the process's action, in the same form across the list;
-  naming unnamed stages is Task 1b work, from the cited source. Notation and
+  item per step or stage (a loop's closing Repeat item counts as a step),
+  each keeping its reason and every claim. A stage item opens with its stage
+  name when the entry names the stages, and otherwise with its actor and
+  verb, in the same form across the list; naming unnamed stages is Task 1b
+  work, from the cited source, and so is gathering a step stated beyond an
+  adjacent paragraph, since Task 1 moves material only between adjacent
+  paragraphs under one heading. Notation and
   conditions that hold for every step stay in the prose before the list,
   which ends with the introducing sentence. A display moves into its step
   with its math unchanged, indented to the item's text column. Parallel facts
-  by period or age window stay bullets.
+  by period or age window stay bullets, and a plain-words summary of a
+  procedure the entry gives in full elsewhere, such as the opener's overview,
+  stays prose.
 - Rewrite parallel facts about several items (the same gene in several
   organisms, one property per variant) as one bullet per item, keeping every
   claim.
@@ -465,9 +474,10 @@ to the finished passage. Repair any regression and re-run the per-entry lint
 before publication. Leave conforming prose untouched and report the defect and
 repair for each changed entry; there is no shortening quota.
 
-If the change crosses a section, changes a fact, removes substantive content,
-chooses between claims, or redistributes material across entries, Task 1
-preserves it and hands it to Task 1b. Task 1b verifies the change against
+If the change moves material beyond an adjacent paragraph under its heading,
+changes a fact, removes substantive content, chooses between claims, or
+redistributes material across entries, Task 1 preserves it and hands it to
+Task 1b. Task 1b verifies the change against
 every affected entry's cited sources or accurate background, changes a degree,
 number, caption or math span only to match them or to drop a hedge or caveat
 the caveat review excludes, and touches only the
@@ -687,13 +697,15 @@ including its four carve-outs, which lint preserves. Normalize determinate
 alias form and duplicates; report cross-entry ownership conflicts. Never
 auto-retarget a display whose exact surface belongs to another entry. Do not
 create an ambiguous alias merely to silence a display-label finding. When an `item18` label is a
-cross-domain synonym its target does not introduce, reword the label to a
-claimed form, or let Task 1b add the synonym's italic introduction to the
-target when its cited source or standard usage gives the target that name. A
+cross-domain synonym, or a compound title's cross-domain modifier
+(`transformer` for Transformer architecture), that its target does not
+introduce, reword the label to a claimed form, or let Task 1b add the word's
+italic introduction to the target when its cited source or standard usage
+gives the target that name. A
 recurring finding on a cross-domain word outside the corpus is a
 [proposal](backlogs.md#proposal-scope) to extend the corpus.
 
-An `item18/partial-label` keeps only the target title's modifiers
+Any other `item18/partial-label` keeps only the target title's modifiers
 (`[[greedy-algorithm|greedy]]`). When the sentence already refers to the
 target, reword it so the label is the title, an alias, an inflection, or a
 derived form, preserving the claim (`CART's greedy choices` → `CART is a
