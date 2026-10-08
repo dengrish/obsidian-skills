@@ -1018,8 +1018,10 @@ free (`Tree of life` becomes `Tree of life (biology)`, slug
 identifier to its determinate conceptual title, retitles one whose
 acronym-or-full-form choice breaks wiki-build's
 [title rule](../skills/wiki-build/references/writing.md#title) to that rule's
-determinate form (`PPO` becomes `Proximal policy optimization`), and
-retitles a split's retained original whose title does not name exactly the
+determinate form (`PPO` becomes `Proximal policy optimization`), retitles
+an `Organism` titled by a common name to the scientific name wiki-build's
+[Organism rule](../skills/wiki-build/references/rare-types.md#the-ten-rare-types)
+requires (`Zebrafish` becomes `Danio rerio`), and retitles a split's retained original whose title does not name exactly the
 one subject it keeps, each when the new slug is free. It renames an entry whose filename does not match
 its title's slug when that slug is free. It removes an alias proven to name
 another entity, such as a bare cross-domain word, and the old bare

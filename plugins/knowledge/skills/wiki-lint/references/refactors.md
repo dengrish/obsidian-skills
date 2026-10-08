@@ -235,9 +235,12 @@ Task 1b runs this protocol when all of these hold:
   the title is itself an API identifier (QC item 6), the filename differs
   from its title's slug, the title's acronym-or-full-form choice breaks the
   builder's [title rule](../../wiki-build/references/writing.md#title)
-  (`PPO` for Proximal policy optimization, under QC item 5), or the title of
-  a split's retained original does not name exactly its one remaining
-  subject;
+  (`PPO` for Proximal policy optimization, under QC item 5), an `Organism`
+  is titled by a common name where the builder's
+  [Organism rule](../../wiki-build/references/rare-types.md#the-ten-rare-types)
+  requires its scientific name (`Zebrafish` for Danio rerio, under QC item
+  5), or the title of a split's retained original does not name exactly its
+  one remaining subject;
 - the qualified, conceptual or other-form title is determinate;
 - and the destination slug is free.
 
