@@ -53,6 +53,8 @@ ownership.
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or accurate background, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
 | `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
+| `item9/list-mismatch-candidate` | Review the lead-in's count or the Repeat item's step against the builder's [numbered-list tests](../../wiki-build/references/writing.md#body-structure). A count of something other than the list's items stays. A real disagreement goes to Task 1b, which settles it from the cited source, correcting the count, restoring a missing step or pointing the Repeat item at the step that begins the repeated work, under [item 9](#9-body-structure-coherence-flow-and-scope). The candidate alone is never an order. |
+| `item9/register-candidate` | Review the praise word or imperative opener under the builder's neutral [register](../../wiki-build/references/writing.md#prose-principles): Task 1 drops praise that adds no claim and restates a definition written as instructions as a fact, keeping every claim; in the description or on card line 1 the review follows [item 7](#7-description) or [item 19](#19-flashcards). The candidate alone is never an order. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
@@ -274,9 +276,11 @@ subject, such as its selectivity, regulation, distribution or a consequence,
 instead of what the subject is, even when the source's sentence is phrased
 that way; the property moves to the body (gene expression is the process by
 which a gene's information makes RNA and protein, and differential expression
-follows in the body). So is a definition by exclusion
-([principle 1](../../wiki-build/references/writing.md#prose-principles)): a
-rule stated as a prohibition leads with what it allows.
+follows in the body). So is any other definition that fails
+[principle 1](../../wiki-build/references/writing.md#prose-principles)'s
+self-check, such as a goal, name origin or member list in place of the kind,
+or a definition by exclusion: a rule stated as a prohibition leads with what
+it allows.
 
 ### 8. Tags
 
@@ -317,9 +321,21 @@ opener, equations, flashcard, and the neighbors the builder's
 names: body and Related link targets, backlinkers, entries citing the same
 source, and family members. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
-notation. A conflict that requires choosing or changing a fact goes to
+notation. Run the builder's
+[contradiction check](../../wiki-build/references/writing.md#editorial-reread)
+on each body claim, against every other claim in the note and these
+neighbors' statements. When the opener fails
+[principle 1](../../wiki-build/references/writing.md#prose-principles)'s
+self-check and card line 1 names a kind the body supports, Task 1 rewrites the
+opener's predicate from the card's claim. A disagreement, card against body included, or any other conflict that
+requires choosing or changing a fact goes to
 Task 1b, which corrects every affected entry under the correction protocol's
-[*Conflicts*](source-backed-corrections.md#correct-and-publish) rule. State
+[*Conflicts*](source-backed-corrections.md#correct-and-publish) rule. A
+general claim whose only support is one figure, caption, configured example,
+or one model's or organism's section fails the builder's
+[scope check](../../wiki-build/references/writing.md#editorial-reread):
+Task 1b states the general fact from standard references, or restores that
+scope. State
 the plain claim under principle 3 (a hedge or caveat that covers only an edge
 case goes even when the source makes it; evidence-bearing uncertainty stays),
 or trim a neighbor's detail to the relationship and a wikilink, rather than
@@ -356,24 +372,43 @@ close call stays unapplied under
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
 to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
-Judge a concrete defect, not a preference for different wording. Inspect
-equation lead-ins and paragraph endings as well as the opening sentences.
+Judge a concrete defect, not a preference for different wording. Run the
+hedge sweep, flow sweep, term audit and opener check of the builder's
+[editorial reread](../../wiki-build/references/writing.md#editorial-reread)
+as the detection pass on every in-scope entry. A multi-job paragraph or a
+tacked-on ending the flow sweep finds is a concrete defect:
+Task 1 splits it, or moves the sentence between adjacent paragraphs under one
+heading; Task 1b moves it further, or cuts it under principle 6 or 7 after
+checking the source.
 Each passage takes the builder's
 [form for its shape](../../wiki-build/references/writing.md#body-structure):
 bullets for parallel items, a numbered list for a procedure or the
 time-ordered stages of one process, and prose for a causal chain or an
-argument. Every list item keeps its reason; body links sit in sentences that
-state their relationships. Task 1b trims source/tutorial scaffolding and
-application catalogs that do not serve the entry, after checking the cited
-source. It consolidates a definition, explanation, argument, worked example
-or property with its justification duplicated across entries into its owner
-under the [consolidation rule](refactors.md#build-the-refactored-entries);
-every such trim follows [Dates](../SKILL.md#dates).
+argument. Every list item keeps its reason, and each list passes that guide's
+tests: a loop's Repeat target and starting step, a lead-in's step count, and
+parallel bullets that never include the entry's own subject. Body links sit
+in sentences that state their relationships. Task 1b trims source/tutorial
+scaffolding and application catalogs that do not serve the entry, after
+checking the cited source. It consolidates into its owner, under the
+[consolidation rule](refactors.md#build-the-refactored-entries), a
+definition, explanation, argument, worked example, property with its
+justification, discovery history or figure description duplicated across
+entries, and a neighbor's formula that this entry's own prediction, objective
+or defining relation is not built from
+([atomicity test](../../wiki-build/references/writing.md#body-structure)).
+The one-clause reason or key value [item 14](#14-self-containment) keeps is
+no duplicate. Every such trim follows [Dates](../SKILL.md#dates).
 
 A statement the entry leaves unexplained, such as an equation without its
-meaning, a complexity without its reason, a derivation step or a result, gets
-its reason in Task 1b, in one sentence from the cited source or accurate
-background; a term with neither definition nor link follows
+meaning, a complexity without its reason, a derivation step, a result, or a
+claim that something suits, is preferred for, helps, works better or matters,
+gets its reason in Task 1b, in one sentence from the cited source or accurate
+background. Task 1b likewise replaces a derivation longer than
+[equations §3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
+allows, or a multi-step complexity analysis, with its one-sentence intuition,
+or, when none exists, with the takeaway alone, omitting the bound
+([equations §1](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)).
+A term with neither definition nor link follows
 [item 14](#14-self-containment). When no accurate reason exists because the
 stated result is itself wrong or imprecise, the defect is a conflict between
 the cited source and standard references, resolved as in the coherence review:
@@ -399,9 +434,11 @@ findings; a source-supported detail can still be unnecessary.
 
 **Depth review.** Apply the builder's
 [core-facet check](../../wiki-build/references/writing.md#prose-principles) to
-every in-scope entry, whatever its type and however detailed it already is.
-Task 1b supplies each missing facet: a model's or ensemble's prediction step
-and how it trains, a display's verbal reading, a concrete case, a
+every in-scope entry, whatever its type and however detailed it already is,
+listing the facets from a standard introductory reference before reading the
+body. Task 1b supplies each missing facet: a model's or ensemble's prediction
+step and how it trains, a display's verbal reading, a concrete case under
+[item 15](#15-example-discipline), a
 category's canonical members (at least three) that have entries, or a discipline
 root's form. For a Concept, it then applies the builder's
 [row-9 test](../../wiki-build/references/quality-checklist.md) (could a reader
@@ -629,12 +666,19 @@ without changing claim, attribution, or certainty; otherwise Task 1b corrects
 it from the cited source. Task 1b completes the rest of principle 5 from the
 cited source or accurate background:
 
-- A term the entry uses with neither definition nor resolving link is linked
-  when its entry exists, and otherwise gets a brief defining clause; a
-  dangling link's term follows the
-  [dangler hand-off](refactors.md#dangling-link-hand-off). A term that meets
-  the [missing-entry rule](refactors.md#create-a-missing-entry) gets its own
-  entry instead, which Task 2 then links.
+- A term the entry uses with neither definition nor resolving link,
+  including terms in added background or corrections, is linked when its
+  entry exists, and otherwise gets a brief defining clause; a dangling link's
+  term follows the [dangler hand-off](refactors.md#dangling-link-hand-off). A
+  term that meets the [missing-entry rule](refactors.md#create-a-missing-entry)
+  gets its own entry instead, which Task 2 then links. A definite noun phrase
+  whose referent only the source's running example supplies ("the
+  districts") follows 5(d): the example is introduced briefly inline, or it
+  goes.
+- A consequence carried from a linked entry without its reason or key value
+  is an open question: Task 1b adds the one clause, which is not a
+  re-explanation and is never consolidated away
+  ([link, don't re-explain](../../wiki-build/references/writing.md#body-structure)).
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.
@@ -650,13 +694,19 @@ authors” do not.
 Apply builder [item 15](../../wiki-build/references/quality-checklist.md) and
 [prose principle 7](../../wiki-build/references/writing.md#prose-principles)
 during semantic review, judging an example by purpose, never by length.
-Trimming an unnecessary, tangential or repetitive example needs the source, so
-Task 1b does it after reading the cited source. A worked example lives in one
+Trimming an unnecessary, tangential or repetitive example, or other material
+principles 6 and 7 leave out, needs the source, so Task 1b does it after
+reading the cited source; source support alone never keeps that material
+([flow sweep](../../wiki-build/references/writing.md#editorial-reread)). A
+worked example lives in one
 entry, its owner under item 9's consolidation; the others state the
 consequence and link the owner. A Concept that is abstract, quantitative or
 procedural (a task such as binary classification, a method, a model, a
 quantity or a process) and whose body names no concrete instance gets one in
-Task 1b, from the cited source or accurate background. Scaffolding and application catalogs belong to item 9,
+Task 1b, from the cited source or accurate background, unless it would only
+restate the definition with a number
+([principle 7](../../wiki-build/references/writing.md#prose-principles)).
+Scaffolding and application catalogs belong to item 9,
 `Software` API catalogs to item 6.
 
 ### 16. Bold, italic, and code typography

@@ -111,6 +111,21 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               with another bullet or delimiter or numbered
                               from 1 again, too; indent it (lists inside
                               quotes are not checked)
+      9-list-mismatch-candidate
+                              a colon lead-in states one count ("in three
+                              steps:") and the list has another number of
+                              top-level items (a count that leaves out a
+                              final Repeat step passes too), or a "Repeat
+                              from step N" item names no earlier step of its
+                              list; agent reviews
+      9-register-candidate    advisory: praise (famous, one of the most
+                              important; classic, except before example or
+                              case in the body) in the
+                              description, the kept card's line 1 or the
+                              body, or a prose sentence outside lists that
+                              opens with Train, Run, Fit, Compute, Get,
+                              Pick, Choose, Predict or Use and a determiner
+                              or number
   10  10-duplicate-wikilink   same TARGET SLUG linked >1x in body prose
                               (counted by target, not display text; the
                               Related footer and self-links, which are
@@ -251,7 +266,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               the target defines in italics passes (warning)
 
 Items 5, 6, 13, 14, 16 and 18, item 7's description subject, item 9's
-acronym-title expansion and list indentation, and item 19's card set, primary
+acronym-title expansion, list indentation, list mismatches and register
+candidates, and item 19's card set, primary
 answer (card line 3), primary card, Spaced Repetition marker floor and
 discipline-root test, share their per-entry rules with wiki-lint's scanner
 through ``shared/scripts/entry_checks.py``; the Related/Flashcards section
@@ -436,6 +452,7 @@ from entry_structure import (  # noqa: E402
     normalized_answer_surface,
     opener_subject_date_status,
     parse_flashcard_blocks,
+    register_hints,
     title_display_form,
     without_leading_title_heading,
 )
@@ -476,10 +493,12 @@ from entry_checks import (  # noqa: E402
     label_shares_surface,
     line3_parts,
     list_indent_findings,
+    list_mismatch_findings,
     merge_scar_findings,
     organism_common_name_bound,
     primary_line3_faults,
     pure_math_opener_markup,
+    register_findings,
     source_identity_pairs,
     source_meta_findings,
     source_reference_kind,
@@ -1065,6 +1084,13 @@ def _check_description(fm, findings, title=None):
             "ordinary case plainly when the note establishes it",
             {"words": hedge_words, "description": desc,
              "agent_review": True}))
+    praise_words = register_hints(desc)
+    if praise_words:
+        findings.append(_f(
+            "9-register-candidate", "warning",
+            "description carries praise; state what the subject is or does "
+            "instead", {"words": praise_words, "description": desc,
+                        "agent_review": True}))
 
 
 def _check_body_structure(fm, sections, findings):
@@ -2026,6 +2052,46 @@ def _check_list_indent(fm, sections, findings):
              "column": finding["column"]}))
 
 
+def _check_list_mismatch(fm, sections, findings):
+    """Item 9: a lead-in count or Repeat step the list does not match.
+
+    Advisory: a lead-in's count may count something other than the items,
+    so the review decides; a candidate is never a fault.
+    """
+    prose, first_line = _shared_prose(fm, sections)
+    tables = _markdown_tables(prose)[1]
+    spans = find_display_spans(strip_code(prose), tables)
+    for finding in list_mismatch_findings(prose, spans, tables):
+        evidence = {key: value for key, value in finding.items()
+                    if key != "message"}
+        evidence["line"] = _file_line(first_line, finding)
+        if "list_line" in finding:
+            evidence["list_line"] = _file_line(
+                first_line, {"line": finding["list_line"]})
+        evidence["agent_review"] = True
+        findings.append(_f(
+            "9-list-mismatch-candidate", "warning",
+            finding["message"] + "; a candidate is never an order",
+            evidence))
+
+
+def _check_register(fm, sections, findings):
+    """Item 9: praise or a definition written as instructions in the body.
+
+    Advisory: the register review decides; a candidate is never a fault.
+    """
+    prose, first_line = _shared_prose(fm, sections)
+    tables = _markdown_tables(prose)[1]
+    spans = find_display_spans(strip_code(prose), tables)
+    for finding in register_findings(prose, spans, tables):
+        findings.append(_f(
+            "9-register-candidate", "warning",
+            finding["message"] + "; a candidate is never an order",
+            {"check": finding["check"], "words": finding["words"],
+             "line": _file_line(first_line, finding),
+             "agent_review": True}))
+
+
 def _check_merge_scars(fm, sections, findings):
     """Item 13: a schema key, stray ``---`` or bare digit line in the body."""
     prose, first_line = _shared_prose(fm, sections)
@@ -2405,7 +2471,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
     # entry's own opener-established, alias-bound counterpart.
     title = fm.scalar("title")
-    line3_checks, brevity, hedges = [], [], []
+    line3_checks, brevity, hedges, praise = [], [], [], []
     for card_no, card in enumerate(cards, 1):
         syntax = sr_card_syntax_fault(card, 0 if card_no not in checked
                                       else 3)
@@ -2502,6 +2568,9 @@ def _check_flashcards_present(fm, sections, findings, filename,
         hedge_words = flashcard_hedge_hints(line1)
         if hedge_words:
             hedges.append({"card": card_no, "words": hedge_words})
+        praise_words = register_hints(line1)
+        if praise_words and card_no not in extras:
+            praise.append({"card": card_no, "words": praise_words})
     brevity_message = ("possible over-long or two-idea card line; review it "
                        "under the card rules and shorten only a genuine "
                        "shortfall")
@@ -2528,6 +2597,13 @@ def _check_flashcards_present(fm, sections, findings, filename,
             findings.append(_card_f(
                 "19-hedge-candidate", "warning", hedge_message,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
+    if praise:
+        # The register review covers the kept card's cue; an extra card's
+        # removal needs no other repair.
+        findings.append(_f(
+            "9-register-candidate", "warning",
+            "card line 1 carries praise; state what the subject is or does "
+            "instead", {"matches": praise, "agent_review": True}))
 
     # With several cards, only the primary card is held to the line-3
     # contract: an extra card is removed, never repointed to the entry's
@@ -2722,6 +2798,8 @@ def lint_text(text, filename):
     _check_person_event_date(fm, sections, findings)
     _check_acronym_expansion(fm, sections, findings)
     _check_list_indent(fm, sections, findings)
+    _check_list_mismatch(fm, sections, findings)
+    _check_register(fm, sections, findings)
     _check_image_captions(fm, sections, findings)
     _check_equation_coverage_candidates(fm, sections, findings, extras)
     _check_literal_dollars("\n".join(sections["prose_lines"]), findings)
@@ -4153,6 +4231,16 @@ def run_self_test():
                         "against normally distributed false positive "
                         "rate."))),
           ([("7-hedge-candidate", "warning", ["often"], True)], [], []))
+    check("praise in the description is an advisory register candidate; "
+          "classical is not",
+          ([(f["item"], f["severity"], f["evidence"].get("words"),
+             f["evidence"].get("agent_review"))
+            for f in lint_text(mutate(
+                "A ROC curve plots true", "A ROC curve famously plots true"),
+                "roc-curve.md")["findings"]],
+           items(mutate("A ROC curve plots true",
+                        "A ROC curve plots classical true"))),
+          ([("9-register-candidate", "warning", ["famously"], True)], []))
     check("two declarative or question-ended description sentences are rejected",
           (items(mutate(
               'description: "A ROC curve plots true positive rate against '
@@ -4995,6 +5083,18 @@ def run_self_test():
             if f["item"] == "19-hedge-candidate"]),
           ([("19-hedge-candidate", "warning", None)],
            [("19-hedge-candidate", True)]))
+    check("praise on the kept card's cue is an advisory register candidate; "
+          "an extra card's needs only its removal",
+          ([(f["item"], f["severity"], f["evidence"].get("matches"))
+            for f in lint_text(mutate(
+                "The plot tracing the trade-off", "The classic plot tracing "
+                "the trade-off"), "roc-curve.md")["findings"]],
+           [f["item"] for f in lint_text(with_cards(
+               "Another famous notion, stated briefly.\n??\n"
+               "Second idea\n"), "roc-curve.md")["findings"]
+            if f["item"] == "9-register-candidate"]),
+          ([("9-register-candidate", "warning",
+             [{"card": 1, "words": ["classic"]}])], []))
 
     # -- item 19: a discipline root needs no card --------------------------
     stats_root = (
@@ -5409,6 +5509,26 @@ def run_self_test():
           [("9-list-indent", "display", 0, 3, 29),
            ("9-list-indent", "paragraph", 0, 3, 33),
            ("9-list-indent", "display", 3, 4, 42)])
+    miscounted = after_opener(
+        procedure.replace("Training runs these steps.",
+                          "Use the weights. Training runs in nine steps:")
+        .replace("Repeat from step 2", "Repeat from step 12"))
+    check("a lead-in count, a Repeat step and an imperative opener are "
+          "item-9 candidates at their file lines",
+          [(f["item"], f["evidence"].get("check"), f["evidence"]["line"],
+            miscounted.split("\n")[f["evidence"]["line"] - 1][:12])
+           for f in lint_text(miscounted, "roc-curve.md")["findings"]],
+          [("9-list-mismatch-candidate", "lead-in-count", 19, "Use the weig"),
+           ("9-list-mismatch-candidate", "repeat-step", 47, "11. Repeat f"),
+           ("9-register-candidate", "imperative", 19, "Use the weig")])
+    check("a count that may count something else is an advisory candidate, "
+          "never a fault",
+          [(f["item"], f["severity"], f["evidence"].get("agent_review"))
+           for f in lint_text(after_opener(procedure.replace(
+               "Training runs these steps.",
+               "With two classes, training runs as follows:")),
+               "roc-curve.md")["findings"]],
+          [("9-list-mismatch-candidate", "warning", True)])
     check("a navigation cue or a table-cell link in a step reads like a "
           "top-level one",
           [items(after_opener(paragraph)) for paragraph in (

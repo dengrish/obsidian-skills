@@ -200,6 +200,7 @@ from entry_structure import (  # noqa: E402
     normalized_answer_surface,
     opener_subject_date_status,
     parse_flashcard_blocks,
+    register_hints,
     split_sentences,
     title_display_form,
     without_leading_title_heading,
@@ -244,12 +245,14 @@ from entry_checks import (  # noqa: E402
     label_drops_head,
     label_shares_surface,
     list_indent_findings,
+    list_mismatch_findings,
     merge_scar_findings,
     organism_common_name_bound as _organism_common_name_bound,
     organism_common_name_surfaces as _organism_common_name_surfaces,
     plural_surface,
     primary_line3_faults,
     pure_math_opener_markup,
+    register_findings,
     source_identity_pairs,
     source_meta_findings,
     source_reference_kind,
@@ -3761,6 +3764,16 @@ def scan(wiki, images=None, vault=None, settled=None):
                     + ", ".join(f'"{word}"' for word in _desc_hedges)
                     + " — state the ordinary case plainly when the note "
                     "establishes it; a candidate is never an order"))
+            # Praise is a register candidate wherever it appears (lint_entry's
+            # 9-register-candidate).
+            _desc_praise = register_hints(e["desc"])
+            if _desc_praise:
+                problems.append((
+                    sl, "item9/register-candidate",
+                    "description carries praise ("
+                    + ", ".join(f'"{word}"' for word in _desc_praise)
+                    + ") — state what the subject is or does instead; a "
+                    "candidate is never an order"))
         # ---- item 8: exactly one discipline tag; misc is the sole fallback ----
         e_tags_raw, e_tag_slugs = e["tags_raw"], e["tag_slugs"]
         if e["tags_value_count"] > 1:
@@ -3914,14 +3927,29 @@ def scan(wiki, images=None, vault=None, settled=None):
         # short of the item's text column ends the list in Obsidian. Shared
         # with lint_entry's 9-list-indent.
         _list_tables = markdown_tables(e["prose"])[1]
+        _list_spans = find_display_spans(strip_code(e["prose"]), _list_tables)
         for _indent in list_indent_findings(
-                e["prose"], find_display_spans(strip_code(e["prose"]),
-                                               _list_tables), _list_tables):
+                e["prose"], _list_spans, _list_tables):
             problems.append((
                 sl, "item9/list-indent",
                 "prose line %d (list item on prose line %d): %s"
                 % (_indent["line"] + _line_off,
                    _indent["item_line"] + _line_off, _indent["message"])))
+        # A lead-in count or Repeat step the list contradicts, and register
+        # candidates (lint_entry's 9-list-mismatch-candidate and
+        # 9-register-candidate). A lead-in's count may count something else,
+        # so both are review candidates.
+        for _row in list_mismatch_findings(
+                e["prose"], _list_spans, _list_tables):
+            problems.append((
+                sl, "item9/list-mismatch-candidate",
+                "prose line %d: %s; a candidate is never an order"
+                % (_row["line"] + _line_off, _row["message"])))
+        for _row in register_findings(e["prose"], _list_spans, _list_tables):
+            problems.append((
+                sl, "item9/register-candidate",
+                "prose line %d: %s; a candidate is never an order"
+                % (_row["line"] + _line_off, _row["message"])))
         # ---- item 12 (format): unescaped literal $ and remote image embeds ----
         _pure_math_opener_markup = None
         nd = leftover_dollars(e["prose"])
@@ -4453,6 +4481,14 @@ def scan(wiki, images=None, vault=None, settled=None):
                         + ", ".join(f'"{word}"' for word in _hedges)
                         + " — state the ordinary case plainly when the note "
                         "establishes it; a candidate is never an order"))
+                _praise = [] if _extra else register_hints(line1)
+                if _praise:
+                    problems.append((
+                        sl, "item9/register-candidate",
+                        f'{tag} line 1 carries praise ('
+                        + ", ".join(f'"{word}"' for word in _praise)
+                        + ") — state what the subject is or does instead; a "
+                        "candidate is never an order"))
             # The line-3 term contract binds the primary card only: an extra
             # card is removed, never repointed to the entry's answer.
             # lint_entry makes the same choice.
@@ -12066,6 +12102,12 @@ def run_self_test():
                      "$$\n\\epsilon = \\sum_{i=1}^{n} w_i\n$$\n\nHere")
             .replace("    $$\n    w_i \\leftarrow \\frac{w_i}{Z}\n    $$",
                      "   $$\n   w_i \\leftarrow \\frac{w_i}{Z}\n   $$")))
+        _st_write(v, "miscounted-steps.md", _st_entry(
+            "Miscounted steps", procedure.replace(
+                "**Steps** run in order.",
+                "**Miscounted steps** run in two steps:")
+            .replace("Repeat from step 2", "Repeat from step 12")
+            + "\n\nUse the final weights in a vote."))
         # Without Related, the separator above Flashcards still ends the
         # prose, as in lint_entry: it is neither an item-13 scar nor a rule
         # that ends the step's gap.
@@ -12092,6 +12134,15 @@ def run_self_test():
                 "prose line 15 (list item on prose line 9)"),
                ("item9/list-indent",
                 "prose line 24 (list item on prose line 22)")])
+        check("a miscounted lead-in, a Repeat step naming no earlier step and "
+              "an imperative prose opener are item9 candidates at their "
+              "prose lines",
+              sorted((p["item"], p["message"].split(":", 1)[0])
+                     for p in res["problems"]
+                     if p["slug"] == "miscounted-steps"),
+              [("item9/list-mismatch-candidate", "prose line 1"),
+               ("item9/list-mismatch-candidate", "prose line 29"),
+               ("item9/register-candidate", "prose line 31")])
         # The per-entry checks shared with wiki-build's lint_entry.py: its
         # self-test runs the same rows, so each moved mutation is flagged by
         # both tools.
@@ -12245,6 +12296,17 @@ def run_self_test():
             "Hedge description", "**Hedge description** is a worked example.",
             description="Hedge description is a worked example, often used "
                         "by the self-test."))
+        _st_write(v, "praise-cue.md", _st_entry(
+            "Praise cue", "**Praise cue** is a worked example.").replace(
+                "The idea this entry is about, stated once.",
+                "The classic idea this entry is about, stated once."))
+        _st_write(v, "praise-description.md", _st_entry(
+            "Praise description",
+            "**Praise description** is a worked example.",
+            description="Praise description is a famous worked example."))
+        _st_write(v, "praise-extra.md", _with_cards(
+            "Praise extra", "A famous second claim, stated once.\n??\n"
+            "Second term\n"))
         _st_write(v, "measured-description.md", _st_entry(
             "Measured description",
             "**Measured description** is a worked example.",
@@ -12394,6 +12456,22 @@ def run_self_test():
                [k for k in _st_keys(res, "measured-description")
                 if k.startswith("item7")]),
               (["item7/hedge-candidate"], True, []))
+        check("praise on the kept cue or in the description is an item9 "
+              "register candidate; a frequency hedge and an extra card's "
+              "praise are not",
+              ([k for k in _st_keys(res, "praise-cue")
+                if k.startswith(("item9", "item19"))],
+               '"classic"' in _st_msg(res, "praise-cue",
+                                      "item9/register-candidate"),
+               [k for k in _st_keys(res, "praise-description")
+                if k.startswith(("item7", "item9"))],
+               '"famous"' in _st_msg(res, "praise-description",
+                                     "item9/register-candidate"),
+               [k for slug_ in ("hedge-cue", "praise-extra")
+                for k in _st_keys(res, slug_)
+                if k == "item9/register-candidate"]),
+              (["item9/register-candidate"], True,
+               ["item9/register-candidate"], True, []))
         check("brevity candidates are advisory and never item19 errors",
               ([k for k in _st_keys(res, "long-cue") if k.startswith("item19")],
                "glossary" in _st_msg(res, "glossary-cue",

@@ -52,6 +52,7 @@ __all__ = [
     "ends_with_sentence_period",
     "flashcard_brevity_hints",
     "flashcard_hedge_hints",
+    "register_hints",
     "first_letter_ci_equal",
     "first_prose_paragraph",
     "first_prose_paragraph_lines",
@@ -1089,6 +1090,29 @@ def flashcard_hedge_hints(text):
     """
     prose = _INLINE_LATEX_RE.sub(" ", text or "")
     return [match.group(0).lower() for match in _HEDGE_RE.finditer(prose)]
+
+
+#: Praise the neutral register leaves out. "Classical" never matches.
+_PRAISE_RE = re.compile(
+    r"\b(?:famous|famously|classic|one\s+of\s+the\s+most\s+important)\b",
+    re.IGNORECASE)
+#: "The classic example" or "classic case" names the standard case.
+_STANDARD_CASE_RE = re.compile(r"\s+(?:examples?|cases?)\b", re.IGNORECASE)
+
+
+def register_hints(text, body=False):
+    """Advisory item-9 hints: praise words in a description, on card line 1
+    or, with ``body``, in a body line.
+
+    In the body, "classic" before "example" or "case" names the standard
+    case and is skipped. Words inside inline math are ignored. Returns the
+    words in order of appearance, lowercased; a candidate, never a fault.
+    """
+    prose = _INLINE_LATEX_RE.sub(" ", text or "")
+    return [" ".join(match.group(0).lower().split())
+            for match in _PRAISE_RE.finditer(prose)
+            if not (body and match.group(0).lower() == "classic"
+                    and _STANDARD_CASE_RE.match(prose, match.end()))]
 
 
 def flashcard_brevity_hints(text):
@@ -2398,6 +2422,28 @@ def run_self_test(verbose=False):
              "The table counting how often, or more often than chance, a "
              "normally distributed value appears.")],
          [["usually", "often"], [], [], ["often"], ["typically"], []]),
+        ("praise words are register candidates; classical, well-known or "
+         "math never",
+         [register_hints(value) for value in (
+             "A famous dataset, famously cited.",
+             "A classic dataset of 150 flowers.",
+             "One of the most\nimportant techniques in machine learning.",
+             "Classical conditioning pairs a well-known stimulus with "
+             "$famous$.")]
+         + [register_hints("The classic example is a famous stump.",
+                           body=True)],
+         [["famous", "famously"], ["classic"],
+          ["one of the most important"], [], ["famous"]]),
+        ("body praise: classic counts unless it names the standard case "
+         "(the classic example, a classic case); off the body it counts",
+         [register_hints(value, body=True) for value in (
+             "Four numeric features have made it a classic illustration "
+             "dataset for classifiers.",
+             "A decision stump is the classic example of a weak learner.",
+             "Overfitting is a classic case of high variance.",
+             "Two classic examples follow.")]
+         + [register_hints("The classic example of a weak learner.")],
+         [["classic"], [], [], [], ["classic"]]),
         ("brevity hints for a definition cue",
          [flashcard_brevity_hints(value) for value in (
              " ".join(["Word"] * 25) + " end.",

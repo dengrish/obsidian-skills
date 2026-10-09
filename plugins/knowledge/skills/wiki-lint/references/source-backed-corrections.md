@@ -98,8 +98,8 @@ assumptions and the ordinary mechanism. Never remove an accurate claim merely
 because the cited source does not state it. In each entry, change only the
 surfaces needed to keep it coherent: for example its description, opener,
 equation, or primary card. Then apply the builder's
-[editorial reread](../../wiki-build/references/writing.md#editorial-reread)
-and principle 4's paragraph-flow test to the whole note, and to each linked
+[editorial reread](../../wiki-build/references/writing.md#editorial-reread),
+its flow sweep included, to the whole note, and to each linked
 neighbor that states the same relationship. Merge a claim now stated twice.
 Keep each fact before its first use. Reread the passage after each inserted
 paragraph or display so its opening still follows. Make every sentence about
@@ -114,9 +114,11 @@ caveat, scaffolding, a catalog, an anecdote, history beyond one clause, a
 tangential example, a neighbor's explanation beyond one defining clause), an
 equation removed under the
 [usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
-with its notation-only prose, or a removal one of the entry's
-[user issues](../SKILL.md#user-issues) asks for; a sentence giving the reason
-for a constant or factor in a display that stays is none of these.
+with its notation-only prose, a derivation or complexity analysis replaced by
+its one-sentence intuition or takeaway, or a removal one of the entry's
+[user issues](../SKILL.md#user-issues) asks for. A sentence giving the reason
+for a constant or factor in a display that stays, or the one-clause reason or
+key value of a consequence carried from a linked entry, is none of these.
 Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments; `issues:`
 changes only under [User issues](../SKILL.md#user-issues).
