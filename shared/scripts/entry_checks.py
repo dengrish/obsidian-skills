@@ -3,8 +3,9 @@
 
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
-item 4's source-identity pairs, item 7's description subject, item 9's acronym-title expansion and list
-indentation, item 17's single-word alias hint, and item 19's card set,
+item 4's source-identity pairs, item 7's description subject, item 9's
+acronym-title expansion, list indentation, list mismatches and register
+candidates, item 17's single-word alias hint, and item 19's card set,
 primary answer on card line 3, primary card and Spaced Repetition markers in
 the body and on card lines) and the discipline-root test from this one
 copy, so an entry that passes the builder gate does not fail the next scan on
@@ -39,8 +40,10 @@ from entry_structure import (  # noqa: E402
     mask_body_comments,
     math_title_plain_text,
     normalized_answer_surface,
+    register_hints,
     source_reference_kind,
     source_stem,
+    split_sentences,
     strip_code,
     strip_fenced,
     strip_indented,
@@ -97,6 +100,7 @@ __all__ = [
     "label_shares_surface",
     "line3_parts",
     "list_indent_findings",
+    "list_mismatch_findings",
     "merge_scar_findings",
     "organism_common_name_bound",
     "organism_common_name_surfaces",
@@ -104,6 +108,7 @@ __all__ = [
     "primary_card_label",
     "primary_line3_faults",
     "pure_math_opener_markup",
+    "register_findings",
     "source_identity_pairs",
     "source_meta_findings",
     "sr_card_marker_faults",
@@ -733,6 +738,302 @@ def list_indent_findings(prose, display_spans=(), table_spans=None):
         index = end + 1
     resolve(True)
     return findings
+
+
+# ---------------------------------------------------------------------------
+# item 9: a list that disagrees with its lead-in or its Repeat step
+# ---------------------------------------------------------------------------
+
+_COUNT_WORDS = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6,
+                "seven": 7, "eight": 8, "nine": 9, "ten": 10, "eleven": 11,
+                "twelve": 12}
+#: A count before a plural noun, up to two modifiers apart: "three steps",
+#: "4 main stages". "Two-part" is a compound, not a count.
+_LEAD_IN_COUNT_RE = re.compile(
+    r"(?<![\w$.,/-])(%s|[2-9]|1[0-2])[ \t]+(?:[a-z][\w'-]*[ \t]+){0,2}?"
+    r"([a-z][\w-]*s)\b(?!['-])" % "|".join(_COUNT_WORDS), re.IGNORECASE)
+#: A count of part of the list ("the first two steps"), a bound or range
+#: ("at least two", "two or more steps") and a measure ("three times")
+#: count no items.
+_PARTIAL_COUNT_RE = re.compile(
+    r"\b(?:first|last|next|other|remaining|previous|top|further|"
+    r"additional|another|every|least|than|to|up|over|about|around|roughly|"
+    r"nearly|almost)[ \t]+$", re.IGNORECASE)
+_RANGE_WORD_RE = re.compile(r"[ \t](?:or|to|and)[ \t]", re.IGNORECASE)
+_MEASURE_NOUNS = frozenset((
+    "times", "seconds", "minutes", "hours", "days", "weeks", "months",
+    "years", "decades", "centuries", "orders"))
+_REPEAT_STEP_RE = re.compile(r"Repeat\b[^.;:]*?\bsteps?[ \t]+([0-9]{1,9})\b")
+_LEAD_IN_MARKUP_RE = re.compile(
+    r"\[\[[^\]|\n]*\|([^\]\n]*)\]\]|\[\[([^\]\n]*)\]\]|\$[^$\n]*\$|[*_]+")
+
+
+def _list_marker(line):
+    """A list item's ``indent``, text ``content`` column, ``kind`` (bullet
+    or ordered delimiter), ``number`` and ``text``, or ``None``."""
+    match = _LIST_MARKER_RE.match(line)
+    if (not match or _LIST_RULE_RE.fullmatch(line)
+            or not line[match.end():].strip()):
+        return None
+    indent, marker = _list_width(line), match.group("marker")
+    gap = len(line[:match.end()].expandtabs(4)) - indent - len(marker)
+    number = match.group("number")
+    return {"indent": indent,
+            "content": indent + len(marker) + (gap if gap <= 4 else 1),
+            "kind": marker[-1], "number": int(number) if number else None,
+            "text": line[match.end():].strip()}
+
+
+def _list_run(lines, start, masked):
+    """The top-level items of the list that opens at ``lines[start]``.
+
+    Returns ``(items, ambiguous)``. Each item adds its ``line`` and the
+    ``shown`` number Markdown renders. A numbered list that a block short of
+    its text column interrupts (``list_indent_findings`` reports the block)
+    goes on where it resumes with the next number; a bullet list there
+    resumes nothing, so its count is ``ambiguous``.
+    """
+    head = dict(_list_marker(lines[start]), line=start)
+    head["shown"] = head["number"]
+    items, content, blank = [head], head["content"], False
+    index = start + 1
+    while index < len(lines):
+        line = lines[index]
+        if not line.strip():
+            blank, index = True, index + 1
+            continue
+        width = _list_width(line)
+        item = None if index in masked else _list_marker(line)
+        if index not in masked and (_LIST_RULE_RE.fullmatch(line) or (
+                _LIST_HEADING_RE.match(line) and width < content)):
+            break
+        if item is not None and item["indent"] <= head["indent"]:
+            if not (item["indent"] == head["indent"]
+                    and item["kind"] == head["kind"]):
+                break
+            shown = items[-1]["shown"]
+            items.append(dict(item, line=index, shown=(
+                item["number"] if shown is None else shown + 1)))
+            content, blank, index = item["content"], False, index + 1
+            continue
+        if blank and item is None and width < content:
+            if width < head["indent"]:
+                break  # an outer item's text ends a nested list
+            resume = None
+            for later in range(index, len(lines)):
+                text = lines[later]
+                if later in masked or not text.strip():
+                    continue
+                if (_LIST_RULE_RE.fullmatch(text)
+                        or _LIST_HEADING_RE.match(text)):
+                    break
+                marker = _list_marker(text)
+                if marker is not None:
+                    if (marker["indent"] == head["indent"]
+                            and marker["kind"] == head["kind"]):
+                        resume = (later, marker)
+                    break
+            if resume is None:
+                break
+            later, marker = resume
+            if head["number"] is None:
+                return items, True
+            if marker["number"] != items[-1]["number"] + 1:
+                break
+            items.append(dict(marker, line=later, shown=marker["number"]))
+            content, blank, index = marker["content"], False, later + 1
+            continue
+        blank, index = False, index + 1
+    return items, False
+
+
+def _lead_in(lines, start, indent, masked):
+    """``(line, text)`` of the colon-ended text that opens a list, or
+    ``None``: the paragraph or parent item text just above ``start``."""
+    above = start - 1
+    while above >= 0 and not lines[above].strip() and above not in masked:
+        above -= 1
+    if (above < 0 or above in masked
+            or not lines[above].rstrip().endswith(":")):
+        return None
+    parts, index = [], above
+    while index >= 0 and lines[index].strip() and index not in masked:
+        item = _list_marker(lines[index])
+        if item is not None:
+            if item["indent"] >= indent:
+                return None
+            parts.append(item["text"])
+            break
+        if _LIST_HEADING_RE.match(lines[index]):
+            break
+        parts.append(lines[index].strip())
+        index -= 1
+    return above, " ".join(reversed(parts))
+
+
+def _lead_in_count(text):
+    """The one count of items in a lead-in's colon sentence, or ``None``."""
+    plain = _LEAD_IN_MARKUP_RE.sub(
+        lambda match: match.group(1) or match.group(2) or " ", text)
+    sentences = split_sentences(plain)
+    sentence = sentences[-1] if sentences else ""
+    counts = list(_LEAD_IN_COUNT_RE.finditer(sentence))
+    if len(counts) != 1:
+        return None
+    match = counts[0]
+    if (_PARTIAL_COUNT_RE.search(sentence[:match.start()])
+            or _RANGE_WORD_RE.search(match.group(0))
+            or match.group(2).lower() in _MEASURE_NOUNS):
+        return None
+    value = match.group(1).lower()
+    return _COUNT_WORDS.get(value) or int(value), match.group(0)
+
+
+def list_mismatch_findings(prose, display_spans=(), table_spans=None):
+    """Item 9's review candidates: a list that disagrees with the text that
+    refers to it.
+
+    Two checks, each a candidate with a one-based ``line``:
+
+    - ``lead-in-count``: the colon sentence that opens a list states one
+      count before a plural noun ("in three steps:"), and the list has a
+      different number of top-level items. The noun may count something
+      else ("With two classes, it runs as follows:"), so the review keeps
+      such a count. The builder's rule counts a final "Repeat from step N"
+      item; to avoid misfiring, this check also accepts a count that leaves
+      it out. A list in a quote or callout is not checked.
+    - ``repeat-step``: a numbered item opening "Repeat from step N" (or
+      "Repeat steps N…") names no earlier step of its list.
+
+    ``display_spans`` and ``table_spans`` are as for
+    :func:`list_indent_findings`; their lines are never list items.
+    """
+    lines = strip_code(prose or "").split("\n")
+    if table_spans is None:
+        table_spans = markdown_table_spans(
+            strip_indented(strip_fenced(prose or "")))
+    masked = set()
+    for span in display_spans or ():
+        masked.update(range(span["open_line"], span["close_line"] + 1))
+    for first, last in table_spans:
+        masked.update(range(first, last + 1))
+    findings, seen = [], set()
+    for start, line in enumerate(lines):
+        head = None if start in seen or start in masked else _list_marker(line)
+        if head is None:
+            continue
+        items, ambiguous = _list_run(lines, start, masked)
+        seen.update(item["line"] for item in items)
+        lead = _lead_in(lines, start, head["indent"], masked)
+        count = _lead_in_count(lead[1]) if lead else None
+        repeats = sum(1 for item in items if item["text"].startswith("Repeat"))
+        if (count and not ambiguous
+                and count[0] not in (len(items), len(items) - repeats)):
+            findings.append({
+                "check": "lead-in-count", "line": lead[0] + 1,
+                "list_line": start + 1, "count": count[0],
+                "items": len(items),
+                "message": (
+                    "the lead-in counts %r but the list below has %d "
+                    "top-level items — make a count of the list's items "
+                    "match it; keep a count of something else"
+                    % (count[1], len(items)))})
+        for position, item in enumerate(items):
+            match = _REPEAT_STEP_RE.match(item["text"])
+            if item["number"] is None or not match:
+                continue
+            step = int(match.group(1))
+            earlier = {number for row in items[:position]
+                       for number in (row["number"], row["shown"])}
+            if step not in earlier:
+                findings.append({
+                    "check": "repeat-step", "line": item["line"] + 1,
+                    "step": step, "number": item["shown"],
+                    "message": (
+                        "step %d repeats from step %d, which is not an "
+                        "earlier step of its list — point it at the step "
+                        "that begins the repeated work"
+                        % (item["shown"], step))})
+    return findings
+
+
+#: A prose sentence that opens with a bare imperative and its object.
+_IMPERATIVE_OPENER_RE = re.compile(
+    r"(?:Train|Run|Fit|Compute|Get|Pick|Choose|Predict|Use)[ \t]+"
+    r"(?:a|an|the|each|every|all|this|that|these|those|its|their|some|any|"
+    r"another|both|one|%s|[0-9]+)\b" % "|".join(_COUNT_WORDS))
+_IMAGE_LINE_RE = re.compile(r"[ \t]*!\[")
+#: A wikilink, read as its rendered text: the label, else the target.
+_WIKILINK_LABEL_RE = re.compile(r"\[\[(?:([^\]|\n]*)\|)?([^\]\n]*)\]\]")
+
+
+def register_findings(prose, display_spans=(), table_spans=None):
+    """Item 9's register candidates in the explanatory body.
+
+    ``praise``: a praise word on a body line outside listings and displays
+    (``register_hints`` with ``body``). ``imperative``: a prose sentence
+    outside lists, tables, captions and headings that opens with a bare
+    imperative from a short list followed by a determiner or number ("Train
+    one detector per class"), a definition written as instructions. Each
+    finding has a one-based ``line``; a candidate, never a fault.
+    """
+    lines = strip_code(prose or "").split("\n")
+    if table_spans is None:
+        table_spans = markdown_table_spans(
+            strip_indented(strip_fenced(prose or "")))
+    masked = set()
+    for span in display_spans or ():
+        masked.update(range(span["open_line"], span["close_line"] + 1))
+    tables = set()
+    for first, last in table_spans:
+        tables.update(range(first, last + 1))
+    findings = []
+    for index, line in enumerate(lines):
+        words = [] if index in masked or _IMAGE_LINE_RE.match(line) else (
+            register_hints(_WIKILINK_LABEL_RE.sub(r"\2", line), body=True))
+        if words:
+            findings.append({
+                "check": "praise", "line": index + 1, "words": words,
+                "message": (
+                    "praise (%s) — state what the subject is or does "
+                    "instead" % ", ".join('"%s"' % word for word in words))})
+    # A paragraph opens after a blank line or a heading, so a lazy line that
+    # continues a list item is never read as prose.
+    paragraph, may_open = [], True
+    for index, line in enumerate(lines + [""]):
+        heading = bool(_LIST_HEADING_RE.match(line))
+        prose_line = bool(
+            line.strip() and index not in masked and index not in tables
+            and not line[:1].isspace() and _list_marker(line) is None
+            and not heading and not _LIST_RULE_RE.fullmatch(line)
+            and not _LIST_QUOTE_RE.match(line)
+            and not _CAPTION_LINE_RE.match(line)
+            and not _IMAGE_LINE_RE.match(line))
+        if prose_line and (paragraph or may_open):
+            paragraph.append((index, " ".join(line.split())))
+            continue
+        compact = " ".join(text for _row, text in paragraph)
+        cursor = 0
+        for sentence in split_sentences(compact):
+            cursor = max(compact.find(sentence, cursor), cursor)
+            match = _IMPERATIVE_OPENER_RE.match(sentence)
+            if match:
+                offset = 0
+                for row, text in paragraph:
+                    offset += len(text) + 1
+                    if offset > cursor:
+                        break
+                findings.append({
+                    "check": "imperative", "line": row + 1,
+                    "words": match.group(0),
+                    "message": (
+                        "a prose sentence opens with the imperative %r, a "
+                        "definition written as instructions — state it as "
+                        "a fact; imperatives belong in numbered steps"
+                        % match.group(0))})
+            cursor += len(sentence)
+        paragraph, may_open = [], heading or not line.strip()
+    return sorted(findings, key=lambda row: row["line"])
 
 
 # ---------------------------------------------------------------------------
@@ -1793,6 +2094,21 @@ SHARED_MUTATIONS = (
      "   - the true positives;\n   - the false positives.\n"
      "11. Divide the hits by the total.",
      "item9/list-indent", "9-list-indent", False),
+    ("item9 a lead-in count the list contradicts",
+     "The rate is found in two steps:\n\n1. Count the hits.\n"
+     "2. Count the runs.\n3. Divide the hits by the runs.",
+     "item9/list-mismatch-candidate",
+     "9-list-mismatch-candidate", False),
+    ("item9 a Repeat step that names no earlier step",
+     "The rate is found in steps.\n\n1. Count the hits.\n"
+     "2. Repeat from step 2 until every run is counted.",
+     "item9/list-mismatch-candidate",
+     "9-list-mismatch-candidate", False),
+    ("item9 a definition written as instructions",
+     "Compute the rate from the hits.",
+     "item9/register-candidate", "9-register-candidate", False),
+    ("item9 praise in body prose", "The rate is a famous measure.",
+     "item9/register-candidate", "9-register-candidate", False),
 )
 
 #: A numbered procedure whose displays and paragraphs sit at their steps'
@@ -1879,6 +2195,20 @@ SHARED_QUIET = (
      "r = \\frac{h}{n}\n$$\n\nHere $h$ counts the hits and $n$ the runs.\n\n"
      "Two uses are common:\n\n- ranking runs;\n- picking a threshold.",
      "item9/list-indent", "9-list-indent"),
+    ("item9 a lead-in count that leaves out the final Repeat step",
+     "The rate alternates two steps:\n\n1. Count the hits.\n"
+     "2. Divide the hits by the total.\n"
+     "3. Repeat from step 1 until every run is scored.",
+     "item9/list-mismatch-candidate",
+     "9-list-mismatch-candidate"),
+    ("item9 a numbered procedure's steps and Repeat step",
+     _QUIET_STEPS, "item9/list-mismatch-candidate",
+     "9-list-mismatch-candidate"),
+    ("item9 imperatives in numbered steps",
+     _QUIET_STEPS, "item9/register-candidate", "9-register-candidate"),
+    ("item9 the classic example in body prose",
+     "A ratio is the classic example of the rate.",
+     "item9/register-candidate", "9-register-candidate"),
 )
 
 
@@ -2158,6 +2488,110 @@ def run_self_test(verbose=False):
               "1. a:\n 1. sub a\n2. b",
               "1. a\n2. b:\n   1. sub a\n   2. sub b\n3. c")],
           [[(3, "list")], [(2, "list")], []])
+
+    def mismatch(prose):
+        """``(check, line)`` per list-mismatch finding, displays as `$$`."""
+        lines = prose.split("\n")
+        marks = [index for index, line in enumerate(lines)
+                 if line.strip() == "$$"]
+        spans = [{"open_line": start, "close_line": end}
+                 for start, end in zip(marks[0::2], marks[1::2])]
+        return [(finding["check"], finding["line"])
+                for finding in list_mismatch_findings(prose, spans)]
+
+    steps = "1. Assign each point.\n2. Move each center.\n"
+    check("a lead-in count the list contradicts is a candidate; a count "
+          "with or without a final Repeat step passes",
+          [mismatch(prose) for prose in (
+              "Its two central events run in this order:\n\n" + steps
+              + "3. Split the cell.",
+              "It runs in three steps:\n\n" + steps,
+              "Training alternates two steps:\n\n" + steps
+              + "3. Repeat from step 1 until the centers stop.",
+              "Training runs in three steps:\n\n" + steps
+              + "3. Repeat from step 1 until the centers stop.",
+              "Two designs dominate:\n- the TEM;\n- the SEM;\n- the STEM.")],
+          [[("lead-in-count", 1)], [("lead-in-count", 1)], [], [],
+           [("lead-in-count", 1)]])
+    check("only one whole count of items is compared: a partial count, a "
+          "measure, a compound, two counts or a count before the colon "
+          "sentence count nothing",
+          [mismatch(prose + "\n\n" + steps + "3. Split the cell.")
+           for prose in (
+               "The first two steps prepare the data:",
+               "The loop runs three times:",
+               "The two-part division runs in order:",
+               "Two phases hold four steps:",
+               "It has two parts. It runs in order:",
+               "It runs in at least two steps:",
+               "It runs in two or more steps:",
+               "The first two steps prepare four inputs:",
+               "It runs in [[step|two steps]] and $2$ rounds:")],
+          [[], [], [], [], [], [], [], [], [("lead-in-count", 1)]])
+    check("a numbered list goes on past a misplaced display; a bullet list "
+          "split by a paragraph is not counted; a parent item's colon counts "
+          "its nested list, which outer text ends",
+          [mismatch(prose) for prose in (
+              "It runs in three steps:\n\n1. Count:\n\n$$\nh = 1\n$$\n\n"
+              "2. Divide.\n3. Round.",
+              "It has two inputs:\n\n- the hits;\n\nEach is counted.\n\n"
+              "- the runs.",
+              "Steps:\n\n1. Weigh the two inputs:\n   - the hits;\n"
+              "   - the runs;\n   - the rounds.\n2. Divide.",
+              "1. Weigh the two inputs:\n   1. the hits;\n   2. the runs."
+              "\n\nThe weights add up.\n\n   3. the rounds.")],
+          [[], [], [("lead-in-count", 3)], []])
+    check("a Repeat step must name an earlier step of its list, as written "
+          "or as rendered",
+          [mismatch(prose) for prose in (
+              steps + "3. Repeat from step 3 until done.",
+              steps + "3. Repeat from step 4 until done.",
+              steps + "3. Repeat steps 0 and 1 until done.",
+              steps + "3. Repeat from step 2 until done.",
+              "1. Assign.\n1. Move.\n1. Repeat from step 2 until done.",
+              "- Assign.\n- Repeat from step 3 until done.")],
+          [[("repeat-step", 3)], [("repeat-step", 3)], [("repeat-step", 3)],
+           [], [], []])
+
+    def register(prose):
+        """``(check, line)`` per register finding, displays as `$$`."""
+        lines = prose.split("\n")
+        marks = [index for index, line in enumerate(lines)
+                 if line.strip() == "$$"]
+        spans = [{"open_line": start, "close_line": end}
+                 for start, end in zip(marks[0::2], marks[1::2])]
+        return [(finding["check"], finding["line"])
+                for finding in register_findings(prose, spans)]
+
+    check("a prose sentence opening with a bare imperative and a "
+          "determiner or number is a register candidate, mid-paragraph too",
+          [register(prose) for prose in (
+              "Train one detector per class.",
+              "It votes.\nEach detector scores it. Predict the class.",
+              "Use the median when outliers dominate.",
+              "Fit 3 models.")],
+          [[("imperative", 1)], [("imperative", 2)], [("imperative", 1)],
+           [("imperative", 1)]])
+    check("steps, captions, headings, displays, a lazy item line, Let, and "
+          "a verb without a determiner are no imperative candidate",
+          [register(prose) for prose in (
+              "1. Train one detector per class.\n- Use the median.",
+              "![[plot.png]]\n*Fit a line to the points.*",
+              "## Use the median",
+              "$$\nRun the loop.\n$$",
+              "1. Count the hits\nUse the median.",
+              "Let $x$ be the input.",
+              "Use of the median is common. Run-time grows.")],
+          [[], [], [], [], [], [], []])
+    check("praise in body prose is a register candidate; the classic "
+          "example, a link target and an image embed are not",
+          [register(prose) for prose in (
+              "It is a famous dataset.",
+              "- One of the most important techniques.",
+              "A stump is the classic example.",
+              "It uses [[famous-dataset|the dataset]].",
+              "![[famous-plot.png]]")],
+          [[("praise", 1)], [("praise", 1)], [], [], []])
 
     # item 14
     check("source-meta phrases and the technical source compounds",

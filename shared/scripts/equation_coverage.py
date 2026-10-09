@@ -1279,8 +1279,7 @@ def find_missing_display_equation_candidates(masked_prose,
         if not _inline_formula_is_substantive(formula):
             continue
         # A formula directly after a wikilink restates the linked owner's
-        # definition (review.md: a one-line restatement of a neighbor's
-        # formula); it is not this entry's defining equation.
+        # formula; it is not this entry's defining equation.
         if visible[:match.start()].rstrip().endswith("]]"):
             continue
         cue_tail = _sentence_tail(plain_visible, match.start())

@@ -181,6 +181,11 @@ but never makes coverage uncertain
 
 A folder or inbox-wide run skips a confirmed match unless the request states
 rerun or resume intent ([skip, rerun and resume](source-cases.md#skip-rerun-and-resume)).
+When `source_matches` lists one entry for a skipped source and its `sources`
+items name a single page, report the source under *Notes for the user* as
+`possibly not built whole: cited only by <entry> (p.N); a wiki-build request
+naming the source fills in its other topics`. That line is information, not a
+finding, and the source stays skipped.
 **A source the user names (a file, a chapter, or a book) is filled in, not
 skipped.** Read it; each entity whose entry already cites this source, in
 any form of the same document (the whole book for a chapter, a same-URL twin

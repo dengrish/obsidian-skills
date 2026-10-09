@@ -6074,7 +6074,9 @@ SELFTEST_MIN_CASES = {
     # content that is not a card's three lines.
     # 2026-10-07 (knowledge 1.24.0): source_identity_pairs, a chapter beside
     # its book and a same-stem pair.
-    "shared/scripts/entry_checks.py": 133,
+    # 2026-10-08 (knowledge 1.25.0): a lead-in count or Repeat step the
+    # list contradicts, and register candidates in body prose.
+    "shared/scripts/entry_checks.py": 140,
     # 2026-10-02: the cases for the removed prose-calculation cues
     # (averaged probability, majority vote, regression average) went with
     # them; the new cue and denominator cases still raise the floor net.
@@ -6124,7 +6126,9 @@ SELFTEST_MIN_CASES = {
     # 2026-10-07 (knowledge 1.24.0): the first full block stays a card
     # beside a separator card.
     # 2026-10-08 (knowledge 1.24.0): a split primary card before a full block.
-    "shared/scripts/entry_structure.py": 203,
+    # 2026-10-08 (knowledge 1.25.0): praise words as register candidates;
+    # in the body, classic counts unless it names the standard case.
+    "shared/scripts/entry_structure.py": 205,
     "shared/scripts/plugin_paths.py": 129,
     "shared/scripts/portable_names.py": 5,
     # 2026-10-06 (knowledge 1.22.0): `move` respelling and `--owned-dir` cases.
@@ -6410,7 +6414,10 @@ SELFTEST_MIN_CASES = {
     # 2026-10-07 (knowledge 1.24.0): a blank title is item 2, as in
     # scan_vault.py.
     # 2026-10-08 (knowledge 1.24.0): a split primary card before a full block.
-    "skills/wiki-build/scripts/lint_entry.py": 522,
+    # 2026-10-08 (knowledge 1.25.0): 9-list-mismatch-candidate, an
+    # advisory candidate, and 9-register-candidate in the description, the
+    # kept cue and the body.
+    "skills/wiki-build/scripts/lint_entry.py": 534,
     # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
     # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
     # `.md` or path, and keep one another vault file needs.
@@ -6485,7 +6492,10 @@ SELFTEST_MIN_CASES = {
     # outside twin takes a written-name label, and the Articles/ ignore probe
     # reads globs as minimatch does.
     # 2026-10-08 (knowledge 1.24.0): a split primary card before a full block.
-    "skills/wiki-lint/scripts/scan_vault.py": 742,
+    # 2026-10-08 (knowledge 1.25.0): item9/list-mismatch-candidate, and
+    # item9/register-candidate in the description, the kept cue and the
+    # body, at their prose lines.
+    "skills/wiki-lint/scripts/scan_vault.py": 752,
 }
 
 
@@ -9299,6 +9309,104 @@ WRITING_RULE_PINS = (
         "Write one line above the Flashcards separator, with a blank line on "
         "each side",
     )),
+    # 2026-10-08 (knowledge 1.25.0): the editorial audit's builder rules.
+    # The reread runs named scope, contradiction and flow sweeps; a linked
+    # neighbor's consequence keeps its one-clause reason; a reason is one
+    # sentence of intuition; examples, openers, lists, sentences, core facets
+    # and background each gain a checkable test.
+    (("wiki-build", "references", "writing.md"), (
+        "with the one-clause reason or key value a reader needs to use it",
+        "nor display its formula unless this entry's own prediction, "
+        "objective or defining relation is built from it",
+        "a family entry gives each member one role clause and a link",
+        "The entry's own subject is never one of its parallel bullets",
+        "a step count it states matches the list",
+        "step N begins the repeated work, and an earlier step sets the "
+        "starting state",
+        "A stage item states what it triggers when the next stage depends on "
+        "it",
+        "the opener or the next sentence states the property that separates "
+        "them",
+        "whatever the source's own section includes",
+        "one sentence and a link do it",
+        "never as a roster in an unrelated sentence",
+        "A definition is never written as instructions",
+        "reading naturally after `<term> is` and naming the kind and the "
+        "essential property",
+        # An opener whose verb states the defining action passes too
+        # ("Gini impurity measures how mixed a node's classes are").
+        "or its verb states the defining action and so makes the kind plain",
+        "nor is a claim taken from one figure or caption, one model's or "
+        "organism's section, or one configured library example",
+        "a progress or trend claim",
+        "Run the [flow sweep](#editorial-reread) on every paragraph",
+        "A reason for why a result holds is one sentence of intuition",
+        "A distinction the note never uses, or background that needs more "
+        "than one new term with no entry",
+        "and one clause can set them up",
+        "an example that only restates the definition with a number",
+        "A single one-clause gloss of a term is no overload",
+        "*such*, *it* or *the former* unambiguous, within its own or the "
+        "previous sentence",
+        "A garden path is a defect",
+        "**Scope check.**",
+        "a cause or actor swapped",
+        "**Contradiction check.**",
+        "becomes one claim with the condition that decides between them",
+        "**Flow sweep.** Label each paragraph's job in a few words, "
+        "one-paragraph bodies included",
+        "never add one to end on",
+        # A closing consequence, main limitation or nearest contrast is the
+        # ending; any other closing point is the stray.
+        "Any other closing sentence or final one-sentence paragraph that "
+        "opens a new point",
+        "A caption follows [captions](media.md#captions) instead",
+        "goes whatever its source support",
+        "a sentence that only previews claims the following sentences "
+        "explain goes",
+        "causal or comparative claim",
+        "terms in background or corrections the builder added included",
+        "every example states the point it shows",
+        "the opener's kind, named or made plain by its verb, matches card "
+        "line 1's",
+        "Every idea the opening paragraph introduces is explained by the end "
+        "of the next paragraph (a term is still defined or linked on first "
+        "use)",
+    )),
+    (("wiki-build", "references", "equations.md"), (
+        "one sentence each, or a display when the source prints one or it "
+        "can be explained simply",
+        "This rule orders displays, not the opener: the plain-words idea "
+        "precedes the general form",
+        "A comparison of two costs gives the practical takeaway and one "
+        "sentence of intuition",
+        "state the takeaway and omit the bound",
+        "give a derivation only when it fits in one or two sentences",
+        "a ratio or average the opening sentence already defines in words "
+        "needs only its symbols bound",
+    )),
+    (("wiki-build", "references", "flashcards-and-emphasis.md"), (
+        "identify the two or three terms a learner would most likely confuse "
+        "with it, whether or not they have entries",
+        "Do not name them in the cue",
+        "**hemoglobin** is the protein that carries",
+    )),
+    (("wiki-build", "references", "media.md"), (
+        "Describe what the exhibit shows and what to notice in it",
+        "Never restate the sentence it follows",
+        "an idea the entry needs is stated in the body, not only in a caption",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "or a neighbor's formula that this entry's own prediction, objective "
+        "or defining relation is built from",
+        "with the one-clause reason or key value the "
+        "[atomicity test](writing.md#body-structure) keeps",
+    )),
+    (("wiki-build", "references", "quality-checklist.md"), (
+        "(scope check, hedge sweep, contradiction check)",
+        "each list passing the [list tests](writing.md#body-structure)",
+        "never restating the sentence they follow",
+    )),
     # 2026-10-07 (knowledge 1.23.0): a display inside a list item is
     # indented to the item's text column and explained inside the item, and
     # a numbered step never opens with a bold lead word.
@@ -9406,6 +9514,61 @@ WRITING_RULE_PINS = (
     # still has exactly one discipline tag, split or not.
     (("wiki-lint", "references", "qc-items.md"), (
         "An entry that conflates two concepts still gets one tag",
+    )),
+    # 2026-10-08 (knowledge 1.25.0): lint runs the builder's editorial-reread
+    # sweeps as its detection pass and routes what they find: a multi-job
+    # paragraph or tacked-on ending, a body claim contradicting another, a
+    # claim scoped to one figure or example, an opener failing principle 1's
+    # self-check, a list failing its tests, a neighbor's formula or history, an
+    # evaluative claim without its reason, an over-long derivation, a term
+    # added as background, and a consequence carried without its reason.
+    # Source support never keeps what principles 6 and 7 leave out, and an
+    # example that would only restate the definition is not added.
+    (("wiki-lint", "references", "qc-items.md"), (
+        "as the detection pass on every in-scope entry",
+        "A multi-job paragraph or a tacked-on ending the flow sweep finds is "
+        "a concrete defect",
+        "Task 1b moves it further, or cuts it under principle 6 or 7",
+        "on each body claim, against every other claim in the note",
+        # Only an opener that fails principle 1's self-check is rewritten
+        # from the card; one whose verb states the defining action stays.
+        "self-check and card line 1 names a kind the body supports, Task 1 "
+        "rewrites the opener's predicate",
+        "hedge sweep, flow sweep, term audit and opener check of the "
+        "builder's",
+        "Task 1b states the general fact from standard references, or "
+        "restores that scope",
+        "a loop's Repeat target and starting step, a lead-in's step count, "
+        "and parallel bullets that never include the entry's own subject",
+        "and a neighbor's formula that this entry's own prediction, "
+        "objective or defining relation is not built from",
+        "claim that something suits, is preferred for, helps, works better "
+        "or matters",
+        # A derivation within equations §3's one or two sentences stays.
+        "replaces a derivation longer than",
+        "or a multi-step complexity analysis, with its one-sentence "
+        "intuition, or, when none exists, with the takeaway alone, omitting "
+        "the bound",
+        "listing the facets from a standard introductory reference before "
+        "reading the body",
+        "including terms in added background or corrections",
+        "A consequence carried from a linked entry without its reason or key "
+        "value is an open question",
+        "source support alone never keeps that material",
+        "unless it would only restate the definition with a number",
+        "A definite noun phrase whose referent only the source's running "
+        "example supplies",
+    )),
+    (("wiki-lint", "references", "flashcards.md"), (
+        "the terms a learner would most likely confuse with it, entries or "
+        "not",
+    )),
+    (("wiki-lint", "references", "source-backed-corrections.md"), (
+        "its flow sweep included",
+        "a derivation or complexity analysis replaced by its one-sentence "
+        "intuition or takeaway",
+        "or the one-clause reason or key value of a consequence carried from "
+        "a linked entry, is none of these",
     )),
     # 2026-10-07 (knowledge 1.23.0): item 9 judges each passage's form by
     # its shape; Task 1 turns an explicit procedure or the stages of one
@@ -9526,6 +9689,23 @@ WRITING_RULE_PINS = (
         "For a reported display, also indent the paragraph after it that "
         "explains it",
     )),
+    # 2026-10-08 (knowledge 1.25.0): a lead-in count or Repeat step the list
+    # contradicts, praise, and a prose sentence opening with a bare
+    # imperative are item 9 review candidates. The builder's rule counts a
+    # final Repeat item; the check also accepts a count that leaves it out.
+    (("wiki-lint", "references", "scanner.md"), (
+        "lint_entry reports it as `9-list-mismatch-candidate`",
+        "The builder's rule counts a final Repeat item; to avoid misfiring, "
+        "the check also accepts a count that leaves it out",
+        "lint_entry reports it as `9-register-candidate`",
+        "in the body, *classic* before *example* or *case* names the "
+        "standard case",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "keeping a lead-in count of something other than the list's items "
+        "(`9-list-mismatch-candidate`)",
+        "rather than praises or instructs (`9-register-candidate`)",
+    )),
 )
 
 #: Retired writing rules: the default against examples, the hedge repair
@@ -9594,6 +9774,26 @@ WRITING_RULE_RETIRED = (
     "each must be a hedge or caveat principle 3 excludes",
     "The cited source settles it when it can.",
     "such as a routine's tolerance",
+    # 2026-10-08 (knowledge 1.25.0): lint detects with the builder's
+    # editorial-reread sweeps, the flow sweep among them.
+    "Inspect equation lead-ins and paragraph endings",
+    "principle 4's paragraph-flow test",
+    # 2026-10-08 (knowledge 1.25.0): the builder's flow test is the reread's
+    # flow sweep, whose tacked-on ending moves or goes; a linked consequence
+    # keeps its reason; a reason is intuition first; a model's objective
+    # takes a display only when the source prints one or it explains simply;
+    # an opener's bold-title example names the kind.
+    "**Paragraph-flow test.**",
+    "start a new paragraph, or omit it",
+    "in one clause and link that entry",
+    "explains every factor that differs",
+    "a short derivation, or, when that is too long",
+    "a display or one sentence each",
+    "a one-line restatement of a neighbor's formula",
+    "**hemoglobin** carries",
+    # 2026-10-08 (knowledge 1.25.0): a closing limitation or comparison is
+    # the note's ending, not a stray to move or cut.
+    "application, limitation, comparison or API family",
 )
 
 
@@ -9735,6 +9935,12 @@ SOURCE_INTAKE_PINS = (
         # attachments, and a `--find` hit counts only on page 1.
         "file other than a [feed-owned attachment]",
         "hit counts only when its pages include 1",
+        # 2026-10-08 (knowledge 1.25.0): a folder run reports a skipped
+        # source that only one entry cites, at a single page, as possibly
+        # not built whole, and still skips it.
+        "possibly not built whole: cited only by <entry> (p.N)",
+        "That line is information, not a finding, and the source stays "
+        "skipped",
     )),
     (("wiki-build", "references", "merge.md"), (
         "A document is cited in one form",
