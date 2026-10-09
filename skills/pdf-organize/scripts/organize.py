@@ -4852,6 +4852,8 @@ def _selftest():
     cases = []
     _test_workspace = _tf.TemporaryDirectory(prefix="organize-selftest-")
     _workspace_mkdtemp = _tf.mkdtemp
+    # An output directory that never exists, whatever the host's /tmp holds.
+    _absent_dir = os.path.join(_test_workspace.name, "absent")
 
     def _make_fixture_dir(*args, **kwargs):
         """Create every fixture below one workspace cleaned at test exit."""
@@ -5893,7 +5895,7 @@ def _selftest():
             ("JustSomeName.pdf", "no chapter segment", False)):
         _ch = [{"heading_text": "Chapter 1 Intro", "filename": _name,
                 "start_idx": 0, "end_idx": 1}]
-        _plan, _probs, _ = _resolve(_ch, _txt, 2, "/tmp/x", {}, "Kuhn_S_2012")
+        _plan, _probs, _ = _resolve(_ch, _txt, 2, _absent_dir, {}, "Kuhn_S_2012")
         check("split_book refuses %s" % _label, (bool(_plan), not _probs),
               (_ok, _ok))
 
@@ -6110,7 +6112,7 @@ def _selftest():
             "Kuhn_S_2012_01_Intro.pdf", "start_idx": 0, "end_idx": 3}]
     _txt = [_norm(_p) for _p in ("front matter, no heading here",
                                  "Chapter 1 Intro " + "body " * 60, "more body")]
-    _plan, _probs, _notes = _resolve(_ch, _txt, 3, "/tmp/x", {}, "Kuhn_S_2012")
+    _plan, _probs, _notes = _resolve(_ch, _txt, 3, _absent_dir, {}, "Kuhn_S_2012")
     check("a start the +/-2 search moves is reported, with both page numbers",
           (bool(_plan), _probs, _notes),
           (True, [], ["Kuhn_S_2012_01_Intro.pdf: start corrected from page 1 "
@@ -6119,7 +6121,7 @@ def _selftest():
             "Kuhn_S_2012_01_Intro.pdf", "start_idx": 1, "end_idx": 3}]
     _txt = [_norm(_p) for _p in ("Chapter 1 Intro",
                                  "Chapter 1 Intro " + "body " * 60, "more body")]
-    _plan, _probs, _notes = _resolve(_ch, _txt, 3, "/tmp/x", {}, "Kuhn_S_2012")
+    _plan, _probs, _notes = _resolve(_ch, _txt, 3, _absent_dir, {}, "Kuhn_S_2012")
     check("a title page pulled in ahead of the start is reported too",
           (_plan[0][0], _notes),
           (0, ["Kuhn_S_2012_01_Intro.pdf: start moved from page 2 to 1 to "
@@ -6127,7 +6129,7 @@ def _selftest():
     _ch = [{"heading_text": "Chapter 1 Intro", "filename":
             "Kuhn_S_2012_01_Intro.pdf", "start_idx": 0, "end_idx": 2}]
     _txt = [_norm(_p) for _p in ("Chapter 1 Intro " + "body " * 60, "more body")]
-    _plan, _probs, _notes = _resolve(_ch, _txt, 2, "/tmp/x", {}, "Kuhn_S_2012")
+    _plan, _probs, _notes = _resolve(_ch, _txt, 2, _absent_dir, {}, "Kuhn_S_2012")
     check("a start that needed no correction reports nothing", _notes, [])
 
     # A uniform off-by-one mapping moves every start; each end the caller set
@@ -6141,7 +6143,7 @@ def _selftest():
         "front", "front two", "Chapter 1 Alpha body", "alpha middle",
         "alpha last", "Chapter 2 Beta body", "beta middle", "beta last",
         "Chapter 3 Gamma body", "gamma last")]
-    _plan, _probs, _notes = _resolve(_ch, _txt, 10, "/tmp/x", {}, "Doe_Book_2025")
+    _plan, _probs, _notes = _resolve(_ch, _txt, 10, _absent_dir, {}, "Doe_Book_2025")
     check("ends follow uniformly corrected starts, so no page is dropped",
           ([(_p[0], _p[1]) for _p in _plan], _probs,
            sum("end moved" in _n for _n in _notes)),
@@ -6163,7 +6165,7 @@ def _selftest():
               "Chapter 2 Beta " + "body " * 60, "beta more"))):
         _ch[0]["start_idx"] = _mapped_start
         _plan, _probs, _ = _resolve(_ch, [_norm(_p) for _p in _pages], 7,
-                                    "/tmp/x", {}, "Doe_Book_2025")
+                                    _absent_dir, {}, "Doe_Book_2025")
         check("a contents page is never the chapter start (%s)" % _label,
               (_probs, _plan[0][0] if _plan else None),
               ([], 3 if "early" in _label else 2))
@@ -6177,14 +6179,14 @@ def _selftest():
         "title", "preface", "Chapter 1 Introduction. This book is organized "
         "as follows. Chapter 2 examines X.", "intro more",
         "Chapter 2 Method " + "body " * 60, "method more")]
-    _plan, _probs, _ = _resolve(_ch, _txt, 6, "/tmp/x", {}, "Doe_Book_2020")
+    _plan, _probs, _ = _resolve(_ch, _txt, 6, _absent_dir, {}, "Doe_Book_2020")
     check("a refused opening page read as contents is named as such",
           [("treated as contents" in _p, "physical page(s) 3 carry" in _p)
            for _p in _probs], [(True, True)])
     _ch = [{"heading_text": "Chapter 1 Alpha",
             "filename": "Doe_Book_2025_01_Alpha.pdf", "start_idx": 2, "end_idx": 5}]
     _plan, _probs, _ = _resolve(
-        _ch, [_norm(_p) for _p in ("a", "b", "c", "d", "e")], 5, "/tmp/x", {},
+        _ch, [_norm(_p) for _p in ("a", "b", "c", "d", "e")], 5, _absent_dir, {},
         "Doe_Book_2025")
     check("a heading on no nearby page keeps the plain refusal, in one-based pages",
           _probs, ["Doe_Book_2025_01_Alpha.pdf: heading 'Chapter 1 Alpha' not "
@@ -6194,7 +6196,7 @@ def _selftest():
     _txt = [_norm(_p) for _p in ("x", "Chapter 1 Alpha " + "body " * 60,
                                  "mapped page", "Chapter 1 Alpha " + "body " * 60,
                                  "more")]
-    _plan, _probs, _ = _resolve(_ch, _txt, 5, "/tmp/x", {}, "Doe_Book_2025")
+    _plan, _probs, _ = _resolve(_ch, _txt, 5, _absent_dir, {}, "Doe_Book_2025")
     check("a heading equally near on both sides is refused, not guessed",
           any("equally near" in _p for _p in _probs), True)
     _ch = [{"heading_text": "Chapter 1 Alpha",
@@ -6203,14 +6205,14 @@ def _selftest():
             "filename": "Doe_Book_2025_02_Beta.pdf", "start_idx": 3, "end_idx": 5}]
     _txt = [_norm(_p) for _p in ("Chapter 1 Alpha body", "alpha", "interlude",
                                  "Chapter 2 Beta body", "beta")]
-    _plan, _probs, _notes = _resolve(_ch, _txt, 5, "/tmp/x", {}, "Doe_Book_2025")
+    _plan, _probs, _notes = _resolve(_ch, _txt, 5, _absent_dir, {}, "Doe_Book_2025")
     check("pages between chapters that no chapter covers are reported",
           (_probs, _notes),
           ([], ["page 3, between Doe_Book_2025_01_Alpha.pdf and "
                 "Doe_Book_2025_02_Beta.pdf, belongs to no chapter"]))
     # Pages after the last chapter are reported too, so a short final end
     # cannot silently truncate that chapter.
-    _plan, _probs, _notes = _resolve(_ch[:1], _txt[:3], 3, "/tmp/x", {},
+    _plan, _probs, _notes = _resolve(_ch[:1], _txt[:3], 3, _absent_dir, {},
                                      "Doe_Book_2025")
     check("pages after the last chapter that no chapter covers are reported",
           (_probs, _notes),
@@ -6803,7 +6805,7 @@ def _selftest():
          "start_idx": False, "end_idx": 1},
     ]
     _bad_plan, _bad_problems, _bad_notes = _resolve(
-        _bad_chapters, ["chapter 1"], 1, "/tmp/unused", {}, "Kuhn_S_2012")
+        _bad_chapters, ["chapter 1"], 1, _absent_dir, {}, "Kuhn_S_2012")
     check("malformed chapter objects and boolean indices are refused cleanly",
           (bool(_bad_plan), len(_bad_problems), bool(_bad_notes)),
           (False, 4, False))

@@ -1674,7 +1674,7 @@ handoff below.
   an existing entry, in an entry this run didn't write, is not its to wrap.
   The one exception is wiki-build's
   [ownership handoff](../skills/wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors): when an entry
-  this run writes becomes the owner of an explanation a neighbor duplicates,
+  this run writes becomes the owner of an explanation or exhibit a neighbor duplicates,
   the run trims the neighbor's copy to its consequence in one clause linked to
   the owner and publishes that
   neighbor with its own entries.

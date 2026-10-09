@@ -127,8 +127,9 @@ creation, and it is limited to a concept the wiki already relies on.
   conflicting user-owned metadata from an entry that may be removed rather
   than silently selecting a value.
 - A consolidation keeps the full treatment of an explanation, argument,
-  worked example or property with its justification duplicated across
-  entries in its owner: the most specific entry whose subject it is about. A
+  worked example, property with its justification, or exhibit duplicated
+  across entries or held outside its owner, in that owner: the most specific
+  entry whose subject it is about. A
   property every member of a family shares belongs to the family's entry
   (weight penalties' scale sensitivity to Regularization, not Ridge
   regression), and an argument about how a metric behaves belongs to that
@@ -140,14 +141,17 @@ creation, and it is limited to a concept the wiki already relies on.
   already holding the fullest version, then the alphabetically first slug.
   If the owner already explains it, trim each other copy to its consequence
   for that entry in one clause, linked to the owner; the clause drops the
-  owner's reasoning (no because- or since-clause restating it) and keeps a
-  source verdict only in the owner, but never drops a fact that entry's core
+  owner's reasoning (keeping only the one-clause reason or key value the
+  [atomicity test](../../wiki-build/references/writing.md#body-structure)
+  allows) and keeps a source verdict only in the owner, but never drops a fact that entry's core
   facets need. Otherwise move the fullest version into the owner, verified
   against the owner's cited sources or accurate background and carrying each
   source-specific claim's existing citation (adding that source to the
   owner's `sources:` when it cites no form of that document), then trim the
-  others. A trimmed copy may lose links that served only the removed passage. A worked example lives in
-  one entry; the others state its consequence and link the owner. Resolve a
+  others. A trimmed copy may lose links that served only the removed passage. A worked example or
+  exhibit lives in one entry; the others state its consequence and link the
+  owner, and an exhibit moves with its caption and carries its source
+  citation. Resolve a
   conflicting claim in the passage before consolidating it; while it stays
   unresolved, leave every copy unchanged and keep the conflict open, and never
   trim a copy that disagrees with the owner's. The owner and each trimmed
@@ -392,9 +396,10 @@ evidence.
    `lint_entry.py` finding as wiki-build's
    [step 7](../../wiki-build/SKILL.md#7-review-and-report) does.
 4. Publish it with `publish_files.py` ([publishing](../SKILL.md#publishing)),
-   which creates the file exclusively. Then trim each using entry's inline
-   re-definition of the term to its role there plus a link to the new entry,
-   as a consolidation trim under [Dates](../SKILL.md#dates). Task 1b hands
+   which creates the file exclusively. Then
+   [consolidate](#build-the-refactored-entries) into the new entry every
+   explanation, example and exhibit the using entries hold about its subject,
+   under [Dates](../SKILL.md#dates). Task 1b hands
    Task 2 the mentions it counted for the three-use test as the new entry's
    link worklist; Task 2 judges each under the closeness bar and links the
    using entry's first eligible body-prose occurrence under the

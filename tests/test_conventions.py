@@ -6495,7 +6495,10 @@ SELFTEST_MIN_CASES = {
     # 2026-10-08 (knowledge 1.25.0): item9/list-mismatch-candidate, and
     # item9/register-candidate in the description, the kept cue and the
     # body, at their prose lines.
-    "skills/wiki-lint/scripts/scan_vault.py": 752,
+    # 2026-10-09 (knowledge 1.26.0): the `neighbors` map, the review-only
+    # `overlap_candidates` list and item12/duplicate-embed-candidate; the
+    # overlap list reads each list item as its own sentence.
+    "skills/wiki-lint/scripts/scan_vault.py": 764,
 }
 
 
@@ -8179,9 +8182,9 @@ def check_linter_finding_routes(rep, _conv):
     finding-to-action rules -- routes every item key.  A mention in another
     reference (flashcards.md calling a key a review candidate, say) is not a
     routed action, so it does not stand in for the qc-items.md row.  The
-    worklists keep their owners: qc-items.md for `card_rivals`, hierarchy.md
-    for Task 3's `unlinked_children`, link-hygiene.md for Task 2's
-    `hub_footer`.
+    worklists keep their owners: qc-items.md for `card_rivals`, `neighbors`
+    and `overlap_candidates`, hierarchy.md for Task 3's `unlinked_children`,
+    link-hygiene.md for Task 2's `hub_footer`.
     """
     check = "linter-finding-routes"
     refs = os.path.join(SKILLS_DIR, "wiki-lint", "references")
@@ -8222,7 +8225,10 @@ def check_linter_finding_routes(rep, _conv):
     pins += [("actions", key) for key in sorted(item_keys)]
     pins += [("scanner", key) for key in top_keys + hierarchy_keys]
     pins += [("actions", "card_rivals"), ("hierarchy", "unlinked_children"),
-             ("links", "hub_footer")]
+             ("links", "hub_footer"),
+             # 2026-10-09 (knowledge 1.26.0): item 9's neighbor and overlap
+             # reading lists.
+             ("actions", "neighbors"), ("actions", "overlap_candidates")]
     found = 0
     for home, key in pins:
         if _phrase_re("`%s`" % key).search(texts[home]):
@@ -9315,7 +9321,6 @@ WRITING_RULE_PINS = (
     # sentence of intuition; examples, openers, lists, sentences, core facets
     # and background each gain a checkable test.
     (("wiki-build", "references", "writing.md"), (
-        "with the one-clause reason or key value a reader needs to use it",
         "nor display its formula unless this entry's own prediction, "
         "objective or defining relation is built from it",
         "a family entry gives each member one role clause and a link",
@@ -9399,13 +9404,91 @@ WRITING_RULE_PINS = (
     (("wiki-build", "references", "review.md"), (
         "or a neighbor's formula that this entry's own prediction, objective "
         "or defining relation is built from",
-        "with the one-clause reason or key value the "
-        "[atomicity test](writing.md#body-structure) keeps",
+        # 2026-10-09 (knowledge 1.26.0): the handoff keeps only a clause the
+        # atomicity test allows, not always one.
+        "with any one-clause reason or key value the "
+        "[atomicity test](writing.md#body-structure) allows",
     )),
     (("wiki-build", "references", "quality-checklist.md"), (
         "(scope check, hedge sweep, contradiction check)",
         "each list passing the [list tests](writing.md#body-structure)",
         "never restating the sentence they follow",
+    )),
+    # 2026-10-09 (knowledge 1.26.0): the second editorial audit's builder
+    # rules. A linked entry's consequence gets at most one shortest clause of
+    # reason or key value, only against an open question; a reciprocal
+    # contrast is one clause, returned by a mutual-nearest sibling; a removal
+    # or move gets a whole-note reread against the pre-edit text, which
+    # wiki-lint's Task 1b runs once per changed entry; a name is the owner's
+    # or the field's, and a unit the owner's; a passage about a linked entry's
+    # subject goes down to what the atomicity test keeps, or moves to a clear
+    # owner that lacks it (wiki-build only into its own entries); a claim
+    # never recurs, even within a sentence; a link must deliver its point and
+    # a mention in another form links where the label rules allow; a scoped
+    # figure never carries an alternative's cost; an example uses only
+    # explained steps; a qualitative property stays prose;
+    # the opener carries the property the card defines by; a figure has one
+    # home; a card separates rivals by a property of the opener's sense,
+    # never a meta-label, and a family's cue stays plain.
+    (("wiki-build", "references", "writing.md"), (
+        "Add at most one clause of reason or key value, and only when the "
+        "consequence would otherwise leave an open question here",
+        "That clause takes the shortest form",
+        "The owner keeps its derivation, conditions, full rule and supporting "
+        "argument",
+        "any one-clause reciprocal contrast",
+        "when the sibling's own nearest contrast is this entry, the sibling "
+        "returns it in one clause with a link",
+        "which wiki-lint adds when wiki-build may not edit that sibling",
+        "An example uses only steps the note or a linked entry explains; "
+        "when it needs another, choose a simpler case rather than teach the "
+        "step",
+        "After a removal or move, reread the whole note against its pre-edit "
+        "text",
+        "wiki-lint's Task 1b does this once per changed entry",
+        "Nothing may point at a deleted passage",
+        "a moved passage leaves both places in order",
+        "name, relationship, direction, number, unit, count, scope or "
+        "preference",
+        "takes a name its owner entry or the field uses (intercept, not "
+        "height), and a value its owner's unit",
+        "passes [principle 9](#prose-principles)'s reading-speed test",
+        "A passage whose subject is a linked entry's",
+        "leaving only what the [atomicity test](#body-structure) keeps here",
+        "When that entry clearly owns it and lacks it, the passage moves there",
+        "wiki-build moves it only into this run's entries and otherwise logs a",
+        "No claim recurs, within a sentence or across sentences and "
+        "paragraphs",
+        "linked to an entry that states it (open the target when the "
+        "sentence leaves the reason to the link)",
+        "one that clears the bar links its first later claimed form, or is "
+        "reworded under the",
+        "never with an alternative implementation's cost",
+        "the property or benefit the description and card define the subject "
+        "by appears in the opening paragraph",
+    )),
+    (("wiki-build", "references", "equations.md"), (
+        "A qualitative property the opener states completely in words",
+        "state it in the display's explanation in one sentence",
+    )),
+    (("wiki-build", "references", "media.md"), (
+        "A figure is embedded in one entry",
+        "the other entry's embed is a duplicate",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "a one-clause reciprocal contrast can belong in both entries",
+        "owns an explanation or exhibit",
+        "mechanism walkthrough, exhibit or multi-sentence explanation",
+    )),
+    (("wiki-build", "references", "flashcards-and-emphasis.md"), (
+        "Separate a rival by an essential property true of the sense the "
+        "opener defines, never by a meta-label",
+        "A family's cue stays its plain definition and need not exclude its "
+        "members",
+    )),
+    (("wiki-build", "references", "quality-checklist.md"), (
+        "claims, names and units agree",
+        "embedded in one entry",
     )),
     # 2026-10-07 (knowledge 1.23.0): a display inside a list item is
     # indented to the item's text column and explained inside the item, and
@@ -9534,8 +9617,9 @@ WRITING_RULE_PINS = (
         # from the card; one whose verb states the defining action stays.
         "self-check and card line 1 names a kind the body supports, Task 1 "
         "rewrites the opener's predicate",
-        "hedge sweep, flow sweep, term audit and opener check of the "
-        "builder's",
+        # 2026-10-09 (knowledge 1.26.0): the detection pass runs every sweep,
+        # principle 9's reading-speed test included.
+        "Run every sweep of the builder's",
         "Task 1b states the general fact from standard references, or "
         "restores that scope",
         "a loop's Repeat target and starting step, a lead-in's step count, "
@@ -9552,8 +9636,10 @@ WRITING_RULE_PINS = (
         "listing the facets from a standard introductory reference before "
         "reading the body",
         "including terms in added background or corrections",
-        "A consequence carried from a linked entry without its reason or key "
-        "value is an open question",
+        # 2026-10-09 (knowledge 1.26.0): only a consequence that would
+        # otherwise leave an open question gets its one clause.
+        "A consequence carried from a linked entry gets its reason or key "
+        "value only when it would otherwise leave an open question",
         "source support alone never keeps that material",
         "unless it would only restate the definition with a number",
         "A definite noun phrase whose referent only the source's running "
@@ -9567,8 +9653,81 @@ WRITING_RULE_PINS = (
         "its flow sweep included",
         "a derivation or complexity analysis replaced by its one-sentence "
         "intuition or takeaway",
-        "or the one-clause reason or key value of a consequence carried from "
-        "a linked entry, is none of these",
+        # 2026-10-09 (knowledge 1.26.0): only the clause the atomicity test
+        # allows is protected from deletion.
+        "or the one-clause reason or key value the atomicity test allows a "
+        "consequence carried from a linked entry, is none of these",
+    )),
+    # 2026-10-09 (knowledge 1.26.0): the second editorial audit's lint rules.
+    # A whole-wiki run reads each family under a non-root parent together
+    # with the cross-family overlap pairs, its contradiction check included;
+    # a copy beyond the atomicity test's one clause is a duplicate, content
+    # moves only to the owner that test clearly names (the family's entry for
+    # a shared property), and a core facet one sibling lacks goes to the
+    # depth review; a narrowed run uses `neighbors`. A linked entry's fact
+    # that would leave an open question gets the one clause the atomicity
+    # test allows, after opening the owner, and consolidation trims the rest.
+    # An exhibit and a misplaced passage consolidate like a duplicate. A
+    # repair rereads its passage and its one-hop neighbors, and every changed
+    # entry gets one final reread against its pre-edit copy before the
+    # refresh that finds the run's own duplicate sentences. A unit follows the
+    # owner, and a name the owner or the field. A family's card need not
+    # exclude its members. Task 1b's term audit feeds Task 2's link worklist.
+    (("wiki-lint", "references", "qc-items.md"), (
+        "In a whole-wiki run, Task 1 reviews entries family by family",
+        "a parent other than a discipline root, with its direct children",
+        "cross-family pairs that `item9/duplicate-sentence` rows and "
+        "`overlap_candidates` name",
+        "that the family states twice beyond the one clause",
+        "one sibling states and another lacks goes to the depth review",
+        "Content moves only when that test clearly names another owner (a "
+        "more specific entry, or the family's for a shared property); "
+        "otherwise the entry holding it keeps it",
+        "A narrowed run compares each in-scope entry with its `neighbors` "
+        "instead",
+        "its contradiction check reading the entries the coherence review "
+        "names",
+        "A statement about this entry's own subject that the entry leaves "
+        "unexplained",
+        "a linked entry's fact used here follows [item 14]",
+        "Task 1b opens the owner and adds the one clause the",
+        "consolidation keeps that clause and trims anything beyond it",
+        "figure description or exhibit duplicated across entries or held "
+        "outside its owner",
+        "rewrites a caption that restates the sentence it follows",
+        "however often it returns",
+    )),
+    (("wiki-lint", "references", "refactors.md"), (
+        "keeping only the one-clause reason or key value the",
+        "an exhibit moves with its caption and carries its source citation",
+        "every explanation, example and exhibit the using entries hold about "
+        "its subject",
+    )),
+    (("wiki-lint", "references", "source-backed-corrections.md"), (
+        "to the changed passage, and to each of the entry's",
+        "that uses the term, sense, argument or exhibit the repair changed "
+        "(one hop)",
+        "write or name the same quantity differently, or state its value in "
+        "another unit, the owner entry's unit wins, and its name replaces "
+        "one the field does not use",
+    )),
+    (("wiki-lint", "references", "link-hygiene.md"), (
+        "adds to it each first mention of an entry's concept that no claimed "
+        "surface names",
+    )),
+    (("wiki-lint", "references", "flashcards.md"), (
+        "A yes is an ambiguity defect, except for a family entry's own "
+        "members",
+    )),
+    (("wiki-lint", "SKILL.md"), (
+        "The run keeps a private copy of each entry under `<scratch>` before "
+        "its first edit",
+        "once on the whole of every entry the run changed, against that copy",
+        "a fix this final reread makes gets only its passage reread",
+        "row absent from Step 0's scan is this run's own copy",
+        "Once Task 1b's repairs are done, it runs the builder's",
+        "when that changes an entry, re-runs Step 0 once more",
+        "property with its justification, or exhibit into its owner",
     )),
     # 2026-10-07 (knowledge 1.23.0): item 9 judges each passage's form by
     # its shape; Task 1 turns an explicit procedure or the stages of one
@@ -9701,6 +9860,20 @@ WRITING_RULE_PINS = (
         "in the body, *classic* before *example* or *case* names the "
         "standard case",
     )),
+    # 2026-10-09 (knowledge 1.26.0): the scanner's review-only cross-entry
+    # inputs: a neighbor map with same-page citers, a fuzzy overlap list over
+    # every entry pair, each list item read as its own sentence, and one
+    # image file embedded in several entries.
+    (("wiki-lint", "references", "scanner.md"), (
+        "the entries citing one of its source pages (the same PDF page or "
+        "URL)",
+        "Every entry pair is compared",
+        "with each list item as its own sentence",
+        "an exact `item9/duplicate-sentence` pair is not repeated",
+        "never a finding or an order",
+        "the fuzzy [`overlap_candidates`](#output-contract) list covers them",
+        "a family-level exhibit can belong to the family's entry",
+    )),
     (("wiki-build", "references", "review.md"), (
         "keeping a lead-in count of something other than the list's items "
         "(`9-list-mismatch-candidate`)",
@@ -9794,6 +9967,38 @@ WRITING_RULE_RETIRED = (
     # 2026-10-08 (knowledge 1.25.0): a closing limitation or comparison is
     # the note's ending, not a stray to move or cut.
     "application, limitation, comparison or API family",
+    # 2026-10-09 (knowledge 1.26.0): lint runs every reread sweep; a linked
+    # entry's one clause is bounded by the atomicity test, not shielded from
+    # consolidation; the final reread replaces the per-removal whole-note
+    # reread; a repair rereads its `neighbors`; a new entry takes over the
+    # explanations its users hold; names and units follow their owner.
+    "hedge sweep, flow sweep, term audit and opener check",
+    "is never consolidated away",
+    "no because- or since-clause restating it",
+    "After any removal, including item 12's boilerplate removals",
+    "each linked neighbor that states the same relationship",
+    "inline re-definition of the term to its role there",
+    "When sibling entries write the same quantity differently",
+    # 2026-10-09 (knowledge 1.26.0): paraphrased copies come from the
+    # scanner's `overlap_candidates`, not a per-entry neighbor comparison.
+    "Paraphrased duplicates stay invisible to it",
+    # 2026-10-09 (knowledge 1.26.0): a linked consequence's clause is bounded
+    # and only answers an open question; a reciprocal contrast is one
+    # clause; convexity's chord inequality is no kept display condition; a
+    # claim never recurs within a sentence either; the opener carries the
+    # property the card defines by.
+    "key value a reader needs to use it",
+    "concise reciprocal contrast",
+    "brief reciprocal contrast",
+    "in the convexity inequality",
+    "No claim recurs in another sentence or paragraph",
+    "lead with appears in the first two paragraphs",
+    # 2026-10-09 (knowledge 1.26.0): a linked consequence gets its one clause
+    # only against an open question, and only the clause the atomicity test
+    # allows is kept or protected.
+    "without its reason or key value is an open question",
+    "key value of a consequence carried from a linked entry",
+    "one-clause reason or key value the [atomicity test](writing.md#body-structure) keeps",
 )
 
 

@@ -69,6 +69,7 @@ ownership.
 | `item12/equation-format` | Preserve the existing equation and put each `$$` alone on its line with a blank line above and below. Wrap rows that use `&` or `\\` outside an environment in `\begin{aligned}...\end{aligned}`, or `gathered` when nothing aligns. Keep the math unchanged and do not add a duplicate display. |
 | `item12/equation-split-candidate` | When the flagged line really holds two equations, give each its own line under the [equation guide](../../wiki-build/references/equations.md#2-form--defining-equations-are-display-math): a separate display beside the prose that introduces it, or a row of an `aligned` or `gathered` display. Keep the math unchanged; this formatting repair changes no dates or review state. |
 | `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math, or replace it with its verbal core, only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
+| `item12/duplicate-embed-candidate` | Task 1b consolidates the embeds under [item 9](#9-body-structure-coherence-flow-and-scope) into the entry [media selection](../../wiki-build/references/media.md#selection) makes the figure's owner. The candidate alone is never an order. |
 | `item12/panel-composite`, `item12/remote-image`, `item12/missing-image`, `item12/image-outside-folder` | Report only: [item 12](#12-equations-images-and-tables). |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
 | `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
@@ -79,6 +80,8 @@ ownership.
 | `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
+| `neighbors` | Input to item 9's per-entry [coherence review](#9-body-structure-coherence-flow-and-scope) in a narrowed run and to a repair's one-hop [neighbor reread](source-backed-corrections.md#correct-and-publish); it authorizes no edit. |
+| `overlap_candidates` | A review-only reading list for item 9's family pass. Task 1b consolidates a real duplicate under item 9; a pair that keeps only the one clause the [atomicity test](../../wiki-build/references/writing.md#body-structure) allows stays as written, however often it returns. The list is never an order. |
 | `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. A `new_slug` that differs from the filename only in case or Unicode normalization names the entry's own file, which the protocol respells. An occupied destination is never retitled into: a same-entity occupant goes to Task 1b's [merge check](#5-filename-collision-and-disambiguation), and any other stays a disambiguation report with its collision warning. |
 | `collision_candidates` | Task 1b's [merge check](#5-filename-collision-and-disambiguation): merge the pair through the [refactor protocol](refactors.md) only when it is one entity under alternate names; a probe match alone never activates a merge. |
 | `hierarchy_diagnostic` (every field) | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. Actions are in [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion). |
@@ -316,15 +319,25 @@ Apply builder [item 9](../../wiki-build/references/quality-checklist.md), the
 There is no body sentence, paragraph, word, or heading-count target.
 
 **Coherence review.** Compare the title and qualifier with the description,
-opener, equations, flashcard, and the neighbors the builder's
-[overlap audit](../../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
-names: body and Related link targets, backlinkers, entries citing the same
-source, and family members. They must identify the same
+opener, equations, flashcard and neighbors. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
-notation. Run the builder's
+notation. In a whole-wiki run, Task 1 reviews entries family by family (a
+parent other than a discipline root, with its direct children; an entry
+whose only parent is a root is a family of one). It reads each family together, with
+the cross-family pairs that `item9/duplicate-sentence` rows and
+`overlap_candidates` name, and lists every explanation, example, exhibit,
+contrast, claim or name that the family states twice beyond the one clause
+the [atomicity test](../../wiki-build/references/writing.md#body-structure)
+allows, states differently, or holds outside the entry that test makes its
+owner. Each becomes a Task 1b coordinated repair. Content moves only when
+that test clearly names another owner (a more specific entry, or the
+family's for a shared property); otherwise the entry holding it keeps it. A
+[core facet](../../wiki-build/references/writing.md#prose-principles) one
+sibling states and another lacks goes to the depth review below. A narrowed
+run compares each in-scope entry with its `neighbors` instead. Run the builder's
 [contradiction check](../../wiki-build/references/writing.md#editorial-reread)
-on each body claim, against every other claim in the note and these
-neighbors' statements. When the opener fails
+on each body claim, against every other claim in the note and the statements
+of the entries read with it. When the opener fails
 [principle 1](../../wiki-build/references/writing.md#prose-principles)'s
 self-check and card line 1 names a kind the body supports, Task 1 rewrites the
 opener's predicate from the card's claim. A disagreement, card against body included, or any other conflict that
@@ -372,10 +385,11 @@ close call stays unapplied under
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
 to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
-Judge a concrete defect, not a preference for different wording. Run the
-hedge sweep, flow sweep, term audit and opener check of the builder's
+Judge a concrete defect, not a preference for different wording. Run every
+sweep of the builder's
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread)
-as the detection pass on every in-scope entry. A multi-job paragraph or a
+as the detection pass on every in-scope entry, its contradiction check
+reading the entries the coherence review names. A multi-job paragraph or a
 tacked-on ending the flow sweep finds is a concrete defect:
 Task 1 splits it, or moves the sentence between adjacent paragraphs under one
 heading; Task 1b moves it further, or cuts it under principle 6 or 7 after
@@ -392,18 +406,19 @@ scaffolding and application catalogs that do not serve the entry, after
 checking the cited source. It consolidates into its owner, under the
 [consolidation rule](refactors.md#build-the-refactored-entries), a
 definition, explanation, argument, worked example, property with its
-justification, discovery history or figure description duplicated across
-entries, and a neighbor's formula that this entry's own prediction, objective
+justification, discovery history, figure description or exhibit duplicated
+across entries or held outside its owner, and a neighbor's formula that this entry's own prediction, objective
 or defining relation is not built from
 ([atomicity test](../../wiki-build/references/writing.md#body-structure)).
 The one-clause reason or key value [item 14](#14-self-containment) keeps is
 no duplicate. Every such trim follows [Dates](../SKILL.md#dates).
 
-A statement the entry leaves unexplained, such as an equation without its
-meaning, a complexity without its reason, a derivation step, a result, or a
-claim that something suits, is preferred for, helps, works better or matters,
-gets its reason in Task 1b, in one sentence from the cited source or accurate
-background. Task 1b likewise replaces a derivation longer than
+A statement about this entry's own subject that the entry leaves
+unexplained, such as an equation without its meaning, a complexity without
+its reason, a derivation step, a result, or a claim that something suits, is
+preferred for, helps, works better or matters, gets its reason in Task 1b, in
+one sentence from the cited source or accurate background; a linked entry's
+fact used here follows [item 14](#14-self-containment). Task 1b likewise replaces a derivation longer than
 [equations §3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
 allows, or a multi-step complexity analysis, with its one-sentence intuition,
 or, when none exists, with the takeaway alone, omitting the bound
@@ -499,10 +514,7 @@ Nor may an edit add a caveat, exception, or clarification the explanation
 does not need. Keep existing link tokens, citations, math spans and numerical values,
 image/table-plus-caption units, the complete flashcard section, and frontmatter
 verbatim during a Task 1 item 9 edit. Do not drop a link or a qualifier when removing
-repetition. After any removal, including item 12's boilerplate removals,
-re-read the whole note and repair what it left behind: a connective or
-referent that now points at nothing ("still", "this"), or a claim now stated
-twice. Descriptions follow item 7; links, equations, exhibits, and cards
+repetition. Descriptions follow item 7; links, equations, exhibits, and cards
 may change only under their own authorized checks, recorded separately.
 Task 1's editorial changes never advance dates or reset review state; Task 1b's
 changes follow [Dates](../SKILL.md#dates).
@@ -576,7 +588,9 @@ caption markup. Keep exhibits beside the prose they clarify, never before the
 opener, detached at the end, or grouped as a gallery; one motivating paragraph
 supports at most one image or table. A clear local placement or format repair
 is allowed. Task 1b corrects caption content against the cited figure or page,
-whose numbers a caption matches exactly; a caption drops a hedge principle 3
+whose numbers a caption matches exactly, and rewrites a caption that restates
+the sentence it follows ([captions](../../wiki-build/references/media.md#captions));
+a caption drops a hedge principle 3
 excludes even when the source's own caption carries it. An ambiguous placement
 is reported.
 
@@ -675,10 +689,11 @@ cited source or accurate background:
   whose referent only the source's running example supplies ("the
   districts") follows 5(d): the example is introduced briefly inline, or it
   goes.
-- A consequence carried from a linked entry without its reason or key value
-  is an open question: Task 1b adds the one clause, which is not a
-  re-explanation and is never consolidated away
-  ([link, don't re-explain](../../wiki-build/references/writing.md#body-structure)).
+- A consequence carried from a linked entry gets its reason or key value
+  only when it would otherwise leave an open question: Task 1b opens the
+  owner and adds the one clause the
+  [atomicity test](../../wiki-build/references/writing.md#body-structure)
+  allows; consolidation keeps that clause and trims anything beyond it.
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.

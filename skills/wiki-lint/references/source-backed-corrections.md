@@ -99,8 +99,11 @@ because the cited source does not state it. In each entry, change only the
 surfaces needed to keep it coherent: for example its description, opener,
 equation, or primary card. Then apply the builder's
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread),
-its flow sweep included, to the whole note, and to each linked
-neighbor that states the same relationship. Merge a claim now stated twice.
+its flow sweep included, to the changed passage, and to each of the entry's
+[`neighbors`](scanner.md#output-contract) that uses the term, sense,
+argument or exhibit the repair changed (one hop); the whole entry gets
+Task 1b's [final reread](../SKILL.md#task-1b--content-repair). Merge a claim
+now stated twice.
 Keep each fact before its first use. Reread the passage after each inserted
 paragraph or display so its opening still follows. Make every sentence about
 the quantity the repair changed agree, stated in one unit. Restore teaching
@@ -118,7 +121,8 @@ with its notation-only prose, a derivation or complexity analysis replaced by
 its one-sentence intuition or takeaway, or a removal one of the entry's
 [user issues](../SKILL.md#user-issues) asks for. A sentence giving the reason
 for a constant or factor in a display that stays, or the one-clause reason or
-key value of a consequence carried from a linked entry, is none of these.
+key value the atomicity test allows a consequence carried from a linked
+entry, is none of these.
 Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments; `issues:`
 changes only under [User issues](../SKILL.md#user-issues).
@@ -154,15 +158,18 @@ and never invent a reason. Recollection alone never settles a conflict. One
 stays an open note-content item only when the references consulted disagree
 or none is reachable; the item names them.
 
-**Notation.** When sibling entries write the same quantity differently, the
-builder's [notation table](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
+**Notation.** When sibling entries write or name the same quantity
+differently, or state its value in another unit, the owner entry's unit
+wins, and its name replaces one the field does not use. For a symbol, the
+builder's
+[notation table](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
 wins; outside the table, the field's standard symbol wins, then the notation
 of the most-linked entry. Statistics-tagged entries write a sample's or
 dataset's size as $n$
 ([equations §4](../../wiki-build/references/equations.md#4-normalization--the-sources-symbols-do-not-survive-contact)),
 so a statistics entry and a machine-learning entry are not siblings for this
 rule. Normalize the minority entries and every prose reference to the renamed
-symbol. Report a choice only when none of these rules decides it.
+symbol or name. Report a choice only when none of these rules decides it.
 
 Dates and review state follow [Dates](../SKILL.md#dates); report each
 `read:` decision and every close no-reset call.
