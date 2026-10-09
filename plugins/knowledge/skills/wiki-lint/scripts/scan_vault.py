@@ -6,8 +6,9 @@ vault_index.py) and emits a single JSON object: the vault inventory, the
 deterministic QC violations ("problems"), and the worklists the executing agent must
 judge — the user's flagged issues (`user_issues`, the run's first worklist),
 collision candidates (item-5 probes), rename candidates, backfill
-candidates and hub footer items (Task 2), and card rivals (item 19) — plus the
-Task 3 hierarchy diagnostic. Outside `Wiki/` it reads the MOCs, for the
+candidates and hub footer items (Task 2), card rivals (item 19), and
+neighbors and overlap candidates (item 9) — plus the Task 3 hierarchy
+diagnostic. Outside `Wiki/` it reads the MOCs, for the
 advisory `spaced_repetition` report the Spaced Repetition plugin's settings
 file, and with `--settled` wiki-lint's settled-decisions ledger; it never
 writes any of them.
@@ -42,6 +43,7 @@ import bisect
 import datetime
 import hashlib
 import json
+import math
 import os
 import posixpath
 import re
@@ -2131,7 +2133,12 @@ _DUPLICATE_INLINE_MATH_RE = re.compile(
 #: may legally span a line break, but honouring that lets one stray backtick
 #: swallow the rest of an entry.
 _INLINE_CODE = re.compile(r"(`+)[^\n]*?\1(?!`)")
-def duplicate_sentence_surfaces(prose, table_spans=()):
+#: A list item's marker, and the plain word that stands in for it when
+#: duplicate_sentence_surfaces starts a sentence at each list item.
+_DUPLICATE_LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+")
+_DUPLICATE_LIST_BREAK = "duplistitembreak"
+def duplicate_sentence_surfaces(prose, table_spans=(), min_chars=80,
+                                min_words=12, split_list_items=False):
     """Return long normalized prose sentences eligible for ownership review.
 
     Exact copied prose is a useful cross-entry signal only after presentation
@@ -2139,7 +2146,10 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
     assertions to deduplicate, so they are blanked. Wikilinks normalize to
     their rendered label, making a linked and an unlinked copy comparable.
     Short sentences stay out: ordinary connective or definitional phrases are
-    expected to recur and offer no ownership evidence.
+    expected to recur and offer no ownership evidence. `overlap_candidates`
+    lowers the floor and applies its own content-word minimum instead; with
+    ``split_list_items`` each list item also starts a sentence without its
+    marker, so a lead-in and its first item are never one sentence.
     """
     visible = strip_indented(strip_fenced(prose or ""))
     visible = _DUPLICATE_DISPLAY_RE.sub(
@@ -2155,6 +2165,9 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
                 or re.match(r"^!\[[^\]]*\]\([^)]*\)$", stripped)
                 or re.match(r"^\*(?!\*)\S(?:.*\S)?\*$", stripped)):
             kept_lines.append("")
+        elif split_list_items:
+            kept_lines.append(_DUPLICATE_LIST_ITEM_RE.sub(
+                " %s " % _DUPLICATE_LIST_BREAK, line, count=1))
         else:
             kept_lines.append(line)
     visible = "\n".join(kept_lines)
@@ -2204,9 +2217,12 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
     visible = _DUPLICATE_MARKDOWN_LINK_RE.sub(r"\1", visible)
     visible = re.sub(r"[*_~]+", "", visible)
     compact = " ".join(visible.split())
+    blocks = (compact.split(_DUPLICATE_LIST_BREAK) if split_list_items
+              else [compact])
 
     out = []
-    for sentence in split_sentences(compact):
+    for sentence in (sentence for block in blocks
+                     for sentence in split_sentences(block)):
         comparison = sentence.strip()
         surface = comparison
         for token, comparison_payload, evidence_payload in payloads:
@@ -2215,7 +2231,7 @@ def duplicate_sentence_surfaces(prose, table_spans=()):
         normalized = unicodedata.normalize("NFKC", comparison).casefold()
         normalized = re.sub(r"[^\w]+", " ", normalized)
         normalized = " ".join(normalized.split())
-        if len(normalized) < 80 or len(normalized.split()) < 12:
+        if len(normalized) < min_chars or len(normalized.split()) < min_words:
             continue
         out.append((normalized, surface))
     return out
@@ -2245,6 +2261,168 @@ def build_card_rivals(cues, parent_slugs, related_slugs, root_slugs):
         if rivals:
             rows.append({"slug": slug_value, "cue": cues[slug_value],
                          "rivals": rivals})
+    return rows
+
+
+def source_page_key(value):
+    """The page a ``sources:`` item cites: its folded filename with any
+    ``#page=N`` anchor, or the URL itself. Two entries citing one chapter
+    PDF share a key only when they cite the same page."""
+    text = (value or "").strip()
+    if text.startswith("[[") and text.endswith("]]"):
+        name, _sep, anchor = text[2:-2].split("|", 1)[0].partition("#")
+        name = name.replace("\\", "/").rsplit("/", 1)[-1].strip()
+        return fold_name(name) + ("#" + anchor.strip() if anchor.strip() else "")
+    return text
+
+
+def build_neighbors(linked, parent_slugs, root_slugs, page_keys):
+    """The per-entry `neighbors` map, input to item 9's narrowed-run
+    comparison and a repair's neighbor reread.
+
+    ``linked`` maps each slug to the entries its body or Related footer
+    links, ``parent_slugs`` to its resolved parents and ``page_keys`` to its
+    `source_page_key` values. Each entry gets its sorted ``links``,
+    ``backlinks``, ``siblings`` (entries sharing a parent other than a
+    discipline root) and ``same_source`` (entries citing one of its source
+    pages); an empty relation is left out. Read-only; authorizes no edit.
+    """
+    slugs = sorted(set(linked) | set(parent_slugs) | set(page_keys))
+    backlinks, children, citing = (defaultdict(set) for _ in range(3))
+    for slug_value in slugs:
+        for target in linked.get(slug_value, ()):
+            backlinks[target].add(slug_value)
+        for parent in parent_slugs.get(slug_value, ()):
+            if parent not in root_slugs:
+                children[parent].add(slug_value)
+        for key in page_keys.get(slug_value, ()):
+            citing[key].add(slug_value)
+    out = {}
+    for slug_value in slugs:
+        relations = {
+            "links": set(linked.get(slug_value, ())),
+            "backlinks": backlinks.get(slug_value, set()),
+            "siblings": set().union(*(
+                children.get(parent, set())
+                for parent in parent_slugs.get(slug_value, ()))),
+            "same_source": set().union(*(
+                citing[key] for key in page_keys.get(slug_value, ()))),
+        }
+        row = {name: sorted(members - {slug_value})
+               for name, members in relations.items()
+               if members - {slug_value}}
+        if row:
+            out[slug_value] = row
+    return out
+
+
+#: Function words left out of an `overlap_candidates` content-word set;
+#: words shorter than three letters are dropped as well.
+_OVERLAP_STOPWORDS = frozenset("""
+about above after again against all also although among and another any are
+around because been before being below between both but can cannot could did
+does doing done down during each either even every few for from further had
+has have having her here hers him his how however into its itself just less
+like many may might more most much must not now off once one only onto other
+our out over own per same she should since some still such than that the
+their them then there these they this those through thus too two under until
+upon very was way well were what when where whether which while who whom whose
+why will with within without would yet you your
+""".split())
+#: `overlap_candidates` calibration (wiki-lint scanner.md): the Jaccard
+#: similarity of two sentences' content-word sets, and the fewest content
+#: words a sentence needs to take part.  On the 302-entry vault of
+#: 2026-10-09 these list 97 entry pairs, about a third of them real copies
+#: (parallel sibling sentences, such as genome sizes, fill most of the rest),
+#: and reach 17 of the 47 duplicated or misplaced passages a manual audit
+#: verified.  No threshold makes the list mostly real: 0.45 lists 141 pairs
+#: and reaches 21, 0.55 lists 54 and reaches 12.  Eight words loses short
+#: copied facts ("Some viruses carry genomes made of RNA rather than DNA").
+OVERLAP_MIN_SIMILARITY = 0.5
+OVERLAP_MIN_WORDS = 6
+
+
+def overlap_content_words(normalized):
+    """The content-word set of a normalized sentence: letter-only words of
+    three or more letters outside `_OVERLAP_STOPWORDS`, each cut to its first
+    six letters after a plural ``s`` is dropped, so a plural and most
+    inflections compare equal. Inline code and math sentinels never count."""
+    words = set()
+    for token in normalized.split():
+        if (len(token) < 3 or token in _OVERLAP_STOPWORDS
+                or token in ("dupmath", "dupcode")
+                or not re.fullmatch(r"[^\W\d_]+", token)):
+            continue
+        if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
+            token = token[:-1]
+        words.add(token[:6])
+    return frozenset(words)
+
+
+def build_overlap_candidates(sentences, exact_keys=frozenset(),
+                             min_similarity=None, min_words=None):
+    """Review-only fuzzy duplicates: sentence pairs from two entries whose
+    content-word sets reach ``min_similarity`` Jaccard similarity.
+
+    ``sentences`` maps slug -> ``duplicate_sentence_surfaces`` rows taken
+    with no length floor. A sentence with fewer than ``min_words`` content
+    words stays out, and a pair already reported as an exact
+    ``item9/duplicate-sentence`` (its normalized key in ``exact_keys``) is
+    not repeated. Candidates are found with a prefix filter over words
+    ordered rarest first, so all entry pairs are compared without the
+    quadratic cost. Rows group by entry pair, most similar first.
+    """
+    min_similarity = (OVERLAP_MIN_SIMILARITY if min_similarity is None
+                      else min_similarity)
+    min_words = OVERLAP_MIN_WORDS if min_words is None else min_words
+    records = []
+    for slug_value in sorted(sentences):
+        seen = set()
+        for normalized, surface in sentences[slug_value]:
+            words = overlap_content_words(normalized)
+            if len(words) < min_words or (normalized, words) in seen:
+                continue
+            seen.add((normalized, words))
+            records.append((slug_value, normalized, surface, words))
+    frequency = Counter(word for record in records for word in record[3])
+    index = defaultdict(list)
+    matches = defaultdict(list)
+    for i, (slug_value, normalized, surface, words) in enumerate(records):
+        # Two sets with Jaccard similarity >= t share a word among the
+        # first |x| - ceil(t|x|) + 1 words of each, in one global order.
+        ordered = sorted(words, key=lambda word: (frequency[word], word))
+        prefix = len(words) - math.ceil(min_similarity * len(words) - 1e-9) + 1
+        candidates = set()
+        for word in ordered[:prefix]:
+            candidates.update(index[word])
+            index[word].append(i)
+        for j in sorted(candidates):
+            other_slug, other_normalized, other_surface, other_words = records[j]
+            if other_slug == slug_value:
+                continue
+            shared = len(words & other_words)
+            similarity = shared / (len(words) + len(other_words) - shared)
+            if similarity < min_similarity - 1e-9:
+                continue
+            if normalized == other_normalized and normalized in exact_keys:
+                continue
+            first, second = sorted(((slug_value, surface),
+                                    (other_slug, other_surface)))
+            matches[(first[0], second[0])].append(
+                (round(similarity, 2), first[1], second[1]))
+
+    def _snippet(text):
+        return text if len(text) <= 180 else text[:177].rstrip() + "..."
+
+    rows = []
+    for (first, second), found in matches.items():
+        found.sort(key=lambda row: (-row[0], row[1], row[2]))
+        rows.append({
+            "a": first, "b": second, "similarity": found[0][0],
+            "sentences": [{"similarity": score, "a": _snippet(a_text),
+                           "b": _snippet(b_text)}
+                          for score, a_text, b_text in found]})
+    rows.sort(key=lambda row: (-row["similarity"], row["a"], row["b"]))
     return rows
 
 
@@ -5371,6 +5549,36 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "to its consequence in one clause linked to the owner; "
                 "normalized similarity alone never chooses the owner"
                 % (", ".join(_peers), _snippet)))
+    # The fuzzy variant over all entry pairs is a review-only reading list
+    # (`overlap_candidates`), never a `problems` row: a one-clause contrast
+    # kept on purpose would otherwise return every run.
+    overlap_candidates = build_overlap_candidates(
+        {_slug: duplicate_sentence_surfaces(
+            _entry.get("prose", ""), _entry.get("table_spans", ()),
+            min_chars=0, min_words=0, split_list_items=True)
+         for _slug, _entry in entries.items()},
+        {_normalized for _normalized, _owners in sentence_owners.items()
+         if len(_owners) > 1})
+
+    # One image file embedded in several entries is a review-only
+    # ownership candidate: a family-level exhibit may belong to the family.
+    _embedders = defaultdict(dict)
+    for _slug, _entry in sorted(entries.items()):
+        for _destination in local_image_destinations(_entry["body"]):
+            _name = _destination.replace("\\", "/").rsplit("/", 1)[-1].strip()
+            _embedders[fold_name(_name)].setdefault(_slug, _name)
+    for _key, _owners in sorted(_embedders.items()):
+        if len(_owners) < 2:
+            continue
+        for _slug in sorted(_owners):
+            problems.append((
+                _slug, "item12/duplicate-embed-candidate",
+                "image %s is also embedded in %s — review only: a figure "
+                "lives in the one entry it explains most specifically; Task "
+                "1b's consolidation moves it with its caption when another "
+                "entry clearly owns it"
+                % (_owners[_slug], ", ".join(
+                    peer for peer in sorted(_owners) if peer != _slug))))
 
     # ---- discipline-tag census (VALID enum slugs vs off-enum/malformed) ----
     tag_counts = {}                       # VALID discipline slug -> entry count
@@ -5574,6 +5782,17 @@ def scan(wiki, images=None, vault=None, settled=None):
     card_rivals = build_card_rivals(
         _primary_cues, {s: sorted(o) for s, o in _parent_owners.items()},
         {s: sorted(o) for s, o in _footer_owners.items()}, _root_slugs)
+
+    # Item 9's narrowed-run comparison and the Correct-and-publish reread
+    # read each entry's neighbors from here.
+    neighbors = build_neighbors(
+        _linked_owners,
+        {s: {o for o in owners if _unique_slug(o)}
+         for s, owners in _parent_owners.items() if _unique_slug(s)},
+        _root_slugs,
+        {s: {source_page_key(src) for src in e["sources"]
+             if isinstance(src, str) and src.strip()}
+         for s, e in entries.items() if _unique_slug(s)})
 
     # ``moc_consistency_findings`` is a report-only worklist for complete
     # generated MOC documents. Every MOC-local record has
@@ -6069,6 +6288,10 @@ def scan(wiki, images=None, vault=None, settled=None):
         "settled": _settled,
         # Item 19's forward-check input: a floor, not an exhaustive rival set.
         "card_rivals": card_rivals,
+        # Read-only inputs to item 9's cross-entry comparison; neither is an
+        # order or a finding.
+        "neighbors": neighbors,
+        "overlap_candidates": overlap_candidates,
         # Folder-level, report-only findings.  These are deliberately outside
         # `problems`: they are not entry checklist violations and must not
         # inflate per-entry problem tallies or imply deletion authority.
@@ -7475,6 +7698,156 @@ def run_self_test():
                   + step_sentence)],
               [surface for _normalized, surface in duplicate_sentence_surfaces(
                   "Compute it.\n\n$$\ne = 1\n$$\n\n" + step_sentence)])
+
+        # overlap_candidates: the fuzzy, review-only variant over all pairs.
+        check("an exact item9/duplicate-sentence pair is not repeated as an "
+              "overlap candidate", res4d["overlap_candidates"], [])
+        _listed = ("The main ensemble methods are:\n"
+                   "- Hard voting picks the majority class.\n"
+                   "* Soft voting averages the probabilities.\n\n"
+                   "It classifies an instance in three steps:\n\n"
+                   "1. Compute each score.\n2) Pick the largest.\n\n"
+                   "**Bold** opens a line and a - dash stays.")
+        check("with split_list_items, each list item starts a sentence "
+              "without its marker; bold and an inline dash are no marker",
+              [surface for _normalized, surface in duplicate_sentence_surfaces(
+                  _listed, min_chars=0, min_words=0, split_list_items=True)],
+              ["The main ensemble methods are:",
+               "Hard voting picks the majority class.",
+               "Soft voting averages the probabilities.",
+               "It classifies an instance in three steps:",
+               "Compute each score.", "Pick the largest.",
+               "Bold opens a line and a - dash stays."])
+        check("the exact duplicate-sentence path keeps a lead-in joined to its "
+              "first list item",
+              [surface for _normalized, surface in duplicate_sentence_surfaces(
+                  _listed, min_chars=0, min_words=0)][:3],
+              ["The main ensemble methods are: - Hard voting picks the "
+               "majority class.", "Soft voting averages the probabilities.",
+               "It classifies an instance in three steps: 1."])
+        check("overlap content words drop function words, plural s, math and "
+              "code sentinels, and compare six-letter stems",
+              sorted(overlap_content_words(
+                  "the genomes of a genome carry genes dupmath x u002b y "
+                  "dupcode fit nucleotides")),
+              ["carry", "fit", "gene", "genome", "nucleo"])
+        _paste = ("Pasting is preferred only when the data is not noisy and "
+                  "the model is not prone to overfitting, because avoiding "
+                  "repeated instances then makes its training slightly more "
+                  "efficient.")
+        _reworded = ("Pasting is preferred when the data is not noisy and the "
+                     "model is not prone to overfitting, because avoiding "
+                     "repeated instances makes its training a little faster.")
+        v = os.path.join(tmp, "v4-overlap")
+        _st_write(v, "bagging-x.md", _st_entry(
+            "Bagging X", "**Bagging X** is a worked example. " + _paste
+            + " The predictors train independently."))
+        _st_write(v, "pasting-x.md", _st_entry(
+            "Pasting X", "**Pasting X** is another worked example. " + _reworded
+            + " The predictors train independently."))
+        _st_write(v, "caption-x.md", _st_entry(
+            "Caption X", "**Caption X** is a third worked example.\n\n"
+            "![[Doe_X_2025_fig_1.png]]\n*" + _reworded + "*\n\n"
+            "Its genome contains about 180 million nucleotide pairs."))
+        _overlap = scan(v)["overlap_candidates"]
+        check("a reworded sentence in another entry is one review-only overlap "
+              "row; captions and sentences under six content words stay out",
+              [(row["a"], row["b"], row["similarity"],
+                [(s["similarity"], s["a"], s["b"]) for s in row["sentences"]])
+               for row in _overlap],
+              [("bagging-x", "pasting-x", 0.75, [(0.75, _paste, _reworded)])])
+        v = os.path.join(tmp, "v4-overlap-list")
+        _st_write(v, "voting-x.md", _st_entry(
+            "Voting X", "**Voting X** is a worked example.\n\n"
+            "Its ensemble methods are:\n\n- " + _paste + "\n- Boosting.\n"))
+        _st_write(v, "pasting-x.md", _st_entry(
+            "Pasting X", "**Pasting X** is another worked example. "
+            + _reworded))
+        check("an overlap row compares a list item without its lead-in or "
+              "marker",
+              [(row["a"], row["b"], [(s["a"], s["b"]) for s in row["sentences"]])
+               for row in scan(v)["overlap_candidates"]],
+              [("pasting-x", "voting-x", [(_reworded, _paste)])])
+        check("overlap_candidates ranks pairs by similarity and keeps every "
+              "matching sentence pair",
+              build_overlap_candidates({
+                  "a": [("alpha bravo delta", "A1"),
+                        ("kilo lima mike oscar papa", "A2")],
+                  "b": [("alpha bravo delta", "B1"),
+                        ("kilo lima mike oscar romeo", "B2")],
+                  "c": [("alpha bravo delta", "C1")]},
+                  min_similarity=0.6, min_words=3),
+              [{"a": "a", "b": "b", "similarity": 1.0, "sentences": [
+                  {"similarity": 1.0, "a": "A1", "b": "B1"},
+                  {"similarity": 0.67, "a": "A2", "b": "B2"}]},
+               {"a": "a", "b": "c", "similarity": 1.0, "sentences": [
+                   {"similarity": 1.0, "a": "A1", "b": "C1"}]},
+               {"a": "b", "b": "c", "similarity": 1.0, "sentences": [
+                   {"similarity": 1.0, "a": "B1", "b": "C1"}]}])
+        import itertools
+        import random
+        _rng = random.Random(7)
+        _vocab = ["word%s" % chr(ord("a") + i) for i in range(18)]
+        _sentences = {
+            "e%02d" % i: [(" ".join(_rng.sample(_vocab, _rng.randint(3, 9))),
+                           "e%02d-%d" % (i, j)) for j in range(3)]
+            for i in range(40)}
+        _brute = set()
+        for (_sa, _ra), (_sb, _rb) in itertools.combinations(
+                [(s, r) for s in sorted(_sentences) for r in _sentences[s]], 2):
+            _wa, _wb = (overlap_content_words(_ra[0]),
+                        overlap_content_words(_rb[0]))
+            if (_sa != _sb and min(len(_wa), len(_wb)) >= 4
+                    and len(_wa & _wb) / len(_wa | _wb) >= 0.5):
+                _brute.add((_sa, _sb))
+        check("the prefix filter finds every pair a brute-force Jaccard "
+              "comparison finds",
+              sorted((row["a"], row["b"]) for row in build_overlap_candidates(
+                  _sentences, min_similarity=0.5, min_words=4)),
+              sorted(_brute))
+
+        # The neighbors map and the per-page source key.
+        check("source_page_key folds the file name and keeps its page anchor; "
+              "a URL is its own key",
+              [source_page_key('[[Sources/PDFs/Doe_X_2025.PDF#page=2|Doe]]'),
+               source_page_key("[[doe_x_2025.pdf#page=2]]"),
+               source_page_key("[[Doe_X_2025.pdf]]"),
+               source_page_key("https://example.org/a")],
+              [fold_name("Doe_X_2025.PDF") + "#page=2",
+               fold_name("doe_x_2025.pdf") + "#page=2",
+               fold_name("Doe_X_2025.pdf"), "https://example.org/a"])
+        check("neighbors lists links, backlinks, non-root siblings and "
+              "same-page citers, leaving empty relations out",
+              build_neighbors(
+                  {"a": {"b"}, "b": set(), "c": {"a"}},
+                  {"a": {"p"}, "b": {"p"}, "c": {"root"}, "d": {"root"}},
+                  {"root"},
+                  {"a": {"x.pdf#page=1"}, "c": {"x.pdf#page=2"},
+                   "d": {"x.pdf#page=1"}}),
+              {"a": {"links": ["b"], "backlinks": ["c"], "siblings": ["b"],
+                     "same_source": ["d"]},
+               "b": {"backlinks": ["a"], "siblings": ["a"]},
+               "c": {"links": ["a"]},
+               "d": {"same_source": ["a"]}})
+
+        # item12/duplicate-embed-candidate: one image file in several entries.
+        v = os.path.join(tmp, "v4-duplicate-embed")
+        for _name, _embed in (("Embed A", "Doe_X_2025_fig_1.png"),
+                              ("Embed B", "Sources/Images/doe_x_2025_fig_1.png"),
+                              ("Embed C", "Doe_X_2025_fig_2.png")):
+            _st_write(v, slug(_name) + ".md", _st_entry(
+                _name, "**%s** is a worked example.\n\n![[%s]]\n*A figure.*\n\n"
+                "```\n![[Doe_X_2025_fig_2.png]]\n```" % (_name, _embed)))
+        res = scan(v)
+        check("one image file embedded in two entries is a review-only "
+              "candidate in each; a listing sample is no embed",
+              [(row["slug"], row["message"].split(" — ")[0])
+               for row in res["problems"]
+               if row["item"] == "item12/duplicate-embed-candidate"],
+              [("embed-a", "image Doe_X_2025_fig_1.png is also embedded in "
+                           "embed-b"),
+               ("embed-b", "image doe_x_2025_fig_1.png is also embedded in "
+                           "embed-a")])
 
         # special-titles.md's cross-domain corpus, its words and its phrases,
         # is the scanner's mechanical minimum.  A single fixture over every
@@ -12773,11 +13146,22 @@ def run_self_test():
         check("scan output keys follow the documented order",
               [key for key in res if key in {
                   "backfill_candidates", "hub_footer", "card_rivals",
+                  "neighbors", "overlap_candidates",
                   "image_folder_findings", "spaced_repetition",
                   "hierarchy_diagnostic"}],
               ["backfill_candidates", "hub_footer", "card_rivals",
+               "neighbors", "overlap_candidates",
                "image_folder_findings", "spaced_repetition",
                "hierarchy_diagnostic"])
+        _near = res["neighbors"]
+        check("a scan's neighbors take body and footer links, backlinks and "
+              "siblings under a parent other than a discipline root",
+              (_near["models"].get("links"), _near["trees"].get("backlinks"),
+               _near["trees"].get("siblings"), "siblings" in _near["models"],
+               _near["linear-model"].get("backlinks"),
+               "trees" in _near["linear-model"].get("same_source", ())),
+              (["trees"], ["models"], ["linear-model"], False,
+               ["machine-learning"], True))
         res = scan(_org_vault(
             "v-org-alias",
             models_prose="**Models** is a worked example that includes "

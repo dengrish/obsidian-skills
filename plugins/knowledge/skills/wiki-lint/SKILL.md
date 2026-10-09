@@ -143,7 +143,7 @@ python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' \
 Each refresh writes the next numbered file (`wiki-scan-2.json`,
 `wiki-scan-3.json`, …); keep every file for later slices.
 
-**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run supplied one, and read the JSON in slices. Its keys feed the tasks ([output contract](references/scanner.md#output-contract)): `inventory`, `discipline_tags` and `untagged_entries` set scope; `user_issues` comes first; `problems` drives QC and links; `rename_candidates`, `collision_candidates` and `item5` feed retitles and merges; `backfill_candidates`, `hub_footer` and `settled` feed Task 2; `card_rivals` feeds item 19; `hierarchy_diagnostic` feeds Task 3; `image_folder_findings` and `spaced_repetition` are report-only.
+**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run supplied one, and read the JSON in slices. Its keys feed the tasks ([output contract](references/scanner.md#output-contract)): `inventory`, `discipline_tags` and `untagged_entries` set scope; `user_issues` comes first; `problems` drives QC and links; `rename_candidates`, `collision_candidates` and `item5` feed retitles and merges; `backfill_candidates`, `hub_footer` and `settled` feed Task 2; `card_rivals` feeds item 19; `neighbors` and `overlap_candidates` feed item 9's coherence review; `hierarchy_diagnostic` feeds Task 3; `image_folder_findings` and `spaced_repetition` are report-only.
 
 No key's name means “fix in place”: unreadable files, ambiguous identity, user state and valid user configuration may appear in `problems` without authorizing an edit, and `hierarchy_diagnostic` authorizes no write (a fresh builder note normally has a placement gap until Task 3 runs). A missing, failed, malformed or incomplete scan is not a clean inventory: record the failure and stop every dependent task or write, unless a referenced procedure defines an equivalent complete scan.
 
@@ -238,9 +238,10 @@ Repair in this order:
    and a discipline root's
    [form](references/hierarchy.md#establish-discipline-roots).
 2. **Coordinated cross-entry repairs**, each planned once across every entry
-   involved: resolve a conflicting claim, consolidate a duplicated
-   explanation, argument, worked example or property with its justification
-   into its owner, and normalize notation across siblings.
+   involved: resolve a conflicting claim, consolidate a duplicated or
+   misplaced explanation, argument, worked example, property with its
+   justification, or exhibit into its owner, and normalize notation across
+   siblings.
 3. **Merges and splits** through the refactor protocol in full: merge entries
    verified as one entity under alternate names (synonym duplicates, from
    `collision_candidates` or the agent's reading), and split an entry that
@@ -265,7 +266,7 @@ not applied: it goes under *Notes for the user* with both options and is
 never logged. A conflict stays an open log item only when the references
 consulted disagree or none is reachable, and the item names them.
 
-**Refresh before Task 2.** Whenever Task 1 or Task 1b changed entries, re-run Step 0 so Task 2 links new entries and Task 3 places them. Use the refreshed worklists, but keep the logical-run timestamp, an inherited coordinator timestamp included, and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
+**Refresh before Task 2.** The run keeps a private copy of each entry under `<scratch>` before its first edit. Once Task 1b's repairs are done, it runs the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against that copy; a fix this final reread makes gets only its passage reread. Whenever Task 1 or Task 1b changed entries, re-run Step 0 so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from Step 0's scan is this run's own copy; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, re-runs Step 0 once more. Use the refreshed worklists, but keep the logical-run timestamp, an inherited coordinator timestamp included, and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
 
 ## Task 2 — Link hygiene
 

@@ -126,7 +126,7 @@ Apply [CONVENTIONS §2](../../../shared/CONVENTIONS.md#2-frontmatter-schemas): d
 
 - **Headings.** Flat prose is the default. **Use ATX `##` headings only when several genuine sub-aspects of the entity need named treatment**, never for length alone; they are the *only* sub-section form, so Setext underlines and bolded paragraph-leads (`**Architecture.**`) are **forbidden as section headers** ([bold and italic](flashcards-and-emphasis.md#5-bold-and-italic)), and wanting `###` prompts the atomicity test again. Headings are plain Sentence case (`## Encoder stack`) without bold, LaTeX or wikilinks; `## Binary classification` inside `Classification (machine learning)` signals a separate entry. The body has no `#` heading. A heading that repeats the entry title is deleted, never demoted, because Obsidian shows the filename as the inline title.
 
-- **The atomicity test.** Each note has one durable entity or concept as its subject; type-specific conceptual units stay intact. Split source material into separate, linked entries when each part has a stable identity and enough support to explain on its own what it is, how it works or why it matters; each keeps only the relationship needed for orientation. **Link, don't re-explain.** A concept that has its own entry is linked and never re-defined here: say only what role it plays in this entry (“each step moves the parameters by the [[learning-rate|learning rate]] times the gradient”), and let its entry say what it is. Nor is an argument, worked example or property with its justification that another entry already gives repeated here: state its consequence for this subject, with the one-clause reason or key value a reader needs to use it (raising the threshold raises precision and lowers recall; about 68% of values lie within one standard deviation of the mean), and link that entry. Never restate its derivation, discovery history or figure description, nor display its formula unless this entry's own prediction, objective or defining relation is built from it ([equations §1](equations.md#1-coverage--explanatory-value-before-notation)). A neighbor with no entry keeps at most one brief defining clause, and only when this entry uses its term. When it deserves an entry of its own (a stable identity that the active source teaches), wiki-build creates that entry and links it instead of explaining it here, always for a [load-bearing term](../SKILL.md#2-extract-entities), unless a [named-entity request](../SKILL.md#named-entity-requests) leaves it unnamed: a named-entity request builds only the entities it names. Otherwise, and always in wiki-add, the clause glosses it and the run reports it as a missing-entry candidate (under *Entities not requested* in a named-entity run), which wiki-lint's next ordinary run creates. A variant with no identity apart from this entity (a solver option, a special case taught only here) is a facet. An umbrella such as `Classification (machine learning)` exists only when the source explains the broader concept, never as an index page. **Do not split to make a note shorter:** names, properties, conditions, stages, mechanisms and components that cannot stand alone are facets, and thin mentions stay plain text. An explanation, argument or worked example belongs to the entry whose subject it is about, the most specific such entry (a loss's convexity to the loss, not to each model trained with it; a trained tree's prediction cost to Decision tree, not CART); a family entry gives each member one role clause and a link. A property every member of a family shares belongs to the family's entry (weight penalties' scale sensitivity to Regularization, not Ridge regression), and an argument about how a metric behaves to that metric (the rare-positive argument to False positive rate; a plot built on the metric keeps the consequence and a link). Related entries keep the relationship, its consequence for them, a link and any brief reciprocal contrast ([overlap audit](review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)). A pre-existing mixed entry met during a merge keeps its body: create any independently supported new-source candidate and report a proposed split, which wiki-lint's ordinary run makes once its proof holds; wiki-build never redistributes or deletes its content ([scope](../SKILL.md#scope-and-files)).
+- **The atomicity test.** Each note has one durable entity or concept as its subject; type-specific conceptual units stay intact. Split source material into separate, linked entries when each part has a stable identity and enough support to explain on its own what it is, how it works or why it matters; each keeps only the relationship needed for orientation. **Link, don't re-explain.** A concept that has its own entry is linked and never re-defined here: say only what role it plays in this entry (“each step moves the parameters by the [[learning-rate|learning rate]] times the gradient”), and let its entry say what it is. Nor is an argument, worked example or property with its justification that another entry already gives repeated here: state its consequence for this subject and link that entry. Add at most one clause of reason or key value, and only when the consequence would otherwise leave an open question here. That clause takes the shortest form: about 68% of values lie within one standard deviation of the mean, not the whole 68-95-99.7 rule; a shrinking learning rate lets SGD settle, not why large early steps escape local minima. The owner keeps its derivation, conditions, full rule and supporting argument: never restate them, its discovery history or figure description here, nor display its formula unless this entry's own prediction, objective or defining relation is built from it ([equations §1](equations.md#1-coverage--explanatory-value-before-notation)). A neighbor with no entry keeps at most one brief defining clause, and only when this entry uses its term. When it deserves an entry of its own (a stable identity that the active source teaches), wiki-build creates that entry and links it instead of explaining it here, always for a [load-bearing term](../SKILL.md#2-extract-entities), unless a [named-entity request](../SKILL.md#named-entity-requests) leaves it unnamed: a named-entity request builds only the entities it names. Otherwise, and always in wiki-add, the clause glosses it and the run reports it as a missing-entry candidate (under *Entities not requested* in a named-entity run), which wiki-lint's next ordinary run creates. A variant with no identity apart from this entity (a solver option, a special case taught only here) is a facet. An umbrella such as `Classification (machine learning)` exists only when the source explains the broader concept, never as an index page. **Do not split to make a note shorter:** names, properties, conditions, stages, mechanisms and components that cannot stand alone are facets, and thin mentions stay plain text. An explanation, argument or worked example belongs to the entry whose subject it is about, the most specific such entry (a loss's convexity to the loss, not to each model trained with it; a trained tree's prediction cost to Decision tree, not CART); a family entry gives each member one role clause and a link. A property every member of a family shares belongs to the family's entry (weight penalties' scale sensitivity to Regularization, not Ridge regression), and an argument about how a metric behaves to that metric (the rare-positive argument to False positive rate; a plot built on the metric keeps the consequence and a link). Related entries keep the relationship, its consequence for them, a link and any one-clause reciprocal contrast ([overlap audit](review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)). A pre-existing mixed entry met during a merge keeps its body: create any independently supported new-source candidate and report a proposed split, which wiki-lint's ordinary run makes once its proof holds; wiki-build never redistributes or deletes its content ([scope](../SKILL.md#scope-and-files)).
 
 - **Bullets, numbered lists and prose.** Body content takes one of three forms, chosen by its shape. A list never replaces explanation: each item keeps its why.
   - **Bullets** suit genuinely list-shaped content: parallel items under one category, such as dependent variants, discrete components, or properties exhausted by their role here; standalone concepts become linked entries under the atomicity test. Parallel facts about several items (the same gene in three organisms, one property per variant, the cell changes in each age window) read best as one self-contained bullet per item, not woven into long sentences. Parallel bullets state the same property for each item (each lineage's cell-wall material), not a different incidental source detail per item. The entry's own subject is never one of its parallel bullets.
@@ -156,7 +156,7 @@ These standards serve `wiki-build` and `wiki-lint`. They describe the result, no
 
 **Operating principle.** Give a learner a correct working understanding of one durable subject, as briefly as that allows. Each sentence defines it, explains how it works or why it matters, distinguishes it, or states a needed condition or consequence. Length is never a target, defect or reportable exception; never compress a definition or necessary condition to save words.
 
-**Teach in the order a learner needs.** After the opener, give the idea in plain words (the problem it solves or why it matters), then how it works, then any formal statement, then consequences, the main limitation and the nearest contrast. This is a default order, not a template: skip a step the subject lacks, and never add one to fill it. A subject defined against a sibling (online versus batch learning) always has a nearest contrast: name and link that sibling in the body, not only in the Related footer. When the opener's definition would also fit a term the card's [sibling check](flashcards-and-emphasis.md#line-1-the-cue) names as confusable, the opener or the next sentence states the property that separates them (each predictor's feature subset is fixed, unlike random forest's per-split sampling).
+**Teach in the order a learner needs.** After the opener, give the idea in plain words (the problem it solves or why it matters), then how it works, then any formal statement, then consequences, the main limitation and the nearest contrast. This is a default order, not a template: skip a step the subject lacks, and never add one to fill it. A subject defined against a sibling (online versus batch learning) always has a nearest contrast: name and link that sibling in the body, not only in the Related footer, and when the sibling's own nearest contrast is this entry, the sibling returns it in one clause with a link, which wiki-lint adds when wiki-build may not edit that sibling. When the opener's definition would also fit a term the card's [sibling check](flashcards-and-emphasis.md#line-1-the-cue) names as confusable, the opener or the next sentence states the property that separates them (each predictor's feature subset is fixed, unlike random forest's per-split sampling).
 
 **Core-facet check.** Before finishing, name the two to four points a standard reference's introductory section on the subject always covers, whatever the source's own section includes (an actin filament is a polymer of actin; k-nearest neighbors needs a distance measure and depends on $k$). Supply each missing one in one to three sentences, as principle 5(h) background when the source lacks it. Some facets are always core: a model or ensemble says how it predicts and how it trains, naming the objective its training minimizes when it has one (AdaBoost takes a weighted vote of its predictors and minimizes the exponential loss), while an instance-based model says that training stores the data and an ensemble whose members train independently (bagging, pasting, random forests, voting, stacking) names and links its members' training algorithm; when naming that objective or algorithm would need a neighbor's internals or notation the source lacks, one sentence and a link do it. A category concept (a class whose members are entities in their own right, such as model organism, organelle or a taxon such as Bacteria) names at least three canonical members a learner would recognize rather than broad groups, linking each that has an entry and placing them where they illustrate the property the note teaches, never as a roster in an unrelated sentence; an unfamiliar member gets its distinguishing clause or gives way to a familiar one. A discipline root takes the [root form](#tags).
 
@@ -208,7 +208,7 @@ Use a neutral encyclopedic register: direct, precise, free of conversational add
 
 **6. Remove padding without compressing away meaning.** Cut empty lead-ins, reader commentary, rhetorical hedging and repetition that adds no distinction; prefer a direct statement to praise or metaphor. Keep useful signposting, technical terms and evidence-bearing qualifiers. Keep the entry on its subject: omit source recaps and scaffolding, tangential motivation, application catalogs, anecdotes, the author's preferences and implementation recipes ([API surface](api-surface.md) governs Software). A neighboring concept gets its relationship and a link. Discovery history, the experiment that revealed the subject and the instrument through which the source met it stay only when they explain what it is or how it works; otherwise keep one clause at most, and never repeat the same history in a sibling entry (Person, Event and Work entries are exempt); an argument or worked example likewise lives only in its owner under the atomicity test. Concision alone never authorizes removing substantive content from an existing note; the merge, ownership-handoff and source-backed repair rules govern that.
 
-**7. One concrete case when it makes the idea click.** For an abstract, quantitative or procedural concept, add one compact example of one to three sentences after the mechanism it illustrates: small numbers put through the defining formula, a two- or three-step trace, or one familiar instance (the webbing between developing fingers, for apoptosis). Prefer the source's own worked values when they illustrate the subject itself and one clause can set them up; otherwise, as when they need the source's dataset columns, preprocessing or library configuration explained, use a standard textbook case, or round numbers whose every result you have checked, never presented as a measurement. Skip the example only when the definition already names a concrete instance; a second example must show a different facet, and an example that only restates the definition with a number (a fraction of 0.25 means 25%) is left out. Quantitative facts that characterize the phenomenon (random points in a unit square lie about 0.52 apart, in a million dimensions about 408) and what a parameter does at its extremes (a predictor no better than chance gets zero weight in the vote) are explanation, not examples. A category concept names its canonical members instead, under the core-facet check. Never write a multi-paragraph walkthrough, an application story, a roster of source data, or an example that mostly teaches a neighbor.
+**7. One concrete case when it makes the idea click.** For an abstract, quantitative or procedural concept, add one compact example of one to three sentences after the mechanism it illustrates: small numbers put through the defining formula, a two- or three-step trace, or one familiar instance (the webbing between developing fingers, for apoptosis). Prefer the source's own worked values when they illustrate the subject itself and one clause can set them up; otherwise, as when they need the source's dataset columns, preprocessing or library configuration explained, use a standard textbook case, or round numbers whose every result you have checked, never presented as a measurement. Skip the example only when the definition already names a concrete instance; a second example must show a different facet, and an example that only restates the definition with a number (a fraction of 0.25 means 25%) is left out. Quantitative facts that characterize the phenomenon (random points in a unit square lie about 0.52 apart, in a million dimensions about 408) and what a parameter does at its extremes (a predictor no better than chance gets zero weight in the vote) are explanation, not examples. A category concept names its canonical members instead, under the core-facet check. Never write a multi-paragraph walkthrough, an application story, a roster of source data, or an example that mostly teaches a neighbor. An example uses only steps the note or a linked entry explains; when it needs another, choose a simpler case rather than teach the step.
 
 **8. Mathematics earns its place by explaining the concept.** Equations follow [equations.md](equations.md): math appears only when it explains better than prose, the defining relation comes first, and each defining display is explained in words.
 
@@ -222,9 +222,15 @@ Use a neutral encyclopedic register: direct, precise, free of conversational add
 
 After drafting or editing, reread the passage and its neighbors as one
 continuous explanation: clear referents, useful order, natural transitions and
-concise wording, around equations and exhibits too. Then run these sweeps on
-the description, body, captions and card of each entry drafted or changed,
-and fix regressions before saving:
+concise wording, around equations and exhibits too. After a removal or move,
+reread the whole note against its pre-edit text; wiki-lint's Task 1b does
+this once per changed entry, in its
+[final reread](../../wiki-lint/SKILL.md#task-1b--content-repair). Nothing may
+point at a deleted passage (a referent, a caption, the names an example
+kept), a moved passage leaves both places in order (a worked result stays
+after its setup), and an added sentence says nothing an adjacent sentence
+already says. Then run these sweeps on the description, body, captions and
+card of each entry drafted or changed, and fix regressions before saving:
 
 - **Scope check.** Compare against the source or pre-edit text for changed
   meaning (an illustration turned general rule, a cause or actor swapped, a
@@ -232,8 +238,10 @@ and fix regressions before saving:
   under [principle 3](#prose-principles).
 - **Contradiction check.** Compare each claim with every other claim in the
   note, and with each linked neighbor that states the same defining sense,
-  relationship, direction, number, count, scope or preference (open it to
-  compare), and reconcile them. A source's own tension (a tip against its
+  name, relationship, direction, number, unit, count, scope or preference
+  (open it to compare), and reconcile them; a part, quantity or relation
+  takes a name its owner entry or the field uses (intercept, not height), and
+  a value its owner's unit (200 nm, not 0.2 µm). A source's own tension (a tip against its
   body text) becomes one claim with the condition that decides between them;
   when no condition decides, it is a conflict, never two rules. Report a
   conflict you cannot resolve, with its page; a conflict with existing
@@ -248,7 +256,8 @@ and fix regressions before saving:
   and card line 1 as review candidates (`7-hedge-candidate`,
   `19-hedge-candidate`); the sweep still reads the rest.
 - **Flow sweep.** Label each paragraph's job in a few words, one-paragraph
-  bodies included, and check that each sentence advances it. A label that
+  bodies included, and check that each sentence advances it and passes
+  [principle 9](#prose-principles)'s reading-speed test. A label that
   needs "and" between unrelated jobs means the paragraph splits, or the stray
   sentence moves beside the material it develops or goes. Never force topic
   sentences, fragment a continuous explanation into one-sentence blocks, or
@@ -261,23 +270,38 @@ and fix regressions before saving:
   same facet, an application list, a data roster, an anecdote, an instrument
   view, a library recipe) goes whatever its source support, as does a
   sentence that would not be there had the subject come from another
-  textbook. No claim recurs in another sentence or paragraph: outside the
-  opener and the plain-words summary that teaching order calls for, a
-  sentence that only previews claims the following sentences explain goes.
+  textbook. A passage whose subject is a linked entry's (its mechanism,
+  worked example or exhibit, or a segue into its topic) goes too, leaving
+  only what the [atomicity test](#body-structure) keeps here. When that entry
+  clearly owns it and lacks it, the passage moves there; wiki-build moves it
+  only into this run's entries and otherwise logs a
+  [proposal](review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors).
+  No claim recurs, within a sentence or across sentences and paragraphs:
+  outside the opener and the plain-words summary that teaching order calls
+  for, a sentence that only previews claims the following sentences explain
+  goes.
   A caption follows [captions](media.md#captions) instead: it never restates
   the sentence it follows. Then read only the opening sentences and check
   that each idea is established before use.
 - **Term audit.** Every technical term, number, causal or comparative claim,
-  complexity, iteration bound and derivation result is defined, linked or
-  given its reason ([principle 5](#prose-principles)), terms in background or
-  corrections the builder added included, and every example states the point
-  it shows. A result no accurate reason supports is suspect, not
+  complexity, iteration bound and derivation result is defined, linked to an
+  entry that states it (open the target when the sentence leaves the reason
+  to the link), or given its reason ([principle 5](#prose-principles)), terms
+  in background or corrections the builder added included, and every example
+  states the point it shows. A first mention of an entry's concept in a form
+  no claimed surface names (a verb or derived form, a head noun, a
+  paraphrase) is a [link candidate](#what-earns-a-wikilink), on Task 2's
+  worklist in wiki-lint; one that clears the bar links its first later
+  claimed form, or is reworded under the
+  [label rules](#display-label-casing). A result no accurate reason supports is suspect, not
   unexplained: never invent a reason. Resolve it as a conflict
   between its source and the other evidence under
   [conflict handling](merge.md#conflict-handling) (in wiki-lint's content
   repair, its [Conflicts](../../wiki-lint/references/source-backed-corrections.md#correct-and-publish) rule, which also reads standard
   references online), keeping the source's figure
-  only within the scope that makes it true; while the evidence settles
+  only within the scope that makes it true, stated in one clause (with each
+  feature presorted), never with an alternative implementation's cost; while
+  the evidence settles
   nothing, omit the figure, keep its practical takeaway, and report and log
   it there.
 - **Opener check.** The opener shows the subject's acronym ↔ full-form
@@ -288,8 +312,9 @@ and fix regressions before saving:
   the opening paragraph names no variant, secondary sense or other
   application ([principle 1](#prose-principles)). Every idea the opening
   paragraph introduces is explained by the end of the next paragraph (a term
-  is still defined or linked on first use), and the benefit the description
-  and card lead with appears in the first two paragraphs.
+  is still defined or linked on first use), and the property or benefit the
+  description and card define the subject by appears in the opening
+  paragraph.
 
 Editorial standards never independently authorize changes to cards, dates,
 review state or other protected content, or rewording a clear passage.
