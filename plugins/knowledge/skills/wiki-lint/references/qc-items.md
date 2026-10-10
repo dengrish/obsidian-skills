@@ -11,9 +11,10 @@ They do not require the user or another human to inspect every
 note or approve an ordinary correction. Task 1 repairs what the note and vault
 establish. A semantic finding they do not settle goes to
 [Task 1b](../SKILL.md#task-1b--content-repair), which repairs it in the same
-run from the entry's cited sources or accurate background, merges and splits
-included. Only a deletion, a split or merge that is a close call or that a
-refactor blocker stops, a conflict no evidence settles, or a user-owned state
+run from the entry's cited sources (plus the clarification
+[5(h)](../../wiki-build/references/writing.md#prose-principles) admits), merges
+and splits included. Only a deletion, a split or merge that is a close call
+or that a refactor blocker stops, a conflict no evidence settles, or a user-owned state
 decision stays a report, and it does not block the current run.
 
 Related procedures:
@@ -34,7 +35,7 @@ ownership.
 
 | Finding or worklist | Action |
 | --- | --- |
-| Ordinary `itemN` | Apply the determinate, source-independent correction allowed by item N below. Hand a finding that needs the entry's sources, accurate background or a coordinated cross-entry change to Task 1b; report only what Task 1b cannot settle, such as ambiguous ownership. In a run that skips Task 1b, the run report names each hand-off as [left for Task 1b](backlogs.md#run-report). |
+| Ordinary `itemN` | Apply the determinate, source-independent correction allowed by item N below. Hand a finding that needs the entry's sources, a 5(h) clarification or a coordinated cross-entry change to Task 1b; report only what Task 1b cannot settle, such as ambiguous ownership. In a run that skips Task 1b, the run report names each hand-off as [left for Task 1b](backlogs.md#run-report). |
 | `item0` | Report the unreadable path and error; there is no parsed entry to repair. Its unknown aliases suppress dependent link actions until readability is restored and the vault is rescanned; direct-filename checks remain usable. |
 | `item1` | Repair only what the file itself establishes. Never invent title, dates, or review state, and preserve links to the real file. The lines of an `issues:` value are never an item-1 repair ([item 2](#2-field-order-and-quoting)); a lost closing fence is ([item 1](#1-valid-yaml)). |
 | `item2/read-type` | Task 1 repair: [item 2](#2-field-order-and-quoting). |
@@ -49,9 +50,9 @@ ownership.
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
 | `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source (a chapter beside its whole book is proven by its name); otherwise report. |
 | `item7/hedge-candidate` | Review the description under [item 7](#7-description) and item 9's [caveat review](#9-body-structure-coherence-flow-and-scope): Task 1 drops a hedge whose plain claim the note establishes for the ordinary case; otherwise Task 1b names the condition from the cited source, or keeps evidence-bearing uncertainty. Keep the description, opener and card aligned; the candidate alone is never an order. |
-| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or accurate background, and integrates the link. |
+| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or as a 5(h) clarification, and integrates the link. |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
-| `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or accurate background, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
+| `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or as a 5(h) clarification, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
 | `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
 | `item9/list-mismatch-candidate` | Review the lead-in's count or the Repeat item's step against the builder's [numbered-list tests](../../wiki-build/references/writing.md#body-structure). A count of something other than the list's items stays. A real disagreement goes to Task 1b, which settles it from the cited source, correcting the count, restoring a missing step or pointing the Repeat item at the step that begins the repeated work, under [item 9](#9-body-structure-coherence-flow-and-scope). The candidate alone is never an order. |
 | `item9/register-candidate` | Review the praise word or imperative opener under the builder's neutral [register](../../wiki-build/references/writing.md#prose-principles): Task 1 drops praise that adds no claim and restates a definition written as instructions as a fact, keeping every claim; in the description or on card line 1 the review follows [item 7](#7-description) or [item 19](#19-flashcards). The candidate alone is never an order. |
@@ -219,8 +220,8 @@ duplicates that shape probes cannot find.
 
 **Merge check.** Collision-probe matches and synonym duplicates are Task 1b's
 merge candidates. Task 1b merges two or more entries through the
-[refactor protocol](refactors.md) only when their definitions, cited sources
-and accurate background verify one entity under alternate names
+[refactor protocol](refactors.md) only when their definitions and cited
+sources verify one entity under alternate names
 ([step 2](refactors.md#establish-evidence-and-complete-scope)). Related
 concepts, overlapping wording or a probe match alone never activate a merge.
 A close call stays unapplied under
@@ -275,9 +276,9 @@ concrete clarity defect; do not rewrite an already clear description. A
 plain-language mathematical definition must retain every operation that
 determines the quantity. Task 1 fixes it when the note establishes the
 corrected wording. Otherwise Task 1b corrects a variant, a wrong sense or a
-wrong fact from the entry's cited source or accurate background, leading with
-the prototype, and keeps the description, opener and card aligned in the same
-edit. A wrong sense includes a definition that leads with a property of the
+wrong fact from the entry's cited sources (plus the clarification 5(h)
+admits), leading with the prototype, and keeps the description, opener and
+card aligned in the same edit. A wrong sense includes a definition that leads with a property of the
 subject, such as its selectivity, regulation, distribution or a consequence,
 instead of what the subject is, even when the source's sentence is phrased
 that way; the property moves to the body (gene expression is the process by
@@ -336,7 +337,9 @@ owner. Each becomes a Task 1b coordinated repair. Content moves only when
 that test clearly names another owner (a more specific entry, or the
 family's for a shared property); otherwise the entry holding it keeps it. A
 [core facet](../../wiki-build/references/writing.md#prose-principles) one
-sibling states and another lacks goes to the depth review below. A narrowed
+sibling states and another lacks goes to the depth review below, which fills
+it only from the lacking entry's own cited sources, never by symmetry with
+the sibling. A narrowed
 run compares each in-scope entry with its `neighbors` instead. Run the builder's
 [contradiction check](../../wiki-build/references/writing.md#editorial-reread)
 on each body claim, against every other claim in the note and the statements
@@ -350,9 +353,9 @@ Task 1b, which corrects every affected entry under the correction protocol's
 general claim whose only support is one figure, caption, configured example,
 or one model's or organism's section fails the builder's
 [scope check](../../wiki-build/references/writing.md#editorial-reread):
-Task 1b states the general fact from standard references, or restores that
-scope. State
-the plain claim under principle 3 (a hedge or caveat that covers only an edge
+Task 1b restores the scope its cited sources establish, or the general form
+[equations §1](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
+sets. State the plain claim under principle 3 (a hedge or caveat that covers only an edge
 case goes even when the source makes it; evidence-bearing uncertainty stays),
 or trim a neighbor's detail to the relationship and a wikilink, rather than
 appending qualifications. The
@@ -365,11 +368,11 @@ which folds it, with its link, into the later passage (Learning rate's
 boosting clause), applying builder
 [item 13](../../wiki-build/references/quality-checklist.md)'s each-sense-once rule
 outside merges too. When the prototype is missing, Task 1b writes it from the
-cited source or accurate background and keeps the variant as one linked
-example. Task 1b likewise frames an entry in its
+cited sources (plus the clarification 5(h) admits) and keeps the variant as
+one linked example. Task 1b likewise frames an entry in its
 [own field](../../wiki-build/references/writing.md#prose-principles): a
 general concept's display never borrows one application's parameter notation,
-and the entry names and links its nearest contrast when the subject has one. A
+and the entry names and links its nearest contrast when its sources draw one. A
 neighbor conflict may also expose a wrong link, a duplicated explanation
 (consolidated below), or an atomicity failure (split below).
 
@@ -378,9 +381,8 @@ subjects fails the builder's
 [atomicity test](../../wiki-build/references/writing.md#body-structure).
 Task 1b splits it through the [refactor protocol](refactors.md) when each
 split-off subject passes the substance test with support in the entry's cited
-sources or accurate background
-([step 2](refactors.md#establish-evidence-and-complete-scope)). A long note,
-several headings or several sources alone never activate a split; inherent
+sources ([step 2](refactors.md#establish-evidence-and-complete-scope)). A
+long note, several headings or several sources alone never activate a split; inherent
 mechanisms, stages, conditions and limitations stay with their subject. A
 close call stays unapplied under
 [Task 1b's rule](../SKILL.md#task-1b--content-repair).
@@ -420,7 +422,7 @@ A statement about this entry's own subject that the entry leaves
 unexplained, such as an equation without its meaning, a complexity without
 its reason, a derivation step, a result, or a claim that something suits, is
 preferred for, helps, works better or matters, gets its reason in Task 1b, in
-one sentence from the cited source or accurate background; a linked entry's
+one sentence from the cited source or as a 5(h) clarification; a linked entry's
 fact used here follows [item 14](#14-self-containment). Task 1b likewise replaces a derivation longer than
 [equations §3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
 allows, or a multi-step complexity analysis, with its one-sentence intuition,
@@ -452,20 +454,16 @@ findings; a source-supported detail can still be unnecessary.
 
 **Depth review.** Apply the builder's
 [core-facet check](../../wiki-build/references/writing.md#prose-principles) to
-every in-scope entry, whatever its type and however detailed it already is,
-listing the facets from a standard introductory reference before reading the
-body. Task 1b supplies each missing facet: a model's or ensemble's prediction
-step and how it trains, a display's verbal reading, a concrete case under
-[item 15](#15-example-discipline), a
-category's canonical members (at least three) that have entries, or a discipline
-root's form. For a Concept, it then applies the builder's
-[row-9 test](../../wiki-build/references/quality-checklist.md) (could a reader
-explain how it works from the note alone?) and supplies only what that test or
+every in-scope entry, whatever its type and however detailed it already is.
+Under the source-backed [*Deepening*](source-backed-corrections.md) rules,
+Task 1b supplies a point that check names from the entry's cited sources, a
+display's verbal reading, a concrete case under
+[item 15](#15-example-discipline), the members its sources name for a
+category, a discipline root's form, and the definitions and reasons
 principle 5's [term audit](../../wiki-build/references/writing.md#editorial-reread)
-names as missing. Both work under the source-backed
-[*Deepening*](source-backed-corrections.md) rules, from the entry's cited
-sources and accurate background. A gap that only an unbuilt source would fill
-waits for that source's whole build under those rules and is not proposed.
+names as missing. It never lists facets from a standard reference. A gap that
+only an uncited or unbuilt source would fill waits for that source's whole
+build under those rules and is not proposed.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
@@ -532,7 +530,7 @@ If the change moves material beyond an adjacent paragraph under its heading,
 changes a fact, removes substantive content, chooses between claims, or
 redistributes material across entries, Task 1 preserves it and hands it to
 Task 1b. Task 1b verifies the change against
-every affected entry's cited sources or accurate background, changes a degree,
+every affected entry's cited sources, changes a degree,
 number, caption or math span only to match them or to drop a hedge or caveat
 the caveat review excludes, and touches only the
 surfaces the repair needs. Every Task 1b repair fixes a concrete defect a
@@ -684,10 +682,10 @@ in full. Task 1 re-subjects source-meta prose on the entity, or names people
 directly, when the surrounding sentence makes the replacement unambiguous
 without changing claim, attribution, or certainty; otherwise Task 1b corrects
 it from the cited source. Task 1b completes the rest of principle 5 from the
-cited source or accurate background:
+cited source or as a 5(h) clarification:
 
 - A term the entry uses with neither definition nor resolving link,
-  including terms in added background or corrections, is linked when its
+  including terms in added clarifications or corrections, is linked when its
   entry exists, and otherwise gets a brief defining clause; a dangling link's
   term follows the [dangler hand-off](refactors.md#dangling-link-hand-off). A
   term that meets the [missing-entry rule](refactors.md#create-a-missing-entry)
@@ -724,8 +722,9 @@ entry, its owner under item 9's consolidation; the others state the
 consequence and link the owner. A Concept that is abstract, quantitative or
 procedural (a task such as binary classification, a method, a model, a
 quantity or a process) and whose body names no concrete instance gets one in
-Task 1b, from the cited source or accurate background, unless it would only
-restate the definition with a number
+Task 1b only when the idea would otherwise be hard to follow: the cited
+source's own case or a constructed one that carries no fact the sources do
+not give, unless it would only restate the definition with a number
 ([principle 7](../../wiki-build/references/writing.md#prose-principles)).
 Scaffolding and application catalogs belong to item 9,
 `Software` API catalogs to item 6.

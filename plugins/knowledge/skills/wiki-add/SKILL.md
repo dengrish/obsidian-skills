@@ -165,8 +165,8 @@ matches that request's `absent` record.
    [root form](../wiki-lint/references/hierarchy.md#establish-discipline-roots),
    which defines the field, states its method of inquiry and names its main
    branches as subfields under the builder's
-   [tag rules](../wiki-build/references/writing.md#tags), citing the
-   reference page it is derived from like any other topic.
+   [tag rules](../wiki-build/references/writing.md#tags), as the reference
+   page it cites gives them, citing that page like any other topic.
 2. **Read the neighbors.** Before drafting, read the entries that link to or
    mention the topic, and its nearest siblings: the draft links an
    explanation, argument or example one of them owns instead of repeating it,

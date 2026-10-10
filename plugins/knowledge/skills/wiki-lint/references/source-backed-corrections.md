@@ -4,18 +4,19 @@ Read this before Task 1b's first repair, and when the user asks to correct,
 simplify or deepen existing entries. A correction rests on the sources each
 entry already cites; the request need not name them. A
 [user issue](../SKILL.md#user-issues) is such a request for its entry alone. The
-corrected entry may also add accurate background that makes it easier to
-understand, under the builder's
-[prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles);
-background needs no citation. Task 1b covers every matching entry in the
-run's scope, and a request covering a class of defects or the whole Wiki
-applies to every matching entry in that scope, not just named examples. A
-source the target does not cite never fills a gap only that source teaches;
-that gap waits for a wiki-build request naming it whole, as under *Deepening*
-below. Standard references read under *Conflicts* or to verify background are
-data, never cited, and are not such a source; the one exception is an entry
-whose `sources:` is empty, which cites the page or document it was verified
-against under [item 4](qc-items.md#4-sources). A new source the user
+corrected entry may also add the clarification the builder's
+[prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
+admits, which needs no citation, and never new information. Task 1b covers
+every matching entry in the run's scope, and a request covering a class of
+defects or the whole Wiki applies to every matching entry in that scope, not
+just named examples. A source the target does not cite never fills a gap only
+that source teaches; that gap waits for a wiki-build request naming it whole,
+as under *Deepening* below. Standard references read under *Conflicts* or to
+verify a clarification are data, never cited, and are not such a source; the
+exceptions are an entry whose `sources:` is empty, which cites the page or
+document it was verified against under [item 4](qc-items.md#4-sources), and a
+discipline root's [form](hierarchy.md#establish-discipline-roots), which
+follows its own source rule. A new source the user
 supplies is a new contribution and belongs to `wiki-build`. A retitle uses the
 [entry-retitle protocol](refactors.md#retitle-an-entry), and a consolidation,
 a passage moved to its owner, a merge or a split uses
@@ -28,7 +29,8 @@ enrich an entry, apply the builder's creation-time teaching rules to it: the
 learner arc, core-facet check and examples of its
 [prose principles](../../wiki-build/references/writing.md#prose-principles),
 and its [equation rules](../../wiki-build/references/equations.md).
-Fill gaps from the entry's cited sources and 5(h) background. Before adding
+Fill gaps from the entry's cited sources, adding beyond them only the
+clarification 5(h) admits. Before adding
 an example, search the entries this one links for the same worked values; a
 neighbor that holds them owns them, so state this entry's facet in one clause
 and link it, or choose an example that shows a different facet. When the
@@ -38,8 +40,8 @@ source fills it in, even when another entry already cites it: a citation does
 not show the source was built as a whole, and the fill-in leaves entries
 citing it untouched. Never route a named-entity build from it, which would mark the
 source covered so folder runs skip its other topics. Keep every existing claim unless
-it is wrong, and the definition card with its attachments byte-for-byte and
-in place.
+it is wrong or new information, and the definition card with its attachments
+byte-for-byte and in place.
 
 ## Establish the evidence and scope
 
@@ -56,8 +58,8 @@ in place.
    contradiction from it, and report any revision or last-modified date later
    than the entry's `created:`, when wiki-add read it.
    An address that no longer answers, now serves a different document or
-   version, or has lost the supporting section is missing evidence: repair the
-   instance from accurate background when that suffices, otherwise keep the
+   version, or has lost the supporting section is missing evidence: make the
+   repair when it needs only a 5(h) clarification, otherwise keep the
    claim and the item open with that blocker, and never cite another page
    instead. An uncited
    page, recollection, or a source cited only by another entry cannot overturn
@@ -66,19 +68,19 @@ in place.
 2. Locate the exact supporting and conflicting passages and, for PDFs, their
    physical pages. When the cited page does not settle a claim, search the
    rest of the cited document before treating evidence as missing. Standard
-   references may also be read to verify a background reason before adding
+   references may also be read to verify a clarification before adding
    it. If the
-   cited sources, accurate background and the standard references *Conflicts*
+   cited sources and the standard references *Conflicts*
    allows do not settle the correction, preserve the note and report what
    evidence is missing. Do not turn a correction into a search for new
-   sources to cite, apart from item 4's citation for an empty `sources:`;
-   reading standard references that are never cited is not such a search.
+   sources to cite, apart from item 4's citation for an empty `sources:` and
+   a discipline root's form repair; reading standard references that are never cited is not such a search.
    In a cleaned clipping, locate passages in its captured body, not in its Summary callout
    or other clipping-clean annotations
    ([rule](../../wiki-build/references/source-intake.md#read-and-classify)).
 3. Plan a repair that spans entries once, across every entry that states the
    same claim, relationship, direction, number or notation, and verify each
-   entry against its own cited sources and accurate background. Choosing which
+   entry against its own cited sources. Choosing which
    entry owns duplicated content is a
    [consolidation](refactors.md#build-the-refactored-entries), and a distinct
    missing entity goes to the
@@ -94,8 +96,11 @@ Apply the current builder rules for fields, prose, equations, media, links, and
 flashcards. Fix only a concrete defect a builder rule or a user issue names,
 and leave conforming prose as it is. Correct the erroneous claim, remove the
 unnecessary caveat or add the missing explanation, preserving essential
-assumptions and the ordinary mechanism. Never remove an accurate claim merely
-because the cited source does not state it. In each entry, change only the
+assumptions and the ordinary mechanism. Remove the new information the cited
+sources do not give, however accurate (principle 5(h)), keeping the rest of
+its sentence; what the equation rules require changes only under them, and an
+uncited hand edit the run can identify is reported, not trimmed. In each
+entry, change only the
 surfaces needed to keep it coherent: for example its description, opener,
 equation, or primary card. Then apply the builder's
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread),
@@ -110,9 +115,9 @@ the quantity the repair changed agree, stated in one unit. Restore teaching
 order under the
 [integration principle](../../wiki-build/references/merge.md#integration-principle),
 losing no claim. Deepening may restructure the whole body this way. List
-every sentence the repair deleted; each must be a corrected error, a claim
-merged into its other statement, a consolidation trim that links its owner,
-content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
+every sentence the repair deleted; each must be a corrected error, new
+information 5(h) excludes, a claim merged into its other statement, a
+consolidation trim that links its owner, content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
 caveat, scaffolding, a catalog, an anecdote, history beyond one clause, a
 tangential example, a neighbor's explanation beyond one defining clause), an
 equation removed under the

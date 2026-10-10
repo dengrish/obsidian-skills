@@ -28,7 +28,7 @@ existing content across entries.
 This is maintenance of existing knowledge, not a second extraction route.
 `wiki-build` still owns turning a new source into new candidates. A refactor
 may create a split note only for a subject already substantively present in the
-affected entry and supported by its cited sources or accurate background.
+affected entry and supported by its cited sources.
 Task 1b's [missing-entry rule](#create-a-missing-entry) is the only other
 creation, and it is limited to a concept the wiki already relies on.
 
@@ -38,11 +38,11 @@ creation, and it is limited to a concept the wiki already relies on.
    request. Snapshot every affected entry and resolve its cited sources: vault
    files, and cited URLs read online. For a PDF/summary pair, verify claims
    against the original PDF. A missing, unreadable, unreachable or ambiguous
-   source blocks only a movement that depends on it, such as a disputed or
-   source-specific claim; accurate, well-established content may move to its
-   owner without it. Never fill a gap with uncertain recollection.
-2. Prove the proposed boundary against the entries' definitions, cited
-   sources and accurate background. A split needs two or more independently
+   source blocks every movement that depends on it: only content a readable
+   cited source supports, or a 5(h) clarification, moves. Never
+   fill a gap with uncertain recollection.
+2. Prove the proposed boundary against the entries' definitions and cited
+   sources. A split needs two or more independently
    definable subjects, each with source-supported substance that passes the
    builder's [substance test](../../wiki-build/SKILL.md#2-extract-entities).
    A merge needs one entity under alternate names, not merely related
@@ -130,8 +130,8 @@ creation, and it is limited to a concept the wiki already relies on.
   worked example, property with its justification, or exhibit duplicated
   across entries or held outside its owner, in that owner: the most specific
   entry whose subject it is about. A
-  property every member of a family shares belongs to the family's entry
-  (weight penalties' scale sensitivity to Regularization, not Ridge
+  property the sources state for a whole family belongs to the family's entry
+  (regularized models' scale sensitivity to Regularization, not Ridge
   regression), and an argument about how a metric behaves belongs to that
   metric (the rare-positive argument to False positive rate); plots built on
   the metric keep the consequence and a link. Before choosing the owner,
@@ -145,7 +145,9 @@ creation, and it is limited to a concept the wiki already relies on.
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
   allows) and keeps a source verdict only in the owner, but never drops a fact that entry's core
   facets need. Otherwise move the fullest version into the owner, verified
-  against the owner's cited sources or accurate background and carrying each
+  against its cited sources (new information they do not give is
+  [trimmed](source-backed-corrections.md#correct-and-publish), never moved)
+  and carrying each
   source-specific claim's existing citation (adding that source to the
   owner's `sources:` when it cites no form of that document), then trim the
   others. A trimmed copy may lose links that served only the removed passage. A worked example or
@@ -385,7 +387,9 @@ evidence.
    using entries already cite leaves wiki-build's coverage unchanged; the
    rule that an uncited source counts as unbuilt governs deepening an
    existing entry, not a new entry's source.
-3. Draft it under wiki-build's entry rules: its
+3. Draft it from step 2's evidence, adding beyond it only the clarification
+   [5(h)](../../wiki-build/references/writing.md#prose-principles) admits,
+   under wiki-build's entry rules: its
    [writing guide](../../wiki-build/references/writing.md) and
    [Quality Checklist](../../wiki-build/references/quality-checklist.md), one
    discipline tag, one `??` definition card, `parents: []`, `read: false`,
@@ -422,7 +426,7 @@ each target before Task 2 drops any link. A target with a
    blocked, each dangling mention whose sentence needs the term's meaning,
    and that the entry does not already explain, gets a
    one-clause gloss at that mention ("leaf nodes, the nodes with no
-   children"), from the entry's cited sources or accurate background as
+   children"), a 5(h) clarification
    [item 14](qc-items.md#14-self-containment) requires. The entry's dates
    follow [Dates](../SKILL.md#dates).
 4. Task 2 then drops only the remaining genuine danglers to plain text under

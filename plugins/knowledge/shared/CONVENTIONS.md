@@ -1373,9 +1373,10 @@ own citation scope. A repair that reads another page of a document the
 entry already cites adds no citation, and the standard references Task 1b
 reads online under its
 [evidence rule](../skills/wiki-lint/SKILL.md#task-1b--content-repair) are
-data, never cited. No repair newly
-cites a source to fill a gap only that source teaches; that gap waits for
-wiki-build. A consolidation carries a moved claim's existing citation into
+data, never cited. Apart from a discipline root's
+[form repair](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots),
+no repair newly cites a source to fill a gap only that source teaches; that
+gap waits for wiki-build. A consolidation carries a moved claim's existing citation into
 its owner's `sources:`. A missing entry follows §9's citation rule. An
 entry whose `sources:` is empty cites the page or document Task 1b verified
 it against
@@ -1723,7 +1724,8 @@ respelling makes and removes (§2a):
   the things wiki-build structurally cannot do, because it sees one source at
   a time and cannot know about entries that do not exist yet.
 - **Content repair across entries** (Task 1b) — correct, simplify and deepen
-  existing entries from their cited sources or accurate background,
+  existing entries from their cited sources, removing new information they
+  do not give,
   consolidate an explanation duplicated across entries into its owner,
   resolve conflicting claims, align notation across siblings, merge synonym
   duplicates, split an entry that defines several durable subjects, retitle
