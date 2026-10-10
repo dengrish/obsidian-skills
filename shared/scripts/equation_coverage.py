@@ -31,6 +31,11 @@ such as ``a = ..., \\qquad b = ...``: every equation gets its own line. An
 index range such as ``i = 1, \\ldots, m`` or ``x = 0, 1``, or a condition
 such as ``\\text{for } i = 1`` qualifies an equation and is not a second one.
 
+Two notation checks read the entry's math and its card. A ``\\ell`` with no
+subscript is a finding, since ``\\ell`` names only norms. A card line 1 with
+no math that spells out arithmetic, beside a short defining display, is a
+candidate to carry that expression inline.
+
 Displays are found by pairing unescaped ``$$`` delimiters in source order,
 whatever their layout. A display that is not in canonical block form, or
 that uses ``&`` or ``\\\\`` outside an environment, is a form finding: the
@@ -44,7 +49,9 @@ import re
 
 __all__ = [
     "find_boilerplate_candidates",
+    "find_card_equation_candidate",
     "find_display_spans",
+    "find_ell_non_norm_candidates",
     "find_missing_display_equation_candidates",
     "find_multi_relation_display_candidates",
     "find_noncanonical_display_equation_candidates",
@@ -1383,7 +1390,8 @@ _SCRIPT_GROUP_RE = re.compile(r"[_^]\{[^{}]*\}|[_^][A-Za-z0-9]")
 #: restricted sum that only skips undefined terms (``\sum_{k:p_k>0}``).
 _FULL_RANGE_SUM_RE = re.compile(
     r"\\sum_\{?\s*([a-z])\s*=\s*1\s*\}?\^\{?\s*[A-Za-z]\s*\}?")
-_RESTRICTED_SUM_RE = re.compile(r"\\sum_\{\s*[a-z]\s*:[^{}]*[<>][^{}]*\}")
+_RESTRICTED_SUM_RE = re.compile(
+    r"\\sum_\{\s*([a-z])\s*:[^{}]*[<>][^{}]*\}")
 #: Prose phrasings of the same guards, matched case-insensitively on the
 #: link-label view of the text.
 _BOILERPLATE_PHRASES = [
@@ -1420,6 +1428,14 @@ _MATH_GUARDS = [
     ("sum-to-one", _SUM_TO_ONE_MATH_RE),
 ]
 _PARAMETER_SUMMAND_RE = re.compile(r"\\(?:boldsymbol\{\\)?theta|\bw_")
+
+
+def _parameter_sum(formula, match):
+    """Whether the full-range sum ``match`` of ``formula`` runs over
+    parameters, whose start index can exclude a bias."""
+    summand = formula[match.end():match.end() + 60]
+    summand = re.split(r"\\sum", summand, maxsplit=1)[0]
+    return bool(_PARAMETER_SUMMAND_RE.search(summand))
 
 
 def _visible_prose_lines(prose, excluded_line_spans=(), displays=None):
@@ -1477,9 +1493,7 @@ def find_boilerplate_candidates(masked_prose, excluded_line_spans=(),
         if not card_line:
             continue
         for match in _FULL_RANGE_SUM_RE.finditer(formula):
-            summand = formula[match.end():match.end() + 60]
-            summand = re.split(r"\\sum", summand, maxsplit=1)[0]
-            if _PARAMETER_SUMMAND_RE.search(summand):
+            if _parameter_sum(formula, match):
                 continue
             candidates.append({"kind": "full-range-bounds",
                                "phrase": " ".join(match.group(0).split()),
@@ -1500,6 +1514,215 @@ def find_boilerplate_candidates(masked_prose, excluded_line_spans=(),
         unique.setdefault(key, candidate)
     return sorted(unique.values(),
                   key=lambda item: (item["line"], item["kind"], item["phrase"]))
+
+
+def _math_spans(text):
+    """Each ``(start, content)`` math span of ``text``: displays, then inline.
+
+    Displays pair ``$$`` as :func:`_displays` does; inline math is read with
+    the displays blanked, so a ``$$`` never opens an inline span.
+    """
+    text = text or ""
+    spans, chars = [], list(text)
+    for start, end, _open, _close, content in _displays(text):
+        spans.append((start + 2, content))
+        for index in range(start, end):
+            if chars[index] != "\n":
+                chars[index] = " "
+    for match in _INLINE_MATH_RE.finditer("".join(chars)):
+        spans.append((match.start(1), match.group(1)))
+    return sorted(spans)
+
+
+def find_ell_non_norm_candidates(masked_text):
+    """Return each math span of ``masked_text`` holding ``\\ell`` as no norm.
+
+    The equation guide reserves ``\\ell`` for named norms, which always carry
+    a subscript (``\\ell_1``, ``\\ell_2``, ``\\ell_p``, ``\\ell_\\infty``,
+    ``\\ell_{...}``): a loss is ``L``, and an index takes another letter. So a
+    ``\\ell`` with no subscript (``\\ell(``, ``\\ell\\!``, ``\\ell=``, a bare
+    ``\\ell``) is a finding. ``masked_text`` is code-masked body prose or one
+    card line. Each result gives the one-based ``line`` of the first such
+    ``\\ell`` in a math span and the ``math`` around it, up to 30 characters
+    on each side, whitespace collapsed.
+    """
+    text = masked_text or ""
+    candidates = []
+    for start, content in _math_spans(text):
+        for token in _LATEX_TOKEN_RE.finditer(content):
+            if (token.group(0) == r"\ell"
+                    and not re.match(r"\s*_", content[token.end():])):
+                window = content[max(0, token.start() - 30):token.end() + 30]
+                candidates.append({
+                    "line": _line_number(text, start + token.start()),
+                    "math": " ".join(window.split()),
+                })
+                break
+    return candidates
+
+
+# Card line 1 spells out arithmetic in words: the cue that the entry's short
+# defining expression would state it more directly. A vault calibration
+# found that a short first display alone flags formulas that are no
+# definition (a worked example, an algorithm step, one member of a family),
+# while a card naming the arithmetic flagged mostly real gaps.
+_ARITHMETIC_CUE_RE = re.compile(
+    r"\b(?:sums?|summed|summing|averages?|averaged|"
+    r"averaging|divided|divides|dividing|ratio|quotient|fraction|minus|"
+    r"products?|multiplied|multiplies|multiplying|square\s+root|squared|"
+    r"subtracts?|subtracted|subtracting|differences?)\b", re.IGNORECASE)
+# A card that defines a procedure (a method, an algorithm, or a gerund such
+# as "Fitting ...") is no candidate: its display states a step, not what the
+# procedure is.
+_PROCEDURE_CUE_RE = re.compile(
+    r"\s*(?:(?:The|An?)\s+(?:[\w'-]+\s+){0,3}?(?:method|algorithm|technique|"
+    r"procedure)\b|[A-Z][a-z]+ing\s+[a-z])")
+# The longest defining expression listed, in LaTeX characters of the body's
+# notation without whitespace, spacing or sizing commands, or bounds over
+# every term. It is looser than the card rule's bound of about 40 characters,
+# since a card names its symbols more compactly than the body does.
+CARD_EXPRESSION_MAX = 80
+_CARD_SPACING_RE = re.compile(
+    r"\\(?:left|right)\.|"
+    r"\\(?:left|right|[bB]igg?[lr]?|q?quad)(?![A-Za-z])|\\[,;:! ]|\s+")
+_VERBAL_OPERAND_RE = re.compile(
+    r"\\(?:text|textrm|mathrm)\s*\{[^{}]*[A-Za-z]\s+[A-Za-z]")
+# A named quantity applied as a function, such as
+# ``\text{MSE}(\boldsymbol{\theta})``: beside another top-level term it makes a
+# regularized objective, whose card names the added term in words.
+_NAMED_FUNCTION_RE = re.compile(
+    r"\\(?:text|textrm|mathrm|operatorname)\s*\{[^{}]*\}\s*\(")
+
+
+def _card_form(expression):
+    """``expression`` as a card line writes it, ready to paste.
+
+    Spacing and sizing commands are dropped, and whitespace is collapsed and
+    removed just inside brackets, so a command keeps its space before a
+    letter (``\\log p``). A full-range ``\\sum_{i=1}^{m}`` and a restricted
+    ``\\sum_{k:p_k>0}`` become ``\\sum_i`` and ``\\sum_k``, as the card rule
+    drops bounds over every term; a parameter sum keeps its bounds.
+    """
+    expression = _CARD_SPACING_RE.sub(" ", expression)
+    expression = _FULL_RANGE_SUM_RE.sub(
+        lambda match: (match.group(0) if _parameter_sum(expression, match)
+                       else "\\sum_%s " % match.group(1)), expression)
+    expression = _RESTRICTED_SUM_RE.sub(
+        lambda match: "\\sum_%s " % match.group(1), expression)
+    expression = re.sub(r"([(\[{])\s+", r"\1", " ".join(expression.split()))
+    return re.sub(r"\s+([)\]}])", r"\1", expression)
+
+
+def _named_function_plus_term(expression):
+    """Whether ``expression`` adds a top-level term to a named quantity."""
+    depth, named, terms = 0, False, False
+    for index, char in enumerate(expression):
+        if (depth == 0 and char == "\\"
+                and _NAMED_FUNCTION_RE.match(expression, index)):
+            named = True
+        if char in "{([":
+            depth += 1
+        elif char in "})]":
+            depth = max(0, depth - 1)
+        elif depth == 0 and char in "+-" and expression[:index].strip():
+            terms = True
+    return named and terms
+
+
+def _relation_sides(row):
+    """``(left, right)`` of ``row`` at its first and last top-level relation.
+
+    ``left`` is the text before the first top-level ``=`` or defining
+    relation, ``right`` the text after the last; with none, ``(None, row)``.
+    """
+    depth, index, first, last = 0, 0, None, None
+    while index < len(row):
+        char = row[index]
+        if char == "\\":
+            token = _LATEX_TOKEN_RE.match(row, index)
+            if token is None:
+                index += 1
+                continue
+            if depth == 0 and token.group(0) in _DEFINING_RELATION_COMMANDS:
+                first = token.start() if first is None else first
+                last = token.end()
+            index = token.end()
+            continue
+        if char in "{([":
+            depth += 1
+        elif char in "})]":
+            depth = max(0, depth - 1)
+        elif (char == "=" and depth == 0
+              and row[index - 1:index] not in ("<", ">", "!")):
+            first = index if first is None else first
+            last = index + 1
+        index += 1
+    if first is None:
+        return None, row
+    return row[:first], row[last:]
+
+
+def find_card_equation_candidate(line1, masked_prose, excluded_line_spans=(),
+                                 opener=""):
+    """Return a card line 1 that could carry its short defining expression.
+
+    The card guide puts the entry's defining expression inline on line 1
+    when it is short and states the definition more directly than words.
+    ``line1`` is the kept card's line 1; it is a candidate when it has no
+    math yet names an arithmetic operation in words (sum, average, divided,
+    square root...), defines no procedure (a method, an algorithm, a
+    gerund such as *Fitting ...*), and the defining display is short. The
+    defining display is the one whose left side ``opener`` (the first
+    prose paragraph) writes as inline math, else the first display of
+    ``masked_prose`` outside ``excluded_line_spans``. Its expression is the
+    first rendered line's right side after the last top-level relation; a
+    ``cases`` or matrix layout, operands written as ``\\text`` phrases, a
+    named quantity such as ``\\text{MSE}(\\boldsymbol{\\theta})`` plus another
+    term, an expression with no letter, or one over
+    :data:`CARD_EXPRESSION_MAX` characters is no candidate. Returns ``None``
+    or a dict with ``line`` (the display's first one-based content line),
+    ``expression`` (in :func:`_card_form`), its ``length`` without
+    whitespace and ``cue``. It is a candidate for the agent, never an order.
+    """
+    if "$" in (line1 or ""):
+        return None
+    cue = _ARITHMETIC_CUE_RE.search(line1 or "")
+    if not cue or _PROCEDURE_CUE_RE.match(line1):
+        return None
+    displays = _displays(masked_prose or "",
+                         _excluded_lines(excluded_line_spans))
+    if not displays:
+        return None
+    named = {_CARD_SPACING_RE.sub("", content)
+             for _start, content in _math_spans(opener)}
+    chosen = displays[0]
+    for display in displays:
+        rows = _display_lines(display[4])
+        left = _relation_sides(rows[0])[0] if rows else None
+        if left is not None and _CARD_SPACING_RE.sub("", left) in named:
+            chosen = display
+            break
+    content = chosen[4]
+    rows = _display_lines(content)
+    if not rows or any(
+            name not in _ROW_ENVIRONMENTS for name in re.findall(
+                r"\\begin\s*\{\s*([A-Za-z]+)\*?\s*\}", content)):
+        return None
+    right = _relation_sides(rows[0])[1]
+    expression = _card_form(right)
+    length = len(re.sub(r"\s+", "", expression))
+    if (not re.search(r"[A-Za-z]", expression)
+            or _VERBAL_OPERAND_RE.search(right)
+            or _named_function_plus_term(expression)
+            or length > CARD_EXPRESSION_MAX):
+        return None
+    start, _end, open_line, close_line, _content = chosen
+    line = open_line + 1
+    if (open_line != close_line and not masked_prose[
+            start + 2:masked_prose.find("\n", start)].strip()):
+        line += 1
+    return {"line": line, "expression": expression,
+            "length": length, "cue": " ".join(cue.group(0).split())}
 
 
 def run_self_test(verbose=False):
@@ -2233,6 +2456,131 @@ def run_self_test(verbose=False):
     for name, text, card_line, expected in boilerplate_cases:
         got = sorted(candidate["kind"] for candidate in
                      find_boilerplate_candidates(text, card_line=card_line))
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    # \ell names only norms: (name, text, lines of the flagged math spans).
+    ell_cases = [
+        ("a loss written \\ell( is flagged",
+         "The cost averages $\\ell(\\hat{y}, y)$ over instances.", [1]),
+        ("\\ell\\! in a display, a bare \\ell and \\ell= are flagged once "
+         "per span",
+         "$$\nJ = \\frac{1}{m}\\sum_i \\ell\\!\\left(\\hat{y}_i, y_i\\right)"
+         " + \\ell\n$$\n\nHere $\\ell$ is the loss and $\\ell=2$.",
+         [2, 5, 5]),
+        ("an index \\ell is flagged",
+         "$$\nw = \\sum_{\\ell=1}^{m} w^{(\\ell)}\n$$", [2]),
+        ("named norms keep their subscripts and are never flagged",
+         "The $\\ell_1$, $\\ell_2$, $\\ell_p$, $\\ell_\\infty$, "
+         "$\\ell_{2,1}$ and $\\ell _2$ norms.", []),
+        ("prose, a longer command and a row break before ell are no loss",
+         "Plain \\ell text, $\\ellx$ and $a \\\\ell b$, and \\$\\ell\\$.",
+         []),
+    ]
+    total += len(ell_cases)
+    for name, text, expected in ell_cases:
+        got = [row["line"] for row in find_ell_non_norm_candidates(text)]
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
+    name = "a long display quotes the math around its \\ell, not its head"
+    total += 1
+    got = [(row["line"], row["math"]) for row in find_ell_non_norm_candidates(
+        "$$\n\\begin{aligned} \\widetilde{w}^{(i)} &= w^{(i)} \\exp(\\alpha "
+        "\\cdot \\text{err}^{(i)}) \\\\ Z &= \\sum_{\\ell=1}^{m} "
+        "\\widetilde{w}^{(\\ell)} \\end{aligned}\n$$")]
+    expected = [(2, "ext{err}^{(i)}) \\\\ Z &= \\sum_{\\ell=1}^{m} "
+                    "\\widetilde{w}^{(\\ell)}")]
+    ok = got == expected
+    if verbose or not ok:
+        print(("PASS" if ok else "FAIL") + ": " + name)
+    if not ok:
+        print("  expected %r, got %r" % (expected, got))
+        failed += 1
+    # Card equations: (name, line 1, prose, opener, (line, expression)).
+    mean_prose = ("For values $x_1, \\ldots, x_n$:\n\n$$\n\\bar{x} = "
+                  "\\frac{1}{n} \\sum_{i=1}^{n} x_i\n$$")
+    card_cases = [
+        ("a verbal arithmetic cue beside a short display is a candidate",
+         "The sum of the values divided by their count.", mean_prose, "",
+         (4, "\\frac{1}{n} \\sum_i x_i")),
+        ("a card that already has math is none",
+         "The value $\\bar{x}$, the sum divided by the count.", mean_prose,
+         "", None),
+        ("a card with no arithmetic word is none",
+         "The center of a set of values.", mean_prose, "", None),
+        ("a method is none: its display states a step",
+         "The ranking method that multiplies each pair's gradient by a "
+         "metric change.", mean_prose, "", None),
+        ("a gerund procedure is none",
+         "Fitting curves by adding powers and products of the features.",
+         mean_prose, "", None),
+        ("sizing and spacing commands do not count toward the length",
+         "The average of the squared differences.",
+         "$$\n\\text{MSE} = \\frac{1}{m}\\sum_{i=1}^{m} \\left( \\hat{y}_i "
+         "- y_i \\right)^2\n$$", "",
+         (2, "\\frac{1}{m}\\sum_i (\\hat{y}_i - y_i)^2")),
+        ("a defining expression over the limit stays in the body",
+         "The average of the squared differences.",
+         "$$\nE = \\frac{1}{m}\\sum_{i=1}^{m}\\left(h_{\\boldsymbol{\\theta}}"
+         "(\\mathbf{x}^{(i)}) - y^{(i)}\\right)^2 + \\frac{\\alpha}{2m}"
+         "\\sum_{j=1}^{n}\\theta_j^2\n$$", "", None),
+        ("the display the opener names is the defining one",
+         "The average of the values weighted by their probabilities.",
+         "The probabilities total:\n\n$$\nZ = \\sum_i p_i\n$$\n\n"
+         "The expectation is:\n\n$$\n\\mathbb{E}[X] = \\sum_i x_i p_i\n$$",
+         "The **expected value** $\\mathbb{E}[X]$ averages the values.",
+         (10, "\\sum_i x_i p_i")),
+        ("an aligned display reads its first row",
+         "The cross entropy minus the entropy.",
+         "$$\n\\begin{aligned} D &= H(p, q) - H(p) \\\\ &= \\sum_k p_k "
+         "\\log \\frac{p_k}{q_k} \\end{aligned}\n$$", "",
+         (2, "H(p, q) - H(p)")),
+        ("operands written as text phrases are none",
+         "The ratio of correct predictions to all predictions.",
+         "$$\n\\text{accuracy} = \\frac{\\text{correct predictions}}"
+         "{\\text{all predictions}}\n$$", "", None),
+        ("a cases layout is none",
+         "The difference of the two log terms.",
+         "$$\nL = \\begin{cases} -\\log p & y = 1 \\\\ -\\log(1 - p) & "
+         "y = 0 \\end{cases}\n$$", "", None),
+        ("a side with no letter is none",
+         "The points where the weighted sum is zero.",
+         "$$\n\\theta_0 + \\theta_1 x = 0\n$$", "", None),
+        ("a command keeps its space before a letter operand",
+         "The average surprise of the outcomes of a distribution.",
+         "$$\nH(p) = -\\sum_{k} p_k \\log p_k\n$$", "",
+         (2, "-\\sum_{k} p_k \\log p_k")),
+        ("a command keeps its space before a scalar it multiplies",
+         "The product of a scale and the input.",
+         "$$\ny = \\lambda x\n$$", "", (2, "\\lambda x")),
+        ("a restricted sum is listed with its index alone",
+         "The average surprise of the outcomes of a distribution.",
+         "$$\nH(p) = -\\sum_{k: p_k > 0} p_k \\, \\log p_k\n$$", "",
+         (2, "-\\sum_k p_k \\log p_k")),
+        ("a parameter sum keeps the bounds that can exclude a bias",
+         "Half the sum of the squared weights.",
+         "$$\nR = \\frac{1}{2}\\sum_{j=1}^{n} \\theta_j^2\n$$", "",
+         (2, "\\frac{1}{2}\\sum_{j=1}^{n} \\theta_j^2")),
+        ("a named quantity plus another term is a regularized objective: none",
+         "The linear regression regularized by the sum of absolute weights.",
+         "$$\nJ(\\boldsymbol{\\theta}) = \\text{MSE}(\\boldsymbol{\\theta}) + "
+         "\\alpha \\sum_{i=1}^{n} \\lvert \\theta_i \\rvert\n$$", "", None),
+        ("a named quantity alone is a candidate",
+         "The square root of the variance.",
+         "$$\n\\sigma = \\sqrt{\\operatorname{Var}(X)}\n$$", "",
+         (2, "\\sqrt{\\operatorname{Var}(X)}")),
+    ]
+    total += len(card_cases)
+    for name, line1, prose, opener, expected in card_cases:
+        result = find_card_equation_candidate(line1, prose, (), opener)
+        got = result and (result["line"], result["expression"])
         ok = got == expected
         if verbose or not ok:
             print(("PASS" if ok else "FAIL") + ": " + name)

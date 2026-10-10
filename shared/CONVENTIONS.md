@@ -1188,8 +1188,9 @@ name and typography evidence shared by both Wiki skills), `entry_structure.py`
 meaning-preserving mathematical-title plain-text conversion),
 `markdown_tables.py` (Markdown-table
 spans and caption checks shared by both Wiki skills), `equation_coverage.py`
-(the conservative missing-display, well-definedness-boilerplate and
-one-equation-per-line candidates shared by both Wiki skills; paper-summarize's
+(the conservative missing-display, well-definedness-boilerplate,
+one-equation-per-line and card-equation candidates and the non-norm `\ell`
+check shared by both Wiki skills; paper-summarize's
 `note_lint.py` reports the one-equation-per-line candidates as advisories),
 `code_typography.py` (bracket special tokens and literal file extensions that
 need backticks in prose), `introduced_aliases.py` (alternate names that body
@@ -1320,15 +1321,16 @@ a viewer reports as "page X of Y" — **not the folio printed on the page.** A
 book-chapter PDF whose chapter starts at printed page 87 has its first page at
 `#page=1`.
 
-**One document is cited in one form, never two**, and the same PDF legitimately
-appears with *different* anchors in different entries — each entity is anchored
-where it is introduced.
+**A document is cited in one representation, never two:** the PDF or its
+summary note, a chapter PDF or its whole book, the vault file or its URL.
+Different physical pages of that representation may each be cited, and the
+same PDF legitimately appears with *different* anchors in different entries —
+each entity is anchored where it is introduced.
 
 **On a merge, compare full citations, including page anchors.** Do not append
 an exact item, wikilink or URL, already present, and keep every existing URL
 item exactly as written and in place, except for the same-document
-replacement below. Different physical pages of one PDF are
-distinct citations, not different documents; preserve existing anchors. If a
+replacement below. Preserve existing anchors. If a
 rerun chooses another introducing page and adds that citation, report the
 anchor drift under *Notes for the user* rather than appending it silently.
 

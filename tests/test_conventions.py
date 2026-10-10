@@ -6088,7 +6088,13 @@ SELFTEST_MIN_CASES = {
     # 2026-10-07 (knowledge 1.23.0): displays and cues indented inside list
     # items, and a cue that cannot bridge into a nested item.
     # 2026-10-07 (knowledge 1.24.0): update arrows count as equations.
-    "shared/scripts/equation_coverage.py": 232,
+    # 2026-10-09 (knowledge 1.27.0): a \ell with no subscript names no norm,
+    # and a verbal arithmetic card beside a short defining display is a
+    # card-equation candidate.
+    # 2026-10-09 (knowledge 1.27.0): the \ell quote is the math around it;
+    # the listed card expression keeps a command's space before a letter,
+    # drops bounds over every term and skips a regularized objective.
+    "shared/scripts/equation_coverage.py": 256,
     # 2026-10-06 (knowledge 1.22.0): a BOM on line 1, unstorable stems, and
     # records that would read back as comments.
     # 2026-10-08 (knowledge 1.24.0): a pending Extended Data row needs its
@@ -6417,7 +6423,9 @@ SELFTEST_MIN_CASES = {
     # 2026-10-08 (knowledge 1.25.0): 9-list-mismatch-candidate, an
     # advisory candidate, and 9-register-candidate in the description, the
     # kept cue and the body.
-    "skills/wiki-build/scripts/lint_entry.py": 534,
+    # 2026-10-09 (knowledge 1.27.0): 12-ell-non-norm and the review-only
+    # 19-card-equation-candidate.
+    "skills/wiki-build/scripts/lint_entry.py": 536,
     # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
     # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
     # `.md` or path, and keep one another vault file needs.
@@ -6498,7 +6506,9 @@ SELFTEST_MIN_CASES = {
     # 2026-10-09 (knowledge 1.26.0): the `neighbors` map, the review-only
     # `overlap_candidates` list and item12/duplicate-embed-candidate; the
     # overlap list reads each list item as its own sentence.
-    "skills/wiki-lint/scripts/scan_vault.py": 764,
+    # 2026-10-09 (knowledge 1.27.0): item12/ell-non-norm and the review-only
+    # item19/card-equation-candidate.
+    "skills/wiki-lint/scripts/scan_vault.py": 766,
 }
 
 
@@ -7865,13 +7875,24 @@ def check_physical_page(rep, conv):
     §7: `#page=N` is the 1-indexed position in the FILE, never the printed
     folio.  The drift shape is a restatement quietly explaining `N` as the
     printed page number -- every citation checked against it then points a
-    page early or late for any front-matter offset.
+    page early or late for any front-matter offset.  §7's one-citation-form
+    rule names representations, so several physical pages of one PDF stay
+    valid citations.
     """
     check = "physical-page"
     if not re.search(r"`N` is the physical page", conv):
         rep.fail(check, "CONVENTIONS.md §7 no longer states \"`N` is the "
                         "physical page\" -- the rule of record",
                  rel(CONVENTIONS))
+    # 2026-10-09 (knowledge 1.27.0): "one form" means one representation of
+    # a document, and its different physical pages may each be cited.
+    for phrase in ("is cited in one representation, never two",
+                   "Different physical pages of that representation may "
+                   "each be cited"):
+        if not _phrase_re(phrase).search(conv):
+            rep.fail(check, "CONVENTIONS.md §7 no longer states %r -- a "
+                            "reader can take one citation form for one page "
+                            "anchor" % phrase, rel(CONVENTIONS))
     stated = 0
     for skill, path, text in walk_skill_files():
         low = text
@@ -8543,8 +8564,12 @@ def check_card_set_contract(rep, _conv):
         (fe_path, "### Line-1 equation coverage",
          "lost the `### Line-1 equation coverage` heading that owns card "
          "math"),
-        (fe_path, "**Line 1 is verbal by default.**",
-         "no longer states that card line 1 is verbal by default"),
+        # 2026-10-09 (knowledge 1.27.0): line 1 includes the entry's short
+        # defining expression instead of staying verbal by default.
+        (fe_path, "**Line 1 includes the entry's defining expression when it "
+         "is short** and states the definition more directly than words",
+         "no longer states that card line 1 includes the entry's short "
+         "defining expression"),
         (fe_path, "removes every other card",
          "no longer removes every card but the definition card in every "
          "wiki-lint run and wiki-build merge"),
@@ -9879,6 +9904,59 @@ WRITING_RULE_PINS = (
         "(`9-list-mismatch-candidate`)",
         "rather than praises or instructs (`9-register-candidate`)",
     )),
+    # 2026-10-09 (knowledge 1.27.0): $\ell$ keeps one role vault-wide and
+    # names only norms, so a per-instance loss is $L(\hat{y}, y)$ and a
+    # log-likelihood $\log L$; a field's $\mathcal{L}$ objective stays.
+    # Wiki-lint's Task 1 renames a non-norm $\ell$ as a pure rename.
+    (("wiki-build", "references", "equations.md"), (
+        "| $L(\\hat{y}, y)$ | the loss on one instance's prediction |",
+        "$\\ell$ keeps one role vault-wide and names only norms: a loss is "
+        "$L$ and a log-likelihood $\\log L$, an index takes another letter",
+        "a field's $\\mathcal{L}$ for a training objective stays",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "and renames an $\\ell$ that names no norm",
+        "Renaming any other symbol to the",
+    )),
+    # 2026-10-09 (knowledge 1.27.0): card line 1 includes the entry's short
+    # defining expression whenever it states the definition more directly
+    # than words; short is about 40 LaTeX characters, and one bound decides
+    # both adding an expression and giving a longer one way to its verbal
+    # core. A card that lacks it is improvable.
+    (("wiki-build", "references", "flashcards-and-emphasis.md"), (
+        "An expression is short when it fits on the card line beside its "
+        "role words, about 40 LaTeX characters at most",
+        "A longer defining formula stays in the body, and line 1, new or "
+        "existing, states its verbal core",
+    )),
+    (("wiki-build", "references", "quality-checklist.md"), (
+        "a short cue that fits no confusable term and follows [line-1 "
+        "equation coverage]",
+    )),
+    (("wiki-lint", "references", "flashcards.md"), (
+        "or the short defining expression the [line-1 equation rule]",
+        "asks for and the card lacks",
+        "or replace a formula longer than that rule allows with its verbal "
+        "core",
+    )),
+    # 2026-10-09 (knowledge 1.27.0): a non-norm $\ell$ is a Task 1 rename of
+    # the symbol and every reference in one edit; the card-equation check is
+    # a review-only candidate, added in the card's compact form, whose
+    # display may be no short definition or as direct in words.
+    (("wiki-lint", "references", "qc-items.md"), (
+        "Task 1, when it is a pure rename",
+        "with every prose and card reference in the same edit; otherwise "
+        "Task 1b",
+        "add the expression inline in the compact form the [line-1 equation "
+        "rule]",
+        "keep the cue verbal when the display is no short definition or "
+        "words state it as directly; the candidate alone is never an order",
+        "or replace math too long for the [line-1 rule]",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "keeping a verbal card whose flagged display is no short definition "
+        "or is stated as directly in words (`19-card-equation-candidate`)",
+    )),
 )
 
 #: Retired writing rules: the default against examples, the hedge repair
@@ -9999,6 +10077,16 @@ WRITING_RULE_RETIRED = (
     "without its reason or key value is an open question",
     "key value of a consequence carried from a linked entry",
     "one-clause reason or key value the [atomicity test](writing.md#body-structure) keeps",
+    # 2026-10-09 (knowledge 1.27.0): card line 1 includes a short defining
+    # expression rather than staying verbal by default, and a document's one
+    # citation form is its one representation, not one page anchor.
+    "Line 1 is verbal by default",
+    "a short standard expression a learner should memorize",
+    "short verbal cue",
+    "cited in one form, never two",
+    "A document is cited in one form",
+    "each document in one form",
+    "long formula may give way to its verbal core",
 )
 
 
@@ -10148,7 +10236,9 @@ SOURCE_INTAKE_PINS = (
         "skipped",
     )),
     (("wiki-build", "references", "merge.md"), (
-        "A document is cited in one form",
+        # 2026-10-09 (knowledge 1.27.0): "one form" is one representation,
+        # matching CONVENTIONS §7, never one page anchor.
+        "A document is cited in one representation",
         # 2026-10-07 (knowledge 1.24.0): a same-URL twin pair passes the
         # replacement test, so a URL item never stays beside its clipping.
         "whose `matches` includes that clipping's path",

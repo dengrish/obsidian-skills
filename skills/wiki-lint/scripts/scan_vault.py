@@ -171,7 +171,9 @@ from organism_names import (  # noqa: E402
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_boilerplate_candidates,
+    find_card_equation_candidate,
     find_display_spans,
+    find_ell_non_norm_candidates,
     find_missing_display_equation_candidates,
     find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
@@ -4227,6 +4229,18 @@ def scan(wiki, images=None, vault=None, settled=None):
                 + " — executing agent: remove a condition the formula "
                 "already presupposes, keep a range the definition needs "
                 "(wiki-build/references/equations.md §1)"))
+        # Shared with lint_entry (equation_coverage.find_ell_non_norm_candidates).
+        _ell_rows = find_ell_non_norm_candidates(_equation_prose)
+        if _ell_rows:
+            problems.append((
+                sl, "item12/ell-non-norm",
+                "`\\ell` without a subscript in body math — "
+                + "; ".join(f'line {row["line"] + _line_off}: '
+                            f'"{row["math"][:60]}"' for row in _ell_rows)
+                + " — `\\ell` names only norms ($\\ell_1$, $\\ell_2$, "
+                "$\\ell_p$), so a loss is $L$ and an index takes another "
+                "letter; rename the symbol and every prose reference to it "
+                "in the same edit (wiki-build/references/equations.md §3)"))
         # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-build MANDATES this exact
         # form for an external URL coming from a markdown source's clipping ("use standard markdown
         # image syntax ![alt](https://...) since wikilinks don't handle remote URLs" —
@@ -4563,6 +4577,14 @@ def scan(wiki, images=None, vault=None, settled=None):
                            "only when the tested claim is unchanged; keep the "
                            "cue, answer line and every attachment "
                            "(flashcards.md)")))
+                if find_ell_non_norm_candidates(strip_code(line1)):
+                    problems.append((
+                        sl, "item12/ell-non-norm",
+                        f"{_lead}`\\ell` without a subscript in {tag} line 1"
+                        + ("" if _extra else
+                           " — `\\ell` names only norms, so a loss is $L$ "
+                           "and an index takes another letter; rename it "
+                           "in the same edit as the body's references")))
                 if re.search(r"ℓ(?:[0-9₀-₉])", line1):
                     problems.append((
                         sl, "item12/equation-typography",
@@ -4659,6 +4681,23 @@ def scan(wiki, images=None, vault=None, settled=None):
                         + ", ".join(f'"{word}"' for word in _hedges)
                         + " — state the ordinary case plainly when the note "
                         "establishes it; a candidate is never an order"))
+                # Shared with lint_entry (equation_coverage); the kept card
+                # only, since an extra card is removed.
+                _card_equation = None if _extra else \
+                    find_card_equation_candidate(
+                        line1, _equation_prose, _equation_tables, opener)
+                if _card_equation:
+                    problems.append((
+                        sl, "item19/card-equation-candidate",
+                        f'{tag} line 1 states arithmetic in words '
+                        f'("{_card_equation["cue"]}") and has no math, while '
+                        "the defining display on prose line "
+                        f'{_card_equation["line"] + _line_off} is short '
+                        f'(${_card_equation["expression"]}$ in the body\'s '
+                        "notation) — add it inline in the card's compact form "
+                        "(no bounds over every term, symbols named by role "
+                        "words) when it states the definition more directly "
+                        "than words; a candidate is never an order"))
                 _praise = [] if _extra else register_hints(line1)
                 if _praise:
                     problems.append((
@@ -12850,6 +12889,61 @@ def run_self_test():
                "glossary" in _st_msg(res, "glossary-cue",
                                      "item19/brevity-candidate")),
               (["item19/brevity-candidate"], True))
+
+        # \ell names only norms (item 12); a verbal arithmetic cue beside a
+        # short defining display is a card-equation candidate (item 19).
+        v = os.path.join(tmp, "v-card-math")
+        _mean_prose = ("**%s** is a worked example. For values $x_1, \\ldots, "
+                       "x_n$:\n\n$$\n\\bar{x} = \\frac{1}{n}\\sum_{i=1}^{n} "
+                       "x_i\n$$\n\nHere $\\bar{x}$ averages the values.")
+        _verbal = "The sum of the values divided by their count."
+        _st_write(v, "ell-loss.md", _st_entry(
+            "Ell loss", "**Ell loss** is a worked example:\n\n$$\nJ = "
+            "\\frac{1}{m}\\sum_{i=1}^{m} \\ell\\!\\left(\\hat{y}, y\\right)\n"
+            "$$\n\nIts $\\ell_2$ norm differs.").replace(
+                "The idea this entry is about, stated once.",
+                "The idea $\\ell(x)$ this entry is about, stated once."))
+        _st_write(v, "ell-norms.md", _st_entry(
+            "Ell norms", "**Ell norms** is a worked example: $\\ell_1$, "
+            "$\\ell_p$, $\\ell_\\infty$ and $\\ell_{2}$."))
+        _st_write(v, "ell-extra.md", _with_cards(
+            "Ell extra", "Another notion $\\ell(x)$, stated briefly.\n??\n"
+            "Second idea\n"))
+        _st_write(v, "card-equation.md", _st_entry(
+            "Card equation", _mean_prose % "Card equation").replace(
+                "The idea this entry is about, stated once.", _verbal))
+        _st_write(v, "card-equation-math.md", _st_entry(
+            "Card equation math", _mean_prose % "Card equation math").replace(
+                "The idea this entry is about, stated once.",
+                "The value $\\frac{1}{n}\\sum_i x_i$, the sum of the values "
+                "divided by their count."))
+        _st_write(v, "card-equation-extra.md", (_st_entry(
+            "Card equation extra", _mean_prose % "Card equation extra")
+            .rstrip("\n") + "\n\n" + _verbal + "\n??\nSecond idea\n"))
+        res = scan(v)
+        check("a \\ell with no subscript in body or card math is an item12 "
+              "finding naming the rename; named norms are not, and an extra "
+              "card's needs only its removal",
+              ([k for k in _st_keys(res, "ell-loss") if k.startswith("item12")],
+               "line 4:" in _st_msg(res, "ell-loss", "item12/ell-non-norm"),
+               [k for k in _st_keys(res, "ell-norms")
+                if k.startswith("item12")],
+               [(p["message"].startswith(EXTRA_CARD_PREFIX % 2),
+                 "rename" in p["message"]) for p in res["problems"]
+                if p["slug"] == "ell-extra"
+                and p["item"] == "item12/ell-non-norm"]),
+              (["item12/ell-non-norm", "item12/ell-non-norm"], True, [],
+               [(True, False)]))
+        check("a verbal arithmetic cue beside a short defining display is an "
+              "item19 candidate; a cue with math or an extra card is not",
+              ([k for k in _st_keys(res, "card-equation")
+                if k.startswith("item19")],
+               "$\\frac{1}{n}\\sum_i x_i$ in the body's notation" in _st_msg(
+                   res, "card-equation", "item19/card-equation-candidate"),
+               [k for slug_ in ("card-equation-math", "card-equation-extra")
+                for k in _st_keys(res, slug_)
+                if k == "item19/card-equation-candidate"]),
+              (["item19/card-equation-candidate"], True, []))
 
         v = os.path.join(tmp, "v-card-attachments", "Wiki")
         _attached = {

@@ -108,7 +108,7 @@ creation, and it is limited to a concept the wiki already relies on.
   [title rule](../../wiki-build/references/writing.md#title), its
   acronym-or-full-form choice included. Preserve that entry's `created:` and
   user-owned appearance fields, integrate nonduplicate claims, and union only valid source
-  contributions, each document in one form
+  contributions, each document in one representation
   ([merge rule 1](../../wiki-build/references/merge.md#frontmatter-and-related-footer)),
   and same-entity aliases. The survivor gets today's
   `updated:` and `read: false`, whatever any merged entry's prior `read:`,
