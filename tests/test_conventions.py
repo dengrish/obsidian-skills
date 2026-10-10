@@ -9100,12 +9100,16 @@ def check_empty_sources_route(rep, _conv):
     pins = (
         (qc_items, "Task 1 hands an empty `sources:` to Task 1b",
          "no longer routes an empty `sources:` to Task 1b"),
+        # 2026-10-10 (knowledge 1.29.0): a discipline root's form repair is
+        # the second citation exception.
         (os.path.join(lint_dir, "SKILL.md"),
-         "The one exception is an entry whose `sources:` is empty",
+         "The exceptions are an entry whose `sources:` is empty",
          "no longer lets Task 1b cite a source for an empty `sources:`"),
         (os.path.join(refs, "source-backed-corrections.md"),
-         "the one exception is an entry whose `sources:` is empty",
+         "the exceptions are an entry whose `sources:` is empty",
          "no longer lets a correction cite a source for an empty `sources:`"),
+        (CONVENTIONS, "Apart from a discipline root's",
+         "no longer lets a root's form repair cite its overview page"),
         (CONVENTIONS, "An entry whose `sources:` is empty cites the page or "
          "document Task 1b verified", "no longer gives an empty `sources:` "
          "its citation scope"),
@@ -9390,8 +9394,9 @@ WRITING_RULE_PINS = (
         "a progress or trend claim",
         "Run the [flow sweep](#editorial-reread) on every paragraph",
         "A reason for why a result holds is one sentence of intuition",
-        "A distinction the note never uses, or background that needs more "
-        "than one new term with no entry",
+        # 2026-10-10 (knowledge 1.29.0): the brake now bounds a 5(h)
+        # clarification, not background.
+        "is reduced to its point or left out",
         "and one clause can set them up",
         "an example that only restates the definition with a number",
         "A single one-clause gloss of a term is no overload",
@@ -9414,7 +9419,8 @@ WRITING_RULE_PINS = (
         "a sentence that only previews claims the following sentences "
         "explain goes",
         "causal or comparative claim",
-        "terms in background or corrections the builder added included",
+        # 2026-10-10 (knowledge 1.29.0): 5(h) admits clarification only.
+        "terms in clarifications or corrections the builder added included",
         "every example states the point it shows",
         "the opener's kind, named or made plain by its verb, matches card "
         "line 1's",
@@ -9510,6 +9516,80 @@ WRITING_RULE_PINS = (
         "never with an alternative implementation's cost",
         "the property or benefit the description and card define the subject "
         "by appears in the opening paragraph",
+    )),
+    # 2026-10-10 (knowledge 1.29.0): an entry says what its cited sources
+    # teach and adds only clarification (definitions, reasons, rephrasing and
+    # framing, equations under equations §1, a clarifying example), never new
+    # information; core facets, members, variants, contrasts, limitations,
+    # scope, framing, examples, aliases, root branches and a Person's
+    # biography come from the sources, while a Person or Event opener's date
+    # stays an identity clarification. Equations §1 alone decides the
+    # equations and the prediction and objective statements an entry
+    # carries; a confusable term's separating property is this subject's
+    # own, a 5(h) definition when the sources lack it; and a root part the
+    # sources lack is left to wiki-lint's root repair.
+    (("wiki-build", "references", "writing.md"), (
+        "Clarify beyond the sources; never add to them",
+        "a definition or acronym expansion of a term it uses",
+        "Everything else the sources do not give is new information, removed "
+        "however accurate or standard",
+        "When a sentence's place on that list is unclear, ask what question "
+        "it answers",
+        "any other question the sources cannot answer makes it new "
+        "information",
+        "the equations, and the prediction and objective statements, that",
+        "alone decides an entry carries, with the prose that explains them",
+        "A clarification needs no citation, is never removed for lacking one",
+        "A short entry is correct; it grows when a source that teaches more "
+        "is built",
+        "genuinely close call stays as it is, neither added nor removed",
+        "biography such as a Person's nationality",
+        "Never take a facet from a standard reference: a point the sources do "
+        "not teach is not a gap",
+        "says how it predicts and what its training minimizes as",
+        "and otherwise how it trains as far as its sources say",
+        "one source-named member is enough, and when its sources name none, "
+        "the entry names none",
+        "never add one to fill it (5(h)), even by symmetry with a sibling",
+        "that returned clause states only the relationship and the link",
+        "states the property that separates them, this subject's own",
+        "a 5(h) definition when its sources lack it",
+        "never replace their definition with another reference's",
+        "A real-world instance carries no fact its sources do not give",
+        "that would otherwise be hard to follow",
+        "alternate names that its sources use or",
+        "another name for the subject (a synonym, spelling or jargon label",
+        "state it at the scope its sources establish, or in the general form",
+        "keeps the source's scope and attribution",
+        "name the condition its sources give, or that",
+        "A property the sources state for a whole family belongs to the "
+        "family's entry",
+        "a short field overview, drawn from its cited sources",
+        "a part its sources lack is left to wiki-lint's root repair",
+    )),
+    (("wiki-build", "references", "rare-types.md"), (
+        "Each body description below covers its points only as far as the "
+        "entry's cited sources teach them",
+        "well-established background, an identity clarification under",
+    )),
+    (("wiki-build", "references", "api-surface.md"), (
+        "as far as its cited sources teach them",
+    )),
+    (("wiki-build", "references", "quality-checklist.md"), (
+        "naming the nearest contrast its sources draw",
+        "nothing beyond those sources but 5(h) clarification",
+        "carrying no fact its sources do not give",
+        "leaving a part they lack to wiki-lint",
+    )),
+    (("wiki-build", "SKILL.md"), (
+        "remove new information no cited source gives",
+    )),
+    (("wiki-add", "SKILL.md"), (
+        "as the reference page it cites gives them",
+    )),
+    (("wiki-add", "references", "research.md"), (
+        "Take every claim the entry makes from the sources it cites; beyond "
+        "them, add only the clarification",
     )),
     (("wiki-build", "references", "equations.md"), (
         "A qualitative property the opener states completely in words",
@@ -9635,7 +9715,9 @@ WRITING_RULE_PINS = (
         "unbuilt source",
     )),
     (("wiki-lint", "references", "qc-items.md"), (
-        "A gap that only an unbuilt source would fill",
+        # 2026-10-10 (knowledge 1.29.0): a gap an uncited source would fill
+        # waits too.
+        "A gap that only an uncited or unbuilt source would fill",
     )),
     # 2026-10-06 (knowledge 1.22.0): an entry that conflates two concepts
     # still has exactly one discipline tag, split or not.
@@ -9664,8 +9746,10 @@ WRITING_RULE_PINS = (
         # 2026-10-09 (knowledge 1.26.0): the detection pass runs every sweep,
         # principle 9's reading-speed test included.
         "Run every sweep of the builder's",
-        "Task 1b states the general fact from standard references, or "
-        "restores that scope",
+        # 2026-10-10 (knowledge 1.29.0): a claim scoped to one exhibit takes
+        # the scope its cited sources establish, never a standard
+        # reference's general fact.
+        "Task 1b restores the scope its cited sources establish",
         "a loop's Repeat target and starting step, a lead-in's step count, "
         "and parallel bullets that never include the entry's own subject",
         "and a neighbor's formula that this entry's own prediction, "
@@ -9677,9 +9761,12 @@ WRITING_RULE_PINS = (
         "or a multi-step complexity analysis, with its one-sentence "
         "intuition, or, when none exists, with the takeaway alone, omitting "
         "the bound",
-        "listing the facets from a standard introductory reference before "
-        "reading the body",
-        "including terms in added background or corrections",
+        # 2026-10-10 (knowledge 1.29.0): the depth review fills only what the
+        # entry's cited sources teach.
+        "It never lists facets from a standard reference",
+        # 2026-10-10 (knowledge 1.29.0): lint adds clarifications, never
+        # background.
+        "including terms in added clarifications or corrections",
         # 2026-10-09 (knowledge 1.26.0): only a consequence that would
         # otherwise leave an open question gets its one clause.
         "A consequence carried from a linked entry gets its reason or key "
@@ -9754,6 +9841,54 @@ WRITING_RULE_PINS = (
         "write or name the same quantity differently, or state its value in "
         "another unit, the owner entry's unit wins, and its name replaces "
         "one the field does not use",
+    )),
+    # 2026-10-10 (knowledge 1.29.0): lint removes new information the cited
+    # sources do not give, however accurate, and keeps the rest of its
+    # sentence, what the equation rules require and an identifiable uncited
+    # hand edit, which it reports. Depth, examples, contrasts, prototypes,
+    # splits, consolidations and missing entries add nothing beyond the
+    # sources; a discipline root's form repair may cite one more overview.
+    (("wiki-lint", "SKILL.md"), (
+        "never judge a claim against its source; Task 1b removes new "
+        "information the cited sources do not give",
+        "beyond them it adds only the clarification",
+        "the nearest contrast its sources draw",
+        "applications its sources give named once",
+    )),
+    (("wiki-lint", "references", "source-backed-corrections.md"), (
+        "Remove the new information the cited sources do not give, however "
+        "accurate",
+        "keeping the rest of its sentence; what the equation rules require "
+        "changes only under them",
+        "an uncited hand edit the run can identify is reported, not trimmed",
+        "and a discipline root's form repair",
+        "adding beyond them only the clarification 5(h) admits",
+        "a corrected error, new information 5(h) excludes",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "Task 1b restores the scope its cited sources establish, or the "
+        "general form",
+        "which fills it only from the lacking entry's own cited sources, "
+        "never by symmetry with the sibling",
+        "the members its sources name for a category",
+        "when its sources draw one",
+        "only when the idea would otherwise be hard to follow",
+        "a constructed one that carries no fact the sources do not give",
+    )),
+    (("wiki-lint", "references", "refactors.md"), (
+        "new information they do not give is",
+        "A property the sources state for a whole family belongs to the "
+        "family's entry",
+        "adding beyond it only the clarification",
+    )),
+    (("wiki-lint", "references", "hierarchy.md"), (
+        "it never adds a branch or method no cited page gives",
+    )),
+    (("wiki-lint", "references", "backlogs.md"), (
+        "a discipline root's [overview page]",
+    )),
+    (("wiki-lint", "references", "flashcards.md"), (
+        "or new information 5(h) excludes",
     )),
     (("wiki-lint", "references", "link-hygiene.md"), (
         "adds to it each first mention of an entry's concept that no claimed "
@@ -10144,6 +10279,44 @@ WRITING_RULE_RETIRED = (
     "A document is cited in one form",
     "each document in one form",
     "long formula may give way to its verbal core",
+    # 2026-10-10 (knowledge 1.29.0): the builder clarifies beyond its cited
+    # sources but never adds to them: no background facts, dates or
+    # nationality, standard-reference facets, quota of members, misconception
+    # denial, standard reference's framing or general fact, or example that
+    # carries a fact the sources do not give.
+    "Background beyond the source is welcome",
+    "a well-known fact or date",
+    "a standard formula or its common variant",
+    "5(h) background needs no citation",
+    "a standard reference's introductory section",
+    "names at least three canonical members",
+    "or gives way to a familiar one",
+    "or a common misconception holds it",
+    "as a standard reference in its own discipline would",
+    "the settled fact standard references confirm",
+    "the webbing between developing fingers",
+    "with each feature presorted",
+    "unlike random forest's per-split sampling",
+    "weight penalties' scale sensitivity",
+    "clinical observation and controlled trials in medicine",
+    "was an English physicist",
+    "Skip the example only when the definition already names",
+    "a reader can explain how a Concept works",
+    "keep every claim the entry makes consistent with it",
+    # 2026-10-10 (knowledge 1.29.0): lint removes new information its cited
+    # sources do not give and never deepens, frames, splits, consolidates or
+    # repairs a root from background or a standard reference's facets.
+    "is not a defect merely because its cited source does not state it",
+    "Never remove an accurate claim merely because",
+    "accurate textbook background",
+    "verify background or settle a conflict",
+    "listing the facets from a standard introductory reference",
+    "states the general fact from standard references",
+    "canonical members (at least three)",
+    "accurate, well-established content may move",
+    "medicine tests treatments in clinical trials",
+    "the scales and questions the definition names",
+    "including terms in added background",
 )
 
 

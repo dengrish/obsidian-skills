@@ -4043,7 +4043,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                 f'acronym title "{base_term(title)}" has no full-form '
                 f'parenthetical directly after its bolded opener title — add '
                 f'the expansion there (wiki-build writing.md principle 5(f)) '
-                f'from the cited source or accurate background; then apply '
+                f'from the cited source or as a 5(h) clarification; then apply '
                 f"item 17's alias gates and, when the alias is added, item "
                 f"19's line-3 counterpart. A title whose letters stand for no "
                 f'established full form keeps its opener'))
@@ -4055,7 +4055,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                 f'"{cue_line[:100]}" — integrate it where adjacent prose already '
                 f'states the relationship without adding a claim; otherwise '
                 f'Task 1b states the relationship from the entry\'s or the '
-                f'linked entry\'s cited source, or accurate background, and '
+                f'linked entry\'s cited source, or as a 5(h) clarification, and '
                 f'integrates the link'))
         # Listings are presentation samples and must not be parsed as
         # headings, but inline code is itself forbidden heading markup.

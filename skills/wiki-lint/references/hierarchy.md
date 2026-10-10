@@ -47,8 +47,9 @@ Reuse the canonical Wiki entry for each active tag, checking filename, identity,
 and tag ownership rather than treating a same-named MOC or alias as the root.
 When a root is missing, Task 3 may create that narrow prerequisite using
 builder's entry rules. It writes the root from one reliable overview of the
-field, such as a textbook introduction or an encyclopedia article (a
-Wikipedia page will do), and cites that page by its URL under
+field that gives its definition, method of inquiry and main branches, such
+as a textbook introduction or an encyclopedia article (a Wikipedia page will
+do), and cites that page by its URL under
 [conventions §7](../../../shared/CONVENTIONS.md#7-source-references), or an
 already-cited vault document that introduces the field. It creates no source
 note, PDF or image. This prerequisite creates only
@@ -58,11 +59,10 @@ alters the user's topic queue or extracts unrelated entities.
 A discipline root is a short explanation of the field, not a duplicate MOC.
 It gives the field's definition, its method of inquiry and its main branches,
 linking those with entries. The method of inquiry is how the field gains and
-tests knowledge: mathematics proves theorems from axioms, and medicine tests
-treatments in clinical trials. The main branches are named as the field's
-recognized subfields, not the objects it studies: algebra, geometry, analysis
-and number theory, not numbers and shapes. Together they cover the scales and
-questions the definition names. The misc root is `Wiki/misc`, titled
+tests knowledge, such as mathematics proving theorems from axioms. The main
+branches are named as the field's recognized subfields, not the objects it
+studies: algebra, geometry, analysis and number theory, not numbers and
+shapes. The misc root is `Wiki/misc`, titled
 `Misc`: a brief definition of a miscellany that makes no claim about this
 vault's contents. Use the ordinary entry schema, one matching tag,
 `parents: []` and no Flashcards section; an existing root keeps its card
@@ -80,12 +80,13 @@ A dangling link to a root this prerequisite creates was
 [left in place by Task 2](link-hygiene.md#dangling-links-target-missing);
 the completion rescan confirms it resolves.
 An existing root whose body lacks part of the root form above is repaired in
-[Task 1b](../SKILL.md#task-1b--content-repair) from the root's cited source,
-an overview page read online included, or accurate background: it replaces a
-subject-matter list with the main branches, adds a missing definition or
-method of inquiry, and adds the branches the definition's scales and questions
-still need, keeping its other claims and its card byte-for-byte; dates
-follow the
+[Task 1b](../SKILL.md#task-1b--content-repair) from the root's cited sources:
+it replaces a subject-matter list with the main branches they name and adds
+the definition or method of inquiry they give. When they lack a part, Task 1b
+reads one more reliable overview page that gives it and cites it by its URL
+under [conventions §7](../../../shared/CONVENTIONS.md#7-source-references);
+it never adds a branch or method no cited page gives. The root keeps its other
+claims and its card byte-for-byte; dates follow the
 [body-change rule](../../wiki-build/references/merge.md#the-read-reset).
 Otherwise preserve existing roots' substantive content and review state under
 the normal correction rules. An ambiguous root owner blocks that group's

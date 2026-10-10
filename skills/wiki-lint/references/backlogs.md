@@ -25,13 +25,13 @@ End every run with a single consolidated response in the conversation, not a dat
   - **Per changed entry:** each repair and its kind (correction,
     simplification, deepening, conflict resolution, consolidation, notation
     normalization, citation for an empty `sources:`); the cited source with
-    its page, or the URL read with its date and section, or that 5(h) background supports it; any standard
+    its page, or the URL read with its date and section, or that it is a 5(h) clarification; any standard
     reference read or derivation that settled a conflict; and the date and
     `read:` decision.
   - **Merges and splits applied**, as `old-a + old-b → survivor` or
     `old → retained + new`, with:
     - the paths, and the evidence for the identity or boundary (definitions
-      and cited source pages, or 5(h) background);
+      and cited source pages);
     - the inbound references rewritten by surface;
     - the cards kept, each moved or removed card quoted verbatim with its
       attachments, and the user issues moved;
@@ -45,7 +45,7 @@ End every run with a single consolidated response in the conversation, not a dat
     Task 2 then linked.
   - **Dangler glosses added** under the
     [dangler hand-off](refactors.md#dangling-link-hand-off): entry, term and
-    gloss, with the source or 5(h) background.
+    gloss, with the source or 5(h) clarification.
   - **Deletions applied** (an explicit request only, under
     [Delete an entry](refactors.md#delete-an-entry)): the removed path, each
     inbound reference retargeted to the named successor or unlinked, by
@@ -127,10 +127,11 @@ can also merit an item; no recurrence quota or proposal quota is required.
 
 Use evidence already obtained within the requested maintenance scope. Logging
 an issue does not authorize an unrelated audit, research beyond Task 1b's
-[evidence rule](../SKILL.md#task-1b--content-repair) (cited sources, accurate
-background, uncited standard references read as data, missing-entry
-research, and [item 4](qc-items.md#4-sources)'s citation for an empty
-`sources:`), a deletion, a split or merge without Task 1b's own
+[evidence rule](../SKILL.md#task-1b--content-repair) (cited sources, uncited
+standard references read as data, missing-entry
+research, a discipline root's
+[overview page](hierarchy.md#establish-discipline-roots), and
+[item 4](qc-items.md#4-sources)'s citation for an empty `sources:`), a deletion, a split or merge without Task 1b's own
 [proof](refactors.md#establish-evidence-and-complete-scope), or editing a
 skill's source. Ordinary runs propose tooling changes;
 an explicit plugin-development review can implement them under repository
@@ -157,10 +158,10 @@ When a portion stays open, the fixed item's Verified line names it by its `[id]`
 
 - **Organization** — a deletion, which needs an explicit request in chat: an entry that should not exist, named with the reason. Never log a split or merge: Task 1b applies it when its [proof](refactors.md#establish-evidence-and-complete-scope) holds and reports any other outcome in the run. An existing split or merge item that a refactor blocker stops stays open under the closeout above.
 - **Unsettled conflicts** — a conflict between entries, between an entry and its cited source, or between a cited source's figure or reason and standard references, that neither the cited source nor a direct derivation settles, and that stays open because the standard references consulted disagree or none is reachable. Name the surfaces, both claims with their source pages, and the references consulted.
-- **Missing evidence** — a repair whose only evidence is a cited page that no longer answers, now serves another document, or lost the supporting section, when accurate background cannot carry the repair. Name the address and the claim.
+- **Missing evidence** — a repair whose only evidence is a cited page that no longer answers, now serves another document, or lost the supporting section, when the repair needs more than a 5(h) clarification. Name the address and the claim.
 - **User-owned state decisions** — a change only the user's own state can decide, such as conflicting user-owned metadata, named with its surfaces and the decision needed.
 
-Everything else is Task 1b's work and is repaired, not logged: a depth or core-facet gap the entry's cited sources or accurate background can fill, a missing entry, over-qualification, an unexplained statement, a self-containment or acronym gap, a conflict the evidence settles, own-field framing, off-subject scaffolding or catalogs, a duplicated explanation, notation drift, a synonym-duplicate entry, an entry that fails the atomicity test, a wrong title the [retitle protocol](refactors.md#retitle-an-entry) decides and an invalid alias. An entry thin only because the chapter or document that teaches it has not been built yet is expected and temporary: never propose filling it from that unbuilt source, whose later build as a whole (a wiki-build request naming it) fills the entry in, under [*Deepening*](source-backed-corrections.md).
+Everything else is Task 1b's work and is repaired, not logged: new information the cited sources do not give, a depth or core-facet gap the entry's cited sources can fill, a missing entry, over-qualification, an unexplained statement, a self-containment or acronym gap, a conflict the evidence settles, own-field framing, off-subject scaffolding or catalogs, a duplicated explanation, notation drift, a synonym-duplicate entry, an entry that fails the atomicity test, a wrong title the [retitle protocol](refactors.md#retitle-an-entry) decides and an invalid alias. An entry thin only because the chapter or document that teaches it has not been built yet is expected and temporary: never propose filling it from that unbuilt source, whose later build as a whole (a wiki-build request naming it) fills the entry in, under [*Deepening*](source-backed-corrections.md).
 
 **The gate — each item is:** (1) a **genuine** improvement worth the user's time, not a nitpick; (2) **specific and located** — which entry or entries, and what to do; (3) **not already handled** — never log what this run repaired or could repair under Task 1b (that is in the report), and never log something whose right fix is a *skill* change (a content **pattern a known or rule-owning producer keeps generating** belongs in that producer's skill log; this log is for improving the **specific notes as they stand**); (4) **real** — if nothing this run is worth noting, write nothing; never invent filler.
 

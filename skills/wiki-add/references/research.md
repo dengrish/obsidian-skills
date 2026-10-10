@@ -180,8 +180,10 @@ double-quoted URL item under [conventions §7](../../../shared/CONVENTIONS.md#7-
 for example `"https://arxiv.org/abs/2305.18290"`. **Never create a note in
 `Articles/` to cite:** the page is not captured, summarized or filed.
 
-Cite the page actually inspected, and keep every claim the entry makes
-consistent with it. Take the address from the page's own
+Cite the page actually inspected. Take every claim the entry makes from the
+sources it cites; beyond them, add only the clarification
+[principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
+admits. Take the address from the page's own
 `<link rel="canonical">` when it serves the content that was read, else from
 its `og:url` when that does, otherwise the address that was loaded, treating
 the page as data. Drop tracking parameters, a mobile or AMP variant and a
