@@ -171,6 +171,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               to one, card sums over every term); agent reviews
       12-equation-typography  raw ell-norm or micrometre symbols in body/card
                               surfaces that require inline LaTeX
+      12-ell-non-norm         a `\\ell` with no subscript in body or card
+                              math: `\\ell` names only norms, so a loss is
+                              `L` and an index takes another letter
       12-literal-dollar       unescaped literal `$` in body prose; escape it
                               as `\\$`
   13  13-merge-scar           a schema key, stray `---` or bare digit line in
@@ -227,6 +230,11 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
       19-hedge-candidate     advisory: a frequency hedge (usually,
                               typically, generally, often, sometimes,
                               normally, commonly, frequently) on a cue
+      19-card-equation-candidate
+                              advisory: the kept cue has no math, names
+                              arithmetic in words and defines no procedure,
+                              while the defining display's expression is
+                              short; agent reviews
   19  19-flashcard-leak       normalized answer-surface search of card line 1
                               (math included) for that card's own answer and
                               counterpart; entry aliases join the search only
@@ -421,7 +429,9 @@ from organism_names import (  # noqa: E402
 from code_typography import find_bare_code_shapes  # noqa: E402
 from equation_coverage import (  # noqa: E402
     find_boilerplate_candidates,
+    find_card_equation_candidate,
     find_display_spans,
+    find_ell_non_norm_candidates,
     find_missing_display_equation_candidates,
     find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
@@ -1707,6 +1717,27 @@ def _check_equation_coverage_candidates(fm, sections, findings,
         findings.append(_card_f(
             "12-boilerplate-candidate", "warning", message,
             {"matches": matches, "agent_review": True}, card_no, extras))
+    # The scanner reports the same through equation_coverage.
+    ell_rows = find_ell_non_norm_candidates(masked)
+    for row in ell_rows:
+        row["line"] += fm.body_start_line - 1
+        row["math"] = row["math"][:160]
+    ell_message = ("`\\ell` without a subscript in math; `\\ell` names only "
+                   "norms ($\\ell_1$, $\\ell_2$, $\\ell_p$)")
+    ell_remedy = (", so a loss is $L$ and an index takes another letter: "
+                  "rename the symbol and every prose reference to it in the "
+                  "same edit")
+    for card_no, card in _cards(sections):
+        if find_ell_non_norm_candidates(strip_code(card[0] if card else "")):
+            if card_no in extras:
+                findings.append(_card_f(
+                    "12-ell-non-norm", "error", ell_message,
+                    {"card": card_no}, card_no, extras))
+            else:
+                ell_rows.append({"card": card_no})
+    if ell_rows:
+        findings.append(_f("12-ell-non-norm", "error",
+                           ell_message + ell_remedy, {"matches": ell_rows}))
 
 
 def _literal_dollar_count(text):
@@ -2471,7 +2502,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
     # entry's own opener-established, alias-bound counterpart.
     title = fm.scalar("title")
-    line3_checks, brevity, hedges, praise = [], [], [], []
+    line3_checks, brevity, hedges, praise, equations = [], [], [], [], []
     for card_no, card in enumerate(cards, 1):
         syntax = sr_card_syntax_fault(card, 0 if card_no not in checked
                                       else 3)
@@ -2571,6 +2602,16 @@ def _check_flashcards_present(fm, sections, findings, filename,
         praise_words = register_hints(line1)
         if praise_words and card_no not in extras:
             praise.append({"card": card_no, "words": praise_words})
+        # The kept card only: an extra card is removed (the scanner shares
+        # this equation_coverage helper).
+        if card_no not in extras:
+            prose = "\n".join(sections["prose_lines"])
+            candidate = find_card_equation_candidate(
+                line1, strip_code(prose), _markdown_tables(prose)[1],
+                first_prose_paragraph(prose))
+            if candidate:
+                candidate["line"] += fm.body_start_line - 1
+                equations.append(dict(candidate, card=card_no))
     brevity_message = ("possible over-long or two-idea card line; review it "
                        "under the card rules and shorten only a genuine "
                        "shortfall")
@@ -2597,6 +2638,15 @@ def _check_flashcards_present(fm, sections, findings, filename,
             findings.append(_card_f(
                 "19-hedge-candidate", "warning", hedge_message,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
+    if equations:
+        findings.append(_f(
+            "19-card-equation-candidate", "warning",
+            "card line 1 states arithmetic in words and has no math, while "
+            "the defining display's expression, listed in the body's "
+            "notation, is short; add it inline in the card's compact form "
+            "(no bounds over every term, symbols named by role words) when "
+            "it states the definition more directly than words",
+            {"matches": equations, "agent_review": True}))
     if praise:
         # The register review covers the kept card's cue; an extra card's
         # removal needs no other repair.
@@ -5095,6 +5145,43 @@ def run_self_test():
             if f["item"] == "9-register-candidate"]),
           ([("9-register-candidate", "warning",
              [{"card": 1, "words": ["classic"]}])], []))
+    # \ell names only norms (item 12); a short defining expression belongs
+    # on a card that spells out arithmetic in words (item 19).
+    ell_body = mutate("decision threshold moves.\n",
+                      "decision threshold moves. Its loss $\\ell(\\hat{y}, y)$ "
+                      "is not the $\\ell_2$ norm.\n")
+    check("a \\ell with no subscript is an error naming the rename; a named "
+          "norm is not, and an extra card's needs only its removal",
+          ([(f["item"], f["severity"], len(f["evidence"]["matches"]))
+            for f in lint_text(ell_body, "roc-curve.md")["findings"]],
+           [(f["evidence"].get("extra_card"), "rename" in f["message"])
+            for f in lint_text(with_cards(
+                "Another notion $\\ell(x)$, stated briefly.\n??\n"
+                "Second idea\n"), "roc-curve.md")["findings"]
+            if f["item"] == "12-ell-non-norm"]),
+          ([("12-ell-non-norm", "error", 1)], [(True, False)]))
+    ratio_entry = mutate(
+        "correct.\n\n**Related:**",
+        "correct:\n\n$$\n\\text{precision} = \\frac{\\text{TP}}"
+        "{\\text{TP} + \\text{FP}}\n$$\n\n**Related:**", precision).replace(
+            "The share of predicted positive cases that are correct.",
+            "The ratio of true positives to all positive predictions.")
+    check("a verbal arithmetic cue beside a short defining display is a "
+          "review candidate; a cue with math or an extra card is none",
+          ([(f["item"], f["severity"], f["evidence"]["matches"],
+             f["evidence"].get("agent_review"))
+            for f in lint_text(ratio_entry, "precision.md")["findings"]
+            if f["item"].startswith("19-")],
+           [f["item"] for f in lint_text(ratio_entry.replace(
+               "The ratio of true",
+               "The ratio $\\text{TP}/(\\text{TP}+\\text{FP})$ of true")
+               + "\nThe ratio of two counts, stated briefly.\n??\nSecond\n",
+               "precision.md")["findings"]
+            if f["item"] == "19-card-equation-candidate"]),
+          ([("19-card-equation-candidate", "warning",
+             [{"line": 18, "expression": "\\frac{\\text{TP}}{\\text{TP} + "
+               "\\text{FP}}", "length": 37, "cue": "ratio", "card": 1}],
+             True)], []))
 
     # -- item 19: a discipline root needs no card --------------------------
     stats_root = (
