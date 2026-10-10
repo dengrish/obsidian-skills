@@ -47,7 +47,9 @@ HTML `<sup>…</sup>`/`<sub>…</sub>` used as exponents/subscripts, Unicode
 super/subscripts (`²³`, `₁₂`, `⁻`), and/or linear math operators in an
 expression (`×`, `⋅`, `·`, `√`, `≤`, `≥`, `≈`, `≠`, `±`, `∑`, `∫`, `→`, an `=`
 relating mathematical quantities). Rebuild the LaTeX and wrap it — inline `$…$`
-mid-sentence, display `$$…$$` on its own line. Worked examples from a real clip:
+mid-sentence, display `$$…$$` on its own line — writing an exponential as a
+power of $e$ (`exp(−x²)` → `$e^{-x^{2}}$`), never `\exp`. Worked examples from
+a real clip:
 
 - `log <sub>2</sub> (10) = 3.32` → `$\log_2(10) = 3.32$`
 - `2.57 × (3.64 × 10 <sup>3</sup>) <sup>−0.048</sup>` →

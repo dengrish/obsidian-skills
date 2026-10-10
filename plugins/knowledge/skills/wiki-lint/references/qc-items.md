@@ -70,6 +70,7 @@ ownership.
 | `item12/equation-split-candidate` | When the flagged line really holds two equations, give each its own line under the [equation guide](../../wiki-build/references/equations.md#2-form--defining-equations-are-display-math): a separate display beside the prose that introduces it, or a row of an `aligned` or `gathered` display. Keep the math unchanged; this formatting repair changes no dates or review state. |
 | `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math, or replace math too long for the [line-1 rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage) with its verbal core, only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
 | `item12/ell-non-norm` | Task 1, when it is a pure rename: rename it under [§3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide) with every prose and card reference in the same edit; otherwise Task 1b. |
+| `item12/exp-macro` | Task 1, a notation rewrite that changes no dates: write each `\exp` as a power of $e$ under [§3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide) (`\exp(-t)` becomes `e^{-t}`), with every prose and card reference in the same edit. |
 | `item12/duplicate-embed-candidate` | Task 1b consolidates the embeds under [item 9](#9-body-structure-coherence-flow-and-scope) into the entry [media selection](../../wiki-build/references/media.md#selection) makes the figure's owner. The candidate alone is never an order. |
 | `item12/panel-composite`, `item12/remote-image`, `item12/missing-image`, `item12/image-outside-folder` | Report only: [item 12](#12-equations-images-and-tables). |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
@@ -641,7 +642,8 @@ Flashcard line 1 follows [flashcard maintenance](flashcards.md).
 display block; keep inline symbol references, bounds, complexity, and worked
 parameter choices inline. Bind every symbol nearby. Task 1 normalizes only
 typography within one entry (bold vectors, `\text{}` names, the
-instance/component index form) and renames an $\ell$ that names no norm
+instance/component index form, the exponential as a power of $e$) and renames
+an $\ell$ that names no norm
 ([`item12/ell-non-norm`](#finding-actions)).
 Renaming any other symbol to the
 [canonical table](../../wiki-build/references/equations.md)'s,

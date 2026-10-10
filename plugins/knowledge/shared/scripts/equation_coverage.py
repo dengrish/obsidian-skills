@@ -31,9 +31,11 @@ such as ``a = ..., \\qquad b = ...``: every equation gets its own line. An
 index range such as ``i = 1, \\ldots, m`` or ``x = 0, 1``, or a condition
 such as ``\\text{for } i = 1`` qualifies an equation and is not a second one.
 
-Two notation checks read the entry's math and its card. A ``\\ell`` with no
-subscript is a finding, since ``\\ell`` names only norms. A card line 1 with
-no math that spells out arithmetic, beside a short defining display, is a
+Three notation checks read the entry's math and its card. A ``\\ell`` with no
+subscript is a finding, since ``\\ell`` names only norms, and so is
+``\\exp`` or an upright exp applied to an argument, since the exponential
+is written as a power of e. A card line 1
+with no math that spells out arithmetic, beside a short defining display, is a
 candidate to carry that expression inline.
 
 Displays are found by pairing unescaped ``$$`` delimiters in source order,
@@ -52,6 +54,7 @@ __all__ = [
     "find_card_equation_candidate",
     "find_display_spans",
     "find_ell_non_norm_candidates",
+    "find_exp_macro_candidates",
     "find_missing_display_equation_candidates",
     "find_multi_relation_display_candidates",
     "find_noncanonical_display_equation_candidates",
@@ -1534,6 +1537,28 @@ def _math_spans(text):
     return sorted(spans)
 
 
+def _math_token_rows(masked_text, flagged):
+    """One row per math span of ``masked_text`` holding a ``flagged`` token.
+
+    ``flagged(token, content)`` judges each LaTeX token of a span's
+    ``content``. A row gives the one-based ``line`` of the span's first
+    flagged token and the ``math`` around it, up to 30 characters on each
+    side, whitespace collapsed.
+    """
+    text = masked_text or ""
+    rows = []
+    for start, content in _math_spans(text):
+        for token in _LATEX_TOKEN_RE.finditer(content):
+            if flagged(token, content):
+                window = content[max(0, token.start() - 30):token.end() + 30]
+                rows.append({
+                    "line": _line_number(text, start + token.start()),
+                    "math": " ".join(window.split()),
+                })
+                break
+    return rows
+
+
 def find_ell_non_norm_candidates(masked_text):
     """Return each math span of ``masked_text`` holding ``\\ell`` as no norm.
 
@@ -1542,23 +1567,35 @@ def find_ell_non_norm_candidates(masked_text):
     ``\\ell_{...}``): a loss is ``L``, and an index takes another letter. So a
     ``\\ell`` with no subscript (``\\ell(``, ``\\ell\\!``, ``\\ell=``, a bare
     ``\\ell``) is a finding. ``masked_text`` is code-masked body prose or one
-    card line. Each result gives the one-based ``line`` of the first such
-    ``\\ell`` in a math span and the ``math`` around it, up to 30 characters
-    on each side, whitespace collapsed.
+    card line. The rows are :func:`_math_token_rows`'s.
     """
-    text = masked_text or ""
-    candidates = []
-    for start, content in _math_spans(text):
-        for token in _LATEX_TOKEN_RE.finditer(content):
-            if (token.group(0) == r"\ell"
-                    and not re.match(r"\s*_", content[token.end():])):
-                window = content[max(0, token.start() - 30):token.end() + 30]
-                candidates.append({
-                    "line": _line_number(text, start + token.start()),
-                    "math": " ".join(window.split()),
-                })
-                break
-    return candidates
+    return _math_token_rows(masked_text, lambda token, content: (
+        token.group(0) == r"\ell"
+        and not re.match(r"\s*_", content[token.end():])))
+
+
+# An upright exp spelled out and applied to an argument renders as \exp does;
+# a label such as T_{\text{exp}} applies to nothing.
+_UPRIGHT_EXP_COMMANDS = frozenset((r"\operatorname", r"\mathrm", r"\text"))
+_UPRIGHT_EXP_RE = re.compile(
+    r"\*?\s*\{\s*exp\s*\}(?:\s|\\[!,;: ])*"
+    r"(?:[(\[]|\\\{|\\left(?![A-Za-z])|\\[bB]igg?l?(?![A-Za-z]))")
+
+
+def find_exp_macro_candidates(masked_text):
+    """Return each math span of ``masked_text`` holding ``\\exp``.
+
+    The equation guide writes the exponential as a power of e (``e^{-t}``),
+    never ``\\exp``, even for a long exponent. An upright exp applied to an
+    argument (``\\operatorname{exp}(x)``, ``\\mathrm{exp}``, ``\\text{exp}``)
+    counts too. ``masked_text`` is code-masked prose or one card line, so
+    ``\\exp`` shown as code is no math. The rows are
+    :func:`_math_token_rows`'s.
+    """
+    return _math_token_rows(masked_text, lambda token, content: (
+        token.group(0) == r"\exp"
+        or (token.group(0) in _UPRIGHT_EXP_COMMANDS
+            and _UPRIGHT_EXP_RE.match(content, token.end()))))
 
 
 # Card line 1 spells out arithmetic in words: the cue that the entry's short
@@ -2503,6 +2540,39 @@ def run_self_test(verbose=False):
     if not ok:
         print("  expected %r, got %r" % (expected, got))
         failed += 1
+    # The exponential is a power of e: (name, text, (line, math) rows).
+    exp_cases = [
+        ("\\exp in a display and inline is flagged once per span, quoting "
+         "the math around it",
+         "$$\np_k = \\frac{\\exp(s_k)}{\\sum_j \\exp(s_j)}\n$$\n\n"
+         "Here $\\exp\\!\\left(-t\\right)$ falls.",
+         [(2, "p_k = \\frac{\\exp(s_k)}{\\sum_j \\exp(s_j)}"),
+          (5, "\\exp\\!\\left(-t\\right)")]),
+        ("a power of e, a longer command, prose and an escaped dollar are "
+         "no \\exp in math",
+         "The $e^{-t}$ and $e^{s_k}$ terms, $\\exponent$, plain \\exp text "
+         "and \\$\\exp\\$.", []),
+        ("an upright exp applied to an argument renders as \\exp and is "
+         "flagged",
+         "$\\operatorname{exp}(x)$, $\\mathrm{exp}\\!\\left(-t\\right)$ and "
+         "$\\text{exp}\\bigl(x\\bigr)$.",
+         [(1, "\\operatorname{exp}(x)"),
+          (1, "\\mathrm{exp}\\!\\left(-t\\right)"),
+          (1, "\\text{exp}\\bigl(x\\bigr)")]),
+        ("an upright exp label applied to nothing is no exponential",
+         "$T_{\\text{exp}}$, $\\sigma_{\\mathrm{exp}}(t)$ and "
+         "$\\operatorname{expit}(x)$.", []),
+    ]
+    total += len(exp_cases)
+    for name, text, expected in exp_cases:
+        got = [(row["line"], row["math"])
+               for row in find_exp_macro_candidates(text)]
+        ok = got == expected
+        if verbose or not ok:
+            print(("PASS" if ok else "FAIL") + ": " + name)
+        if not ok:
+            print("  expected %r, got %r" % (expected, got))
+            failed += 1
     # Card equations: (name, line 1, prose, opener, (line, expression)).
     mean_prose = ("For values $x_1, \\ldots, x_n$:\n\n$$\n\\bar{x} = "
                   "\\frac{1}{n} \\sum_{i=1}^{n} x_i\n$$")

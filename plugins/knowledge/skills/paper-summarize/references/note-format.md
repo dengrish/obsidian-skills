@@ -349,9 +349,11 @@ calls for this judgment; it is not permission to retain avoidable detail.
 When the contribution needs display math, put each equation in its own
 `$$…$$` display or its own row of an `aligned`/`gathered` block, never two per
 line (no `\qquad`-joined pairs, `\Rightarrow` chains or `\text{where}`
-definitions). Lint reports a likely pair as an advisory. Transcribe each
-equation from its page image, not the text capture, which drops accents such
-as hats and loses grouping and indices;
+definitions). Lint reports a likely pair as an advisory. In every equation,
+display or inline, write the exponential as a power of $e$ ($e^{-t}$), never
+`\exp`, even for a long exponent. Transcribe each equation from its page
+image, not the text capture, which drops accents such as hats and loses
+grouping and indices;
 [verification](review-checklist.md#locate-the-claims) checks it there. Beside
 each display, say what each term means and where the relation comes from;
 inside a numbered step, that explanation stays in the step. Use

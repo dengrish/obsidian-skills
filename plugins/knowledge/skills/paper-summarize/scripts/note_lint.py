@@ -67,7 +67,7 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from equation_coverage import (find_display_spans,
+from equation_coverage import (find_display_spans, find_exp_macro_candidates,
                                find_multi_relation_display_candidates)
 from naming import chapter_book_stem, core_stem, looks_canonical
 from note_provenance import split_provenance
@@ -331,7 +331,7 @@ def _fenced(lines, body_start=0):
     a dozen findings against correct text.  Display math is not structure
     either: `|f(x) - f(y)| \\le L |x - y|` is an absolute value, not a table
     row.  Displays are paired by the same shared reader that
-    `_check_display_math` uses, so a `$$` on the math's own line still closes
+    `_check_math` uses, so a `$$` on the math's own line still closes
     its display and a last unpaired `$$` opens none.  A delimiter line that
     also holds prose stays checked.
     """
@@ -1722,14 +1722,16 @@ def _check_wiki_links(note, body_start, fenced, wiki):
                           % (m.group(1), wiki))
 
 
-def _check_display_math(note, body_start):
-    """Every equation gets its own display line (references/note-format.md).
+def _check_math(note, body_start):
+    """Equation form and notation (references/note-format.md).
 
     The shared candidate floor finds a display line that sets two equations
     side by side: a `\\qquad`-joined pair, a `\\Rightarrow` chain or a
     `\\text{where}` definition.  It is conservative, so a candidate is an
-    advisory for the agent to confirm, never a violation.  Front matter and
-    code are blanked in place, which keeps line numbers.
+    advisory for the agent to confirm, never a violation.  An `\\exp` in
+    display or inline math is a violation: the exponential is written as a
+    power of e.  Front matter and code are blanked in place, which keeps line
+    numbers.
     """
     body = _math_prose(note.raw_lines, body_start)
     for c in find_multi_relation_display_candidates(body):
@@ -1737,6 +1739,11 @@ def _check_display_math(note, body_start):
                                "give each equation its own `$$` display or its "
                                "own row of an aligned/gathered block, keeping "
                                "the math unchanged (references/note-format.md)")
+    for c in find_exp_macro_candidates(body):
+        note.fail(c["line"], "`\\exp` in math (%s) -- write the exponential "
+                             "as a power of e ($e^{-t}$), even for a long "
+                             "exponent (references/note-format.md)"
+                  % c["math"][:60])
 
 
 
@@ -1794,7 +1801,7 @@ def lint(text, path="<note>", images=None, *, mode,
     _check_citations(note, body_start, captions, fenced, src)
     if wiki is not None:
         _check_wiki_links(note, body_start, fenced, wiki)
-    _check_display_math(note, body_start)
+    _check_math(note, body_start)
     if advisories is not None:
         advisories.extend(sorted(note.advisories))
     return sorted(note.findings)
@@ -2333,6 +2340,20 @@ def _cases():
         ("a qquad display inside a code fence is code",
          _mutate(M_H + "\n\nProse.", M_H + "\n\nProse.\n\n```latex\n$$\n"
                  "N = 1, \\qquad T = 2\n$$\n```"), CLEAN),
+        # The exponential is a power of e, in display and inline math.
+        ("\\exp in a display is a violation",
+         _mutate("More prose.", "The score falls.\n\n$$\ns = \\exp(-t)\n"
+                 "$$\n\nMore prose."), "__ONLY__write the exponential as a "
+                 "power of e"),
+        ("\\exp in inline math is a violation",
+         _mutate("More prose.", "The score $s = \\exp\\!\\left(-t\\right)$ "
+                 "falls."), "__ONLY__write the exponential as a power of e"),
+        ("a power of e is clean",
+         _mutate("More prose.", "The score falls.\n\n$$\ns = e^{-t}\n$$\n\n"
+                 "Its share $e^{s_k}$ grows."), CLEAN),
+        ("\\exp shown as code is no math",
+         _mutate(M_H + "\n\nProse.", M_H + "\n\nProse with `$\\exp(x)$` "
+                 "as code.\n\n```latex\n$$\ns = \\exp(-t)\n$$\n```"), CLEAN),
         ("'figures' meaning numbers is prose",
          _mutate("More prose.<sup>", "The headline figures 45% and 8% both hold."
                  "<sup>"), CLEAN),
