@@ -9920,12 +9920,15 @@ WRITING_RULE_PINS = (
     )),
     # 2026-10-09 (knowledge 1.27.0): card line 1 includes the entry's short
     # defining expression whenever it states the definition more directly
-    # than words; short is about 40 LaTeX characters, and one bound decides
-    # both adding an expression and giving a longer one way to its verbal
-    # core. A card that lacks it is improvable.
+    # than words; short is about 25 rendered symbols (1.27.1: counted as
+    # rendered, not in LaTeX characters, so bold vectors stay short), and one
+    # bound decides both adding an expression and giving a longer one way to
+    # its verbal core. A card that lacks it is improvable.
     (("wiki-build", "references", "flashcards-and-emphasis.md"), (
         "An expression is short when it fits on the card line beside its "
-        "role words, about 40 LaTeX characters at most",
+        "role words, about 25 rendered symbols at most",
+        "font or accent commands (`\\mathbf`, `\\boldsymbol`, `\\hat`, "
+        "`\\text`) as nothing",
         "A longer defining formula stays in the body, and line 1, new or "
         "existing, states its verbal core",
     )),

@@ -1579,8 +1579,8 @@ _PROCEDURE_CUE_RE = re.compile(
     r"procedure)\b|[A-Z][a-z]+ing\s+[a-z])")
 # The longest defining expression listed, in LaTeX characters of the body's
 # notation without whitespace, spacing or sizing commands, or bounds over
-# every term. It is looser than the card rule's bound of about 40 characters,
-# since a card names its symbols more compactly than the body does.
+# every term. The card rule counts about 25 rendered symbols instead; this
+# looser raw-character bound keeps bold and accented body notation in reach.
 CARD_EXPRESSION_MAX = 80
 _CARD_SPACING_RE = re.compile(
     r"\\(?:left|right)\.|"
