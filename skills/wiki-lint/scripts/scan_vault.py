@@ -174,6 +174,7 @@ from equation_coverage import (  # noqa: E402
     find_card_equation_candidate,
     find_display_spans,
     find_ell_non_norm_candidates,
+    find_exp_macro_candidates,
     find_missing_display_equation_candidates,
     find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
@@ -4241,6 +4242,18 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "$\\ell_p$), so a loss is $L$ and an index takes another "
                 "letter; rename the symbol and every prose reference to it "
                 "in the same edit (wiki-build/references/equations.md §3)"))
+        # Shared with lint_entry (equation_coverage.find_exp_macro_candidates).
+        _exp_rows = find_exp_macro_candidates(_equation_prose)
+        if _exp_rows:
+            problems.append((
+                sl, "item12/exp-macro",
+                "`\\exp` in body math — "
+                + "; ".join(f'line {row["line"] + _line_off}: '
+                            f'"{row["math"][:60]}"' for row in _exp_rows)
+                + " — write the exponential as a power of e ($e^{-t}$, "
+                "$e^{s_k}$), even for a long exponent; rewrite every `\\exp` "
+                "in the body and on the card in the same edit "
+                "(wiki-build/references/equations.md §3)"))
         # Remote ![](http…) embeds are REPORT-ONLY, not a violation. wiki-build MANDATES this exact
         # form for an external URL coming from a markdown source's clipping ("use standard markdown
         # image syntax ![alt](https://...) since wikilinks don't handle remote URLs" —
@@ -4585,6 +4598,13 @@ def scan(wiki, images=None, vault=None, settled=None):
                            " — `\\ell` names only norms, so a loss is $L$ "
                            "and an index takes another letter; rename it "
                            "in the same edit as the body's references")))
+                if find_exp_macro_candidates(strip_code(line1)):
+                    problems.append((
+                        sl, "item12/exp-macro",
+                        f"{_lead}`\\exp` in {tag} line 1"
+                        + ("" if _extra else
+                           " — write the exponential as a power of e; "
+                           "rewrite it in the same edit as the body's")))
                 if re.search(r"ℓ(?:[0-9₀-₉])", line1):
                     problems.append((
                         sl, "item12/equation-typography",
@@ -12920,6 +12940,18 @@ def run_self_test():
         _st_write(v, "card-equation-extra.md", (_st_entry(
             "Card equation extra", _mean_prose % "Card equation extra")
             .rstrip("\n") + "\n\n" + _verbal + "\n??\nSecond idea\n"))
+        _st_write(v, "exp-score.md", _st_entry(
+            "Exp score", "**Exp score** is a worked example:\n\n$$\ns = "
+            "\\exp\\!\\left(-t\\right)\n$$\n\nIt falls as $\\exp(-t)$ "
+            "does.").replace(
+                "The idea this entry is about, stated once.",
+                "The idea $\\exp(x)$ this entry is about, stated once."))
+        _st_write(v, "exp-power.md", _st_entry(
+            "Exp power", "**Exp power** is a worked example: $e^{-t}$ and "
+            "$e^{s_k}$, never `\\exp` or `$\\exp(x)$`."))
+        _st_write(v, "exp-extra.md", _with_cards(
+            "Exp extra", "Another notion $\\exp(x)$, stated briefly.\n??\n"
+            "Second idea\n"))
         res = scan(v)
         check("a \\ell with no subscript in body or card math is an item12 "
               "finding naming the rename; named norms are not, and an extra "
@@ -12934,6 +12966,20 @@ def run_self_test():
                 and p["item"] == "item12/ell-non-norm"]),
               (["item12/ell-non-norm", "item12/ell-non-norm"], True, [],
                [(True, False)]))
+        check("an \\exp in body or card math is an item12 finding naming the "
+              "power of e; a power of e and code are not, and an extra "
+              "card's needs only its removal",
+              ([k for k in _st_keys(res, "exp-score") if k.startswith("item12")],
+               [part for part in ("line 4:", "line 7:", "power of e")
+                if part in _st_msg(res, "exp-score", "item12/exp-macro")],
+               [k for k in _st_keys(res, "exp-power")
+                if k.startswith("item12")],
+               [(p["message"].startswith(EXTRA_CARD_PREFIX % 2),
+                 "power of e" in p["message"]) for p in res["problems"]
+                if p["slug"] == "exp-extra"
+                and p["item"] == "item12/exp-macro"]),
+              (["item12/exp-macro", "item12/exp-macro"],
+               ["line 4:", "line 7:", "power of e"], [], [(True, False)]))
         check("a verbal arithmetic cue beside a short defining display is an "
               "item19 candidate; a cue with math or an extra card is not",
               ([k for k in _st_keys(res, "card-equation")

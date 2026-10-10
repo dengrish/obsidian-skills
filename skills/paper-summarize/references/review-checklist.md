@@ -49,7 +49,7 @@ mathematical notation: they drop accents such as hats and bars, and lose
 parentheses and the placement of superscripts, subscripts and indices (a
 printed θ̂ = (XᵀX)⁻¹Xᵀy captures as `θ = X⊺X −1X⊺y`). Check every display and
 inline formula symbol by symbol on its source page image, as for a figure or
-table image, and cite that page.
+table image, and cite that page; a power of $e$ matches a printed exp.
 
 For OCR or unavailable text search, use the [page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)
 and record that method explicitly. OCR misses are checked against page images;

@@ -6094,7 +6094,10 @@ SELFTEST_MIN_CASES = {
     # 2026-10-09 (knowledge 1.27.0): the \ell quote is the math around it;
     # the listed card expression keeps a command's space before a letter,
     # drops bounds over every term and skips a regularized objective.
-    "shared/scripts/equation_coverage.py": 256,
+    # 2026-10-09 (knowledge 1.28.0): a \exp in math, or an upright exp
+    # applied to an argument, is a finding, quoted by the math around it; a
+    # power of e, a longer command and an upright exp label are none.
+    "shared/scripts/equation_coverage.py": 260,
     # 2026-10-06 (knowledge 1.22.0): a BOM on line 1, unstorable stems, and
     # records that would read back as comments.
     # 2026-10-08 (knowledge 1.24.0): a pending Extended Data row needs its
@@ -6255,7 +6258,9 @@ SELFTEST_MIN_CASES = {
     # names a file in Wiki/.
     # 2026-10-07 (knowledge 1.24.0): --wiki walks symlinked Wiki subfolders,
     # and a phase's introduction between Methods steps is moved out.
-    "skills/paper-summarize/scripts/note_lint.py": 351,
+    # 2026-10-09 (knowledge 1.28.0): a \exp in display or inline math is a
+    # violation; a power of e and code are clean.
+    "skills/paper-summarize/scripts/note_lint.py": 355,
     # 2026-10-06 (knowledge 1.22.0): a named split book lists its chapters' figures.
     # 2026-10-06 (knowledge 1.22.0): named inventory gaps, --vault previews,
     # stored stem spellings and the unorganized remedy's rename cost.
@@ -6425,7 +6430,8 @@ SELFTEST_MIN_CASES = {
     # kept cue and the body.
     # 2026-10-09 (knowledge 1.27.0): 12-ell-non-norm and the review-only
     # 19-card-equation-candidate.
-    "skills/wiki-build/scripts/lint_entry.py": 536,
+    # 2026-10-09 (knowledge 1.28.0): 12-exp-macro in body and card math.
+    "skills/wiki-build/scripts/lint_entry.py": 537,
     # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
     # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
     # `.md` or path, and keep one another vault file needs.
@@ -6508,7 +6514,8 @@ SELFTEST_MIN_CASES = {
     # overlap list reads each list item as its own sentence.
     # 2026-10-09 (knowledge 1.27.0): item12/ell-non-norm and the review-only
     # item19/card-equation-candidate.
-    "skills/wiki-lint/scripts/scan_vault.py": 766,
+    # 2026-10-09 (knowledge 1.28.0): item12/exp-macro in body and card math.
+    "skills/wiki-lint/scripts/scan_vault.py": 767,
 }
 
 
@@ -7576,6 +7583,18 @@ def check_equation_policy(rep, conv):
          r"\bfind_multi_relation_display_candidates\b",
          "paper-summarize note lint no longer imports the shared "
          "one-equation-per-line candidate detector"),
+        # 2026-10-09 (knowledge 1.28.0): one shared \exp check serves the
+        # Wiki linters and the reading-note lint.
+        (builder_lint_path, builder_lint,
+         r"from equation_coverage import \([^)]*\bfind_exp_macro_candidates\b",
+         "wiki-build lint no longer imports the shared \\exp check"),
+        (scanner_path, scanner,
+         r"from equation_coverage import \([^)]*\bfind_exp_macro_candidates\b",
+         "wiki-lint scanner no longer imports the shared \\exp check"),
+        (note_lint_path, note_lint,
+         r"from equation_coverage import \(?[^)]*\bfind_exp_macro_candidates\b",
+         "paper-summarize note lint no longer imports the shared \\exp "
+         "check"),
     ]
     n = 0
     for path, text, pat, msg in pins:
@@ -9959,6 +9978,41 @@ WRITING_RULE_PINS = (
     (("wiki-build", "references", "review.md"), (
         "keeping a verbal card whose flagged display is no short definition "
         "or is stated as directly in words (`19-card-equation-candidate`)",
+    )),
+    # 2026-10-09 (knowledge 1.28.0): the exponential is written as a power of
+    # e, never \exp, in Wiki entries and reading notes alike. Wiki-lint's
+    # Task 1 rewrites it with every reference and changes no dates; code is
+    # never flagged.
+    (("wiki-build", "references", "equations.md"), (
+        "but the exponential is written as a power of $e$ ($e^{-t}$, "
+        "$e^{s_k}$), never `\\exp`, even for a long exponent",
+        "plus the findings for an $\\ell$ that names no norm and for "
+        "`\\exp`",
+    )),
+    (("paper-summarize", "references", "note-format.md"), (
+        "In every equation, display or inline, write the exponential as a "
+        "power of $e$ ($e^{-t}$), never `\\exp`, even for a long exponent",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "the instance/component index form, the exponential as a power of $e$",
+        "Task 1, a notation rewrite that changes no dates: write each "
+        "`\\exp` as a power of $e$",
+    )),
+    (("wiki-lint", "references", "scanner.md"), (
+        "`\\exp` in a code span or fence is not math and is never flagged",
+        "lint_entry reports it as `12-exp-macro`",
+        "or an upright exp applied to an argument "
+        "(`\\operatorname{exp}(x)`)",
+    )),
+    # 2026-10-09 (knowledge 1.28.0): a clipping's rebuilt formula writes the
+    # exponential as a power of e, and reading-note verification accepts it
+    # against a printed exp.
+    (("clipping-clean", "references", "equations.md"), (
+        "writing an exponential as a power of $e$ "
+        "(`exp(−x²)` → `$e^{-x^{2}}$`), never `\\exp`",
+    )),
+    (("paper-summarize", "references", "review-checklist.md"), (
+        "a power of $e$ matches a printed exp",
     )),
 )
 

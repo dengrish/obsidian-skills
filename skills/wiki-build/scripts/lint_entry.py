@@ -174,6 +174,9 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
       12-ell-non-norm         a `\\ell` with no subscript in body or card
                               math: `\\ell` names only norms, so a loss is
                               `L` and an index takes another letter
+      12-exp-macro            an `\\exp`, or an upright exp applied to
+                              an argument, in body or card math: the
+                              exponential is written as a power of e
       12-literal-dollar       unescaped literal `$` in body prose; escape it
                               as `\\$`
   13  13-merge-scar           a schema key, stray `---` or bare digit line in
@@ -432,6 +435,7 @@ from equation_coverage import (  # noqa: E402
     find_card_equation_candidate,
     find_display_spans,
     find_ell_non_norm_candidates,
+    find_exp_macro_candidates,
     find_missing_display_equation_candidates,
     find_multi_relation_display_candidates,
     find_noncanonical_display_equation_candidates,
@@ -1717,27 +1721,36 @@ def _check_equation_coverage_candidates(fm, sections, findings,
         findings.append(_card_f(
             "12-boilerplate-candidate", "warning", message,
             {"matches": matches, "agent_review": True}, card_no, extras))
-    # The scanner reports the same through equation_coverage.
-    ell_rows = find_ell_non_norm_candidates(masked)
-    for row in ell_rows:
-        row["line"] += fm.body_start_line - 1
-        row["math"] = row["math"][:160]
-    ell_message = ("`\\ell` without a subscript in math; `\\ell` names only "
-                   "norms ($\\ell_1$, $\\ell_2$, $\\ell_p$)")
-    ell_remedy = (", so a loss is $L$ and an index takes another letter: "
-                  "rename the symbol and every prose reference to it in the "
-                  "same edit")
-    for card_no, card in _cards(sections):
-        if find_ell_non_norm_candidates(strip_code(card[0] if card else "")):
-            if card_no in extras:
-                findings.append(_card_f(
-                    "12-ell-non-norm", "error", ell_message,
-                    {"card": card_no}, card_no, extras))
-            else:
-                ell_rows.append({"card": card_no})
-    if ell_rows:
-        findings.append(_f("12-ell-non-norm", "error",
-                           ell_message + ell_remedy, {"matches": ell_rows}))
+    # The scanner reports the same through equation_coverage. An extra
+    # card's removal is its only repair, so its finding drops the remedy.
+    notation = (
+        ("12-ell-non-norm", find_ell_non_norm_candidates,
+         "`\\ell` without a subscript in math; `\\ell` names only norms "
+         "($\\ell_1$, $\\ell_2$, $\\ell_p$)",
+         ", so a loss is $L$ and an index takes another letter: rename the "
+         "symbol and every prose reference to it in the same edit"),
+        ("12-exp-macro", find_exp_macro_candidates,
+         "`\\exp` in math; write the exponential as a power of e "
+         "($e^{-t}$, $e^{s_k}$), even for a long exponent",
+         ": rewrite every `\\exp` in the body and on the card in the same "
+         "edit"),
+    )
+    for item, finder, message, remedy in notation:
+        rows = finder(masked)
+        for row in rows:
+            row["line"] += fm.body_start_line - 1
+            row["math"] = row["math"][:160]
+        for card_no, card in _cards(sections):
+            if finder(strip_code(card[0] if card else "")):
+                if card_no in extras:
+                    findings.append(_card_f(item, "error", message,
+                                            {"card": card_no}, card_no,
+                                            extras))
+                else:
+                    rows.append({"card": card_no})
+        if rows:
+            findings.append(_f(item, "error", message + remedy,
+                               {"matches": rows}))
 
 
 def _literal_dollar_count(text):
@@ -5160,6 +5173,28 @@ def run_self_test():
                 "Second idea\n"), "roc-curve.md")["findings"]
             if f["item"] == "12-ell-non-norm"]),
           ([("12-ell-non-norm", "error", 1)], [(True, False)]))
+    # The exponential is a power of e (item 12), in body and card math alike.
+    exp_entry = mutate(
+        "decision threshold moves.\n",
+        "decision threshold moves. Its score\n\n$$\ns = \\exp\\!\\left(-t\\right)"
+        "\n$$\n\nfalls as $e^{-t}$ does; `\\exp` and `$\\exp$` are code.\n"
+    ).replace("The plot tracing the trade-off",
+              "The plot tracing $\\exp(-t)$")
+    check("an \\exp in body or card math is one error naming the rewrite; a "
+          "power of e and code are not, and an extra card's needs only its "
+          "removal",
+          ([(f["item"], f["severity"], f["evidence"]["matches"],
+             "power of e" in f["message"], "same edit" in f["message"])
+            for f in lint_text(exp_entry, "roc-curve.md")["findings"]
+            if f["item"] == "12-exp-macro"],
+           [(f["evidence"].get("extra_card"), "same edit" in f["message"])
+            for f in lint_text(with_cards(
+                "Another notion $\\exp(x)$, stated briefly.\n??\n"
+                "Second idea\n"), "roc-curve.md")["findings"]
+            if f["item"] == "12-exp-macro"]),
+          ([("12-exp-macro", "error",
+             [{"line": 20, "math": "s = \\exp\\!\\left(-t\\right)"},
+              {"card": 1}], True, True)], [(True, False)]))
     ratio_entry = mutate(
         "correct.\n\n**Related:**",
         "correct:\n\n$$\n\\text{precision} = \\frac{\\text{TP}}"
@@ -5501,7 +5536,7 @@ def run_self_test():
         "A **ROC curve** plots the trade-off between two error "
         "rates as a decision threshold moves.\n",
         "A **ROC curve** plots one similarity score. For input $x$ and "
-        "center $c$, the similarity is $\\exp(-\\gamma (x-c)^2)$.\n")
+        "center $c$, the similarity is $e^{-\\gamma (x-c)^2}$.\n")
     check("a defining expression left inline is an equation-form candidate",
           items(inline_definition), ["12-equation-coverage-candidate"])
     check("an unrelated display elsewhere does not clear an inline defining formula",
