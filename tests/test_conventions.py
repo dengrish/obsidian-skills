@@ -6041,6 +6041,10 @@ SELFTEST_TALLY = re.compile(
 #: file looks at the size of a suite.  Coverage may grow freely: only a shrink
 #: fails.  Lowering a number here is a deliberate, reviewable statement that
 #: cases went away; a script with no line is checked for a clean tally only.
+#: A floor must hold on every CI host: a case that depends on the filesystem
+#: or platform (case folding, Unicode normalization, symlinks) counts once in
+#: every branch, with a vacuous `... skipped on this filesystem` pass where
+#: the host cannot run it, so a macOS tally is also the Linux tally.
 SELFTEST_MIN_CASES = {
     # Lowered deliberately on 2026-09-26: a verified bloat audit removed
     # redundant cases (each duplicated one that stays) and the Extended Data

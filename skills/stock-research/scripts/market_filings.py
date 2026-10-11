@@ -255,6 +255,7 @@ def _parse_isolated(html, form, section, offset, count):
 def _text_for_credential_check(html):
     """Inspect joined character data without changing the document being parsed."""
     parts = []
+    line_start = [1, 0]  # (line, index of its first character); getpos() only moves forward
     class TextOnly(HTMLParser):
         def handle_data(self, data):
             parts.append(data)
@@ -265,6 +266,18 @@ def _text_for_credential_check(html):
             # while claiming the entire document passed the credential check.
             raise DataError('invalid_document',
                             'The primary HTML contains an unsupported marked declaration; no text was returned.')
+
+        def handle_comment(self, data):
+            # Python 3.13.4+ reports "<![...]>" as a bogus comment instead of
+            # calling unknown_decl. Reject it on every version; "<!--[if ...]>"
+            # comments start with "<!--" and are still accepted.
+            if data.startswith('['):
+                line, column = self.getpos()
+                while line_start[0] < line:
+                    line_start[1] = html.index('\n', line_start[1]) + 1
+                    line_start[0] += 1
+                if html.startswith('<![', line_start[1] + column):
+                    self.unknown_decl(data)
     scanner = TextOnly(convert_charrefs=True)
     try:
         scanner.feed(html)

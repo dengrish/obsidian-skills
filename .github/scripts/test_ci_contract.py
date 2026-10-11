@@ -163,6 +163,19 @@ class CiContractTests(unittest.TestCase):
         self.assertEqual(unrun, [], "suites missing from validate.yml")
         self.assertEqual(sorted(named - set(suites)), [],
                          "validate.yml names a missing suite")
+        # One failing suite must not skip the rest: every check after the
+        # dependency check runs whenever that check passed.
+        gate = "if: ${{ !cancelled() && steps.deps.outcome == 'success' }}"
+        steps = re.split(r"^\s*- name:", workflow, flags=re.MULTILINE)
+        self.assertIn("id: deps", workflow)
+        checks = [step for step in steps
+                  if re.search(r"run:\s+python\s+(tests/|-m\s+unittest\s+"
+                               r"discover\s+-s\s+tests|tools/build_plugin)",
+                               step)]
+        self.assertEqual(len(checks), len(named) + len(globs) + 1)
+        self.assertEqual([step.splitlines()[0].strip() for step in checks
+                          if gate not in step], [],
+                         "a check step skips after another check fails")
         block = re.search(
             r"^(\s*)cache-dependency-path:\s*\|\n((?:\1\s+\S.*\n)+)",
             workflow, re.MULTILINE)
