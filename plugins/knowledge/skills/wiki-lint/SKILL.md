@@ -258,7 +258,8 @@ Repair in this order:
    wording or scanner similarity alone never activate a merge; a long note,
    several headings or several sources alone never activate a split.
 4. **Retitles and semantic-invalid alias removals** through their protocols.
-5. **Missing entries and dangler glosses** under the
+5. **Missing entries, only from vault documents already cited, and dangler
+   glosses** under the
    [missing-entry rule](references/refactors.md#create-a-missing-entry) and
    its [dangler hand-off](references/refactors.md#dangling-link-hand-off),
    which settles Step 0's `item10/dangling` targets before Task 2 drops any
@@ -380,4 +381,4 @@ Tasks 1–3 advance it only for an extra-card removal, never for blanking
 - Scan `<vault>/Wiki`, **not the vault root**, with `--images` on every apply-capable run ([scanner CLI](references/scanner.md#cli)). Apply user folder overrides per run without editing installed skills. Image-folder findings never authorize moving, renaming, or deleting anything.
 - wiki-lint owns `<vault>/Reviews/.wiki-lint-settled.json`, private run state recording Task 2's settled backfill rejections and kept hub items, not a suggestion log ([settled decisions](references/link-hygiene.md#settled-decisions)).
 - Task 3 owns the generated MOCs `<vault>/MOCs/<discipline-slug>-moc.md` and `MOCs/misc-moc.md`, outside `Wiki/`; unknown `MOCs/` files, legacy vault-root MOCs, and suggestion logs stay outside that ownership.
-- Task 1b reads cited sources, the note-content log, standard references under its [evidence rule](#task-1b--content-repair) and, for missing-entry research, vault PDFs and `Articles/` notes. It writes entries in `Wiki/`, inbound links in `MOCs/` and, for a refactor, the inbound links its [protocol](references/refactors.md#establish-evidence-and-complete-scope) allows in other vault notes.
+- Task 1b reads cited sources, the note-content log and standard references under its [evidence rule](#task-1b--content-repair). It writes entries in `Wiki/`, inbound links in `MOCs/` and, for a refactor, the inbound links its [protocol](references/refactors.md#establish-evidence-and-complete-scope) allows in other vault notes.

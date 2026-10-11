@@ -30,7 +30,8 @@ This is maintenance of existing knowledge, not a second extraction route.
 may create a split note only for a subject already substantively present in the
 affected entry and supported by its cited sources.
 Task 1b's [missing-entry rule](#create-a-missing-entry) is the only other
-creation, and it is limited to a concept the wiki already relies on.
+creation, limited to a concept the wiki relies on, taught by a vault document
+the entries using it cite.
 
 ## Establish evidence and complete scope
 
@@ -358,8 +359,9 @@ rewritten link keeps its dates and `read:` under the
 
 ## Create a missing entry
 
-Task 1b creates a missing entry for a concept with a stable identity that
-passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities)
+Task 1b creates a missing entry only for a concept that a vault document the
+entries using the term already cite teaches, with a stable identity that
+passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities),
 when a [user issue](../SKILL.md#user-issues) asks for its entry, when an
 open note-content item names it, or when it is a load-bearing term:
 one at least three entries use without a resolving link. A one-clause inline
@@ -370,8 +372,12 @@ measurement ("135 million nucleotide pairs"), a list of examples or a
 Related-footer item, dangling or not, is not a use. Count the uses before
 adding any gloss, keep the count across the whole Task 1b sweep, and
 adjudicate every term that reaches three entries in the same run. A concept
-failing those tests is reported. It extracts no other topic from the
-evidence.
+failing those tests, including one no cited document teaches, gets no entry:
+it is a reported [missing-entry candidate](backlogs.md#run-report) for a
+later wiki-build of a source that teaches it or for wiki-add, and each using
+entry whose sentence needs the term's meaning keeps, or regains, its brief
+[5(h)](../../wiki-build/references/writing.md#prose-principles) definition.
+It extracts no other topic from the evidence.
 
 1. Derive the canonical title under the builder's
    [title](../../wiki-build/references/writing.md#title) and
@@ -380,18 +386,11 @@ evidence.
    and snapshot the free slug. A same-entity owner gets no entry: Task 2
    links the term to it, or retargets its dangling links there; an occupied
    or ambiguous slug is reported.
-2. Choose the evidence. When a document that the entries using the term
-   already cite teaches it, cite that document at the page that teaches the
-   term. Otherwise follow wiki-add's [research rules](../../wiki-add/references/research.md)
-   and cite a reliable web page by its URL under
-   [Cite a webpage](../../wiki-add/references/research.md#cite-a-webpage).
-   Research may read the vault's PDFs and `Articles/` notes under its
-   [local-source rule](../../wiki-add/references/research.md#find-local-sources-first),
-   but never cites a PDF or note no entry cites. Never create a source note,
-   acquire or file a PDF, or write `add-to-wiki.md`. Citing a document the
-   using entries already cite leaves wiki-build's coverage unchanged; the
-   rule that an uncited source counts as unbuilt governs deepening an
-   existing entry, not a new entry's source.
+2. Cite that teaching document at the page that teaches the term, and no
+   other source: never research the term on the web or in a vault document
+   no entry cites. Citing an already cited document leaves wiki-build's
+   coverage unchanged; the rule that an uncited source counts as unbuilt
+   governs deepening an existing entry, not a new entry's source.
 3. Draft it from step 2's evidence, adding beyond it only the clarification
    [5(h)](../../wiki-build/references/writing.md#prose-principles) admits,
    under wiki-build's entry rules: its
@@ -438,7 +437,7 @@ each target before Task 2 drops any link. A target with a
    its [dangler protocol](link-hygiene.md#dangling-links-target-missing).
 
 Never create an entry merely to keep a link; only the missing-entry rule
-above (three uses, a user issue, or an open note-content item) decides.
+above decides.
 
 ## Delete an entry
 
