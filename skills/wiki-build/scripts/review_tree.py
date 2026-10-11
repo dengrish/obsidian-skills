@@ -61,6 +61,11 @@ diff in one call:
      path from the entry's folder, or a vault path, whole or its end. It is
      never ``dangling`` or ``alias``, since a real note outranks an alias;
      ``inherited: true`` marks a link the path's baseline copy already had.
+  6. Images: with ``--images``, each image embed of a staged draft must name
+     a file in that folder, or an image file elsewhere in the vault, by
+     basename (case/NFC-insensitive). A miss is an
+     ``on_staged`` ``12-missing-image`` finding, ``inherited: true`` when the
+     baseline copy embedded it too. A folder it cannot read adds a note.
 
 The manifest is the shared publication manifest: a JSON list of
 ``{"path": "Wiki/<slug>.md", "draft": "<absolute draft path>"}`` objects with
@@ -79,7 +84,7 @@ Module use:
 
 CLI:
     review_tree.py --wiki '<vault>/Wiki' --manifest MANIFEST.json
-        --out '<scratch>/review' [--vault VAULT] [--compact]
+        --out '<scratch>/review' [--vault VAULT] [--images DIR] [--compact]
 
 Output: {ok, clean, tree, staged[], on_staged[], introduced[],
 baseline_count, dangling[], noncanonical[], non_entry[], unmirrored[],
@@ -102,6 +107,7 @@ import collections
 import json
 import os
 import posixpath
+import re
 import shutil
 import stat
 import sys
@@ -529,6 +535,66 @@ def _link_regions(text):
             ("related", sections["related_line"] or ""))
 
 
+_IMAGE_EXT = r"\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
+#: An Obsidian image embed, ``![[name.png]]`` with an optional ``|width``.
+_IMAGE_EMBED_RE = re.compile(
+    r"!\[\[([^\]|\n]+" + _IMAGE_EXT + r")(?:\|[^\]\n]*)?\]\]", re.IGNORECASE)
+
+
+def _visible_files(root, failed):
+    """Folded basenames of the files under ``root``, skipping dot-names."""
+    names, seen = set(), set()
+    for dirpath, dirnames, filenames in os.walk(root, onerror=failed,
+                                                followlinks=True):
+        real = os.path.realpath(dirpath)
+        if real in seen:
+            dirnames[:] = []
+            continue
+        seen.add(real)
+        dirnames[:] = [name for name in dirnames if not name.startswith(".")]
+        names.update(fold_name(name) for name in filenames
+                     if not name.startswith(".")
+                     and os.path.isfile(os.path.join(dirpath, name)))
+    return names
+
+
+def image_names(images, vault=None):
+    """Folded basenames of the visible files under ``images``, or None.
+
+    None means that folder could not be read: an incomplete inventory proves
+    no image missing. Dot-files and dot-folders are skipped. With ``vault``,
+    the image files elsewhere in it count too: Obsidian resolves an embed by
+    basename anywhere in the vault and renders it, and wiki-lint reports
+    one outside the image folder.
+    """
+    failed = []
+    names = _visible_files(images, failed.append)
+    if failed:
+        return None
+    if vault is not None:
+        names |= {name for name in _visible_files(vault, lambda exc: None)
+                  if re.search(_IMAGE_EXT + "$", name, re.IGNORECASE)}
+    return names
+
+
+def missing_images(text, names):
+    """Each embedded image an entry names that ``names`` lacks, once.
+
+    Obsidian resolves an embed by basename, so a path-qualified embed names
+    its basename; embeds in code or comments are no embeds.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    visible = mask_escaped_wikilinks(mask_body_comments(
+        parse_frontmatter(text).body, mask_code=True))
+    missing, seen = [], set()
+    for match in _IMAGE_EMBED_RE.finditer(visible):
+        name = match.group(1).strip().replace("\\", "/").rsplit("/", 1)[-1]
+        if fold_name(name) not in names and fold_name(name) not in seen:
+            seen.add(fold_name(name))
+            missing.append(name)
+    return missing
+
+
 def _path_lookup(written, wiki_parts):
     """A path target's folded key, less a leading Wiki qualifier and ``.md``."""
     rest = _root_split(written.split("/"), wiki_parts)[1]
@@ -801,12 +867,14 @@ def noncanonical_links(text, stems, alias_owners, mocs=(), own=None,
     return found
 
 
-def review(wiki, manifest, out, vault=None):
+def review(wiki, manifest, out, vault=None, images=None):
     """Run the whole review and return its report; raise ReviewError."""
     wiki = os.path.abspath(wiki)
     vault = os.path.abspath(vault) if vault else os.path.dirname(wiki)
     if not os.path.isdir(vault):
         raise ReviewError("vault folder not found: %s" % vault)
+    if images is not None and not os.path.isdir(images):
+        raise ReviewError("--images %s is not a directory" % images)
     wiki_rel = os.path.relpath(wiki, vault)
     if wiki_rel == os.curdir or wiki_rel.split(os.sep)[0] == os.pardir:
         raise ReviewError("--wiki %s is not a folder inside the vault %s"
@@ -916,6 +984,10 @@ def review(wiki, manifest, out, vault=None):
         notes.append("notes outside the Wiki are incomplete (unread "
                      "folder(s): %s); a dangling link the entry already had "
                      "may name a note there" % ", ".join(others_unread))
+    names = image_names(images, vault) if images is not None else None
+    if images is not None and names is None:
+        notes.append("the image folder %s could not be read completely; "
+                     "embeds were not checked" % images)
     for rel, inner, data in staged:
         text = data.decode("utf-8-sig", errors="replace")
         note = rel[:-3]
@@ -953,6 +1025,18 @@ def review(wiki, manifest, out, vault=None):
                                             aliases_complete=not unread,
                                             others=others,
                                             others_complete=not others_unread)]
+        if names is None:
+            continue
+        had = {fold_name(name) for name in missing_images(old, names)}
+        for name in missing_images(text, names):
+            record = {"file": rel, "item": "12-missing-image",
+                      "severity": "error",
+                      "message": "embed names no image file in the vault: "
+                                 "%s; Obsidian shows it as plain text" % name,
+                      "evidence": {"image": name}}
+            if fold_name(name) in had:
+                record["inherited"] = True
+            on_staged.append(record)
 
     return {
         "ok": True,
@@ -1580,6 +1664,51 @@ def run_self_test():
         refused("a case variant of an existing entry is refused",
                 manifest=manifest("case.json",
                                   [("Wiki/PRECISION.md", f1_draft)]))
+        refused("an --images path that is not a directory is refused",
+                images=os.path.join(tmp, "no-images"))
+
+        ivault = os.path.join(tmp, "ivault")
+        images = os.path.join(ivault, "Sources", "Images")
+        os.makedirs(os.path.join(ivault, "Wiki"))
+        os.makedirs(images)
+        put(os.path.join(images, "Kept.PNG"), "")
+        for folder, name in (("Attachments", "Outside.png"),
+                             (".trash", "gone.png")):
+            os.makedirs(os.path.join(ivault, folder))
+            put(os.path.join(ivault, folder, name), "")
+        gain = ("Gain", "Gain is the ratio of output to input.",
+                "The ratio of output to input.")
+        put(os.path.join(ivault, "Wiki", "gain.md"), _st_entry(
+            *gain, body="\n\n![[lost.png]]\n*A lost figure.*"))
+        gain_draft = put(os.path.join(drafts, "gain.md"), _st_entry(
+            *gain, body="\n\n![[lost.png]]\n*A lost figure.*\n\n"
+            "![[Sources/Images/kept.png|300]]\n*A kept figure.*\n\n"
+            "![[typo.png]]\n*A mistyped figure.*\n\n![[typo.png]]\n*Again.*"
+            "\n\n![[outside.png]]\n*A pasted figure.*\n\n![[gone.png]]\n"
+            "*A trashed figure.*\n\n`![[code.png]]` is syntax."))
+        gain_manifest = manifest("images.json", [("Wiki/gain.md", gain_draft)])
+        runs = []
+        for extra in ([], ["--images", images]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                main(["--wiki", os.path.join(ivault, "Wiki"), "--manifest",
+                      gain_manifest, "--out", os.path.join(tmp, "ireview")]
+                     + extra)
+            runs.append([(r["file"], r["evidence"]["image"],
+                          r.get("inherited", False))
+                         for r in json.loads(buf.getvalue())["on_staged"]
+                         if r["item"] == "12-missing-image"])
+        check("with --images, a staged embed naming no file in the image "
+              "folder is on_staged once, inherited when the baseline copy "
+              "had it; a path, case variant or code span is not; without "
+              "it nothing is checked", runs,
+              [[], [("Wiki/gain.md", "lost.png", True),
+                    ("Wiki/gain.md", "typo.png", False),
+                    ("Wiki/gain.md", "gone.png", False)]])
+        check("with --images, an embed of an image elsewhere in the vault "
+              "renders and is not missing; one only in a dot-folder is",
+              [name for _file, name, _inherited in runs[1]
+               if name in ("outside.png", "gone.png")], ["gone.png"])
 
         buf = io.StringIO()
         with contextlib.redirect_stdout(buf):
@@ -1624,6 +1753,9 @@ def _build_parser():
                                  "(new, or created earlier by this tool)")
     p.add_argument("--vault", help="vault root the manifest paths are "
                                    "relative to (default: the Wiki's parent)")
+    p.add_argument("--images", help="the image folder; each staged draft's "
+                                    "image embeds must name a file in it "
+                                    "or an image elsewhere in the vault")
     p.add_argument("--test", action="store_true",
                    help="run the built-in self-test and exit")
     p.add_argument("--compact", action="store_true", help="compact JSON output")
@@ -1647,7 +1779,8 @@ def main(argv=None):
                           % ", ".join(missing)}, indent=2))
         return 2
     try:
-        report = review(args.wiki, args.manifest, args.out, vault=args.vault)
+        report = review(args.wiki, args.manifest, args.out, vault=args.vault,
+                        images=args.images)
     except Exception as exc:
         error = str(exc) if isinstance(exc, ReviewError) else "%s: %s" % (
             type(exc).__name__, exc)

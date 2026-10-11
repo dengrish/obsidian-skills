@@ -473,8 +473,10 @@ def sweep_report(text):
         ("1  H1 in body — expect NONE", grep(body, H1_RE)),
         ("2  Summary callouts — expect exactly 1",
          ["%d%s" % (summary, "" if summary == 1 else "  <- expected 1")]),
-        ("3  leftover remote image refs (Markdown or HTML) — NONE without a "
-         "failure placeholder", grep(body, REMOTE_IMAGE_RE)),
+        ("3  leftover remote image refs (Markdown or HTML) — NONE: each image "
+         "is a local embed or replaced by its failure placeholder; kept "
+         "YouTube or X/Twitter embeds are expected",
+         grep(body, REMOTE_IMAGE_RE)),
         ("4  stray HTML — NONE outside kept tables, pipe-cell <br>, reported "
          "sup/sub", grep_only(body, STRAY_HTML_RE)),
         ("5  clipping-chrome candidates — inspect in context",
@@ -1010,25 +1012,45 @@ def _leading_tabs(text):
     return len(text) - len(text.lstrip("\t"))
 
 
+def _tab_change(line, op):
+    return (_leading_tabs(_split_quote(line)[1])
+            - _leading_tabs(_split_quote(REPAIRS[op](line))[1]))
+
+
+def _owner_tab_change(lines, first, code, op, listed):
+    """Tabs ``op`` removes from the item owning the fence at ``first``: the
+    nearest earlier list item shallower than the fence, or 0 when there is
+    none or it is not listed."""
+    depth = _leading_tabs(_split_quote(lines[first])[1])
+    for i in range(first - 1, -1, -1):
+        item = i not in code and LIST_ITEM_RE.match(_split_quote(lines[i])[1])
+        if item and len(item.group(1)) < depth:
+            return _tab_change(lines[i], op) if i in listed else 0
+    return 0
+
+
 def nested_code_moves(lines, openers, op, listed):
     """``{0-based line: new text}`` for the list-nested fenced blocks that
     ``overindent`` or ``dedent`` moves.
 
-    A block moves only when its fence is indented and the op changes the
-    opener's tabs. Each line then loses, after its quote prefix, the tabs the
-    op removes from the opener, so the code keeps its own indentation. A
-    block listed only in part, or with a code line too shallow to move, is
-    refused.
+    A block moves only when its fence is indented. ``dedent`` moves it one
+    tab; ``overindent`` moves it by its owning item's tab change, so the
+    block stays inside that item. Each line loses that many tabs after its
+    quote prefix, so the code keeps its own indentation. A block listed only
+    in part, or with a code line too shallow to move, is refused.
     """
     moves = {}
     if op == "stacked":
         return moves
+    code = set()
+    for first, last in openers:
+        code.update(range(first, last + 1))
     for first, last in openers:
         block = set(range(first, last + 1))
         if not FENCE_RE.match(lines[first]).group(2) or not block & listed:
             continue
-        tabs = (_leading_tabs(_split_quote(lines[first])[1])
-                - _leading_tabs(_split_quote(REPAIRS[op](lines[first]))[1]))
+        tabs = (_tab_change(lines[first], op) if op == "dedent" else
+                _owner_tab_change(lines, first, code, op, listed))
         if not tabs:
             continue
         if not block <= listed:
@@ -1593,10 +1615,14 @@ def run_self_test():
     qa = ("- - **Q:** how do I loop?\n\t\t- **A:** like this:\n\t\t\t```go\n"
           "\t\t\tfor i := range xs {\n\t\t\t\tfmt.Println(\"$HOME\", i)\n"
           "\t\t\t}\n\t\t\t```")
-    check("overindent moves a nested fenced block whole, keeping the code's "
-          "own indent", plan_repair(qa, "overindent", "2-7")[0].split("\n")[1:],
-          ["\t- **A:** like this:", "\t```go", "\tfor i := range xs {",
-           "\t\tfmt.Println(\"$HOME\", i)", "\t}", "\t```"])
+    check("overindent moves a nested fenced block whole by its item's change, "
+          "keeping the code's own indent",
+          plan_repair(qa, "overindent", "2-7")[0].split("\n")[1:],
+          ["\t- **A:** like this:", "\t\t```go", "\t\tfor i := range xs {",
+           "\t\t\tfmt.Println(\"$HOME\", i)", "\t\t}", "\t\t```"])
+    kept = "- a\n\t- b\n\t\t```\n\t\tx\n\t\t```"
+    check("a fenced block nested under an unchanged one-tab item does not "
+          "move", plan_repair(kept, "overindent", "1-5")[:2], (kept, []))
     peer = "> - a\n> \t- b\n> \t\t```\n> \t\tx\n> \t\t\ty\n> \t\t```"
     check("dedent shifts a peer item and its whole nested block by one tab",
           plan_repair(peer, "dedent", "2-6")[0],

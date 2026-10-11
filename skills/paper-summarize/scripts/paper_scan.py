@@ -526,7 +526,7 @@ def classify(stem, books, note_state, allow_unorganized=False,
     older skill's note, not ours) or
     "theirs" (a note of this stem that belongs to something else).
 
-    The two skips come first because both are decisions about *scope* — this
+    The scope skips come first because each is a decision about *scope* — this
     PDF is not the unit of work — while the refusal is about the file itself.
     Ordering them the other way would report a book or a chapter as
     `unorganized` whenever it carried a name pdf-organize had not produced,

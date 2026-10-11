@@ -81,13 +81,6 @@ cannot move stays on it and is listed with its blocker, without failing the
 run, since no figure is missing. Report it as
 mislabelled, as the [Unclaimed crops](#interpret-the-diagnostics) row says.
 
-Later batch runs, folder sweeps included, switch a PDF to `--ed-prefix ED` by
-themselves and print `Using --ed-prefix ED` when its manifest records
-`_fig_ED<N>` crops or its `Sources/Images/` holds an unrecorded
-`<stem>_fig_ED<N>.png`; adopt such a legacy crop only after comparing it with
-its page. `auto_fig_bbox.py` does not read the manifest, so pass it that
-effective prefix explicitly.
-
 ## Readable working copies
 
 For an encrypted PDF, or a scan that needs OCR, make a readable copy under
@@ -331,7 +324,8 @@ unnumbered or colliding exhibit unextracted and report it.
    relaxes the duplicate vault basename or image occupant checks.
 
    `--overwrite` is needed to replace a verified crop; without it that crop
-   is skipped. Unknown occupants remain protected. Keep every caption
+   is skipped; an S crop listed in `.figure-ed-pending.txt` is refused until
+   its links move. Unknown occupants remain protected. Keep every caption
    rectangle out of the crop, including neighbors' captions from the detection
    table and any caption the detector missed. For a caption below the figure
    use `y1 <= cap_y0 - 0.5`; for one above it, `y0 >= cap_y1 + 0.5`. For a
@@ -350,10 +344,8 @@ unnumbered or colliding exhibit unextracted and report it.
    background, repeat step 3 with `--no-trim` (keep `--overwrite`, because the
    crop just written is now verified output). Only then record the review,
    including for a repair of a crop that was never flagged, with that PDF as
-   `--src` and the same output folder. A flagged or adopted crop confirmed
-   correct as written after the same comparison takes the same mark; leave an
-   unviewed or doubtful crop unmarked and report it. Pass one
-   `--mark-reviewed` per checked figure of that PDF in one run:
+   `--src` and the same output folder. Pass one `--mark-reviewed` per
+   checked figure of that PDF in one run:
 
    ```bash
    python3 '<skill>/scripts/batch_extract.py' \
@@ -377,9 +369,7 @@ unnumbered or colliding exhibit unextracted and report it.
 For several bad crops, `auto_fig_bbox.py --emit extract` can print one
 explicit-extraction command with multiple `--crop` arguments. It includes the
 current interpreter and the script's absolute path. Supply the PDF path and
-step 1's detection options (the batch's effective `--ed-prefix`, including an
-`ED` the batch applied by itself, and `--keep-frame`), then edit the emitted
-command:
+step 1's detection options, then edit the emitted command:
 
 - Edit the emitted coordinates and replace the deliberate `--out`
   placeholder `/EDIT-THIS/path/to/vault/Sources/Images`.
@@ -392,5 +382,6 @@ command:
   crops).
 - Repeat any `--allow-unorganized` or `--include-split-books` used at intake.
 
-Collapsed rectangles are omitted and counted on stderr, so an emitted command
-is not evidence that all figures have usable crops.
+Collapsed rectangles, and later captions with an output label already
+emitted, are omitted and reported on stderr, so an emitted command is not
+evidence that all figures have usable crops.

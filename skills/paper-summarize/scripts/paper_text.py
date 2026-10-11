@@ -112,7 +112,8 @@ _FIG_LABEL = _FIG_ENDPOINT + r"(?:-" + _FIG_ENDPOINT + r")*"
 _FIG_REF = re.compile(
     r"(?:\b(?P<marker>" + _FIG_MARKER + r")\s+)?"
     r"\bfig(?:ure)?(?P<plural>s)?\.?\s*"
-    # A hierarchical label is `1.2` or `1-2`; a *range* is `1-3` after a plural.
+    # A hierarchical label is `1.2`, or `1-2` in a document whose captions use
+    # one; otherwise `1-3` is a *range*, as `_range_labels` decides.
     # Reading "Figures 1-3" as one label `1-3` scores a figure no run can write
     # and costs figures 1, 2 and 3 a citation each -- and the en dash papers
     # actually use folds to `-` before this ever runs, so it is the common case.
@@ -171,10 +172,11 @@ _SECTIONS = [
     ("funding", ("funding", "financial support", "grant support",
                  "role of the funding source")),
     ("conflicts", ("conflict of interest", "conflicts of interest",
-                   "competing interests", "declaration of interests",
-                   "disclosure", "disclosures")),
+                   "competing interests", "competing interest",
+                   "declaration of interests", "disclosure", "disclosures")),
     ("data", ("data availability", "data and code availability",
-              "code availability", "availability of data")),
+              "code availability", "availability of data",
+              "materials availability", "software availability")),
     ("ethics", ("ethics", "ethical approval", "institutional review")),
     ("registration", ("trial registration", "registration", "preregistration",
                       "pre-registration")),
@@ -320,15 +322,16 @@ def find(pages, needle, fold_case=True, prepared=None):
 
 
 def _range_labels(label, plural, hyphenated=False):
-    """Expand an unambiguous plural range, otherwise return ``[label]``.
+    """Expand an unambiguous range, otherwise return ``[label]``.
 
-    ``Figures 1-3`` and ``Figures 1.2-1.4`` are ranges. A singular
-    ``Figure 1-3`` remains one chapter-style label, and a descending or very
-    wide span remains literal because books use the same spelling. In a
-    `hyphenated` document (a caption uses a separated label), a plain ``A-B``
-    integer pair is a label too, as the extractor reads it.
+    ``Figures 1-3``, ``Figures 1.2-1.4`` and, as the extractor reads it, a
+    singular ``Figure 1-3`` are ranges. In a `hyphenated` document (a caption
+    uses a separated label), a singular ``A-B`` stays one chapter-style label,
+    and so does a plain ``A-B`` integer pair after a plural. A descending or
+    very wide span remains literal because books use the same spelling, and
+    so does a singular ``S1-3``, as in the extractor.
     """
-    if not plural or label.count("-") != 1:
+    if label.count("-") != 1 or (not plural and hyphenated):
         return [label]
     if hyphenated and re.fullmatch(r"\d+-\d+", label):
         return [label]
@@ -349,6 +352,8 @@ def _range_labels(label, plural, hyphenated=False):
     if (hi_prefix and not lo_prefix) or (hi_prefix and hi_prefix != lo_prefix):
         return [label]
     if hi_prefix and lo_separator != hi_separator:
+        return [label]
+    if not plural and lo_prefix and not hi_prefix:
         return [label]
     lo_parts = lo_match.group("number").split(".")
     hi_parts = hi_match.group("number").split(".")
@@ -474,11 +479,10 @@ def sections(pages):
     A heading is a *short line that is only the heading*.  Matching a line's
     first word was the old rule and it fired on ordinary prose -- "Results were
     consistent across all three cohorts.", "Limitations of this approach are
-    discussed below." -- which is worse than finding nothing, because the
-    results-page reading pass uses that range to decide which numbers to inspect.
-    It also *missed* the common real forms: "5. Empirical Results" (the section
-    word is not first) and "7. Discussion, Limitations, Conclusion" (three
-    sections on one line).
+    discussed below." -- yet prose that opens with a section word is not a
+    heading.  It also *missed* the common real forms: "5. Empirical Results"
+    (the section word is not first) and "7. Discussion, Limitations,
+    Conclusion" (three sections on one line).
 
     So: strip any leading numbering, reject anything punctuated like a sentence,
     split the rest on the separators a compound heading uses, and require each
@@ -719,8 +723,7 @@ def run_self_test():
          cites(["see Fig. 2 and the sup-\nplement"]), {"2": 1})
 
     # Prose that merely begins with a section word is not a heading: the old
-    # rule fired on every one of these, and step 10 uses the results page range
-    # to decide which numbers to look at hardest.
+    # rule fired on every one of these.
     for prose in ("Results were consistent across all three cohorts.",
                   "We discuss the results.",
                   "Methods for the assay are described in the appendix.",
@@ -739,6 +742,15 @@ def run_self_test():
          sections(["Materials and Methods"]).get("methods"), [1])
     case("a trailing Statement word",
          sections(["Data Availability Statement"]).get("data"), [1])
+    # A compound heading is split before matching, so its last part must
+    # name the section on its own.
+    case("compound availability headings and the Elsevier interests heading",
+         [sorted(sections([text])) for text in (
+             "Data and materials availability",
+             "Data, code and materials availability",
+             "Software availability",
+             "Declaration of competing interest")],
+         [["data"], ["data"], ["data"], ["conflicts"]])
     case("inline statements do not hide their short heading",
          sections(["Funding: This research was supported by the Example Research "
                    "Council through its investigator grant programme."]),
@@ -807,8 +819,19 @@ def run_self_test():
          {"S1": 1, "S2": 1, "S4": 1})
     case("a singular prefixed dashed label remains hierarchical",
          cites(["Figure S1-3 shows the loss curve."]), {"S1-3": 1})
-    case("a singular dashed label remains hierarchical",
-         cites(["Figure 4-6 shows the loss curve."]), {"4-6": 1})
+    case("a singular dashed label remains hierarchical in a hyphen-labelled "
+         "document",
+         cites(["Figure 4-2. Caption.\nFigure 4-6 shows the loss curve."]),
+         {"4-2": 1, "4-6": 1})
+    # In a plainly numbered document the extractor reads a singular dashed
+    # pair as a range; a literal `2-4` was a phantom label no file carries.
+    case("a singular dashed pair is a range in a plainly numbered document",
+         cites(["Fig. 2-4 shows the loss curve."]), {"2": 1, "3": 1, "4": 1})
+    case("a singular supplementary dashed pair is a range",
+         cites(["Supplementary Fig. 9-12 shows the controls."]),
+         {"S9": 1, "S10": 1, "S11": 1, "S12": 1})
+    case("a singular prefixed pair is a range",
+         cites(["Fig. S2-S3 shows the controls."]), {"S2": 1, "S3": 1})
     case("a hierarchical label survives",
          cites(["As shown in Figure 1.2, the loss falls."]), {"1-2": 1})
     case("appendix labels match the extractor's compact and separated forms",
@@ -852,7 +875,7 @@ def run_self_test():
          {"1": 1, "2": 1, "3": 1, "4": 1, "A-1": 1})
     case("a caption-shaped prose line does not mark the document",
          cites(["Figure 1-2 shows the traces.\nSee Figures 1-3."]),
-         {"1-2": 1, "1": 1, "2": 1, "3": 1})
+         {"1": 2, "2": 2, "3": 1})
     case("non-ASCII decimal digits fold to the on-disk ASCII label",
          cites(["See Figure \u0663 for the trace."]), {"3": 1})
     case("multi-level dashed labels are not truncated",

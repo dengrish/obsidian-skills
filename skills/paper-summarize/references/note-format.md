@@ -51,7 +51,7 @@ read: false
   resolved upstream; a path-qualified link does not fix note/image namespace
   collisions.
 - **Author:** block-form list in the printed order, without wikilink wrappers.
-  For more than about eight authors, list the first three and a final `et al.`
+  For more than eight authors, list the first three and a final `et al.`
   item. Preserve a collective byline rather than mining individuals from a
   footnote. If the document supplies no byline, write the canonical empty
   exception `author: []` and report it; never use bare `author:` or invent an
@@ -242,13 +242,13 @@ to reconstruct.
   the sentence that introduces it. Put every exhibit here, beneath its supporting
   claim; cite load-bearing numbers. The cap is **2,400 characters of prose**,
   excluding embeds, captions, tables and citation markup; a link counts as its
-  display text.
+  display text, and inline math counts as rendered.
 - **Interpretation / consequence position:** state the authors' or issuer's own
   conclusions and the implications they draw, attributed and only as far as
   the design, reasoning or notice reaches. Add another reading only when the
   source supports a materially different interpretation, and mark it. Do not
-  add the note's own practical inferences or restate limitations; those belong
-  in the fifth position.
+  add the note's own practical inferences, and leave limitations to the fifth
+  position.
 - **Limitations / boundaries position:** use 1–4 bullets that would change how
   the reader acts on or cites the document. Empirical notes normally need 2–4;
   keep one only when a second material limitation would be filler, and explain
@@ -294,12 +294,12 @@ replaces explanation: each item keeps its why.
   order matters and a reader may follow the steps or refer to one of them.
   Introduce the list with one prose sentence. Notation and conditions that
   hold for every step go in the prose before the list, which ends with the
-  introducing sentence. Each item is one step: it opens with its action, in
-  the same grammatical form across the list, and keeps its reason (what the
-  step achieves or why), plus any display equation and that display's
-  explanation. A loop ends with a "Repeat from step N until …" item, which
-  counts as one of the steps. What happens after the procedure, such as
-  prediction after training, follows the list in prose.
+  introducing sentence. Each item is one step, in the same grammatical form
+  across the list, and keeps its reason (what the step achieves or why), plus
+  any display equation and that display's explanation. A loop ends with a
+  "Repeat from step N until …" item, which counts as one of the steps. What
+  happens after the procedure, such as prediction after training, follows the
+  list in prose.
 - **Prose.** A causal chain (mechanism, then condition, then consequence) and
   an argument stay prose, where the connecting words carry the explanation. A
   sequence of fewer than three steps is prose too.
@@ -322,7 +322,8 @@ word or label; a stage name with a Wiki entry keeps its first-mention link. The
 display rules below apply inside a step too:
 
 ```markdown
-The fitting procedure lowers the error by small steps downhill:
+For data $X$, targets $y$ and weights $w$, the fitting procedure lowers the
+squared error by small steps downhill:
 
 1. Set every weight to zero, so no feature starts with any influence.
 2. Compute the gradient of the squared error, which points uphill:
@@ -351,9 +352,10 @@ When the contribution needs display math, put each equation in its own
 line (no `\qquad`-joined pairs, `\Rightarrow` chains or `\text{where}`
 definitions). Lint reports a likely pair as an advisory. In every equation,
 display or inline, write the exponential as a power of $e$ ($e^{-t}$), never
-`\exp`, even for a long exponent. Transcribe each equation from its page
-image, not the text capture, which drops accents such as hats and loses
-grouping and indices;
+`\exp`, even for a long exponent. Write $\ell$ only for a norm: a loss the
+document writes as $\ell$ becomes $L$, and an $\ell$ index takes another
+letter. Transcribe each equation from its page image, not the text capture,
+which drops accents such as hats and loses grouping and indices;
 [verification](review-checklist.md#locate-the-claims) checks it there. Beside
 each display, say what each term means and where the relation comes from;
 inside a numbered step, that explanation stays in the step. Use

@@ -225,12 +225,7 @@ treating a detector match as permission to rewrite.
   syntax. Keep complex tables (merged cells, multi-paragraph cells, embedded
   block content) as `<table>` — Obsidian renders HTML tables natively, and
   forcing them into pipe syntax often loses fidelity.
-- **Equations and typographic super/subscripts** — when the body has math
-  delimiters, LaTeX commands such as `\frac`, an equation image whose alt text
-  holds LaTeX, `<sup>`/`<sub>` tags, Unicode super- or subscripts or formula
-  operators, read [equations](equations.md). It owns delimiter normalization,
-  flattened-formula repair and the non-math sup/sub cases (prices, ordinals,
-  date ranges, chemical names).
+- **Equations and typographic super/subscripts** follow [equations](equations.md).
 - **Currency dollars** — escape every literal currency `$` in the body as `\$`,
   with or without other math; never in YAML values. When in doubt, escape: `\$`
   is never wrong in the body. The review pass re-checks delimiter balance and

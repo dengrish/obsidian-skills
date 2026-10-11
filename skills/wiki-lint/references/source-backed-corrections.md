@@ -99,7 +99,8 @@ unnecessary caveat or add the missing explanation, preserving essential
 assumptions and the ordinary mechanism. Remove the new information the cited
 sources do not give, however accurate (principle 5(h)), keeping the rest of
 its sentence; what the equation rules require changes only under them, and an
-uncited hand edit the run can identify is reported, not trimmed. In each
+uncited sentence that the user's request or the entry's `issues:` value names
+as the user's own edit is reported, not trimmed. In each
 entry, change only the
 surfaces needed to keep it coherent: for example its description, opener,
 equation, or primary card. Then apply the builder's
@@ -136,9 +137,8 @@ changes only under [User issues](../SKILL.md#user-issues).
 case, and then name its condition instead of a hedge word
 ([principle 3](../../wiki-build/references/writing.md#prose-principles)).
 Remove every hedge and caveat principle 3 excludes, its full "Leave out" list
-included (defensive terminology distinctions, implementation and numerical
-details such as a library's default tolerance, rare failure modes,
-troubleshooting about neighbors), even when the source itself makes it; this is not removing
+included (every kind it names, numerical details such as a library's default
+tolerance among them), even when the source itself makes it; this is not removing
 a claim for lack of a citation. Evidence-bearing uncertainty in research
 findings stays. Inspect captions too: a caption drops an excluded hedge even
 when the source's caption carries it. Never add caveats.

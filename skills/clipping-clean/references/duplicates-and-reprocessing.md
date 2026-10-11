@@ -146,7 +146,7 @@ free name.
 |---|---|
 | The same article: a note with the same normalized web origin, or one whose origin differs only by scheme, an `m.`/AMP host or path alias, or query fields the normalizer keeps, and whose title and author/date match this capture's verified metadata | Batch: skip, keep the raw, and report a dedup escape with the existing path and both URLs. Named capture: use the explicit overwrite-or-skip decision, not filename similarity as authorization; an approved overwrite keeps the existing note's origin URL. If sameness is uncertain, treat it as this row, not the next. Never offer a marked research extract for overwrite. |
 | A different source (URL and title/identity differ), PDF summary, PDF or loose figure set | Choose `<slug>_2`, then `_3`, … until the note and image stem are free. Use the suffix for both. Report the collision. |
-| Current note being explicitly reprocessed | Keep its stem if still correct, or plan its own note/image rename below. A stem that differs from the new slug only by case or Unicode normalization is still correct: keep its spelling and its images' names, and publish a same-name rewrite. |
+| Current note being explicitly reprocessed | Keep its stem unless its author or year segment differs from the verified metadata or a title correction makes its topic wrong; a different choice of topic words is never a reason to rename. Otherwise plan its own note/image rename below. A stem that differs from the new slug only by case or Unicode normalization is still correct: keep its spelling and its images' names, and publish a same-name rewrite. |
 
 Do not rename another owner's figures to free a stem. If a new collision appears
 at final publication, return to this check and prepare/review the new draft and

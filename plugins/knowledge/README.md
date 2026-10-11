@@ -14,12 +14,13 @@ both may use the same selected vault.
 | [knowledge:wiki-add](skills/wiki-add/SKILL.md) | Research missing queued or named topics |
 | [knowledge:wiki-lint](skills/wiki-lint/SKILL.md) | Repair, merge and split entries, add missing ones, and maintain links, parents and MOCs |
 
-A default wiki-lint run fixes what it finds. It checks every entry, repairs
-content from the sources each entry already cites or accurate background,
-settles conflicting claims against standard references read online,
-consolidates duplicated explanations, merges duplicate entries, splits entries
-that define several subjects, retitles ambiguous titles and creates missing
-entries the wiki needs, then maintains links, parents and MOCs. New and merged
+A default wiki-lint run fixes what it finds. It checks every entry and repairs
+content from the sources each entry already cites, removing information they
+do not give, however accurate. It settles conflicting claims against standard
+references read online, consolidates duplicated explanations, merges duplicate
+entries, splits entries that define several subjects, retitles ambiguous titles
+and creates missing entries the wiki needs, then maintains links, parents and
+MOCs. New and merged
 entries are marked unread. It also resolves the issues you flag in entries and
 works through the open items in `Reviews/wiki-notes-suggestions.md`. Deleting
 an entry needs an explicit request.

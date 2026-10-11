@@ -32,7 +32,8 @@ index range such as ``i = 1, \\ldots, m`` or ``x = 0, 1``, or a condition
 such as ``\\text{for } i = 1`` qualifies an equation and is not a second one.
 
 Three notation checks read the entry's math and its card. A ``\\ell`` with no
-subscript is a finding, since ``\\ell`` names only norms, and so is
+norm-order subscript (a number, p, q or infinity) is a finding, since
+``\\ell`` names only norms, and so is
 ``\\exp`` or an upright exp applied to an argument, since the exponential
 is written as a power of e. A card line 1
 with no math that spells out arithmetic, beside a short defining display, is a
@@ -879,9 +880,6 @@ def _sum_components_are_named(compact, context):
         expected.append(any(marker in compact for marker in
                             ("noise", r"\epsilon", r"\varepsilon",
                              r"\sigma")))
-    if "loss" in words:
-        expected.append(any(marker in compact for marker in
-                            ("loss", r"\ell")))
     if "penalty" in words:
         expected.append(any(marker in compact for marker in
                             ("penalty", r"\lambda")))
@@ -1559,19 +1557,28 @@ def _math_token_rows(masked_text, flagged):
     return rows
 
 
+# A norm order: a number (whole, decimal or a fraction such as 1/2), p, q or
+# infinity, alone or comma-joined in braces.
+_NORM_ORDER = r"(?:[0-9]+(?:\.[0-9]+)?(?:/[0-9]+)?|[pq]|\\infty(?![A-Za-z]))"
+_NORM_SUBSCRIPT_RE = re.compile(
+    r"\s*_\s*(?:[0-9pq]|\\infty(?![A-Za-z])|\{\s*" + _NORM_ORDER
+    + r"(?:\s*,\s*" + _NORM_ORDER + r")*\s*\})")
+
+
 def find_ell_non_norm_candidates(masked_text):
     """Return each math span of ``masked_text`` holding ``\\ell`` as no norm.
 
     The equation guide reserves ``\\ell`` for named norms, which always carry
-    a subscript (``\\ell_1``, ``\\ell_2``, ``\\ell_p``, ``\\ell_\\infty``,
-    ``\\ell_{...}``): a loss is ``L``, and an index takes another letter. So a
-    ``\\ell`` with no subscript (``\\ell(``, ``\\ell\\!``, ``\\ell=``, a bare
-    ``\\ell``) is a finding. ``masked_text`` is code-masked body prose or one
-    card line. The rows are :func:`_math_token_rows`'s.
+    a norm-order subscript (``\\ell_1``, ``\\ell_p``, ``\\ell_\\infty``,
+    ``\\ell_{2,1}``): a loss is ``L``, and an index takes another letter. So
+    a ``\\ell`` with no norm-order subscript (``\\ell(``, ``\\ell\\!``,
+    ``\\ell=``, a bare ``\\ell``, ``\\ell_i``, ``\\ell_{\\text{CE}}``) is a
+    finding. ``masked_text`` is code-masked body prose or one card line. The
+    rows are :func:`_math_token_rows`'s.
     """
     return _math_token_rows(masked_text, lambda token, content: (
         token.group(0) == r"\ell"
-        and not re.match(r"\s*_", content[token.end():])))
+        and not _NORM_SUBSCRIPT_RE.match(content, token.end())))
 
 
 # An upright exp spelled out and applied to an argument renders as \exp does;
@@ -1882,7 +1889,7 @@ def run_self_test(verbose=False):
          "The scale is the square root of variance.", 1, ()),
         ("a defining equality left inline is reported",
          "The usual construction averages each loss over the data — "
-         "$J(\\theta) = \\frac{1}{m} \\sum_i \\ell_i$.", 1, ()),
+         "$J(\\theta) = \\frac{1}{m} \\sum_i L_i$.", 1, ()),
         ("a hard-wrapped inline definition cue is still visible",
          "For input $x$, the similarity is\n$\\exp(-\\gamma x^2)$.",
          1, ()),
@@ -2134,6 +2141,13 @@ def run_self_test(verbose=False):
          "The error decomposes into the sum of bias, variance, and noise."
          "\n\n$$\nE = \\operatorname{Bias}^2 + "
          "\\operatorname{Var} + \\sigma_\\epsilon^2\n$$", 0, ()),
+        ("a loss's bias-variance display needs no loss symbol",
+         "The expected squared loss decomposes into the sum of bias, "
+         "variance, and noise.\n\n$$\nE = \\operatorname{Bias}^2 + "
+         "\\operatorname{Var} + \\sigma^2\n$$", 0, ()),
+        ("a loss plus a penalty is covered by J = L + lambda R",
+         "The objective decomposes into the sum of the loss and a penalty."
+         "\n\n$$\nJ = L + \\lambda R\n$$", 0, ()),
         ("a generic named decomposition is covered without a fixed vocabulary",
          "The error decomposes into the sum of approximation and estimation error."
          "\n\n$$\nE = A + B\n$$", 0, ()),
@@ -2158,10 +2172,10 @@ def run_self_test(verbose=False):
          "\\hat{y}(x) = \\frac{1}{M} \\sum_m \\hat{y}_m(x)\n$$",
          0, ()),
         ("a regression leaf display averages its target values",
-         "For regression, a leaf $\\ell$ containing $m_\\ell$ instances "
+         "For regression, a leaf $j$ containing $m_j$ instances "
          "with targets $y^{(i)}$ predicts their mean:\n\n$$\n"
-         "\\hat{y}_\\ell = \\frac{1}{m_\\ell} "
-         "\\sum_{i \\in \\ell} y^{(i)}\n$$", 0, ()),
+         "\\hat{y}_j = \\frac{1}{m_j} "
+         "\\sum_{i \\in j} y^{(i)}\n$$", 0, ()),
         ("an unrelated fraction does not cover normalization by a total",
          "Normalize each cell by its row total.\n\n$$\n"
          "z = \\frac{x - \\mu}{\\sigma}\n$$", 1, ()),
@@ -2510,9 +2524,16 @@ def run_self_test(verbose=False):
          [2, 5, 5]),
         ("an index \\ell is flagged",
          "$$\nw = \\sum_{\\ell=1}^{m} w^{(\\ell)}\n$$", [2]),
+        ("an index subscript is no norm order and is flagged per span",
+         "Each $\\ell_i$ and $\\ell_{i}$,\nthen $\\ell_{ij}$ and $\\ell_n$.",
+         [1, 1, 2, 2]),
+        ("a named loss subscript is no norm order and is flagged",
+         "The cost is $\\ell_{\\text{CE}}(y)$.", [1]),
         ("named norms keep their subscripts and are never flagged",
-         "The $\\ell_1$, $\\ell_2$, $\\ell_p$, $\\ell_\\infty$, "
-         "$\\ell_{2,1}$ and $\\ell _2$ norms.", []),
+         "The $\\ell_0$, $\\ell_1$, $\\ell_2$, $\\ell_p$, $\\ell_{p}$, "
+         "$\\ell_\\infty$, $\\ell_{2,1}$ and $\\ell _2$ norms.", []),
+        ("a decimal or fraction order names a quasi-norm, never flagged",
+         "The $\\ell_{1/2}$ and $\\ell_{0.5}$ quasi-norms.", []),
         ("prose, a longer command and a row break before ell are no loss",
          "Plain \\ell text, $\\ellx$ and $a \\\\ell b$, and \\$\\ell\\$.",
          []),

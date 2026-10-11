@@ -2851,6 +2851,11 @@ def _move_snapshot(path):
         "%s is a symlink or unsupported non-regular move source" % path)
 
 
+def _filesystem(path):
+    """The device id of the filesystem holding `path`, symlinks followed."""
+    return os.stat(path).st_dev
+
+
 def _move_snapshot_identity(snapshot):
     """Directory-entry identity accepted by the exclusive move primitive."""
     kind, value = snapshot
@@ -3117,8 +3122,15 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
     reference_ren = {old: new for old, new in ren.items()
                      if _nfc_low(old) not in directory_keys}
 
+    # Ownership matters for a crop whose name changes (compared exactly, as
+    # `rename_all`'s no-op test does, so a case-only or NFC/NFD-only rename
+    # still counts) and for the selected PDF's own-stem crops, which filing
+    # under an unchanged stem claims. A chapter crop that stays put does not.
+    own_fig = _nfc_low(old_stem) + "_fig"
+    owned_check = {p: b for p, b in keyed.items()
+                   if ren[b] != b or _nfc_low(b).startswith(own_fig)}
     try:
-        blockers = (_image_ownership_blockers(vault, path, keyed)
+        blockers = (_image_ownership_blockers(vault, path, owned_check)
                     if have_vault else [])
     except InventoryFailed as exc:
         blockers = ["%s Image ownership cannot be established from an "
@@ -3331,7 +3343,11 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
     # model to use this function to avoid. Moving it to a different depth also
     # dangles a relative target. Refuse rather than produce a vault where every
     # note points at a broken link and the document is unreachable.
-    for src, dst in moves:
+    # `rename_all` skips a move that keeps its path, so the guards below and
+    # the move snapshots cover only the moves that change one.
+    real_moves = [(src, dst) for src, dst in moves
+                  if os.path.abspath(src) != os.path.abspath(dst)]
+    for src, dst in real_moves:
         if os.path.islink(src):
             blockers.append(
                 "%s is a symlink to %s. Renaming it would move the link and "
@@ -3347,20 +3363,37 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
     # bit that a plain `open(path, "w")` would have stopped at. A note the
     # user protected on purpose is a refusal, and it is one the plan shows
     # before anything is written.
-    for src, dst in moves:
+    def _existing(d):
+        # `dest` may not exist yet — the run that first uses it creates it
+        # — so test the nearest ancestor that does. Testing the absent
+        # directory itself reports every first run as unwritable.
+        probe = d
+        while probe and not os.path.isdir(probe):
+            parent = os.path.dirname(probe)
+            if parent == probe:
+                break
+            probe = parent
+        return probe
+
+    for src, dst in real_moves:
         for d in {os.path.dirname(src), os.path.dirname(dst)}:
-            # `dest` may not exist yet — the run that first uses it creates it
-            # — so test the nearest ancestor that does. Testing the absent
-            # directory itself reports every first run as unwritable.
-            probe = d
-            while probe and not os.path.isdir(probe):
-                parent = os.path.dirname(probe)
-                if parent == probe:
-                    break
-                probe = parent
+            probe = _existing(d)
             if not probe or not os.access(probe, os.W_OK):
                 blockers.append("%s is not writable, so %s cannot be moved"
                                 % (d, os.path.basename(src)))
+        # The shared move primitive works through hard links, which never
+        # cross a filesystem: such a filing move would fail at --apply.
+        probe = _existing(os.path.dirname(dst))
+        try:
+            apart = bool(probe) and _filesystem(src) != _filesystem(probe)
+        except OSError:
+            apart = False       # a vanished source fails its snapshot below
+        if apart:
+            blockers.append(
+                "%s is on a different filesystem from %s; this helper moves "
+                "files only within one filesystem, so it cannot file this PDF "
+                "there. Leave it in place and report it."
+                % (os.path.dirname(dst), src))
 
     stem_ren = {os.path.splitext(o)[0]: os.path.splitext(n)[0]
                 for o, n in ren.items() if o.lower().endswith(".md")}
@@ -3591,7 +3624,7 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
          sidecar_blockers) = _plan_figure_state(vault, ren)
         edits.expected.update(sidecar_expected)
         blockers.extend(sidecar_blockers)
-    for src, _dst in moves:
+    for src, _dst in real_moves:
         try:
             edits.move_expected[src] = _move_snapshot(src)
         except OSError as exc:
@@ -4128,8 +4161,11 @@ def _resolve(chapters, text, n_pages, out_dir, taken, book_stem=None):
                 notes.append("%s: end trimmed from %d to %d" % (name, end, nxt))
                 plan[i][1] = end = nxt
             if end <= start:
-                problems.append("%s: empty page range after resolving the "
-                                "start page (%d..%d)" % (name, start, end))
+                problems.append("%s: empty page range: the start resolved to "
+                                "physical page %d, after the chapter's last "
+                                "page %d (end_idx %d); re-derive end_idx from "
+                                "the corrected start"
+                                % (name, start + 1, end, end))
         for previous, following in zip(plan, plan[1:]):
             if following[0] > previous[1]:
                 pages = ("page %d" % following[0]
@@ -4382,9 +4418,12 @@ def split_book(pdf_path, chapters, out_dir, taken=None, verbose=True,
                                "not be inventoried completely (%s). Nothing "
                                "was written." % (pdf_path, exc))
     if problems:
-        raise SplitRefused("Not splitting %s. Fix these first:\n  - "
-                           % os.path.basename(pdf_path)
-                           + "\n  - ".join(problems))
+        message = ("Not splitting %s. Fix these first:\n  - "
+                   % os.path.basename(pdf_path) + "\n  - ".join(problems))
+        if notes:
+            # The notes show the start corrections behind a refusal.
+            message += "\nNotes:\n  - " + "\n  - ".join(notes)
+        raise SplitRefused(message)
     if not apply:
         if verbose:
             for start, end, _target, name in plan:
@@ -4491,15 +4530,25 @@ def _report_plan(moves, edits, blockers, apply_done):
         print("No blockers. Re-run with --apply to write it.")
 
 
-def _cli_vault(value):
+def _cli_vault(value, path):
     """Resolve an explicitly supplied vault, without silently dropping typos.
 
-    Omitting ``--vault`` deliberately selects external-file mode. Supplying a
-    path that is missing or not a directory is different: treating it as an
-    omission bypasses the uniqueness/reference checks the caller requested.
+    Omitting ``--vault`` deliberately selects external-file mode, for a
+    `path` no Obsidian vault (an ancestor holding ``.obsidian/``) contains.
+    Supplying a path that is missing or not a directory is different:
+    treating it as an omission bypasses the uniqueness/reference checks the
+    caller requested. So does forgetting it for a file inside a vault.
     """
     if value is None:
-        return None
+        current = os.path.dirname(os.path.abspath(os.path.expanduser(path)))
+        while True:
+            if os.path.isdir(os.path.join(current, ".obsidian")):
+                raise ValueError("%s is inside the Obsidian vault %s; pass "
+                                 "--vault %s" % (path, current, current))
+            parent = os.path.dirname(current)
+            if parent == current:
+                return None
+            current = parent
     vault = os.path.expanduser(value)
     if not os.path.isdir(vault):
         raise ValueError("--vault is not a directory: %s. Fix the path; omit "
@@ -4510,7 +4559,7 @@ def _cli_vault(value):
 
 def _cmd_check(args):
     try:
-        vault = _cli_vault(args.vault)
+        vault = _cli_vault(args.vault, args.path)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -4579,7 +4628,7 @@ def _cmd_check(args):
 
 def _cmd_rename(args):
     try:
-        vault = _cli_vault(args.vault)
+        vault = _cli_vault(args.vault, args.path)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -4653,7 +4702,7 @@ def _cmd_rename(args):
 
 def _cmd_split(args):
     try:
-        vault = _cli_vault(args.vault)
+        vault = _cli_vault(args.vault, args.pdf)
     except ValueError as exc:
         print(str(exc), file=sys.stderr)
         return 1
@@ -6131,6 +6180,34 @@ def _selftest():
     _txt = [_norm(_p) for _p in ("Chapter 1 Intro " + "body " * 60, "more body")]
     _plan, _probs, _notes = _resolve(_ch, _txt, 2, _absent_dir, {}, "Kuhn_S_2012")
     check("a start that needed no correction reports nothing", _notes, [])
+
+    # A start corrected past the chapter's end is refused in the one-based
+    # pages the plan prints, and the refusal carries the correction note.
+    _ch = [{"heading_text": "Chapter 1 Intro", "filename":
+            "Kuhn_S_2012_01_Intro.pdf", "start_idx": 0, "end_idx": 1}]
+    _raw = ("front matter " * 60, "more front " * 60,
+            "Chapter 1 Intro " + "body " * 60)
+    _txt = [_norm(_p) for _p in _raw]
+    _plan, _probs, _notes = _resolve(_ch, _txt, 3, _absent_dir, {}, "Kuhn_S_2012")
+    check("an empty page range names the resolved start in one-based pages",
+          _probs, ["Kuhn_S_2012_01_Intro.pdf: empty page range: the start "
+                   "resolved to physical page 3, after the chapter's last "
+                   "page 1 (end_idx 1); re-derive end_idx from the corrected "
+                   "start"])
+    from types import SimpleNamespace
+    _fake_reader = SimpleNamespace(pages=[
+        SimpleNamespace(extract_text=lambda _t=_t: _t) for _t in _raw])
+    with patch.dict(globals(), _reader=lambda _path: _fake_reader):
+        try:
+            split_book(os.path.join(_absent_dir, "Kuhn_S_2012.pdf"), _ch,
+                       os.path.join(_absent_dir, "Kuhn_S_2012"), verbose=False)
+            _empty_refusal = ""
+        except SplitRefused as _exc:
+            _empty_refusal = str(_exc)
+    check("a split refusal shows the start corrections behind it",
+          ("empty page range" in _empty_refusal,
+           "\nNotes:\n  - Kuhn_S_2012_01_Intro.pdf: start corrected from page "
+           "1 to 3" in _empty_refusal), (True, True))
 
     # A uniform off-by-one mapping moves every start; each end the caller set
     # to the next requested start follows it instead of dropping a page.
@@ -8151,6 +8228,72 @@ def _selftest():
         check("omitting --vault still supports an independent in-place rename",
               (_code, os.path.isfile(os.path.join(_tmp, "Downloads/Doe_Outside_2025.pdf")),
                os.path.isfile(_inside_pdf)), (0, True, True))
+
+    # A forgotten --vault inside an Obsidian vault is refused, never taken as
+    # an independent download whose figures and links stay behind.
+    with _tf.TemporaryDirectory(prefix="org-forgotten-vault-") as _tmp:
+        _v = os.path.join(_tmp, "vault")
+        os.makedirs(os.path.join(_v, ".obsidian"))
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _chapters = _put(_tmp, "chapters.json", "[]")
+        _refusal = "inside the Obsidian vault %s; pass --vault %s" % (_v, _v)
+        _results = [_run_cli(_argv) for _argv in (
+            ["check", _pdf],
+            ["rename", _pdf, "--to", "Doe_Inside_2025.pdf", "--apply"],
+            ["split", _pdf, "--chapters", _chapters,
+             "--out", os.path.join(_v, "Inbox", "download")])]
+        check("a PDF inside a vault is refused without --vault",
+              ([(_c, _refusal in _e) for _c, _o, _e in _results],
+               os.path.isfile(_pdf)), ([(1, True)] * 3, True))
+
+    # Filing a canonical book beside its chapter set renames no chapter, so an
+    # unrecorded chapter crop that stays put needs no ownership record. The
+    # book's own-stem crops and any crop a rename moves still do.
+    with _tf.TemporaryDirectory(prefix="org-canonical-book-filing-") as _v:
+        _book = _put(_v, "Inbox/Prince_UDL_2026.pdf")
+        _put(_v, "Sources/PDFs/Prince_UDL_2026/Prince_UDL_2026_01_Intro.pdf")
+        _put(_v, "Sources/Images/Prince_UDL_2026_01_Intro_fig_1.png", b"png")
+        _pdfs = os.path.join(_v, "Sources", "PDFs")
+        _moves, _edits, _blockers = plan_rename(
+            _v, _book, "Prince_UDL_2026.pdf", dest=_pdfs)
+        check("filing a canonical book needs no ownership of chapter crops "
+              "that stay put, nor snapshots of unmoved files",
+              (_blockers, list(_edits.move_expected)), ([], [_book]))
+        _own = _put(_v, "Sources/Images/Prince_UDL_2026_fig_1.png", b"png")
+        check("the filed book's own unrecorded crop still needs ownership",
+              any(os.path.basename(_own) in _b
+                  and "no matching current PDF ownership record" in _b
+                  for _b in plan_rename(_v, _book, "Prince_UDL_2026.pdf",
+                                        dest=_pdfs)[2]), True)
+        os.remove(_own)
+        _filed = os.path.join(_pdfs, "Prince_UDL_2026.pdf")
+        os.rename(_book, _filed)
+        check("a case-only book rename still needs ownership of the chapter "
+              "crops it moves",
+              any("Prince_UDL_2026_01_Intro_fig_1.png" in _b
+                  and "no matching current PDF ownership record" in _b
+                  for _b in plan_rename(_v, _filed, "Prince_Udl_2026.pdf")[2]),
+              True)
+
+    # Hard links never cross a filesystem, so a filing move onto another
+    # volume is refused in the plan rather than failing at --apply.
+    with _tf.TemporaryDirectory(prefix="org-other-volume-") as _v:
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _pdfs = os.path.join(_v, "Sources", "PDFs")
+        os.makedirs(_pdfs)
+        _real_filesystem = _filesystem
+
+        def _other_volume(_path):
+            if os.path.abspath(_path) == os.path.abspath(_pdfs):
+                return -1
+            return _real_filesystem(_path)
+        with patch.dict(globals(), _filesystem=_other_volume):
+            _blockers = plan_rename(_v, _pdf, "Doe_X_2025.pdf", dest=_pdfs)[2]
+        check("a filing move onto another filesystem blocks the plan",
+              ["%s is on a different filesystem from %s" % (_pdfs, _pdf)
+               in _b for _b in _blockers], [True])
+        check("a filing move within one filesystem has no such blocker",
+              plan_rename(_v, _pdf, "Doe_X_2025.pdf", dest=_pdfs)[2], [])
 
     # A linked source directory belongs to the vault through its logical path.
     # Resolving the candidate before the containment check rejects this normal

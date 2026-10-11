@@ -29,7 +29,7 @@ Read each reference when its trigger fires, and not before.
 | --- | --- |
 | [references/scanner.md](references/scanner.md) | a scan exits non-zero, a field or finding is unfamiliar, or `item16`/`item18` needs interpretation |
 | [references/qc-items.md](references/qc-items.md) | before Task 1 or Task 1b fixes any finding |
-| [references/flashcards.md](references/flashcards.md) | before a card is added, changed or removed |
+| [references/flashcards.md](references/flashcards.md) | before Task 1's card review, and before a card is added, changed or removed |
 | [references/source-backed-corrections.md](references/source-backed-corrections.md) | before Task 1b's first repair, or on a request to correct, simplify or deepen entries |
 | [references/refactors.md](references/refactors.md) | before a consolidation, merge, split, retitle, alias removal, missing entry, dangler hand-off or requested deletion |
 | [references/link-hygiene.md](references/link-hygiene.md) | before Task 2 adds, keeps or removes a link, resolves a dangler or rewrites the settled ledger |
@@ -105,7 +105,8 @@ blocked.
   [item 8](references/qc-items.md#8-tags) and Task 3.
 - **Blocked.** An issue §2d blocks, such as one that needs a deletion (an
   explicit request in chat), an uncited source (an empty `sources:` is not
-  one; [item 4](references/qc-items.md#4-sources) fills it) or a change a
+  one, nor is a root's [form repair](references/hierarchy.md#establish-discipline-roots)
+  overview page) or a change a
   builder rule forbids, stays verbatim in the field and out of the logs; the
   report names its blocker, and it resets no `read:`.
 
@@ -233,7 +234,7 @@ Repair in this order:
 
 1. **Corrections, simplification and deepening** under the correction
    protocol: new information the cited sources do not give, removed with its
-   copies in the description and card; over-qualification and edge-case
+   copies in the description, card and `aliases:`; over-qualification and edge-case
    caveats; core-facet gaps; unexplained statements; self-containment terms;
    acronym and full-form pairs; framing in the entry's own field and against
    the nearest contrast its sources draw; a prototype-first opening that says
@@ -270,7 +271,7 @@ not applied: it goes under *Notes for the user* with both options and is
 never logged. A conflict stays an open log item only when the references
 consulted disagree or none is reachable, and the item names them.
 
-**Refresh before Task 2.** The run keeps a private copy of each entry under `<scratch>` before its first edit. Once Task 1b's repairs are done, it runs the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against that copy; a fix this final reread makes gets only its passage reread. Whenever Task 1 or Task 1b changed entries, re-run Step 0 so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from Step 0's scan is this run's own copy; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, re-runs Step 0 once more. Use the refreshed worklists, but keep the logical-run timestamp, an inherited coordinator timestamp included, and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
+**Refresh before Task 2.** The run keeps a private copy of each entry under `<scratch>` before its first edit. Once Task 1b's repairs are done, it runs the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against that copy; a fix this final reread makes gets only its passage reread. Whenever Task 1 or Task 1b changed entries, re-run Step 0 so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from Step 0's scan is this run's own copy, unless it pairs an entry with its own retitle destination; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, rereads that whole entry against its copy and re-runs Step 0 once more. Use the refreshed worklists, but keep the logical-run timestamp, an inherited coordinator timestamp included, and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
 
 ## Task 2 — Link hygiene
 

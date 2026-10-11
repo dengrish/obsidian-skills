@@ -164,9 +164,10 @@ Guards, because this is the only script in the skill that writes into the vault:
   `image/png` header on a JSON body does not make it an image, and used to.
   SVG is accepted only when the complete file is inert and self-contained
   and its root carries the SVG namespace; active elements, event handlers,
-  XML DTDs, and external resources are refused before publication. TIFF and
-  ICO are images Obsidian does not display: `stage` keeps one in scratch with
-  `needs_conversion: "png"` and `ok: false`, and `place` refuses one.
+  DTD internal subsets, and external resources are refused before
+  publication. TIFF and ICO are images Obsidian does not display: `stage`
+  keeps one in scratch with `needs_conversion: "png"` and `ok: false`, and
+  `place` refuses one.
 
 Importable
     sniff_extension(head, content_type=None, url=None) -> str | None
@@ -526,6 +527,13 @@ _SVG_ACTIVE_ELEMENTS = frozenset((
     "portal", "script", "set", "source", "track", "video",
 ))
 _SVG_EXTERNAL_ATTRIBUTES = frozenset(("base", "href", "poster", "src"))
+#: An `<a href>` target that stays an inert hyperlink in an image.
+_SVG_HYPERLINK_RE = re.compile(r"(?:https?|mailto):", re.I)
+#: A DOCTYPE with no internal subset: at most an external ID, which neither
+#: this parser nor a browser showing an image fetches.
+_EXTERNAL_DOCTYPE_RE = re.compile(
+    r"""<!DOCTYPE\s+svg(?:\s+(?:PUBLIC\s+(?:"[^"]*"|'[^']*')\s+|SYSTEM\s+)"""
+    r"""(?:"[^"]*"|'[^']*'))?\s*>""", re.I)
 _SVG_CSS_VALUE_ATTRIBUTES = frozenset((
     "background", "background-image", "border-image", "border-image-source",
     "clip-path", "color-profile", "content", "cursor", "fill", "fill-image",
@@ -684,7 +692,8 @@ def _css_reference_issue(css):
 
 
 def _xml_directive_issue(text):
-    """Detect DTDs/stylesheets outside comments and CDATA before XML parsing."""
+    """Detect DTD internal subsets and stylesheets outside comments and CDATA
+    before XML parsing."""
     index = 0
     while True:
         index = text.find("<", index)
@@ -711,7 +720,11 @@ def _xml_directive_issue(text):
             index = end + 2
             continue
         if re.match(r"<!DOCTYPE\b", text[index:], re.I):
-            return "an XML DOCTYPE"
+            doctype = _EXTERNAL_DOCTYPE_RE.match(text, index)
+            if not doctype:
+                return "an XML DOCTYPE other than an external SVG one"
+            index = doctype.end()
+            continue
         index += 1
 
 
@@ -803,7 +816,8 @@ def _svg_safety_issue(text):
     regular expressions: character references and CDATA must be interpreted in
     their actual context, while comments and text labels must not become false
     element or CSS matches. Fragment-only references such as ``href="#marker"``
-    and ``url("#gradient")`` remain available for ordinary diagrams.
+    and ``url("#gradient")``, and an ``<a>`` hyperlink to an http(s) or mailto
+    target, which an image never follows, remain available.
     """
     directive_issue = _xml_directive_issue(text)
     if directive_issue:
@@ -831,7 +845,9 @@ def _svg_safety_issue(text):
                 return "an event-handler attribute"
             if name in _SVG_EXTERNAL_ATTRIBUTES:
                 locator = value.strip()
-                if locator and not locator.startswith("#"):
+                if (locator and not locator.startswith("#")
+                        and not (local == "a" and name == "href"
+                                 and _SVG_HYPERLINK_RE.match(locator))):
                     return "an external href, source, or base attribute"
             if (name in ("animation", "transition")
                     or name.startswith(("animation-", "transition-"))):
@@ -2555,6 +2571,10 @@ def _fetch_data_uri(url, tmp, max_bytes=DEFAULT_MAX_BYTES, deadline=None):
                         raise ValueError(f"invalid base64 data: {exc}") from exc
                     total = _write_bounded(
                         fh, decoded, total, max_bytes, deadline)
+            if len(carry) % 4 in (2, 3) and b"=" not in carry:
+                # Browsers decode forgiving-base64, which pads an unpadded
+                # final quartet; one leftover character stays invalid.
+                carry += b"=" * (-len(carry) % 4)
             try:
                 decoded = base64.b64decode(carry, validate=True)
             except binascii.Error as exc:
@@ -5029,7 +5049,8 @@ def run_self_test():
              b"\x00\x00\x01\x00\x01\x00", "image/jpeg", None, "ico"),
             # --- SVG is validated at the ROOT ELEMENT ------------------------
             ("SVG behind a comment and a doctype",
-             b"<!-- generated -->\n<!DOCTYPE svg PUBLIC '-//W3C//DTD SVG 1.1//EN'>"
+             b"<!-- generated -->\n<!DOCTYPE svg PUBLIC '-//W3C//DTD SVG 1.1//EN'"
+             b" 'http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd'>"
              b"\n<svg xmlns='http://www.w3.org/2000/svg'></svg>", None, None,
              "svg"),
             ("SVG behind a DOCTYPE internal subset",
@@ -5085,12 +5106,21 @@ def run_self_test():
             ("a benign processing instruction with directive-looking data",
              '<svg><?generator value="<!DOCTYPE svg><script/>"?><rect/></svg>'),
             ("forbidden directives inside comments",
-             '<svg><!-- <!DOCTYPE svg><?xml-stylesheet href="x"?> --></svg>')):
+             '<svg><!-- <!DOCTYPE svg><?xml-stylesheet href="x"?> --></svg>'),
+            ("a public SVG 1.1 DOCTYPE",
+             '<!DOCTYPE svg PUBLIC "-//W3C//DTD SVG 1.1//EN"\n'
+             '  "http://www.w3.org/Graphics/SVG/1.1/DTD/svg11.dtd"><svg/>'),
+            ("an http(s) hyperlink",
+             '<svg><a href="https://example.test/"><rect/></a></svg>')):
         rooted = svg.replace("<svg", "<svg xmlns='%s'" % _SVG_NAMESPACE, 1)
         check("self-contained SVG permits %s" % label,
               _svg_safety_issue(rooted), None)
     for label, svg, finding in (
-            ("DOCTYPE", '<!DOCTYPE svg><svg/>', "DOCTYPE"),
+            ("a DOCTYPE internal subset",
+             '<!DOCTYPE svg [<!ENTITY x "y">]><svg/>', "DOCTYPE"),
+            ("a javascript: hyperlink",
+             '<svg><a href="javascript:bad()"><rect/></a></svg>',
+             "external href"),
             ("XML stylesheet",
              '<?xml-stylesheet href="https://cdn.example/a.css"?><svg/>',
              "stylesheet"),
@@ -6007,6 +6037,11 @@ continues here`
                time.monotonic() - 1)
         raises("invalid base64 is refused rather than decoded permissively",
                _fetch_data_uri, "data:text/plain;base64,@@@@", dst, 100)
+        check("an unpadded base64 payload decodes as a browser decodes it",
+              (_fetch_data_uri("data:text/plain;base64,YWJjZA", dst),
+               open(dst, "rb").read()), ("text/plain", b"abcd"))
+        raises("...but one leftover base64 character is refused",
+               _fetch_data_uri, "data:text/plain;base64,YWJjZ", dst, 100)
         # RFC 2397 allows parameters on the mediatype, and real pages carry
         # them: `;charset=utf-8` before `;base64`, and the plain-text
         # inline-SVG `;utf8` form.  Both used to be refused as malformed, so

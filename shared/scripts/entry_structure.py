@@ -66,7 +66,6 @@ __all__ = [
     "mask_escaped_wikilinks",
     "opener_subject_date_status",
     "normalized_answer_surface",
-    "opening_paragraph",
     "parse_flashcard_blocks",
     "sentence_prefix",
     "split_sentences",
@@ -796,14 +795,6 @@ def split_sentences(text):
     return surfaces
 
 
-def opening_paragraph(text):
-    """Return the first paragraph, recognizing whitespace-only blank lines."""
-    value = (text or "").strip("\n")
-    if not value:
-        return ""
-    return re.split(r"\n[ \t]*\n", value, maxsplit=1)[0].strip()
-
-
 _ATX_HEADING_LINE_RE = re.compile(r"^ {0,3}#{1,6}(?:[ \t]+(.*?))?[ \t]*$")
 
 
@@ -1098,21 +1089,45 @@ _PRAISE_RE = re.compile(
     re.IGNORECASE)
 #: "The classic example" or "classic case" names the standard case.
 _STANDARD_CASE_RE = re.compile(r"\s+(?:examples?|cases?)\b", re.IGNORECASE)
+#: Text before a sentence's first word: a line start, a sentence or colon
+#: end, or a list, quote or heading marker, then any opening markup.
+_SENTENCE_LEAD_RE = re.compile(
+    r"(?:^|[.!?:]|^[ \t]*(?:[-*+]|[0-9]+[.)]|>+|#{1,6})[ \t])"
+    "[\\s*_\"'“‘(\\[]*\\Z", re.M)
 
 
-def register_hints(text, body=False):
+def register_hints(text, body=False, title=None):
     """Advisory item-9 hints: praise words in a description, on card line 1
     or, with ``body``, in a body line.
 
     In the body, "classic" before "example" or "case" names the standard
-    case and is skipped. Words inside inline math are ignored. Returns the
-    words in order of appearance, lowercased; a candidate, never a fault.
+    case and is skipped. A capitalized word that does not start a sentence
+    is part of a proper name ("the Terminal Classic period"), and a word
+    inside the entry's ``title`` or its base term ("Classic Maya collapse")
+    names the subject; both are skipped. Words inside inline math are
+    ignored. Returns the words in order of appearance, lowercased; a
+    candidate, never a fault.
     """
     prose = _INLINE_LATEX_RE.sub(" ", text or "")
+    names = []
+    for term in {(title or "").strip(), base_term((title or "").strip())}:
+        if term.split():
+            names.extend(match.span() for match in re.finditer(
+                r"(?<!\w)" + r"\s+".join(map(re.escape, term.split()))
+                + r"(?!\w)", prose, re.IGNORECASE))
+
+    def skipped(match):
+        if any(start <= match.start() and match.end() <= end
+               for start, end in names):
+            return True
+        if (match.group(0)[0].isupper()
+                and not _SENTENCE_LEAD_RE.search(prose[:match.start()])):
+            return True
+        return (body and match.group(0).lower() == "classic"
+                and bool(_STANDARD_CASE_RE.match(prose, match.end())))
+
     return [" ".join(match.group(0).lower().split())
-            for match in _PRAISE_RE.finditer(prose)
-            if not (body and match.group(0).lower() == "classic"
-                    and _STANDARD_CASE_RE.match(prose, match.end()))]
+            for match in _PRAISE_RE.finditer(prose) if not skipped(match)]
 
 
 def flashcard_brevity_hints(text):
@@ -2444,6 +2459,18 @@ def run_self_test(verbose=False):
              "Two classic examples follow.")]
          + [register_hints("The classic example of a weak learner.")],
          [["classic"], [], [], [], ["classic"]]),
+        ("a capitalized praise word inside a sentence is a proper name, and "
+         "the title or its base term names the subject; a sentence's first "
+         "word still counts",
+         [register_hints(value, title=title) for value, title in (
+             ("It began in the Terminal Classic period.", None),
+             ("Classic Maya collapse emptied cities.",
+              "Classic Maya collapse"),
+             ("A classic car is old.", "Classic car (automobile)"),
+             ("Classic Maya collapse emptied cities.", None),
+             ("It is famous. Classic tests remain.", None),
+             ("**Famous** results follow.", None))],
+         [[], [], [], ["classic"], ["famous", "classic"], ["famous"]]),
         ("brevity hints for a definition cue",
          [flashcard_brevity_hints(value) for value in (
              " ".join(["Word"] * 25) + " end.",

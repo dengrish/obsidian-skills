@@ -142,8 +142,8 @@ do not duplicate or silently remove them.
   '<vault>/Articles/<slug>.md'`. If it depends
   on external CSS/fonts/JavaScript or definitions outside the serialized SVG,
   do not save a broken diagram. The helper also refuses active SVG content,
-  external resource references, XML DTDs and a root without the SVG namespace
-  before publication. Leave
+  external resource references, DTD internal subsets and a root without the
+  SVG namespace before publication. Leave
   `<!-- source has an inline SVG diagram here, not capturable as a static file;
   view at <source> -->` and report it.
 - For video, canvas and interactive widgets without a faithful asset, leave

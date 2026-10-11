@@ -47,8 +47,11 @@ A note renamed outside this workflow, which `dedup_index.py` lists under
 
 ## Download and publish
 
-Pass Markdown, HTML, linked-image and data-URI sources through the same helper,
-in source order on one counter. Fresh notes start at 1. Use argument lists or
+Pass Markdown, HTML, linked-image and data-URI image sources through the same
+helper, in source order on one counter. A `![](…)` of a YouTube watch URL or an
+X/Twitter status URL is Web Clipper's form of an embedded video or post, which
+Obsidian renders: keep it unchanged and never stage it. Fresh notes start at 1.
+Use argument lists or
 [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)
 for source-controlled URLs and names. Give every `stage` call its own new or
 empty child under `<scratch>` (the helper refuses a populated one), and place
@@ -158,13 +161,11 @@ field for the bracketed label. When the helper produced no `url` field (it
 could not run, or failed before reporting one), keep the literal bracketed
 label and never copy the raw URL; the retained raw capture is the retry record.
 Retain any caption as an ordinary paragraph because there is no image to
-caption. There is **no manual download/publication fallback**. Do not bypass
-ownership, host, size or occupied-slot checks to make an image appear
-successful.
+caption. Do not bypass ownership, host, size or occupied-slot checks to make an
+image appear successful.
 
 **Late slot conflict.** When `place` refuses an occupied slot after the note
-is public, keep the published note as owner for images already placed. Never
-withdraw the only note that proves ownership of files already placed. Replace
+is public, keep the published note as owner for images already placed. Replace
 the failed embed with the placeholder above:
 
 1. Re-record the note in the run's snapshot file with

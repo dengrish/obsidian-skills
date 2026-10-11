@@ -100,8 +100,9 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
 
 1. **Task 1** checks every entry against the writing rules and fixes what
    needs no source.
-2. **Task 1b** repairs content from the sources each entry already cites or
-   accurate background. It corrects and simplifies claims, deepens thin
+2. **Task 1b** repairs content from the sources each entry already cites,
+   removing information they do not give and adding only clarification. It
+   corrects and simplifies claims, deepens thin
    explanations, settles conflicting claims (reading standard references
    online, never citing them), consolidates an explanation duplicated across
    entries into its owner, aligns notation, merges duplicate entries that name
@@ -424,6 +425,7 @@ python3 -m venv .venv
 .venv/bin/python tools/build_plugin.py
 .venv/bin/python tests/test_end_to_end.py
 .venv/bin/python -m unittest discover -s tests -p 'test_knowledge_*_review.py'
+.venv/bin/python -m unittest discover -s .github/scripts -p 'test_*.py'
 .venv/bin/python tests/test_market_research_eval.py
 .venv/bin/python tests/test_market_comparison.py
 .venv/bin/python tests/test_market_acquire.py

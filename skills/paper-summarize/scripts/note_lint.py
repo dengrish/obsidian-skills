@@ -67,7 +67,8 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from equation_coverage import (find_display_spans, find_exp_macro_candidates,
+from equation_coverage import (find_display_spans, find_ell_non_norm_candidates,
+                               find_exp_macro_candidates,
                                find_multi_relation_display_candidates)
 from naming import chapter_book_stem, core_stem, looks_canonical
 from note_provenance import split_provenance
@@ -251,15 +252,35 @@ _CITATION = re.compile(r"<sup>\[\[[^\]|]*#page=[^\]|]*(?:\|[^\]]*)?\]\]</sup>")
 _WIKILINK = re.compile(r"(?<!!)\[\[([^\]|]*)(?:\|([^\]]*))?\]\]")
 
 
+# Inline math, with the Obsidian delimiters equation_coverage reads.
+_INLINE_MATH = re.compile(
+    r"(?<![\\$])\$(?!\$)((?:\\.|[^$\n])+?)(?<!\\)\$(?!\$)")
+# Font, accent, sizing and spacing commands shape a symbol or a gap and show
+# no symbol of their own.
+_MATH_SILENT = re.compile(
+    r"\\(?:math[a-z]*|boldsymbol|bm|text[a-z]*|operatorname|hat|widehat|bar|"
+    r"overline|tilde|widetilde|vec|dot|ddot|left|right|[bB]igg?[lr]?|"
+    r"q?quad|displaystyle)(?![A-Za-z])|\\[,;:! ]")
+
+
+def _math_rendered(match):
+    """An inline math span counted as its typeset symbols."""
+    body = _MATH_SILENT.sub("", match.group(1))
+    body = re.sub(r"\\(?:[A-Za-z]+|.)", "x", body)
+    return re.sub(r"[{}^_\s]", "", body)
+
+
 def _visible(text):
     """`text` as the reader sees it, for the character caps.
 
-    A citation renders as a raised page number and a link as its display
-    text.  Counting their markup would shrink a budget every time a claim was
-    cited or a concept was linked to its Wiki entry.
+    A citation renders as a raised page number, a link as its display text
+    and inline math as its typeset symbols.  Counting their markup would
+    shrink a budget every time a claim was cited, a concept was linked to
+    its Wiki entry or a formula was typeset.
     """
-    return _WIKILINK.sub(lambda m: m.group(1) if m.group(2) is None
+    text = _WIKILINK.sub(lambda m: m.group(1) if m.group(2) is None
                          else m.group(2), _CITATION.sub("", text))
+    return _INLINE_MATH.sub(_math_rendered, text)
 # An exhibit number in any spelling: "Figure 2", "Fig. 1.2", "FIGURE S1",
 # "Figures 2 and 3", "Supplementary Figure 1", "Extended Data Figure 1", and the
 # same for tables.  No trailing delimiter is required: "Figure 2 The arms
@@ -976,27 +997,25 @@ def _check_structure(note, body_start, fenced, mode):
                 note.fail(start + 1, "the %s section is prose, not a bullet list"
                                      % name)
                 continue
-            # Per-item bullets and a numbered list sit under the prose
-            # sentence that introduces them (references/note-format.md).  An
-            # exhibit and the caption on its next line are not that sentence.
-            after_exhibit = False
-            for l in content:
-                if l.startswith("- "):
-                    note.fail(start + 1, "bullets open the %s section before "
-                                         "any prose; per-item bullets sit under "
-                                         "the sentence that introduces them "
-                                         "(references/note-format.md)" % name)
-                    break
-                if _STEP.match(l):
-                    note.fail(start + 1, "a numbered list opens the %s section "
-                                         "before any prose; introduce it with "
-                                         "one prose sentence "
-                                         "(references/note-format.md)" % name)
-                    break
-                exhibit = bool(_EMBED.match(l.strip()) or _TABLE_ROW.match(l))
-                if not exhibit and not (after_exhibit and _is_caption(l)):
-                    break
-                after_exhibit = exhibit
+            # Per-item bullets, a numbered list and an exhibit sit under the
+            # prose sentence that introduces them or the claim they support
+            # (references/note-format.md, references/figures.md).
+            first = content[0]
+            if first.startswith("- "):
+                note.fail(start + 1, "bullets open the %s section before "
+                                     "any prose; per-item bullets sit under "
+                                     "the sentence that introduces them "
+                                     "(references/note-format.md)" % name)
+            elif _STEP.match(first):
+                note.fail(start + 1, "a numbered list opens the %s section "
+                                     "before any prose; introduce it with "
+                                     "one prose sentence "
+                                     "(references/note-format.md)" % name)
+            elif _EMBED.match(first.strip()) or _TABLE_ROW.match(first):
+                note.fail(start + 1, "an exhibit opens the %s section before "
+                                     "the claim it supports "
+                                     "(references/figures.md#where-they-go)"
+                          % name)
     return bounds
 
 
@@ -1594,6 +1613,8 @@ def _check_citations(note, body_start, captions, fenced, source=None):
 
     `[[Doe_X_2025.pdf#page=5|5]]` -- the reader sees `5`, the click opens page 5,
     and nothing has to be kept in sync with a list at the bottom of the file.
+    A citation and a Wiki entry link both belong in body prose alone
+    (references/note-format.md#links-to-wiki-entries).
     """
     lines = note.raw_lines
     in_callout = set()
@@ -1611,6 +1632,20 @@ def _check_citations(note, body_start, captions, fenced, source=None):
         if _FOOTNOTE.search(prose):
             note.fail(n + 1, "footnote syntax in the note; page references are "
                              "inline links now (references/note-format.md)")
+        where = ("the front matter" if n < body_start else
+                 "the callout" if n in in_callout else
+                 "a caption" if n in captions else
+                 "a heading" if l.lstrip().startswith("#") else
+                 "a table" if _TABLE_ROW.match(l) else None)
+        if where and n >= body_start:
+            for m in _WIKILINK.finditer(prose):
+                target = m.group(1).split("#", 1)[0].strip()
+                if target and not target.lower().endswith(".pdf"):
+                    note.fail(n + 1, "Wiki link %s in %s; link a concept "
+                                     "at its first mention in body prose "
+                                     "(references/note-format.md"
+                                     "#links-to-wiki-entries)"
+                              % (m.group(0), where))
         wrapped = {c.start() for c in _CITATION.finditer(l)}
         for m in _PAGE_LINK.finditer(l):
             target, alias = m.group(1), m.group(2)
@@ -1633,11 +1668,6 @@ def _check_citations(note, body_start, captions, fenced, source=None):
             if not valid_page:
                 note.fail(n + 1, "page citations use physical pages starting at 1; "
                                  "page %s does not exist" % page)
-            where = ("the front matter" if n < body_start else
-                     "the callout" if n in in_callout else
-                     "a caption" if n in captions else
-                     "a heading" if l.lstrip().startswith("#") else
-                     "a table" if _TABLE_ROW.match(l) else None)
             if where:
                 note.fail(n + 1, "page citation in %s; citations are body-prose "
                                  "only" % where)
@@ -1728,10 +1758,10 @@ def _check_math(note, body_start):
     The shared candidate floor finds a display line that sets two equations
     side by side: a `\\qquad`-joined pair, a `\\Rightarrow` chain or a
     `\\text{where}` definition.  It is conservative, so a candidate is an
-    advisory for the agent to confirm, never a violation.  An `\\exp` in
-    display or inline math is a violation: the exponential is written as a
-    power of e.  Front matter and code are blanked in place, which keeps line
-    numbers.
+    advisory for the agent to confirm, never a violation.  An `\\exp` or an
+    `\\ell` that names no norm, in display or inline math, is a violation: the
+    exponential is written as a power of e, and a loss as L.  Front matter
+    and code are blanked in place, which keeps line numbers.
     """
     body = _math_prose(note.raw_lines, body_start)
     for c in find_multi_relation_display_candidates(body):
@@ -1743,6 +1773,12 @@ def _check_math(note, body_start):
         note.fail(c["line"], "`\\exp` in math (%s) -- write the exponential "
                              "as a power of e ($e^{-t}$), even for a long "
                              "exponent (references/note-format.md)"
+                  % c["math"][:60])
+    for c in find_ell_non_norm_candidates(body):
+        note.fail(c["line"], "`\\ell` that names no norm in math (%s) -- "
+                             "`\\ell` names only norms ($\\ell_1$, $\\ell_2$), "
+                             "so a loss is $L$ and an index takes another "
+                             "letter (references/note-format.md)"
                   % c["math"][:60])
 
 
@@ -2354,6 +2390,13 @@ def _cases():
         ("\\exp shown as code is no math",
          _mutate(M_H + "\n\nProse.", M_H + "\n\nProse with `$\\exp(x)$` "
                  "as code.\n\n```latex\n$$\ns = \\exp(-t)\n$$\n```"), CLEAN),
+        # $\ell$ names only norms: a loss the paper writes as $\ell$ is $L$.
+        ("a loss written as \\ell is a violation",
+         _mutate("More prose.", "The total loss $\\sum_i \\ell(\\hat{y}_i, "
+                 "y_i)$ falls."), "__ONLY__`\\ell` names only norms"),
+        ("an \\ell norm and a loss written as L are clean",
+         _mutate("More prose.", "The weights' $\\ell_2$ norm stays small "
+                 "while $L(\\hat{y}, y)$ falls."), CLEAN),
         ("'figures' meaning numbers is prose",
          _mutate("More prose.<sup>", "The headline figures 45% and 8% both hold."
                  "<sup>"), CLEAN),
@@ -2919,12 +2962,57 @@ def _cases():
                  "- **Lyon.** Recurrence fell to 9%.").replace(
                      "A claim with a citation.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>\n\n",
                      "", 1),
-         "__ONLY__bullets open the Results section before any prose"),
+         "__ONLY__an exhibit opens the Results section before the claim it "
+         "supports"),
+        # A figure sits under the claim it supports, never before the
+        # sentence that motivates it (references/figures.md#where-they-go).
+        ("an embed opens the Results section above its claim",
+         _mutate("A claim with a citation.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>"
+                 "\n\n![[Doe_X_2025_fig_2.png]]\n*The arms separated inside a "
+                 "fortnight. Kaplan-Meier curves for the two arms.*",
+                 "![[Doe_X_2025_fig_2.png]]\n*The arms separated inside a "
+                 "fortnight. Kaplan-Meier curves for the two arms.*\n\n"
+                 "A claim with a citation.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>"),
+         "__ONLY__an exhibit opens the Results section before the claim it "
+         "supports"),
+        ("a rebuilt table opens the Results section above its claim",
+         _mutate("A claim with a citation.<sup>[[Doe_X_2025.pdf#page=5|5]]</sup>"
+                 "\n\n![[Doe_X_2025_fig_2.png]]\n*The arms separated inside a "
+                 "fortnight. Kaplan-Meier curves for the two arms.*\n\n",
+                 "").replace(
+                     "*Recurrence was five times lower on transplant. The "
+                     "primary outcome only; the secondary outcomes are in the "
+                     "paper.*\n",
+                     "*Recurrence was five times lower on transplant. The "
+                     "primary outcome only; the secondary outcomes are in the "
+                     "paper.*\n\nA claim with a citation.<sup>[[Doe_X_2025.pdf"
+                     "#page=5|5]]</sup>\n", 1),
+         "__ONLY__an exhibit opens the Results section before the claim it "
+         "supports"),
         # A concept with its own Wiki entry is linked in body prose.
         ("a Wiki entry link in body prose",
          _mutate("A claim with a citation.",
                  "A claim about [[faecal-microbiota-transplant|faecal "
                  "transplant]] with a citation."), CLEAN),
+        # Never a link in the callout, a heading, a caption or a table cell.
+        ("a Wiki entry link in the callout",
+         _mutate("> - Two.", "> - Two [[faecal-microbiota-transplant|faecal "
+                 "transplant]] claims."),
+         "__ONLY__Wiki link [[faecal-microbiota-transplant|faecal transplant]] "
+         "in the callout"),
+        ("a Wiki entry link in a heading",
+         _mutate("## Recurrence fell from 45% to 8% within eight weeks",
+                 "## [[recurrence]] fell from 45% to 8% within eight weeks"),
+         "__ONLY__Wiki link [[recurrence]] in a heading"),
+        ("a Wiki entry link in a caption",
+         _mutate("Kaplan-Meier curves for the two arms.*",
+                 "[[kaplan-meier-estimator|Kaplan-Meier]] curves for the two "
+                 "arms.*"),
+         "__ONLY__Wiki link [[kaplan-meier-estimator|Kaplan-Meier]] in a "
+         "caption"),
+        ("a Wiki entry link in a table cell",
+         _mutate("| Placebo | 45.0% |", "| [[placebo]] | 45.0% |"),
+         "__ONLY__Wiki link [[placebo]] in a table"),
         ("a table as the last block of the file",
          _mutate("- **Code.** github.example/x\n",
                  "- **Code.** github.example/x\n\n| A | B |\n|---|---|\n| 1 | 2 |\n"),
@@ -3184,7 +3272,10 @@ def _selftest():
             ("citation", "x" * (MAX_LIMITATION_CHARS - 12) + "."
              + "<sup>[[Doe_X_2025.pdf#page=6|6]]</sup>"),
             ("link", "x" * (MAX_LIMITATION_CHARS - 14)
-             + " [[gut-microbiota|x]].")):
+             + " [[gut-microbiota|x]]."),
+            # Typeset as the 12 symbols θ̂=(XᵀX)⁻¹Xᵀy.
+            ("inline math", "x" * (MAX_LIMITATION_CHARS - 25)
+             + " $\\hat{\\boldsymbol{\\theta}} = (X^\\top X)^{-1} X^\\top y$.")):
         uncapped = GOOD.replace("- **One.** Prose.", "- **One.** " + cited, 1)
         if not any("Limitations bullet is" in message
                    for _line, message in lint(uncapped, mode="empirical")):
@@ -3192,14 +3283,17 @@ def _selftest():
         else:
             fail += 1
             print("FAIL  %s markup counted against the Limitations cap" % markup)
-    over = GOOD.replace("- **One.** Prose.",
-                        "- **One.** " + "x" * MAX_LIMITATION_CHARS + ".", 1)
-    if any("Limitations bullet is" in message
-           for _line, message in lint(over, mode="empirical")):
-        ok += 1
-    else:
-        fail += 1
-        print("FAIL  an over-long Limitations bullet passed")
+    for markup, long in (
+            ("plain", "x" * MAX_LIMITATION_CHARS + "."),
+            ("inline math", "x" * (MAX_LIMITATION_CHARS - 24)
+             + " $\\hat{\\boldsymbol{\\theta}} = (X^\\top X)^{-1} X^\\top y$.")):
+        over = GOOD.replace("- **One.** Prose.", "- **One.** " + long, 1)
+        if any("Limitations bullet is" in message
+               for _line, message in lint(over, mode="empirical")):
+            ok += 1
+        else:
+            fail += 1
+            print("FAIL  an over-long %s Limitations bullet passed" % markup)
     # With a Wiki folder, every body entry link names a file in it.  GOOD's
     # embed and page citations are never entry links.
     with tempfile.TemporaryDirectory() as vault:
