@@ -76,6 +76,7 @@ from __future__ import annotations
 import argparse
 import ast
 import concurrent.futures
+import hashlib
 import importlib.util
 import inspect
 import io
@@ -6641,7 +6642,10 @@ SELFTEST_MIN_CASES = {
     # title's space by slug ("training-set size").
     # 2026-10-11 (knowledge 1.32.0): the scan proposes a slug-gap mention,
     # and a navigation-only cue names its own prose line.
-    "skills/wiki-lint/scripts/scan_vault.py": 797,
+    # 2026-10-11 (knowledge 1.33.0): a ledger judged under an older
+    # closeness bar, or recording none, settles nothing and is all stale,
+    # even while alias ownership is incomplete; a malformed bar is reported.
+    "skills/wiki-lint/scripts/scan_vault.py": 802,
 }
 
 
@@ -7893,6 +7897,13 @@ def check_moc_placement(rep, conv):
                         "the shape §3 defines has no consumer statement left")
 
 
+#: SHA-1 of link-hygiene.md's closeness-bar section (whitespace collapsed),
+#: per scan_vault.py CLOSENESS_BAR revision; see check_link_rules.
+CLOSENESS_BAR_TEXT = {
+    2: "597ac47fbdf5dcade0233bf631637f9d81e3d972",
+}
+
+
 def check_link_rules(rep, conv):
     """§6's footer-pipe rule, curation rule, and known drift shapes.
 
@@ -7958,6 +7969,33 @@ def check_link_rules(rep, conv):
     else:
         rep.ok(check, "wiki-lint curates backfilled Related links instead "
                "of copying every accepted body link", rel(wl))
+    # 2026-10-11 (knowledge 1.33.0): the settled ledger records the
+    # closeness bar's revision, so an edit to the bar must decide whether
+    # settled decisions are re-judged (knowledge 1.32.0 changed the bar and
+    # left 82 rejections settled under the old one).
+    lh = os.path.join(SKILLS_DIR, "wiki-lint", "references", "link-hygiene.md")
+    bar_text = re.search(r"^#### The closeness bar\n(.*?)(?=^#{1,4} )",
+                         read(lh), re.M | re.S)
+    bar_rev = re.search(r"^CLOSENESS_BAR = (\d+)$", read(SCAN_VAULT), re.M)
+    if not bar_text or not bar_rev:
+        rep.fail(check, "cannot find link-hygiene.md's closeness-bar section "
+                 "or scan_vault.py's CLOSENESS_BAR", rel(lh))
+    else:
+        digest = hashlib.sha1(
+            " ".join(bar_text.group(1).split()).encode("utf-8")).hexdigest()
+        rev = int(bar_rev.group(1))
+        if CLOSENESS_BAR_TEXT.get(rev) != digest:
+            rep.fail(check, "link-hygiene.md's closeness bar changed (text "
+                     "SHA-1 %s) under CLOSENESS_BAR = %d. If the change can "
+                     "flip a settled backfill rejection or kept hub item, "
+                     "raise CLOSENESS_BAR in scan_vault.py, so every ledger "
+                     "judged under the old bar is re-judged once, and record "
+                     "this digest under the new revision in "
+                     "CLOSENESS_BAR_TEXT; otherwise record it under the "
+                     "current revision." % (digest, rev), rel(lh))
+        else:
+            rep.ok(check, "the closeness bar's text matches revision %d of "
+                   "the settled ledger" % rev, rel(lh))
     n_files = 0
     for skill, path, text in walk_skill_files():
         n_files += 1
@@ -10685,6 +10723,20 @@ WRITING_RULE_PINS = (
         "Cite that teaching document at the page that teaches the term: "
         "never research the term on the web",
     )),
+    # 2026-10-11 (knowledge 1.33.0): the settled ledger records the
+    # closeness-bar revision it was judged under, and an outdated ledger
+    # settles nothing, so a bar change re-judges every settled row once.
+    (("wiki-lint", "references", "link-hygiene.md"), (
+        "`bar` is the revision of the closeness bar its decisions were "
+        "judged under",
+        "is outdated (`settled.outdated`): it settles nothing, so the run "
+        "judges every row under the current bar",
+        "Write `\"version\": 2` and the last scan's `settled.bar` as `bar`.",
+    )),
+    (("wiki-lint", "references", "scanner.md"), (
+        "A ledger whose `bar` is older than the scanner's closeness-bar "
+        "revision, or that has none, settles nothing.",
+    )),
 )
 
 #: Retired writing rules: the default against examples, the hedge repair
@@ -10879,6 +10931,10 @@ WRITING_RULE_RETIRED = (
     "keeps the variant as one linked example",
     "a display's verbal reading",
     "Routine lint never adds a second card",
+    # 2026-10-11 (knowledge 1.33.0): a version-1 ledger is outdated like any
+    # ledger without a bar, so its upgrade records are gone.
+    "settled.upgrade",
+    "each of its backfill records settles its entry and target",
 )
 
 
