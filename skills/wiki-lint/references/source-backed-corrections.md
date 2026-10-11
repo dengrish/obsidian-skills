@@ -37,8 +37,8 @@ and link it, or choose an example that shows a different facet. When the
 missing teaching lives only in a chapter or document the entry does not cite,
 leave the entry thin and report that a wiki-build request naming that whole
 source fills it in, even when another entry already cites it: a citation does
-not show the source was built as a whole, and the fill-in leaves entries
-citing it untouched. Never route a named-entity build from it, which would mark the
+not show the source was built as a whole, and the fill-in never re-merges
+entries citing it. Never route a named-entity build from it, which would mark the
 source covered so folder runs skip its other topics. Keep every existing claim unless
 it is wrong or new information, and the definition card with its attachments
 byte-for-byte and in place.
@@ -100,7 +100,10 @@ assumptions and the ordinary mechanism. Remove the new information the cited
 sources do not give, however accurate (principle 5(h)), keeping the rest of
 its sentence; what the equation rules require changes only under them, and an
 uncited sentence that the user's request or the entry's `issues:` value names
-as the user's own edit is reported, not trimmed. In each
+as the user's own edit is reported, not trimmed, and an issue naming it
+stays in the field as
+[blocked](../../../shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox),
+so later runs keep it too. In each
 entry, change only the
 surfaces needed to keep it coherent: for example its description, opener,
 equation, or primary card. Then apply the builder's

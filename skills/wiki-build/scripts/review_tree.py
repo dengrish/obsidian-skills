@@ -12,8 +12,8 @@ diff in one call:
      ``unmirrored`` with a reason.
   2. Baseline: lint the mirror in folder mode.
   3. Overlay: copy each manifest draft whose ``path`` is under the Wiki folder
-     (it must end in ``.md``) to its place in the tree. Other manifest paths
-     are ignored with a note.
+     (it must end in ``.md``) to its place in the tree; a path at or under an
+     unmirrored path is refused. Other manifest paths are ignored with a note.
   4. Combined: lint the overlaid tree in folder mode (alias collisions, label
      targets and the other cross-entry checks) and classify every finding:
      ``on_staged`` (in a manifest file; ``inherited: true`` when the same
@@ -893,6 +893,16 @@ def review(wiki, manifest, out, vault=None, images=None):
     tree = prepare_out(out, os.path.basename(wiki), [vault, wiki])
     mirrored, unmirrored, folders = (mirror_wiki(wiki, tree, prefix)
                                      if os.path.isdir(wiki) else ({}, [], []))
+    occupants = {fold_name(item["path"]): item for item in unmirrored}
+    for rel, inner, _data in staged:
+        parts = inner.split("/")
+        for depth in range(1, len(parts) + 1):
+            item = occupants.get(fold_name(prefix + "/".join(parts[:depth])))
+            if item is not None:
+                raise ReviewError(
+                    "manifest path %s is at or under the unmirrored %s (%s), "
+                    "which stays occupied; never create over it"
+                    % (rel, item["path"], item["reason"]))
     if folders:
         notes.append("dangling and noncanonical links and alias collisions "
                      "are incomplete for entries that may live in unmirrored "
@@ -965,11 +975,9 @@ def review(wiki, manifest, out, vault=None, images=None):
             titles[path] = entry["title"]
         if not _aliases_readable(entry["file"]):
             unread.append(staged_paths.get(fold_name(rel), prefix + rel))
-    # Unmirrored entry files a staged draft does not replace.
     leaves = [item["path"] for item in unmirrored
               if item["path"] not in folders
-              and item["path"].lower().endswith(".md")
-              and fold_name(item["path"][len(prefix):]) not in staged_paths]
+              and item["path"].lower().endswith(".md")]
     if leaves or unread:
         notes.append("alias ownership is incomplete (aliases unread in: %s); "
                      "alias links are listed as ambiguous"
@@ -1664,6 +1672,12 @@ def run_self_test():
         refused("a case variant of an existing entry is refused",
                 manifest=manifest("case.json",
                                   [("Wiki/PRECISION.md", f1_draft)]))
+        refused("a manifest path a leaf symlink occupies is refused",
+                manifest=manifest("occupied.json",
+                                  [("Wiki/linked.md", f1_draft)]))
+        refused("a manifest path under a symlinked folder is refused in any "
+                "spelling", manifest=manifest(
+                    "under.json", [("Wiki/Synced/new.md", f1_draft)]))
         refused("an --images path that is not a directory is refused",
                 images=os.path.join(tmp, "no-images"))
 

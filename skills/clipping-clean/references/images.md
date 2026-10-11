@@ -23,21 +23,11 @@ for prepare, the automatic link repair, the unchanged re-probe, and finalize.
 Keep old images until those checks pass; never use bare `cp`/`mv`, omit either
 owner guard, or bypass prepare/repair/finalize.
 
-Prepare's inventory checks the note in both directions, and `publish-note`
-refuses a blocker in either before the new note is public:
-
-- an old-slug image embed with no exact attachment, including legacy loose
-  `_figN` spellings;
-- an `<old_slug>_fig*` file that the old note does not embed as a
-  filename-only embed (such as one whose embed was deleted in Obsidian), or
-  embeds under two case or Unicode spellings.
-
-Resolve each one before the new note is published, under the
+`rename --phase publish-note` refuses the old note's image blockers (a missing
+embedded attachment, or an `<old_slug>_fig*` file the old note does not embed
+or embeds under two spellings); resolve them under the
 [body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
-Never move, rename or delete an unembedded file yourself; report it as
-ownership-unproven. The missing reference is never silently omitted from an
-otherwise successful rename. Other-slug and non-image embeds are outside this
-plan. A body can contain both old embeds and new remote images; download only
+A body can contain both old embeds and new remote images; download only
 the remote images, starting after the highest occupied number, even if they
 appear earlier in document order.
 

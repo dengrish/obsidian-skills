@@ -40,7 +40,9 @@ the entries using it cite.
    files, and cited URLs read online. For a PDF/summary pair, verify claims
    against the original PDF. A missing, unreadable, unreachable or ambiguous
    source blocks every movement that depends on it: only content a readable
-   cited source supports, or a 5(h) clarification, moves. Never
+   cited source supports, a 5(h) clarification, or a sentence
+   [kept as the user's own edit](source-backed-corrections.md#correct-and-publish),
+   moves. Never
    fill a gap with uncertain recollection.
 2. Prove the proposed boundary against the entries' definitions and cited
    sources. A split needs two or more independently
@@ -146,7 +148,8 @@ the entries using it cite.
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
   allows) and keeps a source verdict only in the owner, but never drops a fact that entry's core
   facets need. Otherwise move the fullest version into the owner, verified
-  against its cited sources (new information they do not give is
+  against the cited sources of the entry that holds it or of the owner (new
+  information they do not give is
   [trimmed](source-backed-corrections.md#correct-and-publish), never moved)
   and carrying each
   source-specific claim's existing citation (adding that source to the
@@ -218,8 +221,12 @@ filesystem transaction, so order prevents a disappearing target:
    included, as a plain link to the survivor, keeping any label. Only such a
    reference in a note the rewrite scope excludes, such as an `Investments/`
    note, is an unresolved inbound reference that retains the old entry.
-   Missing or unverified source support is a reason to retain the content, never
-   evidence that it is disposable. If a later edit or an
+   An unreadable, unreachable or ambiguous source is a reason to retain the
+   content it may support, never evidence that it is disposable. New
+   information, a claim its cited sources, every one read, do not give and
+   5(h) does not admit, is accounted for once
+   [trimmed](source-backed-corrections.md#correct-and-publish) and listed in
+   the report. If a later edit or an
    unresolved inbound reference appears, retain the file and report the mixed
    state; never force cleanup to make the refactor look done. A rollback
    restores only files whose published bytes are still unchanged.
@@ -351,8 +358,9 @@ names a different entity, publishing
 [in dependency order](#publish-in-dependency-order). A blocked dependency
 retains the alias until it can be repaired. Delete the alias only after
 verifying that no ambiguous owner, inbound alias-target link or such
-mislabelled link remains. The removal advances the owner's `updated:` and
-keeps its `read:`, unless it resolves a [user issue](../SKILL.md#user-issues);
+mislabelled link remains. The removal advances `updated:` on the entry whose
+`aliases:` list it edits and keeps that entry's `read:`, unless it resolves a
+[user issue](../SKILL.md#user-issues);
 an otherwise unchanged entry whose only change is a
 rewritten link keeps its dates and `read:` under the
 [shared date rule](../../../shared/CONVENTIONS.md#2a-wiki-entry--wikimd).
@@ -386,11 +394,11 @@ It extracts no other topic from the evidence.
    and snapshot the free slug. A same-entity owner gets no entry: Task 2
    links the term to it, or retargets its dangling links there; an occupied
    or ambiguous slug is reported.
-2. Cite that teaching document at the page that teaches the term, and no
-   other source: never research the term on the web or in a vault document
-   no entry cites. Citing an already cited document leaves wiki-build's
-   coverage unchanged; the rule that an uncited source counts as unbuilt
-   governs deepening an existing entry, not a new entry's source.
+2. Cite that teaching document at the page that teaches the term: never
+   research the term on the web or in a vault document no entry cites.
+   Citing an already cited document leaves wiki-build's coverage unchanged;
+   the rule that an uncited source counts as unbuilt governs deepening an
+   existing entry, not a new entry's source.
 3. Draft it from step 2's evidence, adding beyond it only the clarification
    [5(h)](../../wiki-build/references/writing.md#prose-principles) admits,
    under wiki-build's entry rules: its
@@ -400,9 +408,9 @@ It extracts no other topic from the evidence.
    `issues: ""`, and today's `created:` and `updated:`. Run wiki-build's
    [overlap/ownership audit](../../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
    on the draft against the entries it links and the entries using the term.
-   Stage it under its slug and resolve every
-   `lint_entry.py` finding as wiki-build's
-   [step 7](../../wiki-build/SKILL.md#7-review-and-report) does.
+   Stage it under its slug and review it under wiki-build's
+   [step 7.1](../../wiki-build/SKILL.md#7-review-and-report), with a
+   [manifest](../SKILL.md#publishing) naming only the draft.
 4. Publish it with `publish_files.py` ([publishing](../SKILL.md#publishing)),
    which creates the file exclusively. Then
    [consolidate](#build-the-refactored-entries) into the new entry every
@@ -459,7 +467,10 @@ as blocked by those entries.
 2. Retarget each inbound link to a successor the request names, keeping its
    label. Otherwise unlink it to its visible label and remove its Related
    item, as for a
-   [genuine dangler](link-hygiene.md#dangling-links-target-missing). An
+   [genuine dangler](link-hygiene.md#dangling-links-target-missing). In an
+   entry, each unlinked mention is glossed as the
+   [dangler hand-off](#dangling-link-hand-off)'s step 3 glosses a dangling
+   one. An
    `Investments/` reference or an ambiguous reference blocks the deletion. A
    link or embed to the entry's card block ID blocks it too unless the request
    names a successor, which it then targets as a plain link keeping any label;

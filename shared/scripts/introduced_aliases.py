@@ -49,12 +49,16 @@ _SYN_CUE_RE = re.compile(
 
 # A date marker (b., c., d., fl., r.) excludes a parenthetical when it is
 # lowercase or a year or "?" follows it. A one-letter-genus abbreviation such
-# as *C. elegans* stays an alias candidate.
+# as *C. elegans* stays an alias candidate. A year or an Event's "annual" or
+# "ongoing" excludes only in a date shape, so *annual percentage rate* and
+# *2019-nCoV* stay candidates.
 _NON_NAME_PAREN_RE = re.compile(
     r"^(?:(?-i:b|c|d|fl|r)\.|(?:b|c|d|fl|r)\.\s*[\d?]|"
     r"e\.g|i\.e|cf\.|vs\.|see\s|a\s|an\s|the\s|"
-    r"annual|ongoing|born\b|died\b|founded\b|established\b|launched\b|"
-    r"acquired\b|renamed\b|now\b|figure\s+[A-Za-z0-9])|\d{3,4}",
+    r"(?:annual(?:ly)?|ongoing)(?=\s*(?:[,;]|$|since\b|\d))|born\b|"
+    r"died\b|founded\b|established\b|launched\b|"
+    r"acquired\b|renamed\b|now\b|figure\s+[A-Za-z0-9])|"
+    r"\d{3,4}s?(?=$|,|\s*[–—?]|\s*-\s*\d|\s+(?-i:BCE|CE|BC|AD)\b)",
     re.IGNORECASE)
 
 # Two or more initials before a surname (C. S. Peirce) attribute a person and
@@ -175,7 +179,7 @@ def _cue_names_subject(prefix, subject_forms):
         return True
 
     copula = re.search(
-        r"(?P<subject>[A-Za-z][A-Za-z0-9'’ -]{0,80})\s+"
+        r"(?P<subject>[^\W\d_][\w'’ \-–]{0,80})\s+"
         r"(?:is|are|was|were|has\s+been|have\s+been)\s*$", plain,
         re.IGNORECASE)
     if copula:
@@ -461,6 +465,28 @@ def run_self_test(verbose=False):
              ("Abbey", "**Abbey** (c. late 12th century) stands."),
              ("Monk", "**Monk** (C. 1200) wrote."))],
         [[]] * 7)
+    add("annual or ongoing excludes only an Event date",
+        [[name for name, _kind in introduced_alias_candidates([line], [title])]
+         for title, line in (
+             ("APR", "**APR** (annual percentage rate) is a cost."),
+             ("Fest", "**Fest** (annual, since 1877) is held."),
+             ("Talks", "**Talks** (ongoing, since 2014) continue."),
+             ("Fair", "**Fair** (annual) is held."),
+             ("Feast", "**Feast** (annual since 1877) is held."),
+             ("Fete", "**Fete** (annually; 1877–present) is held."),
+             ("Gala", "**Gala** (annual 1877–present) is held."))],
+        [["annual percentage rate"], [], [], [], [], [], []])
+    add("a year excludes only in a date shape",
+        ([[name for name, _kind in introduced_alias_candidates([line], [title])]
+          for title, line in (
+              ("SARS-CoV-2", "**SARS-CoV-2**, also known as *2019-nCoV*, "
+               "is a virus."),
+              ("1KGP", "**1KGP**, also called the *1000 Genomes Project*, "
+               "mapped variation."),
+              ("Spot", "**Spot**, also called the *1984 ad*, aired once."))],
+         [bool(_NON_NAME_PAREN_RE.match(value)) for value in (
+             "1945-07-16", "1939–1945", "460 BCE – c. 370 BCE", "1990s")]),
+        ([["2019-nCoV"], ["1000 Genomes Project"], ["1984 ad"]], [True] * 4))
     add("case-insensitive duplicate candidates are collapsed",
         introduced_alias_candidates(
             ["**MNIST**, also called *benchmark set*, is common. It is also "
@@ -548,6 +574,18 @@ def run_self_test(verbose=False):
              "rule is also called a *production rule*."], "If-then rule", [],
             "if-then-rule"),
         [("production rule", "italicized synonym", "production-rule")])
+    add("an en dash or a non-ASCII letter stays in the repeated subject",
+        [missing_introduced_aliases([prose], title, [], slug)
+         for prose, title, slug in (
+             ("The **Kullback–Leibler divergence** compares laws. The "
+              "Kullback–Leibler divergence is also called the *relative "
+              "entropy*.", "Kullback–Leibler divergence",
+              "kullback-leibler-divergence"),
+             ("The **Schrödinger equation** evolves states. The Schrödinger "
+              "equation is also called the *wave equation*.",
+              "Schrödinger equation", "schrodinger-equation"))],
+        [[("relative entropy", "italicized synonym", "relative-entropy")],
+         [("wave equation", "italicized synonym", "wave-equation")]])
     add("irregular singular of a canonical plural is not a missing alias",
         missing_introduced_aliases(
             ["**Archaea** (singular, *archaeon*) are prokaryotes."],

@@ -18,10 +18,9 @@ If that folder, or the chapter folder of the book's other copy (the same
 stem with or without `_src`, such as `Kuhn_StructSciRev_2012_src/`), already
 contains chapter-pattern PDFs of this book, stop and report that the book was
 split before. The two copies share one chapter set. Those filenames are
-authoritative. Never re-abbreviate
-an existing set: a future explicitly requested re-split must reuse those
-names or not proceed. The helper refuses occupied targets; an existing set
-is not permission to overwrite or delete it.
+authoritative. Never re-abbreviate or extend an existing set: the helper
+refuses any split while a chapter of this book exists, and an existing set is
+not permission to overwrite or delete it.
 
 Keep chapters in the shared source tree so recursive consumers find them;
 `figure-extract`, `paper-summarize`, and `wiki-build` own how they treat a

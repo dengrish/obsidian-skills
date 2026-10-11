@@ -353,9 +353,10 @@ line (no `\qquad`-joined pairs, `\Rightarrow` chains or `\text{where}`
 definitions). Lint reports a likely pair as an advisory. In every equation,
 display or inline, write the exponential as a power of $e$ ($e^{-t}$), never
 `\exp`, even for a long exponent. Write $\ell$ only for a norm: a loss the
-document writes as $\ell$ becomes $L$, and an $\ell$ index takes another
-letter. Transcribe each equation from its page image, not the text capture,
-which drops accents such as hats and loses grouping and indices;
+document writes as $\ell$ becomes $L$, a log-likelihood becomes
+$\log L(\theta)$, and an $\ell$ index takes another letter. Transcribe each
+equation from its page image, not the text capture, which drops accents such
+as hats and loses grouping and indices;
 [verification](review-checklist.md#locate-the-claims) checks it there. Beside
 each display, say what each term means and where the relation comes from;
 inside a numbered step, that explanation stays in the step. Use
@@ -370,8 +371,9 @@ doubling the features multiplies the time by about 5.3 to 8). Give every such
 bound a one-sentence intuitive reason for its form (it inverts a matrix with
 one row and one column per feature). Take the reason from the document's own
 explanation or proof when it gives one, otherwise use a sound standard reason.
-Never invent a reason or a derivation. Leave out a bound that has no sound
-one-sentence reason, and any display or bound the contribution does not need.
+Never invent a reason or a derivation. When no sound one-sentence reason
+exists, state the takeaway and omit the bound; leave out any display or bound
+the contribution does not need.
 
 The Summary callout holds 3–7 `> - ` bullets, one line per bullet. Each bullet
 makes one claim in one or two sentences, at most about 45 words, and leaves
@@ -394,18 +396,22 @@ Do not put URLs or page citations in the callout.
 
 A concept that has its own Wiki entry is linked to that entry, not explained
 again: the note says only what role the concept plays in this document. A term
-with no entry keeps its one brief gloss. Before drafting, index the vault's
-Wiki entries; when `Wiki/` is absent, no term has an entry.
+with no entry keeps its one brief gloss. Before drafting, write the concepts
+the note would explain as a JSON array of strings to `<scratch>/terms.json`
+with the host's file-writing tool, then index the vault's Wiki entries and
+probe the terms; when `Wiki/` is absent, no term has an entry.
 
 ```bash
 python3 '<plugin>/skills/wiki-build/scripts/vault_index.py' '<vault>/Wiki' \
     -o '<scratch>/wiki-index.json'
+python3 '<plugin>/skills/wiki-build/scripts/find_collisions.py' --no-peers \
+    --index '<scratch>/wiki-index.json' --titles '<scratch>/terms.json'
 ```
 
-Look up each concept the note would explain by the `title` and `aliases` of the
-index's `entries`, ignoring case. Read a matching entry to confirm it is the same
-concept in this document's sense; a similar filename or a shared word is not a
-match. An ambiguous match or an unreadable entry leaves the term glossed.
+Read the entry at each match's `entry_path` in `Wiki/` to confirm it is the
+same concept in this document's sense; a similar filename or a shared word
+alone does not confirm a match. An ambiguous match or an unreadable entry
+leaves the term glossed.
 
 Write each link in the vault's canonical form
 ([CONVENTIONS §6](../../../shared/CONVENTIONS.md#6-wikilink-forms)): `[[slug]]`

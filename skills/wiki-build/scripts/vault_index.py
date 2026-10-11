@@ -83,7 +83,8 @@ symlink remains an occupied slug but contributes no target-derived metadata;
 its record and the top-level problems explain the refusal.
 
 Exit codes: 0 complete inventory (entry findings may remain), 1 partial
-recursive inventory emitted, 2 bad usage / missing root / report-write failure.
+wiki or source inventory emitted, 2 bad usage / missing root / report-write
+failure.
 """
 
 from __future__ import annotations

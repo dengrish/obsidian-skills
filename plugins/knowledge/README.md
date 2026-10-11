@@ -16,12 +16,13 @@ both may use the same selected vault.
 
 A default wiki-lint run fixes what it finds. It checks every entry and repairs
 content from the sources each entry already cites, removing information they
-do not give, however accurate. It settles conflicting claims against standard
-references read online, consolidates duplicated explanations, merges duplicate
-entries, splits entries that define several subjects, retitles ambiguous titles
-and creates missing entries the wiki needs, then maintains links, parents and
-MOCs. New and merged
-entries are marked unread. It also resolves the issues you flag in entries and
+do not give and adding only clarification. It settles conflicting claims
+against standard references read online, consolidates duplicated explanations,
+merges duplicate entries, splits entries that define several subjects,
+retitles ambiguous titles and creates a missing entry only from a vault
+document the entries using its term already cite, reporting any other gap as
+a candidate, then maintains links, parents and MOCs. New and merged entries
+are marked unread. It also resolves the issues you flag in entries and
 works through the open items in `Reviews/wiki-notes-suggestions.md`. Deleting
 an entry needs an explicit request.
 

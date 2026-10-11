@@ -105,6 +105,7 @@ import argparse
 import json
 import re
 import sys
+import time
 import unicodedata
 
 __all__ = [
@@ -204,14 +205,16 @@ SYMBOL_WORDS = {"+": "-plus", "#": "-sharp", "*": "-star"}
 # ("Cl- co-transporter") still converts.  The list's items may repeat the
 # token's head word, in any case ("class I- and class II-restricted"); a match
 # takes that word as ``head``, and only a token with no word and space before
-# it may match without one.
+# it may match without one. A conjunction never matches as ``head``, so the
+# lookahead stays linear on a long "X- and Y- and ..." run.
 _ASCII_ANION_RE = re.compile(
     r"(?:(?<![A-Za-z0-9])(?P<head>[A-Za-z0-9]+\s+)|(?<![A-Za-z0-9]\s))"
     r"(?<![A-Za-z0-9-])(?P<ion>[A-Z][a-z]?[0-9]*)-(?![A-Za-z0-9-])"
-    r"(?!(?:,?\s+(?:(?:and|or|nor|to)\s+)?(?i:(?P=head))?"
+    r"(?!(?:,?\s+(?:(?:and|or|nor|to)\s+)?"
+    r"(?!(?:and|or|nor|to)\s)(?i:(?P=head))?"
     r"[A-Za-z0-9]+-(?=[,\s]))*"
     r"(?:,\s*(?:(?:and|or|nor|to)\s+)?|\s+(?:and|or|nor|to)\s+)"
-    r"(?i:(?P=head))?[A-Za-z0-9]+-[A-Za-z])")
+    r"(?!(?:and|or|nor|to)\s)(?i:(?P=head))?[A-Za-z0-9]+-[A-Za-z])")
 
 #: Step 5b: the slashes inside a fraction.  ascii-ignore would drop them and
 #: fuse the digits ("½" -> "12").
@@ -568,7 +571,20 @@ def run_self_test():
                 "expected": [want_base, want_paren],
                 "got": list(got),
             })
-    total = len(TEST_CASES) + len(guard_cases) + len(base_term_cases)
+    # FIX-A's suspended-hyphen lookahead stays linear on a long
+    # "X- and Y- and ..." run.
+    title = "Cl- " + "and Ab- " * 24 + "x"
+    started = time.monotonic()
+    preprocess(title)
+    elapsed = time.monotonic() - started
+    if elapsed > 1:
+        failures.append({
+            "title": title,
+            "note": "FIX-A stays linear on a long suspended-hyphen-like run",
+            "expected": "under 1 s",
+            "got": "%.2f s" % elapsed,
+        })
+    total = len(TEST_CASES) + len(guard_cases) + len(base_term_cases) + 1
     return {
         "total": total,
         "passed": total - len(failures),

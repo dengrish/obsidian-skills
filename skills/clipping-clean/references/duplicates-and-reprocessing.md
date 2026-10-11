@@ -29,9 +29,10 @@ batch mode never overwrites a duplicate or selects polished notes on its own.
 restores missing attachments of a matching owned note from its raw (as under
 *Body source* below) without rewriting the note, and finishes a pending
 changed-slug handoff by [its procedure](#finish-a-pending-changed-slug-handoff).
-It reports, and does not restore, the missing attachments of a note whose only
-origin is a legacy `source:`, because `place` refuses that note and restoring
-attachments never migrates its origin; only
+It reports, and does not restore, a missing attachment the raw cannot supply
+(an audit recovery, a converted GIF or a serialized SVG), and every missing
+attachment of a note whose only origin is a legacy `source:`: `place` refuses
+that note, and restoring attachments never migrates its origin; only
 [finishing a pending handoff](#finish-a-pending-changed-slug-handoff) does. It
 restores the old note's images in a pending handoff only as
 that procedure directs, because finalize may already have retired them. Every
@@ -50,9 +51,11 @@ Once a changed slug is settled, record `'Articles/<new_slug>.md'` in the same
 file; it must record `absent`. These JSON records are the expected versions
 through publication and cleanup; never re-record them at commit time. The old
 note is recorded afresh only after an approved rewrite before publication (a
-legacy-origin migration or a missing-attachment placeholder) or when finishing
-a pending handoff. The new note and its handoff file get fresh records right
-after step 4 creates them. Exclude this one note from its own dedup scan.
+legacy-origin migration or a missing-attachment placeholder), before a
+[late slot-conflict](images.md#failures-and-readability) rewrite, or when
+finishing a pending handoff. The new note and its handoff file get fresh
+records right after step 4 creates them. Exclude this one note from its own
+dedup scan.
 
 **Legacy origin.** Every `fetch_images.py` command that takes `--owner-note`
 refuses a note whose only origin is a legacy scalar `source:`. That includes a

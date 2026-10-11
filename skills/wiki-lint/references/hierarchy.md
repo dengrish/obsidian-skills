@@ -18,9 +18,10 @@ outline. `#misc` uses `Wiki/misc` with one level of title-sorted members.
 Seed the requested entries and named disciplines. An entry in scope only for
 its [user issues](../SKILL.md#user-issues) is a seed only when one of its
 issues routes to item 8 or Task 3, or a retitle, split or merge resolves one.
-The new notes of a seed's [split](refactors.md#build-the-refactored-entries),
-and a [missing entry](refactors.md#create-a-missing-entry) created to resolve
-a user issue, are seeds too, so Task 3 places them. Include every current and
+Every entry the run creates, by Task 1b or a refactor request, such as a
+[split](refactors.md#build-the-refactored-entries)'s new notes or a
+[missing entry](refactors.md#create-a-missing-entry), is a seed too, so
+Task 3 places it. Include every current and
 proven prior group of those entries, all members of those groups, their Wiki
 roots, and their MOCs. Repeat until stable. Groups that share no entry, root
 or MOC are separate closures. Keep old-tag and old-placement
@@ -46,8 +47,9 @@ valid tag is placed under it even when its home is a reported close call.
 Reuse the canonical Wiki entry for each active tag, checking filename, identity,
 and tag ownership rather than treating a same-named MOC or alias as the root.
 When a root is missing, Task 3 may create that narrow prerequisite using
-builder's entry rules. It writes the root from one reliable overview of the
-field that gives its definition, method of inquiry and main branches, such
+builder's entry rules. It writes the root, misc aside, from one reliable
+overview of the field that gives its definition, method of inquiry and main
+branches, such
 as a textbook introduction or an encyclopedia article (a Wikipedia page will
 do), and cites that page by its URL under
 [conventions §7](../../../shared/CONVENTIONS.md#7-source-references), or an
@@ -63,7 +65,8 @@ tests knowledge, such as mathematics proving theorems from axioms. The main
 branches are named as the field's recognized subfields, not the objects it
 studies: algebra, geometry, analysis and number theory, not numbers and
 shapes. The misc root is `Wiki/misc`, titled
-`Misc`: a brief definition of a miscellany that makes no claim about this
+`Misc`: only a brief definition of a miscellany, from a dictionary page cited
+by its URL, with no method of inquiry or branches and no claim about this
 vault's contents. Use the ordinary entry schema, one matching tag,
 `parents: []` and no Flashcards section; an existing root keeps its card
 unless the user asks to remove it. Like every entry, a root cites at least
@@ -73,9 +76,8 @@ an empty `sources:` gets its citation in Task 1b under
 New roots use today's date for `created:` and `updated:` and set
 `read: false` and `issues: ""`; the date freeze of Tasks 1, 2 and 3 covers
 existing notes only.
-Stage a new root under its own filename and lint it with
-`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`;
-resolve every finding before publication.
+Stage a new root under its own filename and review it as a
+[missing entry's](refactors.md#create-a-missing-entry) draft is reviewed.
 A dangling link to a root this prerequisite creates was
 [left in place by Task 2](link-hygiene.md#dangling-links-target-missing);
 the completion rescan confirms it resolves.
@@ -143,7 +145,9 @@ the rules below, and report the result or its blocker.
   evidence, rescan, and re-derive the closure; otherwise, and for close calls,
   report it.
 - For misc, use its root followed by one level of member links sorted by
-  case/Unicode-normalized canonical title, with vault-relative paths as ties.
+  the code-point order of each canonical display title, NFC-normalized and
+  casefolded (so an accented initial sorts after z), with vault-relative
+  paths as ties.
   Do not invent conceptual subdivisions for this fallback bucket.
 
 Keep a compact review ledger covering every included entry's home and parent,

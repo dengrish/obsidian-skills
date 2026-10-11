@@ -239,7 +239,11 @@ For the scratch path, the free result is `complete: true` and
 `no vault PDF owns this portable basename`. Any other result means the name is
 taken or unproven: nonempty `matches` (exit 0 for one owner, exit 1 for
 several) or `complete: false`. The stem checks must report `free` and
-`ok: true`; while `Articles/` is confirmed absent, run the `--slug` check
+`ok: true`; `image_occupants` that pdf-organize's
+[label test](../../pdf-organize/references/rename-repair.md#establish-the-owned-family)
+shows to be another tool's crops of this same document, such as a slide
+deck's, leave its natural name free and stay that tool's files. While
+`Articles/` is confirmed absent, run the `--slug` check
 against a private empty directory on every run of it, as for the URL check
 above. The snapshot must record `absent`.
 
@@ -299,9 +303,8 @@ Wiki `sources:` never contains a fabricated local filename.
 
 Use the builder's [media rules](../../wiki-build/references/media.md) for
 selection, inventory, source identity, embeds and captions. Usually no image
-or one focused figure suffices. Use only a real, inspected source asset whose
-reuse is permitted, keeping any attribution or license the asset requires.
-Unknown rights, unavailable assets or an unsafe inventory are reasons to
+or one focused figure suffices. Use only a real, inspected source asset.
+Unavailable assets or an unsafe inventory are reasons to
 omit/report the optional image, not invent an exhibit or broaden the topic.
 Existing source images may be reused read-only under those same rules.
 The builder's [missing PDF figures](../../wiki-build/references/media.md#missing-pdf-figures)

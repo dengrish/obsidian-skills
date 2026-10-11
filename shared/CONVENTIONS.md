@@ -103,8 +103,8 @@ user selects, or topics the user names without a source document; its
 [research guide](../skills/wiki-add/references/research.md) owns acquisition,
 naming, filing and the
 [rule for reusing local sources](../skills/wiki-add/references/research.md#find-local-sources-first).
-wiki-lint's missing entries never take this route: each cites only a vault
-document the entries using its term already cite (§9). This route does not
+wiki-lint's missing entries never take this route: each is drafted only from a
+vault document the entries using its term already cite (§9). This route does not
 change wiki-build's source-first extraction.
 
 **Investment artifacts stay outside Knowledge maintenance.** The independent
@@ -805,15 +805,18 @@ note, its cited sources and the rules. An issue is **resolved** when the run
 made the change, or verified with evidence that the reported problem does not
 hold and says why in the run report. It is **blocked** when it needs a
 deletion (which needs an explicit request in chat), a source the entry does
-not cite or, for a missing entry it asks for, any source but a vault document
-an entry using its term cites (such as an unbuilt chapter, which waits for a
+not cite (such as an unbuilt chapter, which waits for a
 wiki-build request naming that source; a verified citation for an entry whose `sources:` is
 empty is not one, since wiki-lint's
 [item 4](../skills/wiki-lint/references/qc-items.md#4-sources) adds it, nor
 is a discipline root's overview page under its
-[form repair](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)), or
-a change a builder rule forbids (such as a second card
-or an added caveat); when no evidence settles it or its meaning is unclear; or
+[form repair](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots),
+nor, for a missing entry it asks for, a vault document an entry using its
+term cites), any other source for that missing entry, or what a builder rule
+forbids (such as a second card or an added caveat); when it names an uncited
+sentence as the user's own edit, which the run keeps
+([source-backed corrections](../skills/wiki-lint/references/source-backed-corrections.md#correct-and-publish));
+when no evidence settles it or its meaning is unclear; or
 when it asks for something outside wiki-lint's scope, such as other files,
 skills or settings. A blocked issue stays verbatim in the field, is never
 moved to a log, and the run report names its blocker.
@@ -1210,7 +1213,7 @@ does not change the canonical output forms in §2.
 |---|---|
 | `[[slug]]` | body link whose display label would equal the slug |
 | `[[MOCs/<discipline-slug>-moc]]` | discipline MOC navigation link only; never a `parents:` value |
-| `[[slug]]` in `parents:` | parent that is a broader Wiki entry, including a discipline root (`[[machine-learning]]`, `[[misc]]`); use `[[Wiki/<entry-path>]]` only when another Wiki file, a `MOCs/` file or a legacy MOC shares the basename. A discipline root itself has `parents: []` |
+| `[[slug]]` in `parents:` | parent that is a broader Wiki entry, including a discipline root (`[[machine-learning]]`, `[[misc]]`); use `[[Wiki/<entry-path>]]` only when another real vault file shares the basename. A discipline root itself has `parents: []` |
 | `[[Wiki/<relative-entry-path>\|Label]]` | every generated MOC tree entry link; use the actual vault-relative Wiki folder prefix and no `.md`. Labels follow [hierarchy](../skills/wiki-lint/references/hierarchy.md#build-or-maintain-the-moc-files) |
 | `[[slug\|Display Label]]` | body link whose label differs by case, spacing or alias |
 | `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, such as a discipline root beside a previous-layout MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
@@ -1598,8 +1601,8 @@ and wiki-add record there the missing entries their published prose mentions
 in plain text) or the three-use
 count of a load-bearing term, plus a stable identity that passes
 wiki-build's substance and atomicity tests on a vault document the entries
-using the term already cite. The entry follows wiki-build's entry rules and cites
-only that document, at the page that teaches the term; wiki-lint never
+using the term already cite. The entry follows wiki-build's entry rules and is
+drafted from only that document, cited at the page that teaches the term; wiki-lint never
 researches a missing entry on the web or in an uncited document. Task 2 then
 links the mentions and Task 3 places the entry. A user's request for a new topic in chat goes to wiki-add
 or wiki-build. For any other real
@@ -1607,7 +1610,7 @@ topic with no entry, report both routes:
 wiki-add can research it (named directly, or queued in `add-to-wiki.md`, where
 only the user adds topics), or wiki-build can build it from a supporting
 source: a request naming that whole chapter or document, which fills in the
-source's topics and leaves entries that already cite it untouched. An entry
+source's topics and never re-merges entries that already cite it. An entry
 citing a source does not show that the source was built as a whole, so a
 [named-entity request](../skills/wiki-build/SKILL.md#named-entity-requests)
 is the route only when the user asks for just that entity or when wiki-build's

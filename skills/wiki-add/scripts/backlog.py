@@ -314,7 +314,7 @@ def parse_queue(data):
                 floor = content_column(indent, shifted[1], shifted[2])
                 lazy = bool(shifted[3].strip())
                 continue
-            if parent is not None and line[:1] in (" ", "\t"):
+            if parent is not None and line[:1] in (" ", "\t") and (inside or lazy):
                 parent["context_lines"].append(clean)
                 lazy = bool(clean.strip())
                 # Obsidian shows a nested open task as its own checkbox, so
@@ -709,6 +709,15 @@ def run_self_tests():
               [([], [(3, stray_text), (4, stray_text), (6, stray_text)]),
                ([("Kalman filter", [])], [(3, stray_text)]),
                ([], [(2, stray_text)])])
+        check("after a blank line, text indented less than the item's content "
+              "is reported, and nested and lazy lines stay context",
+              [shape(queue) for queue in (
+                  b"- [ ] Kalman filter\n\n Particle filter\n",
+                  b"- [ ] A\n\n  nested\n",
+                  b"- [ ] A\n text\n")],
+              [([("Kalman filter", [])], [(3, stray_text)]),
+               ([("A", ["  nested"])], []),
+               ([("A", [" text"])], [])])
         check("a fence inside an item is its context, measured from its own item",
               [shape(queue) for queue in (
                   b"- [ ] Softmax\n  ```\n  - [ ] code\n  ```\n  - note\n  - [ ] Log\n",

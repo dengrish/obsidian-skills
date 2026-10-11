@@ -49,7 +49,7 @@ End every run with a single consolidated response in the conversation, not a dat
   - **Deletions applied** (an explicit request only, under
     [Delete an entry](refactors.md#delete-an-entry)): the removed path, each
     inbound reference retargeted to the named successor or unlinked, by
-    surface, any discipline MOC the deletion left inactive, the entry's card quoted with its attachments and its non-blank `issues:`
+    surface, each gloss added at an unlinked mention, any discipline MOC the deletion left inactive, the entry's card quoted with its attachments and its non-blank `issues:`
     text, and the clean re-scan.
   - **Not applied**, each with its blocker:
     - a merge or split that a

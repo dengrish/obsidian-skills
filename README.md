@@ -107,8 +107,9 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
    online, never citing them), consolidates an explanation duplicated across
    entries into its owner, aligns notation, merges duplicate entries that name
    one entity, splits an entry that defines several subjects, retitles
-   ambiguous bare titles and creates the missing entries the wiki's own
-   entries need. Each new or merged entry is marked unread.
+   ambiguous bare titles and creates a missing entry only from a vault
+   document the entries using its term already cite. Each new or merged entry
+   is marked unread.
 3. **Task 2** adds and prunes links, including links to the new entries.
 4. **Task 3** rebuilds `parents:` and the MOCs.
 

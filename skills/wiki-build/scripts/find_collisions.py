@@ -82,8 +82,9 @@ import os
 import sys
 
 _OBSIDIAN_SHARED_MODULES = (
-    'code_typography', 'entry_checks', 'entry_structure', 'markdown_tables',
-    'naming', 'organism_names', 'plurals', 'portable_names', 'slugify',
+    'code_typography', 'entry_checks', 'entry_structure', 'equation_coverage',
+    'introduced_aliases', 'markdown_tables', 'naming', 'note_provenance',
+    'organism_names', 'plurals', 'portable_names', 'slugify',
     'vault_artifacts', 'yaml_scalars',
 )
 
@@ -144,6 +145,7 @@ from plurals import (  # noqa: E402
     wordorder_key_singular,
 )
 import vault_index as _vault_index  # noqa: E402
+from lint_entry import TAG_ENUM  # noqa: E402
 
 __all__ = [
     "check_candidates", "check_candidate", "load_index", "build_targets",
@@ -315,13 +317,15 @@ def build_targets(index):
     ``{slug, via, alias, entry_slug, path}`` -- one for each filename stem,
     one for its slug form and one for its canonical title when each derives to
     a different slug, one for each alias on each entry, and one for each
-    common name an Organism binds.
+    common name an Organism binds. Filename and title targets also carry the
+    title's folded ``qualifier``.
     """
     _validate_index(index)
     targets = []
     for rec in index.get("entries", []):
         slug = (rec.get("slug") or "").strip()
         tags = rec.get("tags") or []
+        qualifier = _qualifier(rec.get("title"))
         if slug:
             targets.append({
                 "slug": slug, "via": "filename", "alias": None,
@@ -329,6 +333,7 @@ def build_targets(index):
                 "entry_errors": list(rec.get("errors") or ()),
                 # A discipline root's sole tag names the root itself.
                 "root": len(tags) == 1 and _fold(str(tags[0]).lstrip("#")) == _fold(slug),
+                "qualifier": qualifier,
             })
         title = rec.get("title")
         title_slug = None
@@ -343,6 +348,7 @@ def build_targets(index):
                     "entry_slug": slug,
                     "path": rec.get("relpath") or rec.get("path"),
                     "entry_errors": list(rec.get("errors") or ()),
+                    "qualifier": qualifier,
                 })
         # A hand-named stem such as "ROC curve" is also probed in slug form;
         # that name is not canonical, so an exact match adjudicates.
@@ -357,6 +363,7 @@ def build_targets(index):
                 "path": rec.get("relpath") or rec.get("path"),
                 "entry_errors": list(rec.get("errors") or ())
                 + ["filename stem %r is not a canonical slug" % slug],
+                "qualifier": qualifier,
             })
         for alias in rec.get("aliases") or []:
             alias = (alias or "").strip()
@@ -413,13 +420,6 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
             pass
     mu_slugs.discard(slug)
 
-    qualifier = None
-    if has_parenthetical(title):
-        try:
-            qualifier = _fold(slug_stem(title.strip()[len(base_term(title)):]))
-        except SlugError:
-            pass
-
     keys = {
         "slug": slug,
         "mu": mu_slugs,
@@ -431,7 +431,7 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
         "wordorder_singular": wordorder_key_singular(slug),
         "stem": stem_key(slug) if use_stem else None,
         "superset": stem_tokens(slug) if use_superset else None,
-        "qualifier": qualifier,
+        "qualifier": _qualifier(title),
     }
     return slug, keys, None
 
@@ -439,6 +439,16 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
 def _fold(s):
     """Case- and Unicode-folded slug, matching scan_vault.fold_name."""
     return portable_identity((s or "").strip())
+
+
+def _qualifier(title):
+    """Folded slug of a title's parenthetical qualifier, or ``None``."""
+    if isinstance(title, str) and has_parenthetical(title):
+        try:
+            return _fold(slug_stem(title.strip()[len(base_term(title)):]))
+        except SlugError:
+            pass
+    return None
 
 
 def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
@@ -485,9 +495,10 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
         fired.append("e-word-order-permutation")
 
     if use_stem and keys["stem"] and stem_key(other_slug) == keys["stem"]:
-        # Only when nothing else fired.  Probe (f)'s stemmer collapses plurals
-        # too, so a plain plural pair (roc-curve / roc-curves) must be
-        # reported as the probe-(c) hit it is, not as "f-stem-morphology".
+        # Only when nothing else fired.  Probe (f)'s stemmer collapses regular
+        # and -ies/-ses plurals too, so a plain plural pair (roc-curve /
+        # roc-curves) must be reported as the probe-(c) hit it is, not as
+        # "f-stem-morphology".
         if not fired:
             fired.append("f-stem-morphology")
 
@@ -530,14 +541,17 @@ def check_candidate(title, index, use_stem=True, use_superset=True, peers=None,
         # Advisory only: a naming defect, not an ownership collision.
         result["naming"] = ["bare-common-noun"]
 
+    field = _fold(slug) if _fold(slug) in TAG_ENUM else None
     for target in (build_targets(index) if targets is None else targets):
         other = target["slug"]
         for probe in _probe_pair(keys, other, use_stem=use_stem,
                                  use_superset=use_superset):
             # A discipline root named as the candidate's qualifier
-            # ("Temperature (machine learning)") is its field, not a duplicate.
-            if (probe == "g-token-superset" and target.get("root")
-                    and _fold(other) == keys["qualifier"]):
+            # ("Temperature (machine learning)") is its field, not a duplicate,
+            # and a discipline candidate is the field of an entry it qualifies.
+            if probe == "g-token-superset" and (
+                    (target.get("root") and _fold(other) == keys["qualifier"])
+                    or (field and target.get("qualifier") == field)):
                 continue
             match = {
                 "probe": probe,
@@ -1063,6 +1077,22 @@ def run_self_test():
               ([("g-token-superset", "kernel")],
                [("g-token-superset", "convolution-kernel"),
                 ("g-token-superset", "kernel")]))
+        qualified = {"entries": [
+            {"slug": "morpheme-linguistics", "title": "Morpheme (linguistics)",
+             "tags": ["#linguistics"], "relpath": "morpheme-linguistics.md"},
+            {"slug": "filter-convolution-kernel",
+             "title": "Filter (convolution kernel)",
+             "tags": ["#machine-learning"],
+             "relpath": "filter-convolution-kernel.md"}]}
+        check("(g) skips an entry a discipline candidate qualifies, but not "
+              "one a non-discipline qualifier names",
+              [(r["verdict"], [(m["probe"], m["matched_slug"])
+                               for m in r["matches"]])
+               for r in (check_candidate("Linguistics", qualified),
+                         check_candidate("Convolution kernel", qualified))],
+              [("create", []),
+               ("adjudicate", [("g-token-superset",
+                                "filter-convolution-kernel")])])
 
         # -- every probe, NOT firing ----------------------------------------
         r = probe("Gradient boosting")

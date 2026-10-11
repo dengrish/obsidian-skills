@@ -137,6 +137,9 @@ def bound_common_names(title, description, opening):
         rf"(?:\s+\((?P<subject_paren>[^()\n]{{1,60}})\))?"
     )
     boundary = rf"(?=\s*(?:[,.;:—–]|$|\b(?:used|adopted|that|which|whose)\b))"
+    # A weak cue binds only a phrase that punctuation closes: "is the insect
+    # used in genetics" names a class, not a common name.
+    weak_boundary = r"(?=\s*(?:[,.;:—–]|$))"
     patterns = [
         (True, re.compile(
             rf"{subject}\s+(?:is|are|was|were)\s+"
@@ -147,7 +150,7 @@ def bound_common_names(title, description, opening):
             rf"(?:called|known\s+as)\s+(?:(?:the|an?)\s+)?{label}"
             rf"(?=\s*[,;:—–])", re.IGNORECASE)),
         (False, re.compile(
-            rf"{subject}\s+(?:is|are|was|were)\s+the\s+{label}{boundary}",
+            rf"{subject}\s+(?:is|are|was|were)\s+the\s+{label}{weak_boundary}",
             re.IGNORECASE)),
         (False, re.compile(
             rf"{subject}\s*,\s*(?:or\s+(?:(?:the|an?)\s+)?|the\s+)?"
@@ -308,6 +311,20 @@ def _self_test():
          bound_common_names(
              "Mus musculus", "Mus musculus is the standard model organism used in genetics.", ""),
          []),
+        ("a weak cue's class noun before a qualifier is not a name",
+         bound_common_names(
+             "Drosophila melanogaster",
+             "Drosophila melanogaster is the insect used most widely in genetics.", ""),
+         []),
+        ("a weak cue's descriptive phrase before a clause is not a name",
+         bound_common_names(
+             "SARS-CoV-2", "SARS-CoV-2 is the spike-bearing RNA coronavirus "
+             "that caused the COVID-19 pandemic.", ""),
+         []),
+        ("a weak cue binds a name that punctuation closes",
+         bound_common_names(
+             "Mus musculus", "Mus musculus is the mouse, used in laboratories.", ""),
+         ["mouse"]),
         ("an 'or' synonym appositive binds the name without the conjunction",
          bound_common_names(
              "Saccharomyces cerevisiae", "",
