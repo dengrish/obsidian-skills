@@ -49,10 +49,10 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
-| `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper; a rename's link repair, or wiki-lint under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope), rewrites a raw's link and changes nothing else | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview), wiki-add and wiki-lint's missing-entry research (URL and same-document checks) read them but never cite them |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and legacy marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize; pdf-organize moves an owned summary note and updates its `sources:` origin and `published:` year during a PDF rename; figure-extract's Extended Data switch repairs links to each `_fig_S<N>` crop it re-extracts as `_fig_ED<N>` (§8b); wiki-lint rewrites links under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope), never a note's claim wording or `sources:` | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (rename preflight), wiki-lint (cited notes for content repair, and notes its missing-entry research reads under wiki-add's local-source rule) |
-| `Sources/PDFs/` | organized source documents, recursive; feed-owned attachments use the separate route in §1c. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**), wiki-add (newly acquired research PDFs only, named under pdf-organize's rules), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add, wiki-lint (PDFs Wiki entries already cite, and PDFs its missing-entry research reads under wiki-add's local-source rule); feed-collect within its own scope |
-| `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract (extracts the chapters, skips the split book), paper-summarize (scans, skips), wiki-build (processes the chapters instead of the split book), wiki-add (cites the chapters, never the split book), wiki-lint (cited chapters, and chapters its missing-entry research reads) |
+| `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper; a rename's link repair, or wiki-lint under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope), rewrites a raw's link and changes nothing else | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview) and wiki-add (URL and same-document checks) read them but never cite them |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and legacy marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize; pdf-organize moves an owned summary note and updates its `sources:` origin and `published:` year during a PDF rename; figure-extract's Extended Data switch repairs links to each `_fig_S<N>` crop it re-extracts as `_fig_ED<N>` (§8b); wiki-lint rewrites links under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope), never a note's claim wording or `sources:` | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (rename preflight), wiki-lint (cited notes for content repair) |
+| `Sources/PDFs/` | organized source documents, recursive; feed-owned attachments use the separate route in §1c. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**), wiki-add (newly acquired research PDFs only, named under pdf-organize's rules), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add, wiki-lint (PDFs Wiki entries already cite); feed-collect within its own scope |
+| `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract (extracts the chapters, skips the split book), paper-summarize (scans, skips), wiki-build (processes the chapters instead of the split book), wiki-add (cites the chapters, never the split book), wiki-lint (cited chapters) |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract (including the runs wiki-build and wiki-add start for a PDF's missing figures), clipping-clean, feed-collect (original photo attachments); **pdf-organize** renames in place only within its source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
 | `Wiki/` | wiki entries, one `.md` per entity (walked **recursively**) | wiki-build, wiki-add (missing requested entries only), wiki-lint; pdf-organize and clipping-clean repair references to a source they rename (§2a), and figure-extract's Extended Data switch repairs links to each `_fig_S<N>` crop it re-extracts as `_fig_ED<N>` (§8b) | wiki-build, wiki-add, wiki-lint, paper-summarize (indexes entries and reads a match to link a concept in a reading note) |
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md`; clipping-clean respells only a link or embed to a clipping it renames, never in a dated record (see below) | the investments skills within their own scope |
@@ -103,9 +103,9 @@ user selects, or topics the user names without a source document; its
 [research guide](../skills/wiki-add/references/research.md) owns acquisition,
 naming, filing and the
 [rule for reusing local sources](../skills/wiki-add/references/research.md#find-local-sources-first).
-wiki-lint researches a missing entry its own run establishes the same way,
-under that local-source rule and §9's citation limits, but never acquires or
-files a PDF. This route does not change wiki-build's source-first extraction.
+wiki-lint's missing entries never take this route: each cites only a vault
+document the entries using its term already cite (§9). This route does not
+change wiki-build's source-first extraction.
 
 **Investment artifacts stay outside Knowledge maintenance.** The independent
 investment skills own `Investments/`, including dated research, maintained
@@ -197,8 +197,7 @@ because the user selected the vault root.
 plugin; pdf-organize reaches it only on the rename path above, where it is the
 one skill that moves a file another skill wrote.
 `Articles/` is outside wiki-lint's scan and maintenance scope. Its Task 1b
-reads the notes and PDFs entries cite, its missing-entry research reads vault
-material under wiki-add's local-source rule, and wiki-lint rewrites links in
+reads the notes and PDFs entries cite, and wiki-lint rewrites links in
 `Articles/` notes under its refactor rewrite scope, including one inside a
 claim, and never changes claim wording or `sources:`. The folder's producers
 enforce their own notes' schema and quality; paper-summarize also runs
@@ -806,8 +805,9 @@ note, its cited sources and the rules. An issue is **resolved** when the run
 made the change, or verified with evidence that the reported problem does not
 hold and says why in the run report. It is **blocked** when it needs a
 deletion (which needs an explicit request in chat), a source the entry does
-not cite (such as an unbuilt chapter, which waits for a wiki-build request
-naming that source; a verified citation for an entry whose `sources:` is
+not cite or, for a missing entry it asks for, any source but a vault document
+an entry using its term cites (such as an unbuilt chapter, which waits for a
+wiki-build request naming that source; a verified citation for an entry whose `sources:` is
 empty is not one, since wiki-lint's
 [item 4](../skills/wiki-lint/references/qc-items.md#4-sources) adds it, nor
 is a discipline root's overview page under its
@@ -1275,10 +1275,10 @@ slug, never invented, never renamed. An online page is its URL.
 - **Markdown note:** `"[[Author_Title_Year.md]]"` — never an anchor.
 - **Online page:** `"https://example.org/page"` — the full, verified `http(s)`
   address of the page actually read, with no display text or Markdown link.
-  wiki-add cites one for a web page it researched, wiki-lint for the page a
-  missing entry it creates was researched from or an entry with an empty
-  `sources:` was verified against, and, for a discipline root it creates or
-  form-repairs, the overview page that root is derived from; each points
+  wiki-add cites one for a web page it researched, wiki-lint for the page an
+  entry with an empty `sources:` was verified against and, for a discipline
+  root it creates or form-repairs, the overview page that root is derived
+  from; each points
   to the page and never creates a note in `Articles/` just to have something to cite.
   Cite the page's canonical address, not a tracking, mobile or AMP variant,
   ranking its `<link rel="canonical">` over its `og:url` as wiki-add's
@@ -1329,8 +1329,7 @@ that proof both stay and the pair is reported. Outside that replacement a
 merge never rewrites or removes a URL item. wiki-build and wiki-lint's
 source-independent QC never fetch one; wiki-lint's content repair (Task 1b)
 may read a cited URL's page to verify or correct the entry citing it, and
-wiki-add, like wiki-lint researching a missing entry, may inspect one as a
-research lead.
+wiki-add may inspect one as a research lead.
 
 Candidate comparison strips the wikilink wrapper, display label, page anchor
 and folder qualification, then folds case and normalises the basename stem to
@@ -1598,13 +1597,11 @@ item of `Reviews/wiki-notes-suggestions.md` naming the concept (wiki-build
 and wiki-add record there the missing entries their published prose mentions
 in plain text) or the three-use
 count of a load-bearing term, plus a stable identity that passes
-wiki-build's substance and atomicity tests. The entry follows
-wiki-build's entry rules. Its research may read the vault's PDFs and
-`Articles/` notes under wiki-add's local-source rule, but it cites a document
-the entries using the term already cite, at the page that teaches the term,
-or else a reliable web page by URL. It never cites a document no entry cites,
-and never acquires or files a PDF; Task 2 then links the mentions and Task 3
-places the entry. A user's request for a new topic in chat goes to wiki-add
+wiki-build's substance and atomicity tests on a vault document the entries
+using the term already cite. The entry follows wiki-build's entry rules and cites
+only that document, at the page that teaches the term; wiki-lint never
+researches a missing entry on the web or in an uncited document. Task 2 then
+links the mentions and Task 3 places the entry. A user's request for a new topic in chat goes to wiki-add
 or wiki-build. For any other real
 topic with no entry, report both routes:
 wiki-add can research it (named directly, or queued in `add-to-wiki.md`, where

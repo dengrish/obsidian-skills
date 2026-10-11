@@ -9302,6 +9302,106 @@ def check_dangler_hand_off(rep, _conv):
                         hygiene)
 
 
+def check_missing_entry_sources(rep, _conv):
+    """wiki-lint creates a missing entry only from a cited vault document.
+
+    A missing entry cites a vault document (a PDF or Markdown note, never a
+    URL) the entries using its term already cite, at the page that teaches
+    it, and §2d blocks a user issue's missing entry by that same test. Any
+    other gap is a reported missing-entry candidate, which a later
+    wiki-build of a teaching source or wiki-add creates, and each using
+    entry keeps its 5(h) definition.
+    wiki-lint never researches a missing entry on the web or in an uncited
+    vault document; discipline roots and wiki-add keep their web sources.
+    The retired research path stays gone, from the root README too.
+    """
+    # 2026-10-10 (knowledge 1.31.0): the user removed wiki-lint's research
+    # route for missing entries after it created entries from web pages they
+    # never processed ("This should not happen").
+    check = "missing-entry-sources"
+    lint_dir = os.path.join(SKILLS_DIR, "wiki-lint")
+    refs = os.path.join(lint_dir, "references")
+    refactors = os.path.join(refs, "refactors.md")
+    readme = os.path.join(ROOT, "README.md")
+    pins = (
+        (refactors, "Task 1b creates a missing entry only for a concept that "
+         "a vault document the entries using the term already cite teaches",
+         "no longer limits a missing entry to a vault document the using "
+         "entries already cite"),
+        (refactors, "including one no cited document teaches, gets no entry",
+         "no longer reports, instead of creating, a missing entry no cited "
+         "document teaches"),
+        (refactors, "keeps, or regains, its brief",
+         "no longer keeps the 5(h) definition in the using entries of a "
+         "term that gets no entry"),
+        (refactors, "never research the term on the web or in a vault "
+         "document no entry cites", "no longer forbids researching a "
+         "missing entry"),
+        (os.path.join(lint_dir, "SKILL.md"), "**Missing entries, only from "
+         "vault documents already cited", "Task 1b step 5 no longer limits "
+         "a missing entry to a cited vault document"),
+        (os.path.join(refs, "backlogs.md"), "such as a term no cited "
+         "document teaches", "the run report no longer lists a term no "
+         "cited document teaches as a missing-entry candidate"),
+        (CONVENTIONS, "wiki-lint never researches a missing entry on the "
+         "web or in an uncited document", "§9 no longer forbids researching "
+         "a missing entry"),
+        # 2026-10-10 (knowledge 1.31.0): a cited URL page is a document too
+        # (§7), so only a cited vault document may teach a missing entry.
+        (CONVENTIONS, "tests on a vault document the entries using",
+         "§9 no longer limits a missing entry's source to a vault document, "
+         "so a cited URL page could teach one"),
+        (CONVENTIONS, "for a missing entry it asks for, any source but a "
+         "vault document an entry using its term cites", "§2d no longer "
+         "applies the missing-entry source test to a user issue, so it "
+         "blocks an entry another using entry's vault document teaches"),
+        (CONVENTIONS, "wiki-lint's missing entries never take this route",
+         "the research route no longer excludes wiki-lint's missing entries"),
+        (readme, "never from research", "the root README no longer states "
+         "that wiki-lint never researches a missing entry"),
+        (readme, "only from a vault document the entries using its term",
+         "the root README no longer limits a missing entry to a cited vault "
+         "document"),
+        # Discipline roots and wiki-add keep their web sources.
+        (os.path.join(refs, "hierarchy.md"), "cites that page by its URL",
+         "no longer lets a discipline root cite its overview page"),
+        (CONVENTIONS, "root it creates or form-repairs, the overview page "
+         "that root is derived", "§7 no longer lets a discipline root cite "
+         "its overview page"),
+        (CONVENTIONS, "wiki-add cites one for a web page it researched",
+         "§7 no longer lets wiki-add cite a web page it researched"),
+    )
+    only_cited = ("wiki-lint creates a missing entry only from a vault "
+                  "document the using entries already cite and never "
+                  "researches one")
+    stale = (
+        ("missing-entry research", only_cited),
+        ("cite a reliable web page by its URL", only_cited),
+        ("or else a reliable web page by URL", only_cited),
+        ("wiki-lint researches a missing entry", only_cited),
+        ("like wiki-lint researching a missing entry", only_cited),
+        ("missing entry it creates was researched from", only_cited),
+        ("Research may read the vault's PDFs", only_cited),
+        ("researched the same way but citing only", only_cited),
+        # No trailing period, so "creates;" and "creates," fail too.
+        ("wiki-lint's next ordinary run creates",
+         "a builder's missing-entry candidate takes the missing-entry "
+         "routes; wiki-lint creates it only from a cited teaching document"),
+        ("wiki-lint's next ordinary run [creates]",
+         "a builder's missing-entry candidate takes the missing-entry "
+         "routes; wiki-lint creates it only from a cited teaching document"),
+    )
+    # The root README restates the rule but is no canonical rule source.
+    readme_text = read(readme)
+    for phrase, rule in stale:
+        for m in _phrase_re(phrase, re.I).finditer(readme_text):
+            rep.fail(check, "%s restates a retired missing-entry rule (%r) "
+                     "-- %s" % (rel(readme), " ".join(m.group(0).split()),
+                                rule), at(readme, m.start(), readme_text))
+    _check_rule_phrases(rep, check, pins, stale, "missing-entry-source",
+                        refactors)
+
+
 #: Release-history narration in runtime guidance: "Before knowledge 1.4.0
 #: ...", "Earlier wiki-add versions wrote ...", "an older version of this
 #: skill stopped ...", "No skill creates one any more".  A rule states
@@ -11033,6 +11133,7 @@ CHECKS = [
     check_empty_sources_route,
     check_rename_link_repair,
     check_dangler_hand_off,
+    check_missing_entry_sources,
     check_no_version_history_wording,
     check_writing_rules,
     check_suggestion_log_rules,

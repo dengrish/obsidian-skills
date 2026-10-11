@@ -120,7 +120,7 @@ A rejected mention is never appended to an entry's `sources:` and bumps no date.
 
 1. **Count before glossing.** Search the Wiki entry bodies, outside resolving links, for the term as a whole word, its plural and its aliases, and add this run's drafts.
 2. **Build it when the active source teaches it, unless a [named-entity request](#named-entity-requests) leaves it unnamed.** A load-bearing term gets its entry this run. Its passages combine for (b): places that each state a property, effect or treatment (outliers inflate RMSE more than MAE, distort min-max scaling, are removed in data cleaning) pass together when they say what it is and why it matters.
-3. **Otherwise gloss and report it.** A load-bearing term the source does not teach, or one a named-entity request does not name (listed under *Entities not requested*), is glossed in one clause and reported as a missing-entry candidate, which wiki-lint's next ordinary run [creates](../wiki-lint/references/refactors.md#create-a-missing-entry).
+3. **Otherwise gloss and report it.** A load-bearing term the source does not teach, or one a named-entity request does not name (listed under *Entities not requested*), is glossed in one clause and reported as a missing-entry candidate with the [missing-entry routes](../../shared/CONVENTIONS.md#9-ownership-split-for-linking).
 
 **Positive trigger.** A named entity whose mechanism, architecture or method the source explains ("X works by…") in enough detail for an entry is a candidate to accept and link; thinner coverage stays plain, never a placeholder file. A bare list of names is never a trigger until the source says how one differs; named-entity requests gain no candidates this way.
 
@@ -237,7 +237,7 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
 
 ### Closeout
 
-Apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Reviews/wiki-build-suggestions.md`, the logs of producers whose outputs this run consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`. That log receives an unresolved note-content proposal, including a missing entry that this run's published prose mentions in plain text (as the [run report](references/review.md#run-report) records it), which wiki-lint's next ordinary run creates; search it for open items naming an entry this run changed.
+Apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Reviews/wiki-build-suggestions.md`, the logs of producers whose outputs this run consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`. That log receives an unresolved note-content proposal, including a missing entry that this run's published prose mentions in plain text (as the [run report](references/review.md#run-report) records it), for wiki-lint's next ordinary run; search it for open items naming an entry this run changed.
 
 ## Quality Checklist
 

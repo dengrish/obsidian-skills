@@ -3,9 +3,7 @@
 Read this for a topic that a wiki-add request confirms missing. Source
 acquisition is limited to evidence for that topic; it never authorizes
 processing the inbox, refreshing an existing source, or changing its dependent
-notes or figures. wiki-lint's
-[missing-entry research](../../wiki-lint/references/refactors.md#create-a-missing-entry)
-also follows this reference, within the limits that section sets.
+notes or figures.
 
 ## Choose and inspect evidence
 

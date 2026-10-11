@@ -143,9 +143,9 @@ and nested open tasks instead of processing them. It leaves every existing
 entry unchanged and checks off only queued topics it created or found already
 present; enriching an existing entry from a new source remains wiki-build's
 job, and deepening it from the sources it already cites is wiki-lint's.
-wiki-lint also creates a missing entry its own run establishes, researched the
-same way but citing only a document the entries using the term already cite or
-a web page by URL, and links and places it in the same run.
+wiki-lint also creates a missing entry its own run establishes, only from a
+vault document the entries using its term already cite and never from
+research, and links and places it in the same run.
 
 stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum
