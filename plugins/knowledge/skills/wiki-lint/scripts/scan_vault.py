@@ -2714,43 +2714,59 @@ def _entry_physical_key(wiki, path):
 SETTLED_FIELDS = {"backfill": ("entry", "target", "surface", "context"),
                   "hub_footer": ("entry", "target", "context")}
 
+#: The revision of link-hygiene.md's closeness bar that this scanner applies.
+#: Raise it when the bar changes in a way that can flip a settled decision:
+#: a ledger written under an older revision then settles nothing, so the
+#: next run judges every row under the new bar (tests/test_conventions.py
+#: ties it to the bar's text).
+CLOSENESS_BAR = 2
+
 
 def read_settled(path):
-    """``({kind: set of record tuples}, version, error)`` from a settled ledger.
+    """``({kind: set of record tuples}, bar, error)`` from a settled ledger.
 
-    A missing file is an empty version-2 ledger. An unreadable or malformed
-    one yields no records and an error message, so it suppresses nothing.
+    ``bar`` is the closeness-bar revision the ledger was judged under, 1 when
+    it records none. A missing file is an empty ledger of the current
+    revision. An unreadable or malformed one yields no records and an error
+    message, so it suppresses nothing.
     """
     empty = {kind: set() for kind in SETTLED_FIELDS}
     try:
         with open(path, encoding="utf-8") as fh:
             data = json.load(fh)
     except FileNotFoundError:
-        return empty, 2, None
+        return empty, CLOSENESS_BAR, None
     except (OSError, UnicodeDecodeError, ValueError) as exc:
-        return empty, 2, "cannot read the ledger: %s" % exc
+        return empty, CLOSENESS_BAR, "cannot read the ledger: %s" % exc
     if (not isinstance(data, dict) or type(data.get("version")) is not int
             or data["version"] not in (1, 2)):
-        return empty, 2, 'the ledger is not a {"version": 2, ...} object'
-    unknown = sorted(set(data) - {"version"} - set(SETTLED_FIELDS))
+        return empty, CLOSENESS_BAR, (
+            'the ledger is not a {"version": 2, ...} object')
+    bar = data.get("bar", 1)
+    if type(bar) is not int or bar < 1:
+        return empty, CLOSENESS_BAR, (
+            "the ledger's bar is not a positive integer: %s"
+            % json.dumps(bar, ensure_ascii=False))
+    unknown = sorted(set(data) - {"version", "bar"} - set(SETTLED_FIELDS))
     if unknown:
-        return empty, 2, "the ledger has unknown keys: %s" % ", ".join(unknown)
+        return empty, CLOSENESS_BAR, (
+            "the ledger has unknown keys: %s" % ", ".join(unknown))
     records = {}
     for kind, fields in SETTLED_FIELDS.items():
         rows = data.get(kind, [])
         if not isinstance(rows, list):
-            return empty, 2, "the ledger's %s is not a list" % kind
+            return empty, CLOSENESS_BAR, "the ledger's %s is not a list" % kind
         records[kind] = set()
         for row in rows:
             if (not isinstance(row, dict) or set(row) != set(fields)
                     or not all(isinstance(row[f], str) and row[f]
                                for f in fields)
                     or not re.fullmatch(r"[0-9a-f]{40}", row["context"])):
-                return empty, 2, (
+                return empty, CLOSENESS_BAR, (
                     "the ledger's %s holds a malformed record: %s"
                     % (kind, json.dumps(row, ensure_ascii=False)))
             records[kind].add(tuple(row[f] for f in fields))
-    return records, data["version"], None
+    return records, bar, None
 
 
 def apply_settled(backfill_rows, hub_footer, path, complete=True):
@@ -2762,22 +2778,27 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
     each target's in text order; the first unsettled one per entry and
     target is kept, with ``settle_keys``: its own key and those of the
     target's later unsettled sentences, which a rejection records together.
-    In a version-1 ledger, a record that matches the target's first sentence
-    settles all of that entry's sentences of the target, and ``upgrade``
-    lists the records of the others, so a version-2 rewrite keeps them
-    settled. ``stale`` lists the records that matched no current row, in
-    the ledger's own shape. Both stay empty when ``complete`` is false,
-    since the rows themselves were then not computed, and ``upgrade`` is
-    then None for a version-1 ledger.
+    ``stale`` lists the records that matched no current row, in the
+    ledger's own shape; it stays empty when ``complete`` is false, since the
+    rows themselves were then not computed. A ledger judged under an older
+    closeness bar is ``outdated``: it settles nothing, and ``stale`` lists
+    all its records. ``bar`` is the revision the closeout writes.
     """
     settled = {"path": path, "backfill_suppressed": 0,
                "hub_footer_suppressed": 0,
-               "stale": {kind: [] for kind in SETTLED_FIELDS}, "upgrade": [],
-               "error": None}
+               "stale": {kind: [] for kind in SETTLED_FIELDS},
+               "bar": CLOSENESS_BAR, "outdated": False, "error": None}
     if path is None:
-        records, version = {kind: set() for kind in SETTLED_FIELDS}, 2
+        records = {kind: set() for kind in SETTLED_FIELDS}
     else:
-        records, version, settled["error"] = read_settled(path)
+        records, bar, settled["error"] = read_settled(path)
+        settled["outdated"] = bar < CLOSENESS_BAR
+    if settled["outdated"]:
+        settled["stale"] = {
+            kind: [dict(zip(fields, record))
+                   for record in sorted(records[kind])]
+            for kind, fields in SETTLED_FIELDS.items()}
+        records = {kind: set() for kind in SETTLED_FIELDS}
     matched = {kind: set() for kind in SETTLED_FIELDS}
 
     def _is_settled(kind, key):
@@ -2794,11 +2815,6 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
     for rows in pairs.values():
         # Every row is checked, so a record that still matches is not stale.
         done = [_is_settled("backfill", row["settle_key"]) for row in rows]
-        if version == 1 and done[0]:
-            settled["upgrade"] += [row["settle_key"]
-                                   for row, row_done in zip(rows, done)
-                                   if not row_done]
-            done = [True] * len(rows)
         settled["backfill_suppressed"] += sum(done)
         open_rows = [row for row, row_done in zip(rows, done) if not row_done]
         if open_rows:
@@ -2813,13 +2829,11 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
         if items:
             hubs.append(dict(row, entries=[entry for entry, _key in items],
                              settle_keys=[key for _entry, key in items]))
-    if complete:
+    if complete and not settled["outdated"]:
         settled["stale"] = {
             kind: [dict(zip(fields, record)) for record
                    in sorted(records[kind] - matched[kind])]
             for kind, fields in SETTLED_FIELDS.items()}
-    elif version == 1:
-        settled["upgrade"] = None
     return kept, hubs, settled
 
 
@@ -6425,7 +6439,8 @@ def scan(wiki, images=None, vault=None, settled=None):
         "backfill_candidates": _backfill_rows,
         # Report-only; Task 2 judges each listed footer item; no write authority.
         "hub_footer": hub_footer,
-        # The --settled ledger's effect; it never suppresses `problems`.
+        # The --settled ledger's effect, and the closeness-bar revision the
+        # closeout writes; it never suppresses `problems`.
         "settled": _settled,
         # Item 19's forward-check input: a floor, not an exhaustive rival set.
         "card_rivals": card_rivals,
@@ -13785,8 +13800,8 @@ def run_self_test():
               (res0["settled"], _bf_key, _hub_key),
               ({"path": _ledger, "backfill_suppressed": 0,
                 "hub_footer_suppressed": 0,
-                "stale": {"backfill": [], "hub_footer": []}, "upgrade": [],
-                "error": None},
+                "stale": {"backfill": [], "hub_footer": []},
+                "bar": CLOSENESS_BAR, "outdated": False, "error": None},
                {"entry": "settle-reader", "target": "hub-term",
                 "surface": "hub term",
                 "context": settle_context("**Settle reader** names a hub "
@@ -13797,7 +13812,8 @@ def run_self_test():
         _gone = {"entry": "gone", "target": "hub-term", "surface": "hub term",
                  "context": "0" * 40}
         with open(_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 2, "backfill": [_bf_key, _gone],
+            json.dump({"version": 2, "bar": CLOSENESS_BAR,
+                       "backfill": [_bf_key, _gone],
                        "hub_footer": [_hub_key]}, fh)
         res1 = scan(_settle_wiki, settled=_ledger)
 
@@ -13816,6 +13832,30 @@ def run_self_test():
               _settle_view(res1), (["topic"], False, 1, 1, [1, 0], None))
         check("the ledger never suppresses problems",
               res1["problems"] == res0["problems"], True)
+        # A ledger judged under an older closeness bar, or recording none,
+        # settles nothing, and all its records are stale, so the closeout
+        # rewrite drops them and the run judges every row under the new bar.
+        for _old in ({"version": 2}, {"version": 2, "bar": CLOSENESS_BAR - 1},
+                     {"version": 1}):
+            with open(_ledger, "w", encoding="utf-8") as fh:
+                json.dump(dict(_old, backfill=[_bf_key, _gone],
+                               hub_footer=[_hub_key]), fh)
+            _res = scan(_settle_wiki, settled=_ledger)
+            check("an outdated ledger settles nothing and is all stale: "
+                  + json.dumps(_old),
+                  (_settle_view(_res), _res["settled"]["outdated"],
+                   _res["settled"]["bar"]),
+                  ((["hub-term", "topic"], True, 0, 0, [2, 1], None), True,
+                   CLOSENESS_BAR))
+        with open(_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "backfill": [_bf_key]}, fh)
+        check("an outdated ledger is all stale even when rows are unknown",
+              apply_settled([], [], _ledger, complete=False)[2]["stale"],
+              {"backfill": [_bf_key], "hub_footer": []})
+        with open(_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "bar": CLOSENESS_BAR,
+                       "backfill": [_bf_key, _gone],
+                       "hub_footer": [_hub_key]}, fh)
         _st_write(_settle_wiki, "settle-reader.md", _st_entry(
             "Settle reader", "**Settle reader** names a hub term twice. It "
             "also names a topic."))
@@ -13850,7 +13890,9 @@ def run_self_test():
             "also names a topic."))
         for _bad in ("{not json", '{"version": 3}', '{"version": 2, '
                      '"backfill": [{"entry": "x"}]}', '{"version": true}',
-                     '{"version": 2, "hub_footers": []}'):
+                     '{"version": 2, "hub_footers": []}',
+                     '{"version": 2, "bar": 0}', '{"version": 2, "bar": "2"}',
+                     '{"version": 2, "bar": true}'):
             with open(_ledger, "w", encoding="utf-8") as fh:
                 fh.write(_bad)
             _view = _settle_view(scan(_settle_wiki, settled=_ledger))
@@ -13860,7 +13902,8 @@ def run_self_test():
         _all_keys = [key for key in scan(_settle_wiki)["hub_footer"][0]
                      ["settle_keys"]]
         with open(_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 2, "hub_footer": _all_keys}, fh)
+            json.dump({"version": 2, "bar": CLOSENESS_BAR,
+                       "hub_footer": _all_keys}, fh)
         res = scan(_settle_wiki, settled=_ledger)
         check("a hub target left with no item is omitted",
               (res["hub_footer"], res["settled"]["hub_footer_suppressed"]),
@@ -13889,7 +13932,7 @@ def run_self_test():
         _later_views = [_later_view(scan(_later))]
         for _count in range(3):
             with open(_later_ledger, "w", encoding="utf-8") as fh:
-                json.dump({"version": 2, "backfill": [
+                json.dump({"version": 2, "bar": CLOSENESS_BAR, "backfill": [
                     {"entry": "settle-later", "target": "topic",
                      "surface": "topic", "context": _context}
                     for _context in _later_contexts[:_count]]}, fh)
@@ -13909,27 +13952,13 @@ def run_self_test():
         _three = next(row for row in scan(_later)["backfill_candidates"]
                       if row["slug"] == "settle-three")
         with open(_later_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 2, "backfill": _three["settle_keys"]}, fh)
+            json.dump({"version": 2, "bar": CLOSENESS_BAR,
+                       "backfill": _three["settle_keys"]}, fh)
         check("a rejection's settle_keys settle every sentence of its target",
               (len(_three["settle_keys"]),
                _later_view(scan(_later, settled=_later_ledger),
                            "settle-three")),
               (3, ([], 3, [])))
-        # A version-1 record settles its entry and target while it matches
-        # the target's first sentence; `upgrade` lists the others.
-        with open(_later_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 1, "backfill": [_three["settle_key"]]}, fh)
-        res = scan(_later, settled=_later_ledger)
-        check("a version-1 record settles its target's later sentences",
-              (_later_view(res, "settle-three"), res["settled"]["upgrade"]),
-              (([], 3, []), _three["settle_keys"][1:]))
-        with open(_later_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 2, "backfill": [_three["settle_key"]]
-                       + res["settled"]["upgrade"]}, fh)
-        res = scan(_later, settled=_later_ledger)
-        check("its version-2 rewrite with the upgrade keeps them settled",
-              (_later_view(res, "settle-three"), res["settled"]["upgrade"]),
-              (([], 3, []), []))
         # Body line numbers count from the line after the closing fence,
         # including blank lines left there (an item-9 defect).
         _gap_lines = os.path.join(tmp, "v-gap-lines")
@@ -13994,11 +14023,10 @@ def run_self_test():
               [len(scan(_gap_hub, settled=_ledger)["settled"]["stale"][kind])
                for kind in ("backfill", "hub_footer")], [0, 0])
         with open(_later_ledger, "w", encoding="utf-8") as fh:
-            json.dump({"version": 1}, fh)
-        check("an alias-inventory gap leaves a version-1 upgrade unknown",
-              [scan(_gap_hub, settled=path)["settled"]["upgrade"]
-               for path in (_ledger, _later_ledger)],
-              [[], None])
+            json.dump({"version": 2, "backfill": [_three["settle_key"]]}, fh)
+        check("an alias-inventory gap still drops an outdated ledger's records",
+              scan(_gap_hub, settled=_later_ledger)["settled"]["stale"],
+              {"backfill": [_three["settle_key"]], "hub_footer": []})
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -14120,7 +14148,8 @@ def main(argv=None):
                          "backfill_candidates occurrences and hub_footer "
                          "items it records (a settled occurrence yields to "
                          "the target's next sentence); a missing file is an "
-                         "empty ledger, an "
+                         "empty ledger, one judged under an older closeness "
+                         "bar settles nothing (settled.outdated), and an "
                          "unreadable or malformed one suppresses nothing and "
                          "is reported in settled.error. Never written here")
     ap.add_argument("--out", metavar="FILE",
