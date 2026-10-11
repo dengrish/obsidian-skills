@@ -4,8 +4,9 @@
 wiki-build's ``lint_entry.py`` and wiki-lint's ``scan_vault.py`` read these
 source-independent Quality Checklist floors (items 5, 6, 13, 14, 16 and 18,
 item 4's source-identity pairs, item 7's description subject, item 9's
-acronym-title expansion, list indentation, list mismatches and register
-candidates, item 17's single-word alias hint, and item 19's card set,
+acronym-title expansion, list indentation, list mismatches, register
+candidates and navigation-only links, the table and image lines items 9
+and 10 skip, item 12's literal dollars and raw math symbols, item 17's single-word alias hint, and item 19's card set,
 primary answer on card line 3, primary card and Spaced Repetition markers in
 the body and on card lines) and the discipline-root test from this one
 copy, so an entry that passes the builder gate does not fail the next scan on
@@ -37,6 +38,7 @@ from entry_structure import (  # noqa: E402
     description_subject_forms,
     first_letter_ci_equal,
     first_prose_paragraph_lines,
+    markdown_image_spans,
     mask_body_comments,
     math_title_plain_text,
     normalized_answer_surface,
@@ -73,6 +75,8 @@ __all__ = [
     "COMMON_NOUNS",
     "CROSS_DOMAIN_PHRASES",
     "EXTRA_CARD_PREFIX",
+    "IMAGE_EMBED_LINE_RE",
+    "NAVIGATION_ONLY_LINK_RE",
     "PAREN_LEADIN_RE",
     "SHARED_MUTATIONS",
     "SHARED_QUIET",
@@ -94,6 +98,7 @@ __all__ = [
     "flashcard_line3_fault",
     "flashcard_primary_answer",
     "flashcard_set_faults",
+    "image_embed_lines",
     "is_discipline_root",
     "kept_card_label",
     "label_drops_head",
@@ -101,13 +106,18 @@ __all__ = [
     "line3_parts",
     "list_indent_findings",
     "list_mismatch_findings",
+    "literal_dollar_count",
+    "markdown_image_line",
     "merge_scar_findings",
+    "navigation_only_link_lines",
     "organism_common_name_bound",
     "organism_common_name_surfaces",
     "plural_surface",
     "primary_card_label",
+    "presentation_lines",
     "primary_line3_faults",
     "pure_math_opener_markup",
+    "raw_math_symbol_faults",
     "register_findings",
     "source_identity_pairs",
     "source_meta_findings",
@@ -290,7 +300,9 @@ _API_FAILURE_STRINGS = [
     (r"`(True|False|None)`", "Python language literal in code form"),
 ]
 _CODE_IDENTIFIER_TITLE_RE = re.compile(r"^[A-Za-z_][\w]*(\.[A-Za-z_][\w]*)+$")
-_SPECIAL_TOKEN_LITERAL_RE = re.compile(r"\[[^\]\n]+\]")
+_SPECIAL_TOKEN_LITERAL_RE = re.compile(r"\[[A-Z][A-Z0-9_]*\]")
+# Backticked wikilink syntax shows link markup, not an API identifier.
+_LINK_SYNTAX_LITERAL_RE = re.compile(r"!?\[\[[^\[\]\n]+\]\]")
 
 
 def _file_extension_literal(token):
@@ -314,8 +326,8 @@ def api_surface_findings(entry_type, title, prose, body):
     framing or how-to signpost, else a code-form ``… or …`` alternative),
     ``fenced-code`` (read from the whole comment-masked ``body``: the fence is
     the finding) and ``backticked-identifiers`` (the zero cap; a file
-    extension such as ``.csv`` or ``.tar.gz`` and a bracket special token are
-    not identifiers).
+    extension such as ``.csv`` or ``.tar.gz``, a bracket special token such
+    as ``[CLS]`` and wikilink syntax are not identifiers).
     """
     if entry_type == "Software":
         return []
@@ -355,7 +367,8 @@ def api_surface_findings(entry_type, title, prose, body):
                         re.sub(r"`{3}.*?`{3}", " ", prose, flags=re.S))
     identifiers = [token.strip() for token in inline if token.strip()
                    and not _file_extension_literal(token.strip())
-                   and not re.fullmatch(r"\[.+\]", token.strip())]
+                   and not _SPECIAL_TOKEN_LITERAL_RE.fullmatch(token.strip())
+                   and not _LINK_SYNTAX_LITERAL_RE.fullmatch(token.strip())]
     if identifiers:
         findings.append({
             "check": "backticked-identifiers", "identifiers": identifiers,
@@ -895,10 +908,12 @@ def _lead_in_count(text):
 
 def list_mismatch_findings(prose, display_spans=(), table_spans=None):
     """Item 9's review candidates: a list that disagrees with the text that
-    refers to it.
+    refers to it, or a numbered list too short to be one.
 
-    Two checks, each a candidate with a one-based ``line``:
+    Three checks, each a candidate with a one-based ``line``:
 
+    - ``short-list``: a numbered list with fewer than three items, which the
+      builder writes as prose.
     - ``lead-in-count``: the colon sentence that opens a list states one
       count before a plural noun ("in three steps:"), and the list has a
       different number of top-level items. The noun may count something
@@ -928,6 +943,14 @@ def list_mismatch_findings(prose, display_spans=(), table_spans=None):
             continue
         items, ambiguous = _list_run(lines, start, masked)
         seen.update(item["line"] for item in items)
+        if head["number"] is not None and not ambiguous and len(items) < 3:
+            findings.append({
+                "check": "short-list", "line": start + 1,
+                "items": len(items),
+                "message": (
+                    "a numbered list needs three or more steps, and this one "
+                    "has %d — write a shorter sequence as prose"
+                    % len(items))})
         lead = _lead_in(lines, start, head["indent"], masked)
         count = _lead_in_count(lead[1]) if lead else None
         repeats = sum(1 for item in items if item["text"].startswith("Repeat"))
@@ -1136,7 +1159,7 @@ _CAPTION_LINE_RE = re.compile(r"^\s*\*(?!\*).*\*\s*$")
 # The anchor itself is read like the outer bold, so an italic taxon
 # (`- ***Mus musculus*** —`) is an anchor too.
 _BULLET_ANCHOR_RE = re.compile(
-    r"^\s*[-*]\s+\*\*" + BOLD_TEXT + r"\*\*(?!\*)"
+    r"^\s*[-*+]\s+\*\*" + BOLD_TEXT + r"\*\*(?!\*)"
     r"(?:\s*[*_]?[\(\[][^)\]\n]{1,60}[\)\]][*_]?)*\s*[—–:\-]")
 _SINGLE_SPAN_RE = re.compile(r"\[\[[^\]]*\]\]|\$[^$]+\$|`[^`]+`")
 _EMPHASIS_SPAN_RE = re.compile(
@@ -1177,9 +1200,12 @@ def unenumerated_bold_findings(prose, table_spans=()):
     opener_skipped = False
     for index, line in enumerate(masked.split("\n")):
         in_opener = opener[0] <= index < opener[1]
-        if _CAPTION_LINE_RE.match(line) or _BULLET_ANCHOR_RE.match(line):
+        if _CAPTION_LINE_RE.match(line):
             continue
-        for bold in BOLD_OUTER_RE.finditer(line):
+        # Only the anchor's own bold is enumerated; its text is read.
+        anchor = _BULLET_ANCHOR_RE.match(line)
+        start = anchor.end() if anchor else 0
+        for bold in BOLD_OUTER_RE.finditer(line, start):
             if in_opener and not opener_skipped:
                 opener_skipped = True
                 continue
@@ -1999,6 +2025,114 @@ def sr_card_syntax_fault(block, after=0):
 
 
 # ---------------------------------------------------------------------------
+# items 9, 10 and 12: presentation lines, navigation cues, literal dollars
+# and raw math symbols
+# ---------------------------------------------------------------------------
+
+#: A standalone Obsidian image-embed line, with an optional ``|width`` pipe.
+IMAGE_EMBED_LINE_RE = re.compile(
+    r"^\s*!\[\[[^\]\n]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
+    r"(?:\|[^\]\n]*)?\]\]\s*$", re.IGNORECASE)
+
+
+def markdown_image_line(line):
+    """Whether ``line`` is one Markdown image, ``![alt](url)``, and nothing else."""
+    stripped = (line or "").strip()
+    matches = list(markdown_image_spans(stripped))
+    return bool(matches and matches[0][0] == 0
+                and matches[0][1] == len(stripped))
+
+
+def image_embed_lines(body):
+    """Return the original lines and the standalone image-embed line indexes.
+
+    Embeds are found in the listing-masked body, so a syntax sample is no
+    embed; callers read captions from the original lines.
+    """
+    original = (body or "").split("\n")
+    masked = strip_code(body or "").split("\n")
+    return original, [index for index, line in enumerate(masked)
+                      if IMAGE_EMBED_LINE_RE.match(line)
+                      or markdown_image_line(line)]
+
+
+def presentation_lines(body):
+    """Line indexes of tables and image embeds, each with its caption line.
+
+    Item 12 owns a caption, so its link neither directs the reader (item 9)
+    nor counts as a body link (item 10).
+    """
+    count = len((body or "").split("\n"))
+    skip = set()
+    for header, last in markdown_table_spans(
+            strip_indented(strip_fenced(body or ""))):
+        skip.update(range(header, min(count, last + 2)))
+    for embed in image_embed_lines(body)[1]:
+        skip.update(index for index in (embed, embed + 1) if index < count)
+    return skip
+
+
+#: A cue that directs the reader to a wikilink: at the start of a line, a
+#: list item's text or its indented continuation, or after punctuation, with
+#: an optional colon ("See also: [[x]]").
+NAVIGATION_ONLY_LINK_RE = re.compile(
+    r"(?:^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?|"
+    r"[.!?,;:]\s+|\(\s*|[—–-]\s+)"
+    r"(?:see(?:\s+also)?|refer\s+to|consult|"
+    r"for\s+(?:more\s+)?details,?\s+see):?\s+\[\[", re.IGNORECASE)
+_ITALIC_LINE_RE = re.compile(r"^\s*\*.*\*\s*$")
+
+
+def navigation_only_link_lines(body):
+    """Item 9's floor: ``(index, line)`` for each line whose cue points
+    straight at a wikilink, outside listings, tables, image embeds and
+    whole-line italic captions. ``line`` is the original text."""
+    raw_lines = (body or "").split("\n")
+    skip = presentation_lines(body)
+    return [(index, raw_lines[index]) for index, line
+            in enumerate(strip_code(body or "").split("\n"))
+            if index not in skip and not _ITALIC_LINE_RE.match(line)
+            and NAVIGATION_ONLY_LINK_RE.search(line)]
+
+
+#: Inline math as Obsidian reads it: no whitespace just inside either ``$``,
+#: and a closing ``$`` never directly before a digit, so ``$HOME and $PATH``,
+#: ``^a$ and ^b$`` and ``$20 to $30`` each keep two literal dollars.
+_INLINE_MATH_RE = re.compile(
+    r"(?<!\\)\$(?=[^\s$])[^$\n]*?(?<=[^\s\\])\$(?!\d)")
+
+
+def literal_dollar_count(text):
+    """Item 12: the literal dollars left after code and math are removed."""
+    visible = strip_code(text or "").replace(r"\$", "x")
+    visible = re.sub(r"\$\$.*?\$\$", " ", visible, flags=re.DOTALL)
+    return _INLINE_MATH_RE.sub(" ", visible).count("$")
+
+
+#: A raw micrometre unit, ``μm`` or ``µm``, also right after a number.
+_RAW_MICROMETRE_RE = re.compile(r"(?<![A-Za-z])(?:μ|µ)m\b")
+
+
+def raw_math_symbol_faults(text):
+    """Item 12: raw Unicode math in rendered prose or a card prompt.
+
+    Returns one message per kind: any raw ``ℓ`` (a norm is inline-LaTeX
+    ``\\ell`` with its norm-order subscript, a loss is ``L``) and a raw
+    micrometre unit. A description, which renders no LaTeX, is checked
+    separately.
+    """
+    faults = []
+    if "ℓ" in (text or ""):
+        faults.append(
+            "a raw ℓ must be inline-LaTeX `\\ell` with a norm-order "
+            "subscript, such as `$\\ell_1$` or `$\\ell_2$`; a loss is `L`")
+    if _RAW_MICROMETRE_RE.search(text or ""):
+        faults.append("raw micrometre notation must use inline LaTeX, such "
+                      "as `$\\mu\\mathrm{m}$`")
+    return faults
+
+
+# ---------------------------------------------------------------------------
 # Differential fixtures
 # ---------------------------------------------------------------------------
 
@@ -2012,6 +2146,8 @@ SHARED_MUTATIONS = (
     ("item6 library framing", "In PyTorch the rate is a tensor.",
      "item6", "6-api-surface", False),
     ("item6 backticked identifier", "The rate is stored as `rate_value`.",
+     "item6", "6-api-surface", False),
+    ("item6 backticked list literal", "The rate lies in `[0, 1]`.",
      "item6", "6-api-surface", False),
     ("item6 fenced code", "```python\nrate = 1\n```",
      "item6", "6-api-surface", False),
@@ -2115,6 +2251,18 @@ SHARED_MUTATIONS = (
      "item9/register-candidate", "9-register-candidate", False),
     ("item9 praise in body prose", "The rate is a famous measure.",
      "item9/register-candidate", "9-register-candidate", False),
+    ("item9 a numbered list of two steps",
+     "The rate is found in two steps:\n\n1. Count the hits.\n"
+     "2. Divide the hits by the total.",
+     "item9/list-mismatch-candidate", "9-list-mismatch-candidate", False),
+    ("item9 a navigation cue with a colon", "See also: [[precision]].",
+     "item9/imperative-link", "9-link-integration", False),
+    ("item12 two shell variables", "It reads $HOME and $PATH at start.",
+     "item12", "12-literal-dollar", False),
+    ("item12 a raw micrometre after a number", "The pore is 10μm wide.",
+     "item12/equation-typography", "12-equation-typography", False),
+    ("item12 a loss written as a raw ℓ", "The loss ℓ(y) is used.",
+     "item12/equation-typography", "12-equation-typography", False),
 )
 
 #: A numbered procedure whose displays and paragraphs sit at their steps'
@@ -2215,6 +2363,10 @@ SHARED_QUIET = (
     ("item9 the classic example in body prose",
      "A ratio is the classic example of the rate.",
      "item9/register-candidate", "9-register-candidate"),
+    ("item10 a caption link is not counted beside the prose link",
+     "![[rate.png]]\n*The [[decision-threshold|threshold]] plot.*\n\n"
+     "The rate crosses the [[decision-threshold|threshold]].",
+     "item10/dup", "10-duplicate-wikilink"),
 )
 
 
@@ -2356,9 +2508,10 @@ def run_self_test(verbose=False):
           [["fenced-code"], ["fenced-code"], []])
     check("the identifier cap names each identifier",
           api_surface_findings("Concept", "Rate",
-                               "Use `alpha` and `beta` with `.csv`.",
+                               "Use `alpha` and `[0, 1]` with `.csv`, "
+                               "`[CLS]` and `[[x]]`.",
                                "")[-1]["identifiers"],
-          ["alpha", "beta"])
+          ["alpha", "[0, 1]"])
 
     # item 13
     check("schema keys, stray rules and digit lines are scars",
@@ -2517,8 +2670,8 @@ def run_self_test(verbose=False):
               "Training runs in three steps:\n\n" + steps
               + "3. Repeat from step 1 until the centers stop.",
               "Two designs dominate:\n- the TEM;\n- the SEM;\n- the STEM.")],
-          [[("lead-in-count", 1)], [("lead-in-count", 1)], [], [],
-           [("lead-in-count", 1)]])
+          [[("lead-in-count", 1)], [("short-list", 3), ("lead-in-count", 1)],
+           [], [], [("lead-in-count", 1)]])
     check("only one whole count of items is compared: a partial count, a "
           "measure, a compound, two counts or a count before the colon "
           "sentence count nothing",
@@ -2554,7 +2707,8 @@ def run_self_test(verbose=False):
               "   - the runs;\n   - the rounds.\n2. Divide.",
               "1. Weigh the two inputs:\n   1. the hits;\n   2. the runs."
               "\n\nThe weights add up.\n\n   3. the rounds.")],
-          [[], [], [("lead-in-count", 3)], []])
+          [[], [], [("short-list", 3), ("lead-in-count", 3)],
+           [("short-list", 1), ("short-list", 2), ("short-list", 7)]])
     check("a Repeat step must name an earlier step of its list, as written "
           "or as rendered",
           [mismatch(prose) for prose in (
@@ -2616,6 +2770,37 @@ def run_self_test(verbose=False):
                ("It ended in the Terminal Classic period.", None),
                ("Classic Maya collapse ended an era.", None))],
           [[], [], [("praise", 1)]])
+    check("a numbered list of fewer than three steps is a short-list "
+          "candidate; a bullet list and a three-step list are not",
+          [mismatch(prose) for prose in (
+              "It runs in order:\n\n" + steps, "1. Assign each point.",
+              "It has two parts:\n\n- the hits;\n- the runs.",
+              steps + "3. Split the cell.")],
+          [[("short-list", 3)], [("short-list", 1)], [], []])
+
+    # items 9, 10 and 12: presentation lines, cues, dollars, raw symbols
+    sample = ("See also: [[a]].\n![[f.png]]\n*See [[b]].*\n\n| x |\n|---|\n"
+              "| see [[c]] |\n*Refer to [[d]].*\nIt is, see [[e]].")
+    check("tables, image embeds and their captions are presentation lines; "
+          "a cue before a link elsewhere, with or without a colon, is "
+          "navigation-only",
+          (sorted(presentation_lines(sample)),
+           [index for index, _line in navigation_only_link_lines(sample)]),
+          ([1, 2, 4, 5, 6, 7], [0, 8]))
+    check("inline math has no space inside its dollars, so shell variables, "
+          "regex anchors, prompts and prices stay literal; math does not",
+          [literal_dollar_count(text) for text in (
+              "It reads $HOME and $PATH.", "The regex ^a$ and ^b$ anchor.",
+              "Type $ ls or $ cd.", "Prices of $5 and $x.",
+              "From $20 to $30.", r"With $1 \le k$, $x$ and \$5.",
+              r"A deposit of $\$100$ grows.")],
+          [2, 2, 2, 2, 2, 0, 0])
+    check("any raw ℓ and a raw micrometre after a number or space are raw "
+          "math symbols; a letter before μm is not",
+          [len(raw_math_symbol_faults(text)) for text in (
+              "The loss ℓ(y) falls.", "It is 10μm or 10 μm wide.",
+              "A $\\ell_1$ norm and Xμm.")],
+          [1, 1, 0])
 
     # item 14
     check("source-meta phrases and the technical source compounds",
@@ -2703,6 +2888,13 @@ def run_self_test(verbose=False):
           unenumerated_bold_findings(
               "**Rate** opens.\n\n- ***Mus musculus*** — the house mouse.\n"
               "- ***E. coli* K-12** — a lab strain."), [])
+    check("a + bullet is an anchor too",
+          unenumerated_bold_findings(
+              "**Rate** opens.\n\n+ **Recall** — the share found."), [])
+    check("bold in an anchor's definition text is unenumerated bold",
+          [finding["span"] for finding in unenumerated_bold_findings(
+              "**Rate** opens.\n\n- **Recall** — the share **always** "
+              "found.")], ["always"])
     check("an anchor without a delimiter is still unenumerated bold",
           checks(unenumerated_bold_findings(
               "**Rate** opens.\n\n- ***Mus musculus*** lives here.")),

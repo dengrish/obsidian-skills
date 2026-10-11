@@ -1017,7 +1017,12 @@ def _sibling_representations(path, parents):
     """
     stem = os.path.splitext(os.path.basename(path))[0]
     identity = _nfc_low(core_stem(stem, is_stem=True))
-    real = os.path.realpath(path)
+
+    def is_path(candidate):
+        try:
+            return os.path.samefile(candidate, path)
+        except OSError:
+            return os.path.realpath(candidate) == os.path.realpath(path)
     out, looked = [], set()
     for parent in parents:
         if os.path.realpath(parent) in looked:
@@ -1028,7 +1033,7 @@ def _sibling_representations(path, parents):
             if (f.lower().endswith(".pdf")
                     and _nfc_low(core_stem(f)) == identity
                     and os.path.isfile(candidate)
-                    and os.path.realpath(candidate) != real):
+                    and not is_path(candidate)):
                 out.append(candidate)
     return out
 
@@ -1717,6 +1722,17 @@ def _vault_relative(vault, path):
     return "/".join(reversed(tail))
 
 
+def _vault_spelled(vault, path):
+    """`path`, which `_inside` accepted, under `vault`'s own spelling.
+
+    `_inside` accepts a case or Unicode spelling of the same vault directory;
+    the family scan compares the source with vault-spelled paths as strings.
+    """
+    rel = _vault_relative(vault, path)
+    return (os.path.join(os.path.abspath(vault), *rel.split("/")) if rel
+            else path)
+
+
 def _path_map(vault, moves):
     """({old file key: new path}, {old folder key: new path}) for `moves`.
 
@@ -2004,8 +2020,8 @@ def _debase_res(name):
     uri_guard = r"(?![A-Za-z][A-Za-z0-9+.-]*:|//)"
     return (re.compile(r"(!?\[\[)(%s[^\[\]\n|#]*/)(%s)(?=[ \t]*[\]\\|#])"
                        % (uri_guard, esc), re.I),
-            re.compile(r"(\]\()(%s[^()\s\n]*/)(%s)(?=[)?#]|[ \t]+[\"'(])"
-                       % (uri_guard, esc), re.I),
+            re.compile(r"(\]\([ \t]*)(%s[^()\s\n]*/)(%s)"
+                       r"(?=[)?#]|[ \t]+[)\"'(])" % (uri_guard, esc), re.I),
             re.compile(r"(\]\(<)(%s[^<>\r\n]*/)(%s)(?=[>#])"
                        % (uri_guard, esc), re.I),
             # Reference-style definitions, bare and angle-bracketed, also
@@ -2963,6 +2979,8 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
             "establish ownership of files inside that vault. Omit --vault "
             "and --dest to rename this independent download in place; "
             "this command never imports it into the vault." % path]
+    if have_vault:
+        path = _vault_spelled(vault, path)
 
     # Measured on the name that actually lands on disk, not the one the caller
     # typed: this skill keeps the source's own extension, so `--to '<stem>'` with
@@ -3166,9 +3184,14 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
             published_year_targets[owned_path] = target_year
     mine = {os.path.realpath(p) for p in keyed}
     # Filing under an unchanged stem takes that name too, so another
-    # source's note or images there block it as they block a rename.
-    if have_vault and (_nfc_low(new_stem) != _nfc_low(old_stem)
-                       or dest is not None or foreign_paths):
+    # source's note or images there block it as they block a rename. A
+    # basename taken vault-wide is settled first: that file's own note and
+    # crops occupy the stem, and a re-plan under another name re-checks it.
+    name_taken = any(os.path.realpath(p) not in mine for p in
+                     existing.get(_nfc_low(written_basename), []))
+    if have_vault and not name_taken and (
+            _nfc_low(new_stem) != _nfc_low(old_stem)
+            or dest is not None or foreign_paths):
         blockers.extend(_target_stem_blockers(
             vault, new_stem, mine,
             alternative=("another chapter name"
@@ -3269,9 +3292,11 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
     # Every colliding path, not just one: two files already sharing a
     # lowercased basename are two separate obstacles, and naming one of them
     # sends the user back around the same refusal after they have moved it.
+    reported = []
     for new in sorted(set(ren.values())):
         clashes = [p for p in existing.get(_nfc_low(new), [])
                    if os.path.realpath(p) not in mine]
+        reported.extend(clashes)
         if clashes:
             blockers.append("%s already exists at %s"
                             % (new, ", ".join(clashes)))
@@ -3334,9 +3359,11 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
         except OSError:
             return os.path.realpath(src) == os.path.realpath(dst)
 
+    # A destination the vault-wide check above already named is not repeated.
     blockers += ["%s already exists at %s" % (os.path.basename(dst), dst)
                  for src, dst in moves
-                 if os.path.lexists(dst) and not _same(src, dst)]
+                 if os.path.lexists(dst) and not _same(src, dst)
+                 and not any(_same(p, dst) for p in reported)]
 
     # A symlinked source: `os.rename` moves the LINK and leaves the real file
     # behind under its old name -- which is the exact hazard SKILL.md tells the
@@ -3417,7 +3444,23 @@ def plan_rename(vault, path, new_basename, dest=None, foreign=()):
             blockers.append("%s Markdown and Canvas references could not be "
                             "scanned completely." % exc)
             holders = []
-        markdown_files = [p for p in holders if not _is_canvas(p)]
+        # The walk spells a keyed note as its folder lists it (`articles/`),
+        # `keyed_files` as NOTE_DIRS does; per-note state uses the keyed path.
+        keyed_notes = {}
+        for p, b in keyed.items():
+            if _nfc_low(b).endswith(".md"):
+                keyed_notes.setdefault(_nfc_low(b), []).append(p)
+
+        def _keyed_spelling(holder):
+            for p in keyed_notes.get(_nfc_low(os.path.basename(holder)), ()):
+                try:
+                    if os.path.samefile(holder, p):
+                        return p
+                except OSError:
+                    pass
+            return holder
+        markdown_files = [_keyed_spelling(p) for p in holders
+                          if not _is_canvas(p)]
         canvases = [p for p in holders if _is_canvas(p)]
         path_map = _path_map(vault, moves)
         # Each file whose folder changes: a filed source, or a chapter or
@@ -4582,6 +4625,7 @@ def _cmd_check(args):
               "download; matching its basename cannot establish ownership of "
               "the vault's notes or images.", file=sys.stderr)
         return 1
+    path = _vault_spelled(vault, path)
     try:
         names = vault_names(vault)
         keyed = keyed_files(vault, path)
@@ -4637,6 +4681,8 @@ def _cmd_rename(args):
         print("No vault (--vault not given): the vault-wide uniqueness and reference "
               "checks did not run. Only the literal destination is checked."
               )
+    elif _inside(vault, path):
+        path = _vault_spelled(vault, path)
     try:
         keyed = keyed_files(vault, path) if vault else {}
     except InventoryFailed as exc:
@@ -6815,6 +6861,13 @@ def _selftest():
           debase_links(_uri_new, {"Doe_Study_2025.pdf"}),
           ("[cdn](//cdn.example.org/files/Doe_Study_2025.pdf) "
            "[local](Doe_Study_2025.pdf)"))
+    _v = _vault("Inbox", "Sources/PDFs", "Wiki")
+    _pdf = _put(_v, "Inbox/x.pdf")
+    _padded = _put(_v, "Wiki/padded.md", "[a]( Inbox/x.pdf ) [b](Inbox/x.pdf )\n")
+    check("filing debases a padded inline link",
+          plan_rename(_v, _pdf, "Doe_X_2025.pdf",
+                      dest=os.path.join(_v, "Sources", "PDFs"))[1].get(_padded),
+          "[a]( Doe_X_2025.pdf ) [b](Doe_X_2025.pdf )\n")
     check("filing debases reference definitions and HTML src/href",
           debase_links('[r]: ../Inbox/a.pdf\n'
                        '[s]: <../My Inbox/a.pdf> "t"\n'
@@ -8363,6 +8416,54 @@ def _selftest():
             check("a distinct folded-name symlink is not a filesystem alias",
                   not _inside(_v, os.path.join(_alias, "future.pdf")),
                   True)
+        else:
+            check("folded-name symlink regression skipped on this filesystem",
+                  True, True)
+
+    # A source typed under another spelling of the same vault directory
+    # keeps its summary note, and a split book collects each copy once.
+    with _tf.TemporaryDirectory(prefix="org-vault-spelling-") as _tmp:
+        _v = os.path.join(_tmp, "SpellVault")
+        _alias = os.path.join(_tmp, "spellvault")
+        _put(_v, "Inbox/download.pdf")
+        _put(_v, "Articles/download.md",
+             '---\nsources:\n  - "[[Inbox/download.pdf]]"\n---\n')
+        for _rel in ("Doe_Book_2020.pdf", "Doe_Book_2020_src.pdf",
+                     "Doe_Book_2020/Doe_Book_2020_01_Intro.pdf"):
+            _put(_v, "Sources/PDFs/" + _rel)
+        _code, _stdout, _ = _run_cli([
+            "rename", os.path.join(_v, "Inbox", "download.pdf"), "--vault",
+            os.path.join(_v, os.pardir, "SpellVault"), "--to", "Doe_X_2020.pdf"])
+        check("a --vault spelled with .. keeps the source inside it",
+              (_code, "No blockers" in _stdout), (0, True))
+        if os.path.isdir(_alias):
+            _moves = plan_rename(
+                _v, os.path.join(_alias, "Inbox", "download.pdf"),
+                "Doe_X_2020.pdf", dest=os.path.join(_v, "Sources", "PDFs"))[0]
+            check("a source under another vault spelling keeps its note",
+                  sorted(os.path.basename(_dst) for _src, _dst in _moves),
+                  ["Doe_X_2020.md", "Doe_X_2020.pdf"])
+            _book = os.path.join(_alias, "Sources", "PDFs", "Doe_Book_2020.pdf")
+            _moves, _edits, _blockers = plan_rename(_v, _book,
+                                                    "Doe_Book_2021.pdf")
+            check("a split book under another vault spelling moves each "
+                  "copy once",
+                  (_blockers, len(_moves), [os.path.basename(_p) for _p in
+                   _sibling_representations(
+                       _book, (os.path.join(_v, "Sources", "PDFs"),))]),
+                  ([], 4, ["Doe_Book_2020_src.pdf"]))
+            _src = os.path.join(_alias, "Inbox", "download.pdf")
+            _code, _stdout, _ = _run_cli(["check", _src, "--vault", _v])
+            check("check under another vault spelling lists the note",
+                  "Names keyed to download.pdf (2)" in _stdout, True)
+            _code, _stdout, _ = _run_cli(["rename", _src, "--vault", _v,
+                                          "--to", "Doe_X_2020.pdf", "--apply"])
+            check("rename under another vault spelling verifies the note",
+                  (_code, "any of the 2 old names" in _stdout), (0, True))
+        else:
+            for _skipped in ("summary note", "split book", "check", "rename"):
+                check("vault-spelling %s regression skipped on this "
+                      "filesystem" % _skipped, True, True)
 
     with _tf.TemporaryDirectory(prefix="org-src-book-test-") as _v:
         _book = _put(_v, "Sources/PDFs/Doe_Book_2025_src.pdf")
@@ -8887,7 +8988,8 @@ def _selftest():
             os.symlink(os.path.join(_v, "ArchivedResearch"),
                        os.path.join(_v, "Investments"), target_is_directory=True)
         except (OSError, NotImplementedError):
-            pass
+            check("Investments alias regression skipped on this filesystem",
+                  True, True)
         else:
             _moves, _edits, _blockers = plan_rename(_v, _pdf, "Doe_New_2025.pdf")
             check("a physical alias of Investments remains protected",
@@ -8961,6 +9063,44 @@ def _selftest():
                                               _read_snapshot=_no_reread)), True)
         os.remove(_latin)
 
+    with _tf.TemporaryDirectory(prefix="org-guard-redownload-") as _v:
+        # A re-download of a filed PDF: the taken name is settled first, so
+        # the filed copy's note and crop are no target-stem occupants, and
+        # the occupied destination is named once.
+        _pdf = _put(_v, "Inbox/download.pdf")
+        _filed = _put(_v, "Sources/PDFs/Doe_X_2025.pdf")
+        _put(_v, "Articles/Doe_X_2025.md",
+             "---\nsources:\n  - \"[[Doe_X_2025.pdf]]\"\n---\n")
+        _put(_v, "Sources/Images/Doe_X_2025_fig_1.png", b"\x89PNG\r\n\x1a\n")
+        _blocked = _guard_blockers(_v, _pdf, "Doe_X_2025.pdf",
+                                   dest=os.path.join(_v, "Sources", "PDFs"))
+        check("a taken name raises no target-stem blocker",
+              [item for item in _blocked if "already exists at" not in item],
+              [])
+        check("an occupied filing destination is named once",
+              [item for item in _blocked if "already exists at" in item],
+              ["Doe_X_2025.pdf already exists at %s" % _filed])
+
+    # On a case-insensitive volume a lowercase `articles/` folder holds the
+    # owned note; the walk and `keyed_files` spell its path differently.
+    with _tf.TemporaryDirectory(prefix="org-folded-notes-") as _v:
+        _pdf = _put(_v, "Sources/PDFs/Doe_Foo_2024.pdf")
+        _put(_v, "articles/Doe_Foo_2024.md", _published_note)
+        if os.path.isdir(os.path.join(_v, "Articles")):
+            try:
+                _blockers = rename_all(_v, _pdf, "Doe_Foo_2026.pdf",
+                                       apply=True)[2]
+                _got = (_blockers, "published: 2026-01-01" in Path(
+                    _v, "articles", "Doe_Foo_2026.md").read_text(
+                        encoding="utf-8"))
+            except (RenameFailed, OSError) as _exc:
+                _got = str(_exc)
+            check("an owned note in a case-variant Articles folder follows "
+                  "the year rename", _got, ([], True))
+        else:
+            check("case-variant Articles regression skipped on this "
+                  "filesystem", True, True)
+
     with _tf.TemporaryDirectory(prefix="org-guard-outside-") as _tmp:
         _v = os.path.join(_tmp, "vault")
         os.makedirs(os.path.join(_v, "Sources", "PDFs"))
@@ -9007,7 +9147,8 @@ def _selftest():
             os.symlink(_real_manifest,
                        os.path.join(_v, "Sources", "Images", MANIFEST_FILE))
         except (OSError, NotImplementedError):
-            pass
+            check("symlinked sidecar regression skipped on this filesystem",
+                  True, True)
         else:
             check("a figure sidecar that cannot follow the rename blocks it",
                   any("cannot safely follow the source rename" in item
@@ -9035,6 +9176,10 @@ def _selftest():
                               _v, _pdf, "Doe_New_2025.pdf")[2]), True)
             finally:
                 os.chmod(_pdfs, 0o755)
+    else:
+        for _skipped in ("read-only note", "read-only folder"):
+            check("%s regression skipped where permissions do not bind"
+                  % _skipped, True, True)
 
     # --- A note is parsed once per rename plan: the literal pre-gate skips
     # --- notes that cannot name a changed file, and debasing then rewriting
@@ -9502,6 +9647,9 @@ def _selftest():
                        plan_rename(_v, _pdf, "Doe_Study_2020.pdf")[2])),
                   (True, True))
             os.remove(_link)
+        else:
+            check("leaf canvas symlink regression skipped on this filesystem",
+                  True, True)
 
     # A canvas edited after planning is preserved and fails the apply; a
     # failed apply restores a rewritten canvas byte for byte.

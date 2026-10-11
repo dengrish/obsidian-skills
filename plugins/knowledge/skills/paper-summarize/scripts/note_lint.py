@@ -241,8 +241,13 @@ _ANY_EMBED = re.compile(r"!\[\[[^\]\n]+\]\]")
 # A `**bold**` span; `***term***` (bold italic) yields `*term`.
 _BOLD = re.compile(r"\*\*(.+?)\*\*")
 _AVAILABILITY_BULLET = re.compile(
-    r"\A-\s+\*\*(Data|Code|Materials|Sources|Record|Evidence)\.\*\*\s+",
+    r"\A-\s+\*\*(Data|Code|Materials|Sources|Record|Evidence)\.\*\*(?:\s+|\Z)",
     re.I)
+# In a description: a backslash escape or macro, or `$…$` math as Obsidian
+# reads it, with no whitespace just inside either `$` and no digit after the
+# closing one, so currency (`$5 to $2`) stays plain.
+_NOT_PLAIN_TEXT = re.compile(
+    r"\\[^\s\\]|(?<!\\)\$(?=[^\s$])[^$\n]*?(?<=[^\s\\])\$(?!\d)")
 # `[[Stem.pdf#page=5|5]]` -- group 1 the target, group 2 the display text if any.
 _PAGE_LINK = re.compile(r"\[\[([^\]|]*#page=[^\]|]*)(?:\|([^\]]*))?\]\]")
 # The whole citation: the link wrapped in <sup>, which is how Obsidian renders a
@@ -652,6 +657,11 @@ def _check_front_matter(note, keys, kv, allow_unorganized=False):
         if isinstance(bare, str) and len(bare) > MAX_DESCRIPTION:
             note.fail(2, "`description` is %d characters, over the %d limit"
                          % (len(bare), MAX_DESCRIPTION))
+        # A page citation here is reported once, by the citation check.
+        plain = _PAGE_LINK.sub("", bare) if isinstance(bare, str) else ""
+        if "[[" in plain or _NOT_PLAIN_TEXT.search(plain):
+            note.fail(2, "`description` is plain text: no wikilinks, LaTeX or "
+                         "Markdown escapes (CONVENTIONS.md 2b)")
 
     if "author" in kv:
         inline = kv["author"][0]
@@ -738,8 +748,12 @@ def _check_origin_round_trip(note):
 
 def _check_callout(note, body_start, fenced):
     lines = note.raw_lines
+    # The first body line opens the callout, even after a stray blank line.
+    first = next((n for n in range(body_start, len(lines)) if lines[n].strip()),
+                 None)
     for n, l in enumerate(lines):
-        if n > body_start and n not in fenced and l.strip() == "> [!Summary]":
+        if (first is not None and n > first and n not in fenced
+                and l.strip() == "> [!Summary]"):
             note.fail(n + 1, "a second `> [!Summary]` callout; the note has one, "
                              "at the top")
     i = body_start
@@ -807,7 +821,8 @@ def _check_callout(note, body_start, fenced):
 
 
 def _check_rule(note, i):
-    """One blank, `___`, one blank.  Returns the line after the second blank."""
+    """One blank, `___`, one blank, then the first `##` heading.  Returns the
+    first non-blank line after the rule."""
     lines = note.raw_lines
     if i < len(lines) and not lines[i].strip():
         i += 1
@@ -818,11 +833,22 @@ def _check_rule(note, i):
     else:
         note.fail(i + 1, "expected `___` alone on its line after the callout")
         return i
-    if i < len(lines) and not lines[i].strip():
-        i += 1
-    else:
+    j = i
+    while j < len(lines) and not lines[j].strip():
+        j += 1
+    if j < len(lines) and not lines[j].startswith("## "):
+        # Another heading level, a second callout, a table, an embed or
+        # another rule is its own check's finding.
+        if not (re.match(r"\A(?:#(?!#)\s|###+\s)", lines[j])
+                or _TABLE_ROW.match(lines[j]) or _ANY_EMBED.search(lines[j])
+                or lines[j].strip() == "> [!Summary]"
+                or _OTHER_RULE.match(lines[j].strip())):
+            note.fail(j + 1, "the first `##` heading follows the blank line "
+                             "under `___`; text here belongs to no section: %r"
+                      % lines[j][:50])
+    elif j == i:
         note.fail(i + 1, "expected a blank line between `___` and the first heading")
-    return i
+    return j
 
 
 def _check_structure(note, body_start, fenced, mode):
@@ -839,6 +865,15 @@ def _check_structure(note, body_start, fenced, mode):
         if s and s != "___" and _OTHER_RULE.match(s):
             note.fail(n + 1, "horizontal rule %r below the front matter; the only "
                              "rule in the note is the single `___`" % s)
+    # Whatever the `##` count, so a section heading at the wrong level is
+    # named, not only counted.
+    for n, l in enumerate(lines[body_start:], body_start):
+        if n in fenced:
+            continue
+        if re.match(r"\A#(?!#)\s", l):
+            note.fail(n + 1, "no `#` heading in the note: %r" % l)
+        elif re.match(r"\A###+\s", l):
+            note.fail(n + 1, "no `###` subheading in the note: %r" % l)
 
     heads = [(n, l[3:].strip()) for n, l in enumerate(lines[body_start:], body_start)
              if l.startswith("## ") and n not in fenced]
@@ -887,13 +922,6 @@ def _check_structure(note, body_start, fenced, mode):
         if bare.isupper():
             note.fail(n + 1, "heading %d (%s) is in capitals; a heading is a "
                              "sentence, in sentence case" % (idx + 1, role))
-    for n, l in enumerate(lines[body_start:], body_start):
-        if n in fenced:
-            continue
-        if re.match(r"\A#(?!#)\s", l):
-            note.fail(n + 1, "no `#` heading in the note: %r" % l)
-        elif re.match(r"\A###+\s", l):
-            note.fail(n + 1, "no `###` subheading in the note: %r" % l)
 
     # Section bodies: non-empty, and the right kind (bullets vs prose).
     bounds = []
@@ -908,7 +936,8 @@ def _check_structure(note, body_start, fenced, mode):
             continue
         if start + 1 < len(lines) and lines[start + 1].strip():
             note.fail(start + 2, "no blank line under the %s heading" % name)
-        if start > 0 and lines[start - 1].strip():
+        # A heading right under `___` is _check_rule's finding.
+        if start > 0 and lines[start - 1].strip() not in ("", "___"):
             note.fail(start + 1, "no blank line above the %s heading" % name)
         if name in BULLET_ROLES:
             if not any(l.startswith("- ") for l in content):
@@ -1774,11 +1803,13 @@ def _check_math(note, body_start):
                              "as a power of e ($e^{-t}$), even for a long "
                              "exponent (references/note-format.md)"
                   % c["math"][:60])
-    for c in find_ell_non_norm_candidates(body):
+    # A raw ℓ, as a PDF text layer gives it, is read as `\ell`.
+    for c in find_ell_non_norm_candidates(body.replace("ℓ", "\\ell ")):
         note.fail(c["line"], "`\\ell` that names no norm in math (%s) -- "
                              "`\\ell` names only norms ($\\ell_1$, $\\ell_2$), "
-                             "so a loss is $L$ and an index takes another "
-                             "letter (references/note-format.md)"
+                             "so a loss is $L$, a log-likelihood $\\log L$, "
+                             "and an index takes another letter "
+                             "(references/note-format.md)"
                   % c["math"][:60])
 
 
@@ -2099,7 +2130,8 @@ def _cases():
                  "Five stands. Six ends. Seven overflows."),
          "one topic per paragraph"),
         ("blank line above callout",
-         _mutate("---\n> [!Summary]", "---\n\n> [!Summary]"), "blank line between"),
+         _mutate("---\n> [!Summary]", "---\n\n> [!Summary]"),
+         "__ONLY__blank line between the closing"),
         ("URL in Summary callout",
          _mutate("> - Three.", "> - Details are at https://example.org/data."),
          "callout contains a URL"),
@@ -2177,6 +2209,25 @@ def _cases():
         ("description too long",
          _mutate("description: Doe cut recurrence from 45% to 8% in a 219-patient trial.",
                  "description: " + "x" * 111), "over the 110 limit"),
+        ("a wikilink in the description",
+         _mutate("description: Doe cut recurrence",
+                 "description: Doe cut [[recurrence]]"),
+         "__ONLY__`description` is plain text"),
+        ("LaTeX in the description",
+         _mutate("description: Doe cut recurrence",
+                 "description: A model with $e^{x}$ gating cut"),
+         "__ONLY__`description` is plain text"),
+        ("inline math without a LaTeX command in the description",
+         _mutate("description: Doe cut recurrence",
+                 "description: A $k$-means variant cut"),
+         "__ONLY__`description` is plain text"),
+        ("a Markdown escape in the description",
+         _mutate("description: Doe cut recurrence from 45% to 8% in a 219-patient trial.",
+                 'description: "Revenue rose \\\\$5M in a year."'),
+         "__ONLY__`description` is plain text"),
+        ("NEAR MISS: currency amounts in the description are plain text",
+         _mutate("description: Doe cut recurrence from 45% to 8% in a 219-patient trial.",
+                 "description: Cost fell from $5 to $2 per dose."), CLEAN),
         ("heading is a bare label",
          _mutate("## Participant data on request, no analysis code", "## Availability"), "not a sentence about"),
         ("heading is another bare label",
@@ -2203,7 +2254,22 @@ def _cases():
         ("no blank above the rule", _mutate("> - Three.\n\n___", "> - Three.\n___"),
          "blank line between the callout and `___`"),
         ("no blank below the rule", _mutate("___\n\n## Recurrent", "___\n## Recurrent"),
-         "blank line between `___` and the first heading"),
+         "__ONLY__blank line between `___` and the first heading"),
+        ("text between the rule and the first heading",
+         _mutate("___\n\n## Recurrent", "___\n\nThis paper matters.\n\n## Recurrent"),
+         "__ONLY__text here belongs to no section"),
+        ("an embed between the rule and the first heading is one finding",
+         _mutate("___\n\n## Recurrent",
+                 "___\n\n![[Doe_X_2025_fig_1.png]]\n*The arms separated "
+                 "early. Curves for both arms.*\n\n## Recurrent"),
+         "__ONLY__figure embed outside the Results section"),
+        ("prose opening with a pipe between the rule and the first heading",
+         _mutate("___\n\n## Recurrent",
+                 "___\n\n|d| > 0.8 marked a large effect.\n\n## Recurrent"),
+         "__ONLY__text here belongs to no section"),
+        ("a first heading at the wrong level is named, not only counted",
+         _mutate("___\n\n## Recurrent", "___\n\n### Recurrent"),
+         "no `###` subheading in the note: '### Recurrent"),
         ("rule is not `___`", _mutate("\n___\n", "\n***\n"),
          "expected `___` alone on its line"),
         ("stray hr", _mutate("## Worth offering after a second recurrence in adults\n\nProse.",
@@ -2397,6 +2463,11 @@ def _cases():
         ("an \\ell norm and a loss written as L are clean",
          _mutate("More prose.", "The weights' $\\ell_2$ norm stays small "
                  "while $L(\\hat{y}, y)$ falls."), CLEAN),
+        ("a loss written as a raw ℓ is a violation",
+         _mutate("More prose.", "The loss $ℓ(\\hat{y}, y)$ falls."),
+         "__ONLY__`\\ell` names only norms"),
+        ("NEAR MISS: a raw ℓ norm with its subscript is clean",
+         _mutate("More prose.", "The $ℓ_2$ norm shrinks weights."), CLEAN),
         ("'figures' meaning numbers is prose",
          _mutate("More prose.<sup>", "The headline figures 45% and 8% both hold."
                  "<sup>"), CLEAN),
@@ -2436,8 +2507,8 @@ def _cases():
         ("notice mode rejects empirical availability labels",
          GOOD, "do not apply in notice mode", "notice"),
         ("Availability disclosure text cannot be empty",
-         _mutate("- **Data.** Not stated.", "- **Data.** "),
-         "no disclosure or record text"),
+         _mutate("- **Data.** Not stated.", "- **Data.**"),
+         "__ONLY__no disclosure or record text"),
         ("a Limitations bullet cannot be empty",
          _mutate("- **One.** Prose.\n- **Two.** Prose.",
                  "- \n- **Two.** Prose."),

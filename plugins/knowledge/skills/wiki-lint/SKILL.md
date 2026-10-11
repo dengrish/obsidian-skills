@@ -66,7 +66,9 @@ Task 3 has its stricter connected-closure recovery rule.
 A request to correct, simplify or deepen named entries, or to remove a class
 of defects in a named scope, runs Task 1b's
 [correction protocol](references/source-backed-corrections.md) on that scope
-and the neighbors a consolidation, split, merge or retitle must touch. A
+and the neighbors a consolidation, split, merge or retitle must touch, then
+Task 2 on the link worklist those repairs hand it, such as a missing entry's
+mentions. A
 retitle, alias-removal, merge or split request, whatever its scope, uses the
 [refactor protocol](references/refactors.md). A deletion runs
 [its own protocol](references/refactors.md#delete-an-entry), but only when
@@ -106,8 +108,8 @@ blocked.
 - **Blocked.** An issue §2d blocks, such as one that needs a deletion (an
   explicit request in chat), an uncited source (an empty `sources:` is not
   one, nor is a root's [form repair](references/hierarchy.md#establish-discipline-roots)
-  overview page) or a change a
-  builder rule forbids, stays verbatim in the field and out of the logs; the
+  overview page) or what a builder rule forbids, stays verbatim in the field
+  and out of the logs; the
   report names its blocker, and it resets no `read:`.
 
 Once the owning tasks have run, rewrite the field under §2d in the last
@@ -234,7 +236,8 @@ Repair in this order:
 
 1. **Corrections, simplification and deepening** under the correction
    protocol: new information the cited sources do not give, removed with its
-   copies in the description, card and `aliases:`; over-qualification and edge-case
+   copies in the description and card, and in `aliases:` through step 4's
+   alias-removal protocol; over-qualification and edge-case
    caveats; core-facet gaps; unexplained statements; self-containment terms;
    acronym and full-form pairs; framing in the entry's own field and against
    the nearest contrast its sources draw; a prototype-first opening that says

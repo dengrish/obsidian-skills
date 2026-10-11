@@ -73,9 +73,8 @@ Resolve each blocker at its cause, then re-plan:
     says.
   - *Another tool's crop of this PDF* matches a figure on these pages, as
     each of a slide deck's crops does (one with an uppercase panel letter,
-    such as `_fig_1A_B`, and every crop beside it); a note outside
-    `Sources/` that embeds it, such as a `Slides/` deck, supports this. It shares the stem, current or target: the PDF
-    still takes its natural name.
+    such as `_fig_1A_B`, and every crop beside it). It shares the stem,
+    current or target: the PDF still takes its natural name.
   - *Any other image*, such as a clipping-clean image or an image these
     pages do not show, sends a PDF that would take or keep that stem to a
     distinguishing abbreviated title by the

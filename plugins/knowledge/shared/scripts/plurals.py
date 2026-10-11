@@ -245,9 +245,17 @@ _DOUBLE_TAIL_RE = re.compile(r"([bdfglmnprt])\1$")
 
 
 def _stem_token(token):
-    """Light suffix stem used only for collision signals, never titles."""
-    value = token
-    for suffix in _STEM_SUFFIXES:
+    """Light suffix stem used only for collision signals, never titles.
+
+    A word and its plural share a stem: class/classes, study/studies and
+    analysis/analyses (a Greek -sis noun) too.
+    """
+    value, suffixes = token, _STEM_SUFFIXES
+    if value.endswith("sis") and len(value) > 5:
+        value, suffixes = value[:-2], ()
+    for suffix in suffixes:
+        if suffix == "s" and value.endswith(("ss", "us")):
+            break  # class, status: no plural s
         # Agent-noun endings are too short and too common in lexical roots for
         # a three-character remainder to be useful: ``error`` became ``er``
         # after ``-or`` removal plus doubled-tail folding. A four-character
@@ -255,6 +263,8 @@ def _stem_token(token):
         floor = 4 if suffix in ("er", "ers", "or", "ors") else 3
         if value.endswith(suffix) and len(value) - len(suffix) >= floor:
             value = value[: -len(suffix)]
+            if suffix in ("ies", "ied"):
+                value += "y"  # studies, studied -> study
             break
     value = _DOUBLE_TAIL_RE.sub(r"\1", value)  # modell -> model
     if len(value) > 3 and value.endswith("e"):
@@ -352,6 +362,10 @@ STEM_CASES = [
     ("masked-language-model", "masked-language-modeling", True),
     ("tokenization", "tokenizer", True),
     ("roc-curve", "roc-curves", True),
+    ("decision-class", "decision-classes", True),
+    ("computer-virus", "computer-viruses", True),
+    ("case-study", "case-studies", True),
+    ("error-analysis", "error-analyses", True),
     ("random-forest", "gradient-boosting", False),
 ]
 

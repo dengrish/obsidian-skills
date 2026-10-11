@@ -6,7 +6,7 @@ fingerprint. Feed collection and stock dossier helpers may retain verified
 producer records in their private operational state; those records are not
 note content or research evidence.
 
-`shared/scripts/note_provenance.py inspect --plugin '<plugin>' --skill '<skill-name>'`
+`python3 '<plugin>/shared/scripts/note_provenance.py' inspect --plugin '<plugin>' --skill '<skill-name>'`
 verifies the installed bundle and reports its identity without writing files.
 Use the helper shipped by that plugin. The helper has no note-stamping command.
 

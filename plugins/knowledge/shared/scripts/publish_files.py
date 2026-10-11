@@ -6,10 +6,12 @@ file is published with ``atomic_move.publish_new`` and a replacement with
 ``atomic_move.replace_expected`` against that recorded version, a removal with
 ``atomic_move.remove_expected`` and a move with ``atomic_move.move_noreplace``.
 PATH is vault-relative (forward slashes) or absolute and must resolve inside
-the vault's real path. A leaf symlink is never followed. A case alias of an
-existing file is unsafe, and a Unicode normalization variant is replaced
-under its on-disk spelling, so a replacement never renames the file. Manifest
-paths that differ only in case or normalization are refused.
+the vault's real path. A leaf symlink is never followed. A case variant of an
+existing file is unsafe on every filesystem, and a Unicode normalization
+variant is replaced under its on-disk spelling where the filesystem finds it
+(unsafe where it does not), so a replacement never renames the file and no
+twin is created. Manifest paths that differ only in case or normalization are
+refused.
 
 ``--owned-dir DIR`` (repeatable; ``snapshot``, ``verify`` and ``publish``)
 names a direct child of the vault that must be one readable real directory.
@@ -202,15 +204,26 @@ def _owned_dir_refusal(vault, key, owned_dirs):
 
 def observe(target):
     """``(state, token, error)`` for one path, never following a symlink."""
+    name = os.path.basename(target)
     try:
         item = os.lstat(target)
     except FileNotFoundError:
+        # A case- or normalization-sensitive filesystem misses a twin that
+        # an insensitive one finds as an alias: refuse it on every host.
+        try:
+            names = os.listdir(os.path.dirname(target))
+        except OSError:
+            return "absent", None, None
+        twins = sorted(n for n in names
+                       if portable_identity(n) == portable_identity(name))
+        if twins:
+            return "unsafe", None, ("%s shares this name's case/Unicode "
+                                    "identity" % twins[0])
         return "absent", None, None
     except OSError as exc:
         return "unsafe", None, _describe(exc)
     # A case-insensitive filesystem finds the file under an alias spelling,
     # and publishing through that spelling would rename it.
-    name = os.path.basename(target)
     try:
         names = os.listdir(os.path.dirname(target))
     except OSError as exc:
@@ -1292,6 +1305,20 @@ def run_self_test():
         else:
             check("distinct case-variant files skipped on a case-insensitive "
                   "filesystem", True, True)
+
+        put(wiki("Pair.md"), b"pair\n")
+        put(wiki("pair-src.md"), b"source\n")
+        pairs = os.path.join(scratch, "pairs.json")
+        payload, code = cmd_snapshot(vault, ["Wiki/PAIR.md"], pairs)
+        cmd_snapshot(vault, ["Wiki/pair-src.md"], pairs)
+        moved, move_code = cmd_move(vault, pairs, "Wiki/pair-src.md",
+                                    "Wiki/PAIR.md")
+        check("a case variant of an existing file is unsafe on every "
+              "filesystem, and no move creates it",
+              (code, payload["snapshots"][0]["state"], move_code,
+               actions(moved), spellings("pair.md"),
+               os.path.lexists(wiki("pair-src.md"))),
+              (1, "unsafe", 1, ["refused"], ["Pair.md"], True))
 
         os.makedirs(os.path.join(vault, "Other"))
         os.symlink("Other", os.path.join(vault, "Reviews"))

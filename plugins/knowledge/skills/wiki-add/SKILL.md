@@ -227,7 +227,7 @@ matches that request's `absent` record.
 
 **Revalidate (builder step 7.7).** Rewrite `<scratch>/candidates.json` with
 this item's final title and every alias form the draft carries or step 2
-probed, each once, in place of the builder's title-only list. Rerun step 2's index and
+probed, each once. Rerun step 2's index and
 collision probes against the real Wiki (a private empty folder while Wiki is
 absent) and the
 [ownership check](references/research.md#check-ownership-of-a-candidate-source)

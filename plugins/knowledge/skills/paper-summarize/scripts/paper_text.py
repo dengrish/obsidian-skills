@@ -455,8 +455,10 @@ def _furniture(page_lines):
     return {line for line, count in counts.items() if count >= need}
 
 
-#: Leading section numbering: `1 `, `2.3 `, `IV. `.
-_NUMBERING = re.compile(r"\A[\s#*]*(?:[0-9]+(?:\.[0-9]+)*|[IVXLC]+)[.)]?\s+")
+#: Leading section numbering: `1 `, `2.3 `, `IV. `.  Lines arrive casefolded,
+#: and a Roman numeral needs its punctuation, so a word such as `civil` stays.
+_NUMBERING = re.compile(
+    r"\A[\s#*]*(?:[0-9]+(?:\.[0-9]+)*[.)]?|[ivxlc]+[.)])\s+")
 
 
 def _only_section_names(norm):
@@ -774,6 +776,13 @@ def run_self_test():
                   + ["1 Introduction\nText %d.\n%d" % (p, p) for p in (2, 3, 4)]
                   + ["2 Methods\nText %d.\n%d" % (p, p) for p in (5, 6, 7)]
                   + ["Results\nText %d.\n%d" % (p, p) for p in (8, 9, 10)]),
+         {"abstract": [1], "introduction": [2], "methods": [5],
+          "results": [8]})
+    case("a Roman-numbered section-named running head starts its section once",
+         sections(["Abstract\nWe study x.\n1"]
+                  + ["I. Introduction\nText %d.\n%d" % (p, p) for p in (2, 3, 4)]
+                  + ["II. Methods\nText %d.\n%d" % (p, p) for p in (5, 6, 7)]
+                  + ["III. Results\nText %d.\n%d" % (p, p) for p in (8, 9, 10)]),
          {"abstract": [1], "introduction": [2], "methods": [5],
           "results": [8]})
     # `Summary` is an abstract only as the whole heading: the Nature

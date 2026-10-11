@@ -53,9 +53,9 @@ treating a detector match as permission to rewrite.
   `David S. Goodsell/PDB101 / Modified by Quanta Magazine`, a "Figure N"
   caption, or a one-line italic figure caption between two body paragraphs) with
   no image anywhere adjacent: no markdown `![](…)`, HTML `<img>`,
-  `<!-- image download failed … -->` or `<!-- source has … -->` placeholder, or
-  — on reprocess — `![[…]]`. Remove it. A caption kept beside a failure
-  placeholder stays. If the line is ambiguous — a genuine pull-quote, an
+  `<!-- image download failed … -->`, `<!-- missing attachment: … -->` or
+  `<!-- source has … -->` placeholder, or — on reprocess — `![[…]]`. Remove
+  it. A caption kept beside a failure placeholder stays. If the line is ambiguous — a genuine pull-quote, an
   epigraph attribution (`— Oscar Wilde`), a one-line aside, or a `Source:`
   that's part of the prose's argument — **keep it and flag it in the report**.
 - **Run-on section-navigation fragments** — a single line of several Title-Cased
@@ -227,9 +227,9 @@ treating a detector match as permission to rewrite.
   forcing them into pipe syntax often loses fidelity.
 - **Equations and typographic super/subscripts** follow [equations](equations.md).
 - **Currency dollars** — escape every literal currency `$` in the body as `\$`,
-  with or without other math; never in YAML values. When in doubt, escape: `\$`
-  is never wrong in the body. The review pass re-checks delimiter balance and
-  currency escaping as a backstop.
+  with or without other math; never in YAML values. Leave `$` bare inside a
+  kept HTML `<table>`, where Obsidian renders neither escapes nor math. The
+  review pass re-checks delimiter balance and currency escaping as a backstop.
 - **Missing equation or diagram bodies** — when Web Clipper kept an equation's
   label or the prose around it but not the equation (a bare `(5-38)` line, a
   sentence like `since , i.e. we consider it quite unlikely…` with a missing

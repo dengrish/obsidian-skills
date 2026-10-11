@@ -372,7 +372,7 @@ def partition_cross_chapter_references(pdf_path, found_labels, missing,
             # local namespace is mixed or uncertain. Do not hide any miss.
             return list(missing), []
         found_prefixes.add(match.group("chapter"))
-    if found_prefixes != {local_prefix}:
+    if found_prefixes and found_prefixes != {local_prefix}:
         return list(missing), []
 
     cache = caption_cache if caption_cache is not None else {}
@@ -1222,11 +1222,11 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                             page, dropped caption excerpt, output label) where
                             two captions in this same PDF normalized to the
                             same filename.
-                            The first caption "won" (was written); the later
-                            one was dropped. Common when a paper uses both
-                            `Figure S1` AND `Supplementary Figure 1` style,
-                            or prints a continuation caption. Pages are
-                            one-based.
+                            The first caption that got a crop "won" (was
+                            written); the other was dropped. Common when a
+                            paper uses both `Figure S1` AND `Supplementary
+                            Figure 1` style, or prints a continuation
+                            caption. Pages are one-based.
         reviewed_collisions: list — collisions whose kept label carries a
                             review mark: reported, but no longer a failure.
                             An Extended Data/Supplementary pair is never
@@ -1414,6 +1414,29 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
     # the same filename) from idempotent re-run skips (file existed before
     # we started). Maps out_path → (first caption label, its one-based page).
     written_this_run = {}
+    # Captions whose free slot got a degenerate or blank crop, or that
+    # cannot crop the figure an existing output holds, by out_path:
+    # [(collision without its winner, the report entries added)].
+    unfilled = {}
+    # Existing outputs whose first caption deferred: {out_path: (its fig_num,
+    # the output's digest, whether --overwrite kept it)}.
+    deferred = {}
+
+    def claim(out_path, raw_label, page_no):
+        """Record that `raw_label` holds `out_path` in this run. An earlier
+        caption that got no crop for it was not the figure: its report
+        entries go, and it becomes a collision this caption won."""
+        written_this_run[out_path] = (raw_label, page_no)
+        for dropped, entries in unfilled.pop(out_path, ()):
+            label, page, excerpt, fig_suffix, fig_num = dropped
+            for key, item in entries:
+                result[key][:] = [x for x in result[key] if x is not item]
+            collision = (raw_label, page_no, label, page, excerpt, fig_suffix)
+            if (((stem, fig_num) in reviewed or (stem, fig_suffix) in reviewed)
+                    and not _ed_supplementary_pair(raw_label, label)):
+                result["reviewed_collisions"].append(collision)
+            else:
+                result["collisions"].append(collision)
     # {output path: digest} for every output this PDF's run noted, so a
     # replaced file's place in `seen_hashes` can pass to a surviving twin.
     noted = {}
@@ -1532,6 +1555,9 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     result["collisions"].append(collision)
                 continue
 
+            # The report entries this caption adds, for `failed`.
+            entries = []
+
             def record_reason(honor_review=True):
                 # Only a caption that wins its output slot can have a crop to
                 # review. Recording this before collision resolution made a
@@ -1549,12 +1575,31 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     return
                 if honor_review and ((stem, fig_num) in reviewed
                                      or (stem, fig_suffix) in reviewed):
-                    result["reviewed"].append((fig_num, reason))
+                    entries.append(("reviewed", (fig_num, reason)))
                 else:
-                    result["warnings"].append((fig_num, reason))
+                    entries.append(("warnings", (fig_num, reason)))
                     crop_pages.add(page_idx)
                     if reason.startswith(CAPTION_IN_CROP_TAG):
-                        result["caption_in"].append((fig_num, reason))
+                        entries.append(("caption_in", (fig_num, reason)))
+                for key, item in entries:
+                    result[key].append(item)
+
+            def failed(key, item):
+                # This caption's free slot got no crop. A later caption that
+                # fills the slot was the figure (`claim`).
+                result[key].append(item)
+                unfilled.setdefault(out_path, []).append((
+                    (raw_label, page_idx + 1,
+                     _caption_excerpt(doc, page_idx, _cap_rect), fig_suffix,
+                     fig_num),
+                    entries + [(key, item)]))
+
+            def kept(why):
+                # --overwrite got no new crop, so the verified crop stays: it
+                # is kept, not missing. A later caption that re-crops the
+                # figure claims it; otherwise this one does at the end.
+                failed("kept", (fig_num, why))
+                deferred.setdefault(out_path, (fig_num, replace_digest, True))
 
             slot_conflict = slot_conflict_for(fig_suffix, out_path)
             if slot_conflict is not None:
@@ -1597,7 +1642,16 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                 record_reason()
                 if not (overwrite or (overwrite_s and _S_LABEL_RE.fullmatch(
                         figure_identity(fig_suffix)))):
-                    written_this_run[out_path] = (raw_label, page_idx + 1)
+                    if degenerate(bbox):
+                        # As on the first run, a later caption that can crop
+                        # the figure claims it; otherwise this one does.
+                        deferred.setdefault(out_path, (fig_num, digest, False))
+                        unfilled.setdefault(out_path, []).append((
+                            (raw_label, page_idx + 1,
+                             _caption_excerpt(doc, page_idx, _cap_rect),
+                             fig_suffix, fig_num), entries))
+                        continue
+                    claim(out_path, raw_label, page_idx + 1)
                     result["skipped"] += 1
                     _note_output(result, seen_hashes, out_path, fig_num, stem,
                                  manifest, digest=digest, noted=noted)
@@ -1607,7 +1661,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     # A review mark commonly follows an explicit-coordinate
                     # repair. A broad automatic --overwrite must not undo that
                     # checked crop; --unmark-reviewed opts it back in.
-                    written_this_run[out_path] = (raw_label, page_idx + 1)
+                    claim(out_path, raw_label, page_idx + 1)
                     result["skipped"] += 1
                     _note_output(result, seen_hashes, out_path, fig_num, stem,
                                  manifest, digest=digest, noted=noted)
@@ -1625,18 +1679,11 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             # made the documented repair remain "missing" on every later run.
             if degenerate(bbox):
                 if replace_digest is not None:
-                    # --overwrite cannot re-crop it, so the verified crop
-                    # stays. It is kept, not missing.
-                    result["kept"].append((
-                        fig_num, f"automatic re-crop failed: degenerate bbox "
-                                 f"on page {page_idx + 1}"))
-                    written_this_run[out_path] = (raw_label, page_idx + 1)
-                    _note_output(result, seen_hashes, out_path, fig_num, stem,
-                                 manifest, digest=replace_digest, noted=noted)
+                    kept(f"automatic re-crop failed: degenerate bbox on page "
+                         f"{page_idx + 1}")
                     continue
-                result["failures"].append(
-                    (fig_num, f"degenerate bbox on page {page_idx + 1} — set an explicit crop")
-                )
+                failed("failures", (
+                    fig_num, f"degenerate bbox on page {page_idx + 1} — set an explicit crop"))
                 continue
 
             # Replacing a `_fig_S<N>` crop that holds an Extended Data figure
@@ -1645,7 +1692,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             if (replace_digest is not None and ed_holder is not None
                     and not move_extended_data_links(
                         out_path, ed_holder, True)):
-                written_this_run[out_path] = (raw_label, page_idx + 1)
+                claim(out_path, raw_label, page_idx + 1)
                 _note_output(result, seen_hashes, out_path, fig_num, stem,
                              manifest, digest=replace_digest, noted=noted)
                 continue
@@ -1655,7 +1702,7 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
             if dry_run:
                 result["extracted"] += 1
                 result["written"].append(written_name)
-                written_this_run[out_path] = (raw_label, page_idx + 1)
+                claim(out_path, raw_label, page_idx + 1)
                 would_write.add(out_path)
                 crop_pages.add(page_idx)
                 continue
@@ -1671,20 +1718,14 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     # blank render instead of moving a picture of empty page
                     # into the vault, so this is not an extraction.
                     if replace_digest is not None:
-                        # The verified crop it would have replaced stays.
-                        result["kept"].append((
-                            fig_num, f"automatic re-crop on page "
-                                     f"{page_idx + 1} was blank"))
-                        written_this_run[out_path] = (raw_label, page_idx + 1)
-                        _note_output(result, seen_hashes, out_path, fig_num,
-                                     stem, manifest, digest=replace_digest,
-                                     noted=noted)
+                        kept(f"automatic re-crop on page {page_idx + 1} "
+                             f"was blank")
                         continue
-                    result["blank"].append((fig_num, page_idx + 1))
+                    failed("blank", (fig_num, page_idx + 1))
                     continue
                 result["extracted"] += 1
                 result["written"].append(written_name)
-                written_this_run[out_path] = (raw_label, page_idx + 1)
+                claim(out_path, raw_label, page_idx + 1)
                 crop_pages.add(page_idx)
                 if replace_digest is not None:
                     # A duplicate found against the replaced bytes compares
@@ -1787,6 +1828,16 @@ def process_pdf(pdf_path, out_dir, overwrite=False, dpi=250, dry_run=False,
                     f"(page {page_idx+1}): {e}{location_note}",
                     file=sys.stderr,
                 )
+
+        for out_path, (fig_num, digest, was_kept) in deferred.items():
+            waiting = unfilled.get(out_path)
+            if waiting:
+                (label, page, *_rest), _entries = waiting.pop(0)
+                claim(out_path, label, page)
+                if not was_kept:
+                    result["skipped"] += 1
+                _note_output(result, seen_hashes, out_path, fig_num, stem,
+                             manifest, digest=digest, noted=noted)
 
         # Detection stopped at a failed ownership save, so the captions after
         # it were never read. Coverage would call each of them missing.
@@ -2283,7 +2334,7 @@ def print_summary(per_pdf, out_dir, skipped_books=None, review_file=None,
         print()
 
     if total_collisions or total_reviewed_collisions:
-        print("Caption collisions (later caption dropped — two supplementary styles in one")
+        print("Caption collisions (one caption dropped — two supplementary styles in one")
         print("PDF, or a continuation caption, are the usual causes):")
         # {PDF: [S labels whose kept crop is Extended Data]} in report order.
         ed_pairs = {}
@@ -3189,7 +3240,8 @@ def run_self_test():
                                manifest=dict(repaired_manifest))
         check("--overwrite keeps a repair its degenerate detection cannot "
               "replace", (kept_top["failures"], [k[0] for k in kept_top["kept"]],
-                          kept_top["extracted"]), ([], ["3"], 0))
+                          kept_top["extracted"], kept_top["skipped"]),
+              ([], ["3"], 0, 0))
         check("...and its bytes are unchanged",
               open(repaired_path, "rb").read(), repaired_bytes)
 
@@ -3294,6 +3346,56 @@ def run_self_test():
               (len(dropped_reason["collisions"]), dropped_reason["warnings"],
                dropped_reason["caption_in"], dropped_reason["extracted"]),
               (1, [], [], 1))
+
+        # A first caption that got no crop (a continuation line, say) was not
+        # the figure when a later caption fills its slot: the pair is a
+        # collision the later caption won, and nothing is missing.
+        first_fail_pdf = _st_fig_pdf(
+            os.path.join(tmp, "Doe_FirstFail_2025.pdf"),
+            captions=("Figure 1. Continued.", "Figure 1. Synthetic."))
+        for bucket, first_bbox, first_reason in (
+                ("failures", fitz.Rect(100, 60, 316, 60),
+                 "degenerate rect 216x0 — nothing to render"),
+                ("blank", fitz.Rect(100, 500, 500, 700), "")):
+            def first_fail_detector(_doc, first_bbox=first_bbox,
+                                    first_reason=first_reason):
+                yield (0, "1", "Figure 1", first_bbox,
+                       fitz.Rect(100, 420, 300, 432), first_reason)
+                yield (1, "1", "Figure 1", fitz.Rect(100, 200, 500, 400),
+                       fitz.Rect(100, 420, 300, 432), "")
+
+            first_fail_out = os.path.join(tmp, "FirstFail-" + bucket)
+            os.makedirs(first_fail_out)
+            first_fail_manifest = {}
+            try:
+                globals()["detect_figures"] = first_fail_detector
+                first_fail = process_pdf(first_fail_pdf, first_fail_out,
+                                         dpi=72, manifest=first_fail_manifest)
+                rerun = (process_pdf(first_fail_pdf, first_fail_out, dpi=72,
+                                     manifest=first_fail_manifest)
+                         if bucket == "failures" else None)
+                overwritten = process_pdf(first_fail_pdf, first_fail_out,
+                                          dpi=72, overwrite=True,
+                                          manifest=first_fail_manifest)
+            finally:
+                globals()["detect_figures"] = original_detect_figures
+            check("a first caption with no crop (%s) loses to the caption "
+                  "that fills its slot" % bucket,
+                  (first_fail["failures"], first_fail["blank"],
+                   first_fail["warnings"], first_fail["extracted"],
+                   [c[:4] for c in first_fail["collisions"]]),
+                  ([], [], [], 1, [("Figure 1", 2, "Figure 1", 1)]))
+            if rerun is not None:
+                check("a re-run keeps the caption that fills the slot",
+                      (rerun["warnings"], rerun["skipped"],
+                       [c[:4] for c in rerun["collisions"]]),
+                      ([], 1, [("Figure 1", 2, "Figure 1", 1)]))
+            check("an --overwrite re-run (%s) re-crops from the caption that "
+                  "fills the slot" % bucket,
+                  (overwritten["extracted"], overwritten["kept"],
+                   overwritten["skipped"],
+                   [c[:4] for c in overwritten["collisions"]]),
+                  (1, [], 0, [("Figure 1", 2, "Figure 1", 1)]))
 
         # Exercise the real detector boundary too: nearby captions are often
         # one PyMuPDF text block. Both must reach this collision report even
@@ -3572,6 +3674,12 @@ def run_self_test():
               partition_cross_chapter_references(
                   Path(chapter_pdf), ["7-1", "1"], ["6-6"]),
               (["6-6"], []))
+        check("a chapter with no numeric caption relies on its filename and "
+              "the exact sibling caption",
+              partition_cross_chapter_references(
+                  Path(chapter_pdf), [], ["6.6", "7-2"],
+                  chapter_pdfs=[Path(sibling_pdf)], caption_cache={}),
+              (["7-2"], ["6.6"]))
 
         # Two source PDFs, same pixels, different stems.
         dup_dir = os.path.join(tmp, "dup")
@@ -4038,7 +4146,10 @@ def run_self_test():
         absent_records, absent_snapshot = load_manifest(os.path.join(tmp, "nope.tsv"))
         check("load_manifest on a file that does not exist",
               (absent_records, absent_snapshot[0]), ({}, False))
-        man_path = os.path.join(tmp, "man.tsv")
+        # One level below tmp: the stale save keeps its draft beside the
+        # sidecar's folder, which must be inside tmp, not $TMPDIR.
+        man_path = os.path.join(tmp, "manifest-save", "man.tsv")
+        os.makedirs(os.path.dirname(man_path))
         published_snapshot = save_manifest(
             man_path, {"a_fig_1.png": "a" * 64, "b_fig_2.png": "b" * 64},
             expected=load_manifest(man_path)[1])
@@ -4763,7 +4874,7 @@ def run_self_test():
         ])
         check("a run that drops a caption collision exits non-zero", code, 1)
         ok("the failed collision run names the dropped caption",
-           "later caption dropped" in so
+           "one caption dropped" in so
            and "Extended Data Figure 1" in so)
 
         # Each PDF with a written or flagged crop names its multi-column pages.
@@ -6098,7 +6209,8 @@ def main(argv=None):
         "--include-split-books", action="store_true",
         help=(
             "Also extract from a book PDF whose chapter PDFs are in the same "
-            "run, or in the vault when the book is named. Default: skip or "
+            "run or, with the vault's canonical Sources/Images output, "
+            "anywhere in the vault. Default: skip or "
             "refuse the book, because its figures would be "
             "written a second time under the book's stem — byte-identical, "
             "never colliding, and permanently unused whichever stem an entry "

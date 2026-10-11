@@ -42,7 +42,8 @@ Read the results as follows:
 - Currency-rate and inflation matches require comparison with the source.
   Item 11 skips URLs; fractions and dates are expected false positives. After
   literal currency dollars are escaped, check math-delimiter pairing; an even
-  count alone is not proof.
+  count alone is not proof. A bare `$` inside a kept `<table>` is an expected
+  item 9 match; leave it out of the item 10 parity.
 - Stray-HTML matches may be intentional complex tables, a `<br>` in a pipe-table
   cell, or a retained sup/sub with no plain equivalent. Chrome and
   backlink-header matches are candidates: remove only confirmed chrome under
@@ -147,7 +148,7 @@ suggested detector; do not edit an installed plugin during clipping processing.
   source evidence; ordinals, prices, dates, chemical names and prose notation
   were not forced into math mode.
 - [ ] Literal currency dollars in the Summary and body are escaped (never in
-  YAML values), and math delimiters are balanced.
+  YAML values or inside a kept `<table>`), and math delimiters are balanced.
   Source comparison also catches **dropped** symbols or denominators, such as
   `0.03/1K tokens`, `33K tokens/` or a bare amount before an inflation note.
   Restore only what the clipping lost, not an author's original odd wording.

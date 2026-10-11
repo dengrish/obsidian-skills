@@ -5702,7 +5702,12 @@ continues here`
                                    type=socket.SOCK_STREAM)
             except socket.gaierror:
                 # Some platforms reject a legacy numeric spelling before this
-                # script can classify it. The mocked cases below cover those.
+                # script can classify it. The mocked cases below cover those;
+                # both cases still count, so every host gives the same tally.
+                check("check_url refuses %s (%s): skipped, the resolver "
+                      "rejects this spelling" % (label, host), True, True)
+                check("...unless --allow-private-hosts is passed (%s): "
+                      "skipped" % host, True, True)
                 continue
             raises("check_url refuses %s (%s)" % (label, host), check_url, url)
             check("...unless --allow-private-hosts is passed (%s)" % host,

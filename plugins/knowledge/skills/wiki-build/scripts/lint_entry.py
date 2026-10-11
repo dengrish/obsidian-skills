@@ -115,9 +115,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               a colon lead-in states one count ("in three
                               steps:") and the list has another number of
                               top-level items (a count that leaves out a
-                              final Repeat step passes too), or a "Repeat
+                              final Repeat step passes too), a "Repeat
                               from step N" item names no earlier step of its
-                              list; agent reviews
+                              list, or a numbered list has fewer than three
+                              items; agent reviews
       9-register-candidate    advisory: praise (famous, one of the most
                               important; classic, except before example or
                               case in the body) in the
@@ -145,7 +146,7 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
   11  11-related-footer       exactly one terminal `**Related:**` line (bare
                               label or ` · `-separated whole wikilinks) before
                               the Flashcards separator, with a blank line
-                              on each side
+                              on each side, listing each entry once
   11  11-related-display      every Related-footer link except a self-link
                               (reported only as 10-self-link) is piped;
                               folder mode also requires the resolved target's
@@ -169,7 +170,7 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               line 1 (nonempty and count guards, sign ranges on
                               named strengths or rates, probabilities summing
                               to one, card sums over every term); agent reviews
-      12-equation-typography  raw ell-norm or micrometre symbols in body/card
+      12-equation-typography  a raw ell or micrometre symbol in body/card
                               surfaces that require inline LaTeX
       12-ell-non-norm         a `\\ell` with no norm-order subscript (a
                               number, p, q or infinity) in body or card
@@ -447,7 +448,6 @@ from entry_structure import (  # noqa: E402
     FLASH_HEAD_CANON_RE,
     RELATED_HEAD_LINE_RE,
     first_letter_ci_equal,
-    markdown_image_spans as _markdown_image_spans,
     source_stem,
     strip_code,
     strip_fenced,
@@ -502,6 +502,7 @@ from entry_checks import (  # noqa: E402
     flashcard_line3_fault,
     flashcard_primary_answer,
     flashcard_set_faults,
+    image_embed_lines,
     is_discipline_root,
     kept_card_label,
     label_drops_head,
@@ -509,10 +510,14 @@ from entry_checks import (  # noqa: E402
     line3_parts,
     list_indent_findings,
     list_mismatch_findings,
+    literal_dollar_count,
     merge_scar_findings,
+    navigation_only_link_lines,
     organism_common_name_bound,
+    presentation_lines,
     primary_line3_faults,
     pure_math_opener_markup,
+    raw_math_symbol_faults,
     register_findings,
     source_identity_pairs,
     source_meta_findings,
@@ -1226,8 +1231,16 @@ def _check_related_footer(sections, findings, own=frozenset()):
             "by whole-line wikilinks separated with ` · `",
             {"body_line": index + 1, "text": line[:160]}))
     # Folder mode adds the resolved canonical title to these findings.
+    listed = set()
     for target, display in extract_wikilinks(line):
         key = _link_key(target)
+        if key in listed:
+            findings.append(_f(
+                "11-related-footer", "error",
+                "Related footer lists [[%s]] twice; keep one" % target,
+                {"target": target}))
+            continue
+        listed.add(key)
         if display is None and not ("/" not in key and key in own):
             findings.append(_f(
                 "11-related-display", "error",
@@ -1566,31 +1579,10 @@ def _check_parents(fm, findings, filename):
             {"line": field.line}))
 
 
-_OBSIDIAN_IMAGE_EMBED_LINE_RE = re.compile(
-    r"^\s*!\[\[[^\]\n]*\.(?:png|jpe?g|gif|svg|webp|tiff?|bmp|avif|ico)"
-    r"(?:\|[^\]\n]*)?\]\]\s*$", re.IGNORECASE)
-
-
-def _markdown_image_line(line):
-    stripped = (line or "").strip()
-    matches = list(_markdown_image_spans(stripped))
-    return bool(matches and matches[0][0] == 0 and matches[0][1] == len(stripped))
-
-
-def _image_embed_lines(body):
-    """Return original lines and real standalone image-embed line indexes."""
-    original = body.split("\n")
-    masked = strip_code(body).split("\n")
-    return original, [
-        i for i, line in enumerate(masked)
-        if _OBSIDIAN_IMAGE_EMBED_LINE_RE.match(line) or _markdown_image_line(line)
-    ]
-
-
 def _check_image_captions(fm, sections, findings):
     """Item 12 image-caption adjacency and plainness for both embed forms."""
     body = "\n".join(sections["prose_lines"])
-    lines, embeds = _image_embed_lines(body)
+    lines, embeds = image_embed_lines(body)
     for embed_i in embeds:
         caption = lines[embed_i + 1].strip() if embed_i + 1 < len(lines) else ""
         faults = _caption_faults(caption)
@@ -1755,18 +1747,8 @@ def _check_equation_coverage_candidates(fm, sections, findings,
                                {"matches": rows}))
 
 
-def _literal_dollar_count(text):
-    """Count literal dollars after removing code and valid math spans."""
-    visible = strip_code(text or "").replace(r"\$", " ")
-    visible = re.sub(r"\$\$.*?\$\$", " ", visible, flags=re.DOTALL)
-    # A closing math delimiter is not immediately followed by a digit. This
-    # preserves both signs in ``$20 ... $30`` while accepting numeric math.
-    visible = re.sub(r"(?<!\\)\$(?!\$)[^$\n]*\$(?!\d)", " ", visible)
-    return visible.count("$")
-
-
 def _check_literal_dollars(body, findings):
-    count = _literal_dollar_count(body)
+    count = literal_dollar_count(body)
     if count:
         findings.append(_f(
             "12-literal-dollar", "error",
@@ -1779,17 +1761,9 @@ def _check_unicode_math(fm, sections, findings, extras=frozenset()):
     """Catch raw mathematical Unicode in rendered prose/card surfaces."""
     prose = strip_code("\n".join(sections["prose_lines"]))
     for line_no, line in enumerate(prose.split("\n"), 1):
-        if re.search(r"ℓ(?:[0-9₀-₉])", line):
+        for fault in raw_math_symbol_faults(line):
             findings.append(_f(
-                "12-equation-typography", "error",
-                "raw ℓ-norm notation must use inline LaTeX, such as "
-                "`$\\ell_1$` or `$\\ell_2$`",
-                {"body_line": line_no, "text": line.strip()[:160]}))
-        if re.search(r"(?<!\w)(?:μ|µ)m\b", line):
-            findings.append(_f(
-                "12-equation-typography", "error",
-                "raw micrometre notation must use inline LaTeX, such as "
-                "`$\\mu\\mathrm{m}$`",
+                "12-equation-typography", "error", fault,
                 {"body_line": line_no, "text": line.strip()[:160]}))
     description = fm.scalar("description") or ""
     if re.search(r"ℓ(?:[0-9₀-₉])", description):
@@ -1800,17 +1774,10 @@ def _check_unicode_math(fm, sections, findings, extras=frozenset()):
             {"field": "description", "text": description[:160]}))
     for card_no, card in _cards(sections):
         line1 = card[0] if card else ""
-        if re.search(r"ℓ(?:[0-9₀-₉])", line1):
+        for fault in raw_math_symbol_faults(line1):
             findings.append(_card_f(
                 "12-equation-typography", "error",
-                "raw ℓ-norm notation in flashcard %d line 1 must use inline "
-                "LaTeX, such as `$\\ell_1$` or `$\\ell_2$`" % card_no,
-                {"card": card_no, "line1": line1[:160]}, card_no, extras))
-        if re.search(r"(?<!\w)(?:μ|µ)m\b", line1):
-            findings.append(_card_f(
-                "12-equation-typography", "error",
-                "raw micrometre notation in flashcard %d line 1 must use "
-                "inline LaTeX, such as `$\\mu\\mathrm{m}$`" % card_no,
+                "flashcard %d line 1: %s" % (card_no, fault),
                 {"card": card_no, "line1": line1[:160]}, card_no, extras))
 
 
@@ -1833,12 +1800,6 @@ def _check_table_cell_wikilinks(fm, sections, findings):
                      "text": lines[line_i].strip()[:160]}))
 
 
-# A cue may open a line, a list item's text or its indented continuation.
-_NAVIGATION_ONLY_LINK_RE = re.compile(
-    r"(?:^[ \t]*(?:(?:[-*+]|\d{1,9}[.)])[ \t]+)?|"
-    r"[.!?,;:]\s+|\(\s*|[—–-]\s+)"
-    r"(?:see(?:\s+also)?|refer\s+to|consult|"
-    r"for\s+(?:more\s+)?details,?\s+see)\s+\[\[", re.IGNORECASE)
 _REDUNDANT_PIPE_RE = re.compile(
     r"(?<!!)\[\[(?P<target>[^\[\]\n|#^/\\]+)\|(?P=target)\]\]")
 
@@ -1864,26 +1825,12 @@ def _check_integrated_wikilinks(fm, sections, findings):
     material and are masked.  Broader paragraph flow remains a reading task.
     """
     body = "\n".join(sections["prose_lines"])
-    raw_lines = body.split("\n")
-    masked_lines = strip_code(body).split("\n")
-    skip = set()
-    _original, tables = _markdown_tables(body)
-    for header_i, end_i in tables:
-        skip.update(range(header_i, min(len(raw_lines), end_i + 2)))
-    _original, embeds = _image_embed_lines(body)
-    for embed_i in embeds:
-        skip.add(embed_i)
-        skip.add(embed_i + 1)
-    for i, line in enumerate(masked_lines):
-        if i in skip or re.match(r"^\s*\*.*\*\s*$", line):
-            continue
-        if _NAVIGATION_ONLY_LINK_RE.search(line):
-            findings.append(_f(
-                "9-link-integration", "error",
-                "navigation-only cross-reference; integrate the wikilink into "
-                "the sentence's claim instead of directing the reader to see it",
-                {"line": fm.body_start_line + i,
-                 "text": raw_lines[i].strip()[:160]}))
+    for i, line in navigation_only_link_lines(body):
+        findings.append(_f(
+            "9-link-integration", "error",
+            "navigation-only cross-reference; integrate the wikilink into "
+            "the sentence's claim instead of directing the reader to see it",
+            {"line": fm.body_start_line + i, "text": line.strip()[:160]}))
 
 
 def _body_wikilink_occurrences(sections):
@@ -1895,13 +1842,11 @@ def _body_wikilink_occurrences(sections):
     prose_lines = sections["prose_lines"]
     body = "\n".join(prose_lines)
     masked_lines = strip_code(body).split("\n")
-    # Tables and their captions are presentation surfaces rather than body
-    # prose.  Item 10 reports a real link in a cell directly, while item 12
-    # owns a caption link; neither should also distort the duplicate count.
-    skip = set()
-    _original, tables = _markdown_tables(body)
-    for header_i, end_i in tables:
-        skip.update(range(header_i, min(len(prose_lines), end_i + 2)))
+    # Tables, image embeds and their captions are presentation surfaces
+    # rather than body prose.  Item 10 reports a real link in a cell
+    # directly, while item 12 owns a caption link; neither should also
+    # distort the duplicate count.
+    skip = presentation_lines(body)
     # Count the entry a link resolves to, not its raw spelling.  A single-file
     # lint can safely fold case/normalization and an explicit ``.md`` suffix,
     # but it must retain path qualification: ``[[a/target]]`` and
@@ -2473,7 +2418,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
         findings.append(_f(
             "19-flashcards", "error",
             "`## Flashcards` is not preceded by a `---` separator line of its "
-            "own (Body Structure -> Flashcards)",
+            "own (flashcards-and-emphasis.md, Card shape)",
             {"line": fm.body_start_line + sections["flashcards_index"]}))
     else:
         separator_index = sections["separator_index"]
@@ -3578,13 +3523,13 @@ def run_self_test():
                 .split("\n**Related:**", 1)[0] + "\n"),
           ["11-related-footer", "19-flashcards", "4-sources"])
     check("numeric inline math is not mistaken for currency",
-          [_literal_dollar_count(value) for value in (
+          [literal_dollar_count(value) for value in (
               r"The rank satisfies $1 \le k \le m$.",
               r"The probability obeys $0 < p < 1$.",
               r"The fraction approaches $1-e^{-1}$.")],
           [0, 0, 0])
     check("two currency amounts remain two literal dollars",
-          _literal_dollar_count("The price ranges from $20 to $30."), 2)
+          literal_dollar_count("The price ranges from $20 to $30."), 2)
     raw_description = mutate(
         'description: "A ROC curve plots true positive rate against false '
         'positive rate."',
@@ -4427,6 +4372,11 @@ def run_self_test():
     check("an unpiped Related link is an error even in single-file mode",
           items(mutate("[[precision|Precision]]", "[[precision]]")),
           ["11-related-display"])
+    check("a Related footer that lists one entry twice, in any case, is "
+          "item 11's",
+          items(mutate("[[precision|Precision]]",
+                       "[[precision|Precision]] · [[Precision|Precision]]")),
+          ["11-related-footer"])
     check("a ^block anchor is stripped, so the same target twice is still a dup",
           items(mutate("decision threshold moves.\n",
                        "decision threshold moves, per [[precision|p]] and "
@@ -5673,9 +5623,10 @@ def run_self_test():
           "top-level one",
           [items(after_opener(paragraph)) for paragraph in (
               "1. Count the hits.\n\n   See [[precision]] for details.\n"
-              "2. Divide them.",
+              "2. Divide them.\n3. Round the result.",
               "10. Compare:\n\n    | Name | Value |\n    | --- | --- |\n"
-              "    | [[precision]] | 2 |\n    *Two values.*\n11. Stop.")],
+              "    | [[precision]] | 2 |\n    *Two values.*\n11. Stop.\n"
+              "12. Report.")],
           [["9-link-integration"], ["10-table-cell-wikilink"]])
     images = mutate(
         "\n**Related:**",

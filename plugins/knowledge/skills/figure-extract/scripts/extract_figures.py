@@ -2211,6 +2211,11 @@ def run_self_test():
                                    "72", "--no-trim"])
         check("a crop that stops above the caption is not warned about",
               "WARNING" in se, False)
+        code, so, se = run(base + ["--crop", "1:5:100,300,500,600", "--dpi",
+                                   "72", "--no-trim"])
+        ok("a caption above the crop's centre gives the crop's y0 bound",
+           "overlaps the caption" in se and "(y0 >= " in se
+           and "y1 <=" not in se)
 
         # A caption in the top-right corner of an L-shaped figure: every rect
         # holding the whole figure holds caption text. --blank-captions whites
@@ -2293,14 +2298,16 @@ def run_self_test():
            code == 0 and "WARNING" in se
            and "'Supplementary Figure 1'" in se and "'S1'" in se
            and supp_main in se)
-        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
+        supp_main_bytes = open(supp_main, "rb").read()
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,400,350",
                                         "--overwrite"])
-        ok("...and says --overwrite replaces the crop already there",
-           "replaces the crop already there" in se)
-        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
+        check("...and refused when --overwrite would replace the Figure 1 crop",
+              (code != 0 and "Pass 'S1'" in str(code),
+               open(supp_main, "rb").read() == supp_main_bytes), (True, True))
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,400,350",
                                         "--no-caption-check", "--overwrite"])
         ok("...even when the caption-overlap check is off",
-           "'Supplementary Figure 1'" in se)
+           "'Supplementary Figure 1'" in str(code))
         code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350"])
         check("...but a skipped crop prints only that it was skipped",
               ("Exists, skipped" in so, se), (True, ""))
@@ -2316,8 +2323,9 @@ def run_self_test():
            in se)
         code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
                                         "--overwrite"])
-        ok("...as a Supplementary caption's warning does, with no ED form",
-           "WARNING" in se and "--ed-prefix ED" not in se)
+        ok("...as a Supplementary caption's refusal does, with no ED form",
+           "'Supplementary Figure 1'" in str(code)
+           and "--ed-prefix ED" not in str(code))
         code, so, se = run(ed_default + ["--crop", "1:ED1:100,150,500,350"])
         ok("...and an ED label there says it switches later batch runs",
            code == 0 and "has no _fig_ED crop" in se and "'S1'" in se
@@ -3159,13 +3167,21 @@ def main(argv=None):
                 "Extended Data figure whose links could not move "
                 f"({ED_PENDING_FILE}); fix the link blocker and rerun the "
                 "batch with --ed-prefix ED, or report the S crop as kept")
-        twin = ed_namespace and _extended_data_twin(
-            suffix, page_captions.get(page_idx, []))
-        if args.overwrite and twin:
-            die(f"Refusing --crop {spec!r}: this PDF uses --ed-prefix ED, so "
-                f"its caption {twin[0]!r} on page {page_idx + 1} has output "
-                f"label {twin[1]!r}, and --overwrite would replace {target}, "
-                f"another figure's crop. Pass {twin[1]!r}")
+        # A printed number is not always the output label: `Supplementary
+        # Figure 1` is `S1`, and beside a _fig_ED crop `S1` is not
+        # `Extended Data Figure 1`. --overwrite would replace another
+        # figure's verified crop under the wrong label.
+        caps = page_captions.get(page_idx, [])
+        mismatch = (_series_mismatch(suffix, caps)
+                    or (ed_namespace and _extended_data_twin(suffix, caps)))
+        if args.overwrite and mismatch:
+            cap_raw, cap_label = mismatch
+            ed_note = (" (this PDF uses --ed-prefix ED)" if _ED_LABEL_RE
+                       .fullmatch(figure_identity(cap_label)) else "")
+            die(f"Refusing --crop {spec!r}: its caption {cap_raw!r} on page "
+                f"{page_idx + 1} has output label {cap_label!r}{ed_note}, and "
+                f"--overwrite would replace {target}, another figure's crop. "
+                f"Pass {cap_label!r}")
         preflight_digests[target] = digest
 
     os.makedirs(out_dir, exist_ok=True)
@@ -3189,23 +3205,20 @@ def main(argv=None):
             print(f"Exists, skipped: {out_path} (pass --overwrite to replace)")
             continue
         captions = page_captions.get(page_idx, [])
-        # A printed number is not always the output label: `Supplementary
-        # Figure 1` is `S1`. Passing `1` would write, and with --overwrite
-        # replace, the main Figure 1 crop.
+        # The preflight refused this mismatch over an existing crop; a new
+        # crop is written under the passed label, with a warning.
         mismatch = (_series_mismatch(fig_suffix, captions)
                     or (ed_namespace
                         and _extended_data_twin(fig_suffix, captions)))
         if mismatch:
             cap_raw, cap_label = mismatch
-            replaces = (", and --overwrite replaces the crop already there"
-                        if expected_digest is not None else "")
             print(
                 f"WARNING: --crop {spec!r} is labelled {fig_suffix!r}, but no "
                 f"caption on page {page_idx + 1} is; its caption {cap_raw!r} "
                 f"has output label {cap_label!r}"
                 + (" (this PDF uses --ed-prefix ED)" if _ED_LABEL_RE.fullmatch(
                     figure_identity(cap_label)) else "")
-                + f". This crop goes to {out_path}{replaces}. Pass the Fig "
+                + f". This crop goes to {out_path}. Pass the Fig "
                 f"label auto_fig_bbox.py reports, not the printed number.",
                 file=sys.stderr,
             )
@@ -3249,12 +3262,21 @@ def main(argv=None):
                     print(f"--crop {spec!r}: blanked caption {cap_raw!r} "
                           f"inside the crop")
                 else:
+                    # The caption's side, judged from the crop's centre.
+                    if cap.y0 >= (y0 + y1) / 2:
+                        bound = f"y1 <= {cap.y0 - 0.5:.1f}"
+                    elif cap.y1 <= (y0 + y1) / 2:
+                        bound = f"y0 >= {cap.y1 + 0.5:.1f}"
+                    elif cap.x0 >= (x0 + x1) / 2:
+                        bound = f"x1 <= {cap.x0 - 0.5:.1f}"
+                    else:
+                        bound = f"x0 >= {cap.x1 + 0.5:.1f}"
                     print(
                         f"WARNING: --crop {spec!r} overlaps the caption for "
                         f"{cap_raw!r} (x={cap.x0:.1f}-{cap.x1:.1f}, "
                         f"y={cap.y0:.1f}-{cap.y1:.1f}) — the caption will be "
                         f"in the PNG. Move the crop edge facing the caption "
-                        f"(for a caption below, y1 <= {cap.y0 - 0.5:.1f}).",
+                        f"({bound}).",
                         file=sys.stderr,
                     )
         if args.blank_captions and not blank_rects:

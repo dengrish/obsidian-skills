@@ -23,9 +23,10 @@ are in references/review-checklist.md and references/nested-lists.md.
                   number, nearest preceding heading and Lottie source. Counts
                   are elements outside nav/aside and page-level header/footer,
                   whose headings and rows are tagged instead. A heading
-                  hidden from sight (the `hidden` attribute, a
-                  screen-reader-only class or an inline `display:none` or
-                  `visibility:hidden`, on it or an ancestor) is tagged
+                  hidden from sight (the `hidden` attribute except
+                  `hidden="until-found"`, a screen-reader-only class or an
+                  inline `display:none` or `visibility:hidden`, on it or an
+                  ancestor) is tagged
                   `hidden` and is never a row's nearest heading. --text also
                   prints the page's text, one block (paragraph, list item,
                   heading, cell, caption) per line, tagged the same way.
@@ -523,7 +524,7 @@ def outline_report(text):
     prose = "\n".join(lines[i] for i in range(start, len(lines))
                       if i not in inside)
     heads = [(len(m.group(1)), m.group(2).strip())
-             for m in re.finditer(r"^(#{1,6})\s+(.*)$", prose, re.M)]
+             for m in re.finditer(r"^(#{1,6})[ \t]+(\S.*)$", prose, re.M)]
     counts = dict(
         # One class for the indent and quote prefix keeps these linear.
         list_lines=len(re.findall(r"^[ \t>]*(?:[-*]|\d+\.)(?:[ \t]|$)",
@@ -543,16 +544,20 @@ def outline_report(text):
 #: Elements whose open/close depth the parser tracks.
 TRACKED = frozenset((
     "a", "article", "aside", "blockquote", "button", "figcaption", "figure",
-    "footer", "header", "main", "nav", "noscript", "picture", "script",
-    "section", "style", "svg", "template", "title", "video",
-    "h1", "h2", "h3", "h4", "h5", "h6"))
+    "footer", "header", "iframe", "main", "nav", "noembed", "noframes",
+    "noscript", "picture", "script", "section", "style", "svg", "template",
+    "textarea", "title", "video", "xmp", "h1", "h2", "h3", "h4", "h5", "h6"))
 HEADING_TAGS = ("h1", "h2", "h3", "h4", "h5", "h6")
 #: Sectioning elements that keep a header/footer from being page chrome.
 SECTIONING = ("article", "aside", "main", "nav", "section")
 CHROME = ("nav", "aside", "header", "footer")
 #: Element bodies that are not page content: no headings, counts, rows or
-#: text.
-INERT = ("script", "style", "template", "svg", "title")
+#: text. Browsers never show iframe, noembed or noframes fallbacks, a
+#: textarea is a form field and xmp is obsolete; html.parser reads each as
+#: markup or raw text depending on the Python release, so skipping them
+#: keeps the output the same on every Python.
+INERT = ("script", "style", "template", "svg", "title", "iframe", "noembed",
+         "noframes", "textarea", "xmp")
 #: Block elements whose start or end ends one `--text` block; inline spans
 #: such as links and emphasis join the text around them.
 TEXT_BREAKS = frozenset((
@@ -648,9 +653,9 @@ class SourceInventory:
     saved page markup.
 
     Script and style bodies are character data to html.parser, so markup in
-    them is never parsed; template, title and inline-SVG contents are
-    skipped, and inside `<noscript>` only an image not already listed is
-    reported.
+    them is never parsed; template, title, inline-SVG, iframe, noembed,
+    noframes, textarea and xmp contents are skipped, and inside `<noscript>`
+    only an image not already listed is reported.
     """
 
     def __init__(self, base_url=None):
@@ -734,11 +739,14 @@ class SourceInventory:
             # A block start ends an open hidden `<p>`, as in HTML.
             if self.hidden and self.hidden[-1][0] == "p":
                 self.hidden.pop()
-        # aria-hidden does not hide an element from sight, so it stays.
+        # Neither aria-hidden nor hidden="until-found" (a collapsed section
+        # readers open) hides an element from sight, so both stay.
         if self.hidden and tag == self.hidden[-1][0]:
             self.hidden[-1][1] += 1
         elif tag not in VOID_TAGS and tag not in INERT and (
-                "hidden" in attrs or HIDDEN_STYLE_RE.search(
+                ("hidden" in attrs
+                 and attrs["hidden"].strip().lower() != "until-found")
+                or HIDDEN_STYLE_RE.search(
                     attrs.get("style", "")) or not SR_ONLY_CLASSES.isdisjoint(
                     attrs.get("class", "").lower().split())):
             self.hidden.append([tag, 1])
@@ -1378,6 +1386,9 @@ def run_self_test():
         "<table><tr><td>x</td></tr></table>\n---")
     check("outline lists headings outside code, in order", heads,
           [(2, "One"), (3, "Two")])
+    check("an empty heading is skipped, never joined to the next line",
+          outline_report("Intro\n#\nNext paragraph\n### \nMore\n## Real")[0],
+          [(2, "Real")])
     check("outline counts lists, quotes, links, embeds, tables and code blocks",
           counts, dict(list_lines=1, quote_lines=1, links=1, image_embeds=1,
                        tables=2, code_blocks=1))
@@ -1530,6 +1541,24 @@ def run_self_test():
               "<p hidden>F<p>G<div aria-hidden='true'>H</div>")[4],
           [("hidden", "A"), ("hidden", "B"), ("hidden", "C"), ("hidden", "D"),
            (None, "E e"), ("hidden", "F"), (None, "G"), (None, "H")])
+    found = source_report(
+        "<h2>History</h2><section hidden='until-found'><h3>Early life</h3>"
+        "<p>Born</p><figure><img src=a.png></figure></section>",
+        "https://x.test/")
+    check("a hidden='until-found' section readers open is not hidden",
+          (found[0], [r.get("heading") for r in found[2]], found[4]),
+          ([(2, "History", None), (3, "Early life", None)], ["Early life"],
+           [(None, "## History"), (None, "### Early life"), (None, "Born")]))
+    fallback = source_report(
+        "<p>A</p><iframe src='v.html'><p>Fallback <img src='f.png'></p>"
+        "<h3>F</h3></iframe><noembed><img src='n.png'></noembed>"
+        "<noframes><p>nf</p></noframes><textarea><iframe src='t.html'>"
+        "</iframe></textarea><xmp><img src='x.png'><h3>X</h3></xmp><p>B</p>",
+        "https://x.test/")
+    check("iframe, noembed, noframes, textarea and xmp bodies give no text, "
+          "heading or row, so every Python reads them alike",
+          (fallback[0], [r["tag"] for r in fallback[2]], fallback[4]),
+          ([], ["iframe"], [(None, "A"), (None, "B")]))
     check("a gallery's nested figures give captioned media rows, no stub",
           [(r["tag"], r.get("caption")) for r in source_report(
               "<figure class=\"wp-block-gallery\"><figure><img src=a.jpg>"

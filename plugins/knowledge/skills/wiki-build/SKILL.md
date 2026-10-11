@@ -124,7 +124,7 @@ A rejected mention is never appended to an entry's `sources:` and bumps no date.
 
 **Positive trigger.** A named entity whose mechanism, architecture or method the source explains ("X works by…") in enough detail for an entry is a candidate to accept and link; thinner coverage stays plain, never a placeholder file. A bare list of names is never a trigger until the source says how one differs; named-entity requests gain no candidates this way.
 
-Each candidate is one durable entity under the [atomicity test](references/writing.md#body-structure). Record its canonical qualified name, same-entity aliases, type, description, source page and substantive content; step 3 probes these titles.
+Each candidate is one durable entity under the [atomicity test](references/writing.md#body-structure). Record its canonical qualified name, same-entity aliases, type, description, source page and substantive content; step 3 probes the title and these aliases.
 
 #### Named-entity requests
 
@@ -137,7 +137,7 @@ A request naming entities to build from identified durable sources ("PCA from ch
 
 ### 3. Resolve against existing entries
 
-Probe **every** candidate against a fresh index's filenames and aliases and against the other candidates, even in an empty wiki. Write the complete accepted candidate list as a JSON array of title strings (`["Principal component analysis"]`) to `<scratch>/candidates.json` with the host's file-writing tool, replacing any earlier list; never put titles into a heredoc, `echo`, or `python -c` ([input safety](../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)).
+Probe **every** candidate against a fresh index's filenames and aliases and against the other candidates, even in an empty wiki. Write every accepted candidate's title and each same-entity alias form it records, each once, as a JSON array of strings (`["Principal component analysis", "PCA"]`), as wiki-add does, to `<scratch>/candidates.json` with the host's file-writing tool, replacing any earlier list; never put titles into a heredoc, `echo`, or `python -c` ([input safety](../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)). A match between one candidate's own forms is no collision. An alias form matching an existing entry or another candidate goes to [collision adjudication](references/merge.md#collision-decisions), never to create.
 
 ```bash
 IDX=$(mktemp '<scratch>/vault-index.XXXXXX')
@@ -150,7 +150,7 @@ python3 '<skill>/scripts/find_collisions.py' --index "$IDX" \
 
 **A decisive exact/µ match permits a merge only when it has one existing owner.** Multiple owners and all broader probe matches require [adjudication](references/merge.md#collision-decisions); never choose an owner by index order. A `bare-common-noun` result needs a [qualified title](references/special-titles.md#cross-domain-term-disambiguation) and a new probe; an existing bare-slug entry of the same sense takes the merge and a qualified-rename proposal, which wiki-lint's ordinary run applies. A leaf `.md` symlink is an occupied slug: never create over it, follow it, merge into it or cite through it; report it.
 
-**Snapshot before relying on a path.** Record each existing entry this run may change before reading the bytes its draft uses, and each new slug when its collision decision is made; a new slug must record `absent`, otherwise redo its decision. An entry the run read earlier for another purpose (step 2's count, a neighbor survey, a named merge target in step 1, an audit) is recorded when the run decides to change it and then re-read in full; draft only from that re-read, because `verify` cannot detect an edit made before the record. The index reserves no name, and a later occupant must survive unchanged.
+**Snapshot before relying on a path.** Record each existing entry this run may change before reading the bytes its draft uses (a merge's snapshot and manifest path is `Wiki/` plus the match's `entry_path`), and each new slug when its collision decision is made; a new slug must record `absent`, otherwise redo its decision. An entry the run read earlier for another purpose (step 2's count, a neighbor survey, a named merge target in step 1, an audit) is recorded when the run decides to change it and then re-read in full; draft only from that re-read, because `verify` cannot detect an edit made before the record. The index reserves no name, and a later occupant must survive unchanged.
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
@@ -163,10 +163,10 @@ Use the `slug` that step 3's `find_collisions.py` report returned for that exact
 
 Draft the complete bytes for `<wiki-folder>/<slug>.md` privately in [the entry shape](#the-entry) and add it to the manifest. New entries have `parents: []`, bare `read: false` followed by `issues: ""`, and no `importance:` key; only the user sets review state to true or writes issue text.
 
-**Count every drafted or revised description before review**, including one a merge or audit writes. Lint the private draft and read `entries[0].description_chars` (at most 110, without YAML quotes; a `5-slug` finding is expected there when the draft file is not named by its slug):
+**Count every drafted or revised description before review**, including one a merge or audit writes. Lint the private draft and read `entries[0].description_chars` (at most 110, without YAML quotes):
 
 ```bash
-python3 '<skill>/scripts/lint_entry.py' '<draft path>'
+python3 '<skill>/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'
 ```
 
 Never estimate by eye; shorten under the [description rule](references/writing.md#description) and recount.
@@ -193,7 +193,7 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
        --out '<scratch>/review' --images '<vault>/Sources/Images'
    ```
 
-   Reuse one `--out` on reruns; each call rebuilds it. A preview run with an absent image folder omits `--images`. It never follows a symlink in the Wiki, `unmirrored` paths stay occupied, and its lint flags a new alias another entry owns (`18-alias-collision`). Resolve privately, under the [lint dispositions](references/review.md#lint-dispositions):
+   Reuse one `--out` on reruns; each call rebuilds it. Omit `--images` when the image folder is absent. It never follows a symlink in the Wiki, `unmirrored` paths stay occupied, and its lint flags a new alias another entry owns (`18-alias-collision`). Resolve privately, under the [lint dispositions](references/review.md#lint-dispositions):
 
    - every `on_staged` finding;
    - every `introduced` finding;
@@ -205,8 +205,8 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
 2. **Report, never repair or block on,** what this run may not change ([lint dispositions](references/review.md#lint-dispositions)):
    - an unmodified copy's link or Related label that now names a new entry;
    - a merged entry's inherited state the [merge rules](references/merge.md#merge-logic) preserve, including its `report_only: true` findings, such as `2-user-issues` or `2-issues-malformed` on the user's `issues:` text, which stays byte-for-byte;
-   - an ownership-handoff neighbor's `inherited: true` findings;
-   - an inherited `ambiguous` link in a merged entry or an ownership-handoff neighbor that the prose leaves open;
+   - an ownership-handoff neighbor's `inherited: true` findings and every `dangling` or `noncanonical` link its baseline copy already had;
+   - an inherited `ambiguous` link in a merged entry that the prose leaves open;
    - an inherited `non_entry` link to a real vault note outside `Wiki/` and `MOCs/`, kept with its path, anchor and display text;
    - an extra card whose block ID another note links or embeds ([merge](references/merge.md#flashcards-on-merge));
    - a merged entry's missing `Person`/`Event` date that neither a [rare-types route](references/rare-types.md#dates-in-the-opener-person-and-event) nor the open floruit form supplies (a new candidate without one is deferred).
@@ -214,9 +214,9 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
    Baseline findings on unmodified copies stay wiki-lint's, unreported.
 3. **Check against the source.** For every new or changed claim, re-read the active-source passage and compare conditions, population or version, time frame, causal direction (including the opener's), units and numbers, and uncertainty; correct or narrow misstatements, including priority and superlative wording, under [principle 3](references/writing.md#prose-principles), and remove new information this run adds that no cited source gives (carried-over content follows [merge preservation](references/merge.md#integration-principle)); a [5(h)](references/writing.md#prose-principles) clarification needs no citation. Then apply the [editorial reread](references/writing.md#editorial-reread), with every sweep it names (its contradiction check compares linked neighbors), and re-check atomic scope and protected content. These edits are autonomous; a prose/script disagreement follows the governing rule.
 4. **Review-only candidates need no edit to silence them:** a supported, recorded decision resolves one even if `clean` stays false ([lint dispositions](references/review.md#lint-dispositions)). Never add notation or rewrite clear prose to force a zero-finding report; errors, incomplete checks, unresolved candidates and new findings in the published bytes are never waived.
-5. **Renaming or deleting a pre-existing entry, or removing a semantic-invalid alias, is never a review fix.** Report it with evidence and log it in `Reviews/wiki-notes-suggestions.md`: wiki-lint's ordinary run retitles a bare cross-domain title, a title whose acronym-or-full-form choice breaks the [title rule](references/writing.md#title) and a title its filename does not match, and removes a semantic-invalid alias through the [retitle](../wiki-lint/references/refactors.md#retitle-an-entry) and [alias-removal](../wiki-lint/references/refactors.md#remove-a-semantic-invalid-alias) protocols, while a deletion needs an [explicit request](../wiki-lint/SKILL.md#explicit-requests). Renaming an entry created this run must keep every reference written this run resolving; duplicate spellings within one alias list stay format fixes.
+5. **Renaming or deleting a pre-existing entry, or removing a semantic-invalid alias, is never a review fix.** Report it with evidence and log it in `Reviews/wiki-notes-suggestions.md`: wiki-lint's ordinary run retitles the titles its [retitle protocol](../wiki-lint/references/refactors.md#retitle-an-entry) lists and removes a semantic-invalid alias through its [alias-removal protocol](../wiki-lint/references/refactors.md#remove-a-semantic-invalid-alias), while a deletion needs an [explicit request](../wiki-lint/SKILL.md#explicit-requests). Renaming an entry created this run must keep every reference written this run resolving; duplicate spellings within one alias list stay format fixes.
 6. **Audits.** Run the three [audits](references/review.md#the-three-audits) in order.
-7. **Revalidate.** A run that still has nothing staged after the audits goes straight to the report (step 7.10). Otherwise rewrite `<scratch>/candidates.json` with the final title of every entry this run staged, once each, from all its sources and audit recoveries. In one shell, re-run step 3's `mktemp`, `vault_index.py` and `find_collisions.py` commands against the real Wiki (an empty scratch folder while Wiki is absent), then verify every original snapshot:
+7. **Revalidate.** A run that still has nothing staged after the audits goes straight to the report (step 7.10). Otherwise rewrite `<scratch>/candidates.json` as step 3 does, with the final title and every alias form of each entry this run staged, from all its sources and audit recoveries. In one shell, re-run step 3's `mktemp`, `vault_index.py` and `find_collisions.py` commands against the real Wiki (an empty scratch folder while Wiki is absent), then verify every original snapshot:
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' verify --vault '<vault>' \
@@ -224,7 +224,7 @@ Apply the [Quality Checklist](references/quality-checklist.md) gates throughout 
    ```
 
    A new occupant, alias owner, changed file, or newly unreadable path invalidates the affected draft: preserve it, re-snapshot each changed path with `snapshot --replace` before re-reading it, rebuild the draft and combined view, and review again. A preview/no-apply run stops here and reports the reviewed proposal; it never creates `Wiki/` or a publication stage inside the vault.
-8. **Publish.** An ordinary build or update request authorizes this without a second review. Rerun `review_tree.py` if any draft changed since its last run, and leave no-op entries untouched. Publish with `publish_files.py`, which creates new slugs exclusively and replaces files only against their original snapshots (`--dry-run` plans without writing):
+8. **Publish.** An ordinary build or update request authorizes this without a second review. Rerun `review_tree.py` against the current Wiki, and leave no-op entries untouched. Publish with `publish_files.py`, which creates new slugs exclusively and replaces files only against their original snapshots (`--dry-run` plans without writing):
 
    ```bash
    python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \

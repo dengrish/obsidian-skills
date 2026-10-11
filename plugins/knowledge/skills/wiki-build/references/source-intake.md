@@ -189,7 +189,7 @@ finding, and the source stays skipped.
 **A source the user names (a file, a chapter, or a book) is filled in, not
 skipped.** Read it; each entity whose entry already cites this source, in
 any form of the same document (the whole book for a chapter, a same-URL twin
-for a clipping), is finished and stays untouched (no re-merge, no `updated:` or `read:` change);
+for a clipping), is finished: it is not re-merged, and changes only through an [ownership handoff](review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors) trim;
 every other substantive entity goes through the ordinary workflow, creating an
 entry or merging into one that does not yet cite this source. A [named-entity request](../SKILL.md#named-entity-requests)
 instead builds only its named entities.

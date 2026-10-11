@@ -13,9 +13,9 @@ establish. A semantic finding they do not settle goes to
 [Task 1b](../SKILL.md#task-1b--content-repair), which repairs it in the same
 run from the entry's cited sources (plus the clarification
 [5(h)](../../wiki-build/references/writing.md#prose-principles) admits), merges
-and splits included. Only a deletion, a split or merge that is a close call
-or that a refactor blocker stops, a conflict no evidence settles, or a user-owned state
-decision stays a report, and it does not block the current run.
+and splits included. Whatever Task 1b cannot settle stays a nonblocking
+report, as the run report's [Not applied](backlogs.md#run-report) list and
+the [note-content closeout](backlogs.md#proposing-note-improvements) define.
 
 Related procedures:
 
@@ -54,7 +54,7 @@ ownership.
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or as a 5(h) clarification, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
 | `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
-| `item9/list-mismatch-candidate` | Review the lead-in's count or the Repeat item's step against the builder's [numbered-list tests](../../wiki-build/references/writing.md#body-structure). A count of something other than the list's items stays. A real disagreement goes to Task 1b, which settles it from the cited source, correcting the count, restoring a missing step or pointing the Repeat item at the step that begins the repeated work, under [item 9](#9-body-structure-coherence-flow-and-scope). The candidate alone is never an order. |
+| `item9/list-mismatch-candidate` | Review the lead-in's count, the Repeat item's step or a short numbered list against the builder's [numbered-list tests](../../wiki-build/references/writing.md#body-structure). A count of something other than the list's items stays. A numbered list of fewer than three steps becomes prose as an item-9 local editorial repair. A real disagreement goes to Task 1b, which settles it from the cited source, correcting the count, restoring a missing step or pointing the Repeat item at the step that begins the repeated work, under [item 9](#9-body-structure-coherence-flow-and-scope). The candidate alone is never an order. |
 | `item9/register-candidate` | Review the praise word or imperative opener under the builder's neutral [register](../../wiki-build/references/writing.md#prose-principles): Task 1 drops praise that adds no claim and restates a definition written as instructions as a fact, keeping every claim; in the description or on card line 1 the review follows [item 7](#7-description) or [item 19](#19-flashcards). The candidate alone is never an order. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. A link to an entry this run's Task 1b retitles (a `rename_candidates` row with `target_exists: false`) waits for the retitle, which rewrites it once; if Task 1b keeps the name, it canonicalizes the link then. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
@@ -65,7 +65,7 @@ ownership.
 | `item10/dangling` | Task 1b first settles the target under its [dangler hand-off](refactors.md#dangling-link-hand-off): an existing entry for its concept, the entry the [missing-entry rule](refactors.md#create-a-missing-entry) allows, or a gloss for each mention that needs the term. Task 2 points the link at an existing or new entry and resolves the rest under its [dangler protocol](link-hygiene.md#dangling-links-target-missing), which leaves a link to a missing root for Task 3. |
 | `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
-| `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw ℓ-norm and `μm`/`µm` notation with canonical inline LaTeX. |
+| `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw `μm`/`µm` and a raw ℓ norm with canonical inline LaTeX; a raw ℓ that names no norm is renamed as for `item12/ell-non-norm`. |
 | `item12/equation-coverage-candidate` | Inspect the local prose or inline formula. Apply the explanatory-value test; add math only when it clarifies the concept and the note supplies the relationship. Clear prose may be the correct outcome. |
 | `item12/equation-format` | Preserve the existing equation and put each `$$` alone on its line with a blank line above and below. Wrap rows that use `&` or `\\` outside an environment in `\begin{aligned}...\end{aligned}`, or `gathered` when nothing aligns. Keep the math unchanged and do not add a duplicate display. |
 | `item12/equation-split-candidate` | When the flagged line really holds two equations, give each its own line under the [equation guide](../../wiki-build/references/equations.md#2-form--defining-equations-are-display-math): a separate display beside the prose that introduces it, or a row of an `aligned` or `gathered` display. Keep the math unchanged; this formatting repair changes no dates or review state. |
@@ -176,7 +176,8 @@ included, cites at least one source. Task 1 hands an empty `sources:` to
 Task 1b, which never fills it from memory. Task 1b chooses the evidence: a
 vault document other entries already cite that introduces the subject, cited
 at that page, or else one reliable overview, such as a textbook introduction
-or an encyclopedia article (a Wikipedia page will do), cited by its URL under
+or an encyclopedia article (a Wikipedia page will do), or for the misc root a
+dictionary page, cited by its URL under
 [conventions §7](../../../shared/CONVENTIONS.md#7-source-references). It
 reads that source, verifies the entry against it under the
 [source-backed correction protocol](source-backed-corrections.md), correcting
@@ -211,11 +212,10 @@ when the canonical name is determinate and its slug is free.
 If the slug is occupied, preserve both files: a same-entity occupant goes to
 the merge check below, and any other is reported with both paths as an
 unresolved disambiguation; the lint run still completes.
-Whole-vault maintenance uses slug equality, micro-sign normalization,
-singular/plural, hyphen-collapse, word-order, and light stem morphology. When
+Whole-vault maintenance uses the scanner's
+[collision probes](scanner.md#collision_candidates). When
 several probes flag the same pair, report only the most specific probe label;
-no probe chooses an entry owner. The linter deliberately omits the noisy
-create-time token-superset probe. While reading, also note semantic synonym
+no probe chooses an entry owner. While reading, also note semantic synonym
 duplicates that shape probes cannot find.
 
 **Merge check.** Collision-probe matches and synonym duplicates are Task 1b's
@@ -248,9 +248,9 @@ same way, and so is an `Organism` titled by a common name where the
 requires its scientific name (`Zebrafish` takes `Danio rerio`). The semantic pass checks every acronym or expanded title against
 it: `PPO` takes `Proximal policy optimization`, and `Long short-term memory`
 takes `LSTM`. When the rule's form is determinate and its slug is free, Task
-1b retitles the entry, keeping the old form as an alias when it is a valid
-same-entity name. A slug the same entity occupies goes to the merge check
-above.
+1b retitles the entry, keeping the old form as an alias only when the
+[alias rule](../../wiki-build/references/writing.md#aliases) admits it. A
+slug the same entity occupies goes to the merge check above.
 
 ### 6. Type and API surface
 
@@ -370,8 +370,7 @@ which folds it, with its link, into the later passage (Learning rate's
 boosting clause), applying builder
 [item 13](../../wiki-build/references/quality-checklist.md)'s each-sense-once rule
 outside merges too. When the prototype is missing, Task 1b writes it from the
-cited sources (plus the clarification 5(h) admits) and keeps the variant as
-one linked example. Task 1b likewise frames an entry in its
+cited sources (plus the clarification 5(h) admits). Task 1b likewise frames an entry in its
 [own field](../../wiki-build/references/writing.md#prose-principles): a
 general concept's display never borrows one application's parameter notation,
 and the entry names and links its nearest contrast when its sources draw one,
@@ -415,7 +414,9 @@ scaffolding and application catalogs that do not serve the entry, after
 checking the cited source. It consolidates into its owner, under the
 [consolidation rule](refactors.md#build-the-refactored-entries), a
 definition, explanation, argument, worked example, property with its
-justification, discovery history, figure description or exhibit duplicated
+justification, discovery history
+([principle 6](../../wiki-build/references/writing.md#prose-principles)),
+figure description or exhibit duplicated
 across entries or held outside its owner, and a neighbor's formula that this entry's own prediction, objective
 or defining relation is not built from
 ([atomicity test](../../wiki-build/references/writing.md#body-structure)).
@@ -446,8 +447,9 @@ description for the hedges and caveats
 excludes, including a claim hedged below its source; card line 1 follows
 [item 19](#19-flashcards). Never add caveats from memory; a main limitation
 the source teaches is explanation. Task 1 removes empty rhetoric and repetition
-(the local repairs below) and well-definedness boilerplate (item 12). Task 1b
-removes every hedge and caveat principle 3 excludes, its full "Leave out" list
+(the local repairs below), well-definedness boilerplate (item 12) and the
+description hedges `item7/hedge-candidate` lets it drop. Task 1b removes every
+other hedge and caveat principle 3 excludes, its full "Leave out" list
 included (every kind it names, numerical details such as a library's default
 tolerance among them), under
 [*Hedges*](source-backed-corrections.md#correct-and-publish). It keeps a limit
@@ -460,7 +462,9 @@ findings; a source-supported detail can still be unnecessary.
 every in-scope entry, whatever its type and however detailed it already is.
 Under the source-backed [*Deepening*](source-backed-corrections.md) rules,
 Task 1b supplies a point that check names from the entry's cited sources, a
-display's verbal reading, a concrete case under
+display's missing explanation (what its terms mean and why it holds, under
+[equations §3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)),
+a concrete case under
 [item 15](#15-example-discipline), the members its sources name for a
 category, a discipline root's form, and the definitions and reasons
 principle 5's [term audit](../../wiki-build/references/writing.md#editorial-reread)
@@ -573,7 +577,8 @@ before disputing a finding or treating literal sample syntax as a link.
 Use the canonical [Related footer](../../wiki-build/references/writing.md#the-related-footer).
 Keep one ` · `-separated line and pipe every target to its canonical title,
 with no slug-equal exception, including all-lowercase titles. Converting a bare
-footer link to that form is determinate. A footer with more than roughly 12
+footer link to that form, and removing a repeated target's later items, is
+determinate. A footer with more than roughly 12
 links, the guide's merge-growth bound, is reported rather than pruned.
 
 ### 12. Equations, images, and tables
@@ -691,8 +696,10 @@ it from the cited source. Task 1b completes the rest of principle 5 from the
 cited source or as a 5(h) clarification:
 
 - A term the entry uses with neither definition nor resolving link,
-  including terms in added clarifications or corrections, is linked when its
-  entry exists, and otherwise gets a brief defining clause; a dangling link's
+  including terms in added clarifications or corrections, goes on Task 2's
+  link worklist when its entry exists, where a sentence that needs its
+  meaning [clears the closeness bar](link-hygiene.md#the-closeness-bar),
+  and otherwise gets a brief defining clause; a dangling link's
   term follows the [dangler hand-off](refactors.md#dangling-link-hand-off). A
   term that meets the [missing-entry rule](refactors.md#create-a-missing-entry)
   gets its own entry instead, which Task 2 then links. A definite noun phrase
@@ -808,7 +815,7 @@ has a Flashcards section after the Related footer and separator, holding its
 one `??` definition card. Repair a variant heading in place rather than adding
 a section. Repair a missing or empty section by writing the card from the
 entry's already-established main claim, with `??` and the canonical primary
-answer, and itemize the addition. Routine lint never adds a second card.
+answer, and itemize the addition. Lint never adds a second card.
 
 Inspect the definition card semantically: leaks and reconstructions, a
 primary answer that omits a qualifying opener binding, and any line-1 math,

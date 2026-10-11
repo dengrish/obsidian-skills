@@ -286,8 +286,9 @@ it, not the wording of a hand-off from another skill:
 
 - **Split it: keep the original and add chapter PDFs** when the request
   asks to organize or file PDFs (one, several, a folder or the inbox, as in
-  "rename and file the PDFs in my Inbox"), to process or clean the inbox, or
-  to split a book. A request for one chapter of an unsplit book, handed off
+  "rename and file the PDFs in my Inbox"), to process or clean the inbox
+  (wiki-build processing Inbox PDFs into the wiki included), or to split a
+  book. A request for one chapter of an unsplit book, handed off
   by wiki-build, paper-summarize or figure-extract ("build chapter 3 into my
   wiki", "summarize chapter 3 of this book", "extract the figures of
   chapter 3"), counts as a request to split that one book. A request for a

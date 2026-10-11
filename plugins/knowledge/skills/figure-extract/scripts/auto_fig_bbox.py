@@ -165,6 +165,10 @@ CAP_RE = re.compile(
     r'(?=\.\s|\s+[^\sa-z]|\s+[a-z][a-z-]*[A-Z0-9]|\s*$|\s*:|\s*[–—])',  # caption-shape lookahead
     re.MULTILINE,
 )
+# A List of Figures entry's page number: a line of it alone, with or without
+# its dot leader, or the leader and number ending the entry's line.
+_PAGE_NUMBER_LINE_RE = re.compile(r'[\s.]*\d+\s*')
+_DOT_LEADER_RE = re.compile(r'(?:\.\s*){3,}\d+\s*$')
 # A narrative reference can inherit CAP_RE's line-start shape when a caption is
 # wrapped immediately after "shown in" (or an equivalent phrase). Apply this
 # wherever it occurs inside a text block. In multi-column PDFs a body paragraph
@@ -823,7 +827,8 @@ def find_caption_blocks(page):
     """
     candidates = []
     style_blocks = None
-    for rect, text, lines in collect_text_blocks(page):
+    blocks = collect_text_blocks(page)
+    for rect, text, lines in blocks:
         raw_matches = list(CAP_RE.finditer(text))
         if not raw_matches:
             continue
@@ -889,7 +894,46 @@ def find_caption_blocks(page):
                 "italic": _italic_text_share(style_blocks, own_rect),
                 "lines": last - first + 1,
                 "text": "\n".join(t for _r, t in lines[first:last + 1]),
+                "own": lines[first:last + 1],
             })
+
+    # A List of Figures is never a figure page, yet its entries pass the
+    # caption shape and come before the figures, so they would claim every
+    # label. An entry is one line, page numbers aside, that ends in a dot
+    # leader and a page number or has its page number to the right. A margin
+    # line number sits to the left, and a line-number ruler's numbers never
+    # count: a ruler is a column of number lines ending at one x, far more of
+    # them than the page has captions, whose values step by one fixed amount.
+    # A list's page numbers repeat or jump, so they stay, even when the table
+    # of contents or a List of Tables shares the page. Three entries mark the
+    # page, and none of its candidates is kept, an entry merged with a
+    # heading included.
+    columns = {}
+    for _b, _t, lines in blocks:
+        for r, t in lines:
+            if _PAGE_NUMBER_LINE_RE.fullmatch(t):
+                columns.setdefault(round(r.x1), []).append((r.y0, r, t))
+    numbers = []
+    for column in columns.values():
+        column.sort(key=lambda item: item[0])
+        values = [int(re.sub(r"\D", "", t)) for _y, _r, t in column]
+        steps = [b - a for a, b in zip(values, values[1:])]
+        if len(column) > 2 * len(candidates) + 2 and any(
+                s > 0 and steps.count(s) >= 0.8 * len(steps)
+                for s in set(steps)):
+            continue
+        numbers.extend(r for _y, r, _t in column)
+    entries = 0
+    for candidate in candidates:
+        own = [(r, t) for r, t in candidate["own"]
+               if not _PAGE_NUMBER_LINE_RE.fullmatch(t)]
+        if len(own) == 1 and (_DOT_LEADER_RE.search(own[0][1]) or any(
+                n.x0 >= own[0][0].x1 and min(n.y1, own[0][0].y1)
+                - max(n.y0, own[0][0].y0) > own[0][0].height / 2
+                for n in numbers)):
+            entries += 1
+    if entries >= 3:
+        return []
 
     # Some books put body prose and captions in distinct type styles. A body
     # paragraph may itself begin ``Figure N.`` and therefore pass the caption
@@ -3236,6 +3280,32 @@ def _st_wrapped_reference_doc():
     return doc
 
 
+def _st_list_of_figures_doc(leaders):
+    """A List of Figures page, then Figures 1-3 on their own pages.
+
+    With `leaders`, each entry is a block ending in a dot leader and its page
+    number; otherwise one block holds the entries, each page number a line to
+    its entry's right.
+    """
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for k in range(3):
+        entry = "Figure %d The figure titled %d" % (k + 1, k + 1)
+        if leaders:
+            page.insert_text((72, 100 + 40 * k),
+                             entry + " " + ". " * 20 + str(k + 2), fontsize=10)
+        else:
+            page.insert_text((72, 100 + 13 * k), entry, fontsize=10)
+            page.insert_text((500, 100 + 13 * k), str(k + 2), fontsize=10)
+    for k in range(3):
+        page = doc.new_page(width=612, height=792)
+        page.draw_rect(fitz.Rect(100, 80, 500, 300), color=(0, 0, 0),
+                       fill=(0.9, 0.6, 0.6))
+        page.insert_text((72, 320), "Figure %d The real figure, with its "
+                         "caption." % (k + 1), fontsize=9)
+    return doc
+
+
 def _st_bleed_doc():
     """A page-sized bleed rectangle, a small figure, a caption, and prose.
 
@@ -3546,6 +3616,59 @@ def run_self_test():
           find_caption_blocks(doc[0]), [])
     check("...so the real caption overleaf is the only one, with no collision",
           [(row[0], row[1]) for row in detect_figures(doc)], [(1, "1")])
+    doc.close()
+
+    # A List of Figures comes before the figures, so its entries claimed
+    # every label and the real captions were dropped as collisions.
+    for leaders in (True, False):
+        doc = _st_list_of_figures_doc(leaders)
+        check("a List of Figures page (%s) yields to the real captions"
+              % ("dot leaders" if leaders else "page-number lines"),
+              [(row[0], row[1]) for row in detect_figures(doc)],
+              [(1, "1"), (2, "2"), (3, "3")])
+        doc.close()
+    # A margin line number sits to the left of a caption, not to its right.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for k in range(3):
+        page.draw_rect(fitz.Rect(100, 60 + 240 * k, 500, 240 + 240 * k),
+                       color=(0, 0, 0), fill=(0.9, 0.6, 0.6))
+        page.insert_text((150, 260 + 240 * k),
+                         "Figure %d A small state diagram" % (k + 1), fontsize=10)
+        page.insert_text((40, 260 + 240 * k), str(20 + k), fontsize=7)
+    check("three one-line captions beside margin line numbers stay captions",
+          [f[0] for f in find_caption_blocks(page)], ["1", "2", "3"])
+    doc.close()
+    # A review copy's ruler numbers every line in both margins, so a
+    # left-column caption has a ruler number to its right too.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    for k in range(3):
+        page.draw_rect(fitz.Rect(72, 60 + 240 * k, 290, 240 + 240 * k),
+                       color=(0, 0, 0), fill=(0.9, 0.6, 0.6))
+        page.insert_text((72, 260 + 240 * k),
+                         "Figure %d A small state diagram" % (k + 1), fontsize=9)
+    for i in range(63):
+        page.insert_text((30, 20 + 12 * i), "%03d" % (100 + i), fontsize=7)
+        page.insert_text((570, 20 + 12 * i), "%03d" % (163 + i), fontsize=7)
+    check("three one-line captions inside a two-margin line ruler stay "
+          "captions", [f[0] for f in find_caption_blocks(page)],
+          ["1", "2", "3"])
+    doc.close()
+    # A List of Tables sharing the page adds page numbers but no captions,
+    # and a margin ruler adds more; neither hides the List of Figures.
+    doc = fitz.open()
+    page = doc.new_page(width=612, height=792)
+    pages = [12, 15, 21, 22, 22, 25, 31, 31, 40, 44, 47, 52, 60]
+    for k, number in enumerate(pages):
+        kind, label = ("Figure", k + 1) if k < 3 else ("Table", k - 2)
+        page.insert_text((72, 104 + 24 * k), "%s %d The %s titled %d"
+                         % (kind, label, kind.lower(), label), fontsize=10)
+        page.insert_text((500, 104 + 24 * k), str(number), fontsize=10)
+    for i in range(63):
+        page.insert_text((30, 20 + 12 * i), str(i + 1), fontsize=7)
+    check("a List of Figures sharing its page with a List of Tables and a "
+          "ruler yields no captions", find_caption_blocks(page), [])
     doc.close()
 
     # Géron chapter 7 contains a prose paragraph beginning "Figure 7-3.

@@ -762,7 +762,11 @@ def self_test():
                     real_images, MANIFEST_FILE)))
 
         def test_stale_snapshot_and_late_new_occupant_are_preserved(self):
-            with tempfile.TemporaryDirectory() as directory:
+            with tempfile.TemporaryDirectory() as root:
+                # A conflict keeps its draft beside the sidecar's folder;
+                # one level down, that is inside root, not in $TMPDIR.
+                directory = os.path.join(root, "Images")
+                os.makedirs(directory)
                 path = os.path.join(directory, MANIFEST_FILE)
                 write_manifest(path, {"A_fig_1.png": "a" * 64}, expected=_now(path))
                 _manifest, expected = read_manifest_snapshot(path)
