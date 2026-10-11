@@ -69,7 +69,7 @@ import re
 import sys
 
 __all__ = [
-    "SAFE_NAME", "CANONICAL", "DISAMBIGUATOR", "TAIL", "STANDALONE_CORE", "CHAPTER_CORE",
+    "SAFE_NAME", "CANONICAL", "DISAMBIGUATOR", "TAIL", "STANDALONE_CORE",
     "ChapterName", "looks_canonical", "core_stem", "split_tail",
     "chapter_parts", "chapter_book_stem", "stem_of",
     "FEED_ATTACHMENT", "is_feed_attachment",
@@ -103,14 +103,11 @@ TAIL = r"(?:_src)?(?:_%s)?" % DISAMBIGUATOR
 STANDALONE_CORE = (r"[A-Za-z0-9][A-Za-z0-9-]*_[A-Za-z0-9-]+_"
                    r"(?:(?!0000)[0-9]{4}|nd)")
 
-#: `<standalone core>_<NN>_<ChapterName>`, no tail.  The chapter name admits
-#: no underscore: that is what keeps `_NN_` unambiguous as the boundary
-#: between a book stem and its chapter segment.
-CHAPTER_CORE = STANDALONE_CORE + r"_[0-9]{2}_[A-Za-z0-9-]+"
-
 #: A stem this plugin has already produced, either form, tail optional.
 #: Match against the STEM, not the filename — `looks_canonical()` does the
-#: extension stripping for you.
+#: extension stripping for you.  The chapter name admits no underscore: that
+#: is what keeps `_NN_` unambiguous as the boundary between a book stem and
+#: its chapter segment.
 CANONICAL = re.compile(r"(?:%s)(?:_[0-9]{2}_[A-Za-z0-9-]+)?%s\Z"
                        % (STANDALONE_CORE, TAIL))
 

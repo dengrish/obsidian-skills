@@ -208,7 +208,10 @@ from auto_fig_bbox import (
 from extract_figures import (extract_one_figure, normalize_fig_num,
                              split_book_chapters,
                              validated_figure_suffix, vault_refusal,
-                             _figure_slot_conflict)
+                             _figure_slot_conflict, _ED_LABEL_RE,
+                             _S_LABEL_RE, _default_s_label,
+                             _records_extended_data,
+                             unrecorded_extended_data)
 import atomic_move
 
 
@@ -977,67 +980,6 @@ def _ed_supplementary_pair(kept, dropped):
     """
     return (bool(_EXTENDED_DATA_RE.match(kept))
             != bool(_EXTENDED_DATA_RE.match(dropped)))
-
-
-#: Casefolded labels in the S namespace (`S1`, `S-1`, `SA1`, `SI1`), where a
-#: default-prefix run puts Extended Data captions, and the labels only
-#: `--ed-prefix ED` writes (`ED1`, `EDA1`, `EDS1`, `EDSI1`).
-_S_LABEL_RE = re.compile(r"s(?:-|[a-z]-?)?[0-9][0-9-]*")
-_ED_LABEL_RE = re.compile(r"ed(?:si|[a-z]-?)?[0-9][0-9-]*")
-
-
-def _records_extended_data(manifest, stem):
-    """True when the manifest records a `<stem>_fig_ED<N>.png` crop.
-
-    That PDF was extracted with `--ed-prefix ED`, and every later run keeps
-    it, since a default-prefix run would fold its Extended Data captions back
-    into `_fig_S<N>`.
-    """
-    prefix = figure_identity(stem + "_fig_")
-    for key in manifest:
-        identity = figure_identity(key)
-        if (identity.startswith(prefix) and identity.endswith(".png")
-                and _ED_LABEL_RE.fullmatch(identity[len(prefix):-len(".png")])):
-            return True
-    return False
-
-
-def unrecorded_extended_data(out_dir, pdfs, manifest):
-    """{PDF: its unrecorded `<stem>_fig_ED<N>.png` names in `out_dir`}.
-
-    A legacy `--ed-prefix ED` crop without an ownership record fixes that
-    PDF's namespace as firmly as a recorded one: under the default prefix
-    the same Extended Data caption would be written again as `_fig_S<N>`,
-    a second copy of one figure. The run switches such a PDF to `ED`, so
-    its summary reports the occupied slot with an `--adopt-legacy` command.
-    """
-    try:
-        names = sorted(os.listdir(out_dir)) if os.path.isdir(out_dir) else []
-    except OSError:
-        names = []
-    recorded = {figure_identity(key) for key in manifest}
-    by_stem = {}
-    for name in names:
-        identity = figure_identity(name)
-        stem, sep, label = identity.rpartition("_fig_")
-        if (sep and stem and label.endswith(".png")
-                and _ED_LABEL_RE.fullmatch(label[:-len(".png")])
-                and identity not in recorded):
-            by_stem.setdefault(stem, []).append(name)
-    return {source: by_stem[figure_identity(source.stem)] for source in pdfs
-            if figure_identity(source.stem) in by_stem}
-
-
-def _default_s_label(label):
-    """The label a default-prefix run gives the caption labelled `label`.
-
-    `ED1` becomes `S1`, `EDA1` becomes `SA1` and `EDS1` becomes `S1`, the
-    pairs `_s_ed_twins` matches. A label outside the ED namespace is its own.
-    """
-    if not _ED_LABEL_RE.fullmatch(label.casefold()):
-        return label
-    rest = label[2:]
-    return rest if rest[:1].upper() == "S" else "S" + rest
 
 
 def _load_organize():

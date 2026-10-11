@@ -763,6 +763,9 @@ _RANGE_WORD_RE = re.compile(r"[ \t](?:or|to|and)[ \t]", re.IGNORECASE)
 _MEASURE_NOUNS = frozenset((
     "times", "seconds", "minutes", "hours", "days", "weeks", "months",
     "years", "decades", "centuries", "orders"))
+#: Words ending in s that are no plural noun ("in two as follows:").
+_NON_NOUN_WORDS = frozenset((
+    "as", "is", "was", "has", "does", "gives", "yields", "follows"))
 _REPEAT_STEP_RE = re.compile(r"Repeat\b[^.;:]*?\bsteps?[ \t]+([0-9]{1,9})\b")
 _LEAD_IN_MARKUP_RE = re.compile(
     r"\[\[[^\]|\n]*\|([^\]\n]*)\]\]|\[\[([^\]\n]*)\]\]|\$[^$\n]*\$|[*_]+")
@@ -883,7 +886,8 @@ def _lead_in_count(text):
     match = counts[0]
     if (_PARTIAL_COUNT_RE.search(sentence[:match.start()])
             or _RANGE_WORD_RE.search(match.group(0))
-            or match.group(2).lower() in _MEASURE_NOUNS):
+            or match.group(2).lower() in _MEASURE_NOUNS
+            or _NON_NOUN_WORDS & set(match.group(0).lower().split()[1:])):
         return None
     value = match.group(1).lower()
     return _COUNT_WORDS.get(value) or int(value), match.group(0)
@@ -967,11 +971,12 @@ _IMAGE_LINE_RE = re.compile(r"[ \t]*!\[")
 _WIKILINK_LABEL_RE = re.compile(r"\[\[(?:([^\]|\n]*)\|)?([^\]\n]*)\]\]")
 
 
-def register_findings(prose, display_spans=(), table_spans=None):
+def register_findings(prose, display_spans=(), table_spans=None, title=None):
     """Item 9's register candidates in the explanatory body.
 
     ``praise``: a praise word on a body line outside listings and displays
-    (``register_hints`` with ``body``). ``imperative``: a prose sentence
+    (``register_hints`` with ``body`` and the entry's ``title``, so a proper
+    name or the title is no praise). ``imperative``: a prose sentence
     outside lists, tables, captions and headings that opens with a bare
     imperative from a short list followed by a determiner or number ("Train
     one detector per class"), a definition written as instructions. Each
@@ -990,7 +995,8 @@ def register_findings(prose, display_spans=(), table_spans=None):
     findings = []
     for index, line in enumerate(lines):
         words = [] if index in masked or _IMAGE_LINE_RE.match(line) else (
-            register_hints(_WIKILINK_LABEL_RE.sub(r"\2", line), body=True))
+            register_hints(_WIKILINK_LABEL_RE.sub(r"\2", line), body=True,
+                           title=title))
         if words:
             findings.append({
                 "check": "praise", "line": index + 1, "words": words,
@@ -2528,6 +2534,14 @@ def run_self_test(verbose=False):
                "The first two steps prepare four inputs:",
                "It runs in [[step|two steps]] and $2$ rounds:")],
           [[], [], [], [], [], [], [], [], [("lead-in-count", 1)]])
+    check("a verb or conjunction after a count is no counted noun",
+          [mismatch(prose + "\n\n" + steps + "3. Split the cell.")
+           for prose in (
+               "It splits a node in two as follows:",
+               "The sum of two is:",
+               "Splitting in two gives:",
+               "It runs in two steps:")],
+          [[], [], [], [("lead-in-count", 1)]])
     check("a numbered list goes on past a misplaced display; a bullet list "
           "split by a paragraph is not counted; a parent item's colon counts "
           "its nested list, which outer text ends",
@@ -2592,6 +2606,16 @@ def run_self_test(verbose=False):
               "It uses [[famous-dataset|the dataset]].",
               "![[famous-plot.png]]")],
           [[("praise", 1)], [("praise", 1)], [], [], []])
+    check("the entry's title and a proper name are no body praise",
+          [[(finding["check"], finding["line"])
+            for finding in register_findings(prose, title=title)]
+           for prose, title in (
+               ("The **Classic Maya collapse** emptied cities.\n"
+                "Classic Maya collapse ended an era.",
+                "Classic Maya collapse"),
+               ("It ended in the Terminal Classic period.", None),
+               ("Classic Maya collapse ended an era.", None))],
+          [[], [], [("praise", 1)]])
 
     # item 14
     check("source-meta phrases and the technical source compounds",

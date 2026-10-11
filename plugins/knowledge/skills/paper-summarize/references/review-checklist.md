@@ -49,7 +49,8 @@ mathematical notation: they drop accents such as hats and bars, and lose
 parentheses and the placement of superscripts, subscripts and indices (a
 printed θ̂ = (XᵀX)⁻¹Xᵀy captures as `θ = X⊺X −1X⊺y`). Check every display and
 inline formula symbol by symbol on its source page image, as for a figure or
-table image, and cite that page; a power of $e$ matches a printed exp.
+table image, and cite that page; a power of $e$ matches a printed exp, and
+$L$ or a renamed index matches a printed non-norm $\ell$.
 
 For OCR or unavailable text search, use the [page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)
 and record that method explicitly. OCR misses are checked against page images;
@@ -115,9 +116,9 @@ Walk the callout, headings, body and captions with their supporting pages open:
   methodological disclosures are stated plainly without inventing empirical
   shortcomings for a non-empirical source.
 - [ ] No needed scope or design limit was lost and none was added without
-  support; each document-level caveat appears once, in Limitations; only the
-  single chief caveat (or bullet 1's rung limit) may also appear, in one short
-  callout bullet, and nowhere else.
+  support; each document-level caveat appears once, in Limitations; only
+  bullet 1's rung limit and the single chief caveat may also appear in the
+  callout, each once, and nowhere else.
 
 ## Check provenance and exhibits
 

@@ -160,18 +160,12 @@ matches that request's `absent` record.
    [special titles](../wiki-build/references/special-titles.md) and
    [tag calibration](../wiki-build/references/calibration.md) references when
    their [reading-plan](../wiki-build/SKILL.md#what-to-read-and-when) triggers
-   apply. A missing topic that is itself a discipline (`Wiki/<discipline>.md`
-   tagged only `#<discipline>`) is that discipline's root: write it in the
-   [root form](../wiki-lint/references/hierarchy.md#establish-discipline-roots),
-   which defines the field, states its method of inquiry and names its main
-   branches as subfields under the builder's
-   [tag rules](../wiki-build/references/writing.md#tags), as the reference
-   page it cites gives them, citing that page like any other topic.
+   apply. A missing discipline (`Wiki/<discipline>.md`) takes the builder's
+   [root form](../wiki-build/references/writing.md#tags).
 2. **Read the neighbors.** Before drafting, read the entries that link to or
    mention the topic, and its nearest siblings: the draft links an
-   explanation, argument or example one of them owns instead of repeating it,
-   and states the numbers and senses they verifiably state. It uses the
-   symbols of the builder's
+   explanation, argument or example one of them owns instead of repeating it.
+   It uses the symbols of the builder's
    [notation table](../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide),
    and outside the table the symbols they state; a sibling that departs from
    the table is never a model to copy and becomes a note-content proposal for
@@ -216,11 +210,12 @@ matches that request's `absent` record.
    ```bash
    python3 '<builder>/scripts/review_tree.py' --vault '<vault>' \
        --wiki '<vault>/Wiki' --manifest '<scratch>/manifest-<n>.json' \
-       --out '<scratch>/review-<n>'
+       --out '<scratch>/review-<n>' --images '<vault>/Sources/Images'
    ```
 
-   Repair only the new draft. Skip missed-entity recovery, merges, the
-   ownership handoff and the orphan audit's create-the-entry branch.
+   Omit `--images` when the image folder is absent. Repair only the new draft. Skip the missed-entity audit (sub-step 5 sets
+   missing-entry candidates), merges, the ownership handoff and the orphan
+   audit's create-the-entry branch.
    Existing notes are read-only context: only the neighbor's side of an
    overlap or conflict becomes a note-content proposal for closeout (a copy
    the new entry should own, or a neighbor claim the research contradicts),

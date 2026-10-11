@@ -1883,25 +1883,54 @@ def _is_folder(path, identity):
     return identity is not None and _folder_identity(path) == identity
 
 
+def _vault_folders(root, skip, failed=lambda path: None):
+    """Yield ``(dirpath, sorted file names)`` for each folder Obsidian
+    indexes under the vault folder ``root``.
+
+    Folder symlinks are followed, as Obsidian indexes them, with a loop
+    guard. Dot-folders, a symlink that points back into the vault, because
+    the real folder already covers its files, and each subfolder for which
+    ``skip(path, top)`` is true are not walked; ``top`` says it sits at the
+    vault root. ``failed`` receives each folder that cannot be read.
+    """
+    seen = set()
+    for dirpath, dirnames, filenames in os.walk(
+            root, followlinks=True,
+            onerror=lambda exc: failed(exc.filename or root)):
+        identity = _folder_identity(dirpath)
+        if identity is None:
+            failed(dirpath)
+        if identity is None or identity in seen:
+            dirnames[:] = []
+            continue
+        seen.add(identity)
+
+        def walked(path):
+            return not (skip(path, dirpath == root)
+                        or (os.path.islink(path) and within_folder(path, root)))
+        dirnames[:] = sorted(
+            name for name in dirnames
+            if not name.startswith(".")
+            and walked(os.path.join(dirpath, name)))
+        yield dirpath, sorted(filenames)
+
+
 def vault_image_index(vault_root, images):
     """Index the vault's image files outside the `--images` folder.
 
     Returns a dict from each folded basename to the sorted vault-relative
     paths that hold it. Obsidian resolves an embed by basename anywhere in
     the vault, so an image outside `Sources/Images/` still renders.
-    Dot-folders, which Obsidian does not index, and the image folder, which
-    `image_index` already covers, are skipped. Folder symlinks are not
-    followed, and a folder that cannot be read is skipped.
+    `_vault_folders` walks the folders Obsidian indexes, skipping the image
+    folder, which `image_index` already covers, and any folder that cannot
+    be read.
     """
     paths = {}
     root = os.path.abspath(vault_root)
     images_identity = _folder_identity(images)
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = sorted(
-            name for name in dirnames
-            if not name.startswith(".")
-            and not _is_folder(os.path.join(dirpath, name), images_identity))
-        for name in sorted(filenames):
+    for dirpath, filenames in _vault_folders(
+            root, lambda path, _top: _is_folder(path, images_identity)):
+        for name in filenames:
             if name.startswith(".") or not _IMAGE_FILE_RE.search(name):
                 continue
             if not os.path.isfile(os.path.join(dirpath, name)):
@@ -2136,23 +2165,24 @@ _DUPLICATE_INLINE_MATH_RE = re.compile(
 #: may legally span a line break, but honouring that lets one stray backtick
 #: swallow the rest of an entry.
 _INLINE_CODE = re.compile(r"(`+)[^\n]*?\1(?!`)")
-#: A list item's marker, and the plain word that stands in for it when
-#: duplicate_sentence_surfaces starts a sentence at each list item.
+#: A list item's marker, and the plain word that stands in for it and for a
+#: blank line where duplicate_sentence_surfaces ends a sentence.
 _DUPLICATE_LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+")
-_DUPLICATE_LIST_BREAK = "duplistitembreak"
+_DUPLICATE_BREAK = "dupblockbreak"
 def duplicate_sentence_surfaces(prose, table_spans=(), min_chars=80,
-                                min_words=12, split_list_items=False):
+                                min_words=12):
     """Return long normalized prose sentences eligible for ownership review.
 
     Exact copied prose is a useful cross-entry signal only after presentation
     syntax is removed. Listings, displays, tables, images, and captions are not
     assertions to deduplicate, so they are blanked. Wikilinks normalize to
     their rendered label, making a linked and an unlinked copy comparable.
+    Every blank or blanked line ends a sentence, and each list item starts
+    one without its marker, so a lead-in never joins the sentence after its
+    display or its first list item.
     Short sentences stay out: ordinary connective or definitional phrases are
     expected to recur and offer no ownership evidence. `overlap_candidates`
-    lowers the floor and applies its own content-word minimum instead; with
-    ``split_list_items`` each list item also starts a sentence without its
-    marker, so a lead-in and its first item are never one sentence.
+    lowers the floor and applies its own content-word minimum instead.
     """
     visible = strip_indented(strip_fenced(prose or ""))
     visible = _DUPLICATE_DISPLAY_RE.sub(
@@ -2167,12 +2197,10 @@ def duplicate_sentence_surfaces(prose, table_spans=(), min_chars=80,
                 or re.match(r"^!\[\[.*\]\]$", stripped)
                 or re.match(r"^!\[[^\]]*\]\([^)]*\)$", stripped)
                 or re.match(r"^\*(?!\*)\S(?:.*\S)?\*$", stripped)):
-            kept_lines.append("")
-        elif split_list_items:
-            kept_lines.append(_DUPLICATE_LIST_ITEM_RE.sub(
-                " %s " % _DUPLICATE_LIST_BREAK, line, count=1))
+            kept_lines.append(" %s " % _DUPLICATE_BREAK)
         else:
-            kept_lines.append(line)
+            kept_lines.append(_DUPLICATE_LIST_ITEM_RE.sub(
+                " %s " % _DUPLICATE_BREAK, line, count=1))
     visible = "\n".join(kept_lines)
 
     def render_wikilink(match):
@@ -2220,8 +2248,7 @@ def duplicate_sentence_surfaces(prose, table_spans=(), min_chars=80,
     visible = _DUPLICATE_MARKDOWN_LINK_RE.sub(r"\1", visible)
     visible = re.sub(r"[*_~]+", "", visible)
     compact = " ".join(visible.split())
-    blocks = (compact.split(_DUPLICATE_LIST_BREAK) if split_list_items
-              else [compact])
+    blocks = compact.split(_DUPLICATE_BREAK)
 
     out = []
     for sentence in (sentence for block in blocks
@@ -2345,19 +2372,21 @@ OVERLAP_MIN_SIMILARITY = 0.5
 OVERLAP_MIN_WORDS = 6
 
 
-def overlap_content_words(normalized):
+def overlap_content_words(normalized, vocabulary=frozenset()):
     """The content-word set of a normalized sentence: letter-only words of
-    three or more letters outside `_OVERLAP_STOPWORDS`, each cut to its first
-    six letters after a plural ``s`` is dropped, so a plural and most
-    inflections compare equal. Inline code and math sentinels never count."""
+    three or more letters outside `_OVERLAP_STOPWORDS`. Each becomes its
+    shortest other `singular_forms` member found in ``vocabulary``, the run's
+    words, and is cut to its first six letters, so a regular or irregular
+    plural compares equal to a singular used elsewhere in the run, as do most
+    inflections. Inline code and math sentinels never count."""
     words = set()
     for token in normalized.split():
         if (len(token) < 3 or token in _OVERLAP_STOPWORDS
                 or token in ("dupmath", "dupcode")
                 or not re.fullmatch(r"[^\W\d_]+", token)):
             continue
-        if len(token) > 3 and token.endswith("s") and not token.endswith("ss"):
-            token = token[:-1]
+        token = min((singular_forms(token) - {token}) & vocabulary,
+                    key=lambda form: (len(form), form), default=token)
         words.add(token[:6])
     return frozenset(words)
 
@@ -2378,11 +2407,14 @@ def build_overlap_candidates(sentences, exact_keys=frozenset(),
     min_similarity = (OVERLAP_MIN_SIMILARITY if min_similarity is None
                       else min_similarity)
     min_words = OVERLAP_MIN_WORDS if min_words is None else min_words
+    vocabulary = frozenset(token for rows in sentences.values()
+                           for normalized, _surface in rows
+                           for token in normalized.split())
     records = []
     for slug_value in sorted(sentences):
         seen = set()
         for normalized, surface in sentences[slug_value]:
-            words = overlap_content_words(normalized)
+            words = overlap_content_words(normalized, vocabulary)
             if len(words) < min_words or (normalized, words) in seen:
                 continue
             seen.add((normalized, words))
@@ -2587,42 +2619,24 @@ def vault_note_index(vault_root, wiki):
     (with ``.md``) that own it, and ``basenames`` maps each folded basename
     the same way. ``unread`` lists, sorted, the vault-relative folders that
     could not be read.
-    Dot-folders, the scanned Wiki tree and the vault-root ``MOCs/`` folder,
-    which the MOC inventory owns, are skipped. Folder symlinks are followed,
-    as Obsidian indexes them, with a loop guard; one that points back into
-    the vault is not walked, because the real folder already covers its
-    files.
+    `_vault_folders` walks the folders Obsidian indexes, skipping the
+    scanned Wiki tree and the vault-root ``MOCs/`` folder, which the MOC
+    inventory owns.
     """
     paths, basenames = {}, {}
     unread = set()
     root = os.path.abspath(vault_root)
     wiki_identity = _folder_identity(wiki)
-    seen = set()
 
     def failed(path):
         unread.add(os.path.relpath(path, root).replace(os.sep, "/"))
 
-    def links_back(path):
-        return os.path.islink(path) and within_folder(path, root)
+    def skipped(path, top):
+        return ((top and fold_name(os.path.basename(path)) == "mocs")
+                or _is_folder(path, wiki_identity))
 
-    for dirpath, dirnames, filenames in os.walk(
-            root, followlinks=True,
-            onerror=lambda exc: failed(exc.filename or root)):
-        identity = _folder_identity(dirpath)
-        if identity is None:
-            failed(dirpath)
-        if identity is None or identity in seen:
-            dirnames[:] = []
-            continue
-        seen.add(identity)
-        top = dirpath == root
-        dirnames[:] = sorted(
-            name for name in dirnames
-            if not name.startswith(".")
-            and not (top and fold_name(name) == "mocs")
-            and not _is_folder(os.path.join(dirpath, name), wiki_identity)
-            and not links_back(os.path.join(dirpath, name)))
-        for name in sorted(filenames):
+    for dirpath, filenames in _vault_folders(root, skipped, failed):
+        for name in filenames:
             if name.startswith(".") or not name.lower().endswith(".md"):
                 continue
             if not os.path.isfile(os.path.join(dirpath, name)):
@@ -3947,7 +3961,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                     "establishes it; a candidate is never an order"))
             # Praise is a register candidate wherever it appears (lint_entry's
             # 9-register-candidate).
-            _desc_praise = register_hints(e["desc"])
+            _desc_praise = register_hints(e["desc"], title=e["title"])
             if _desc_praise:
                 problems.append((
                     sl, "item9/register-candidate",
@@ -4126,7 +4140,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                 sl, "item9/list-mismatch-candidate",
                 "prose line %d: %s; a candidate is never an order"
                 % (_row["line"] + _line_off, _row["message"])))
-        for _row in register_findings(e["prose"], _list_spans, _list_tables):
+        for _row in register_findings(e["prose"], _list_spans, _list_tables,
+                                      title=e["title"]):
             problems.append((
                 sl, "item9/register-candidate",
                 "prose line %d: %s; a candidate is never an order"
@@ -4235,7 +4250,7 @@ def scan(wiki, images=None, vault=None, settled=None):
         if _ell_rows:
             problems.append((
                 sl, "item12/ell-non-norm",
-                "`\\ell` without a subscript in body math — "
+                "`\\ell` without a norm-order subscript in body math — "
                 + "; ".join(f'line {row["line"] + _line_off}: '
                             f'"{row["math"][:60]}"' for row in _ell_rows)
                 + " — `\\ell` names only norms ($\\ell_1$, $\\ell_2$, "
@@ -4593,7 +4608,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                 if find_ell_non_norm_candidates(strip_code(line1)):
                     problems.append((
                         sl, "item12/ell-non-norm",
-                        f"{_lead}`\\ell` without a subscript in {tag} line 1"
+                        f"{_lead}`\\ell` without a norm-order subscript in "
+                        f"{tag} line 1"
                         + ("" if _extra else
                            " — `\\ell` names only norms, so a loss is $L$ "
                            "and an index takes another letter; rename it "
@@ -4718,7 +4734,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                         "(no bounds over every term, symbols named by role "
                         "words) when it states the definition more directly "
                         "than words; a candidate is never an order"))
-                _praise = [] if _extra else register_hints(line1)
+                _praise = ([] if _extra
+                           else register_hints(line1, title=e["title"]))
                 if _praise:
                     problems.append((
                         sl, "item9/register-candidate",
@@ -5585,21 +5602,32 @@ def scan(wiki, images=None, vault=None, settled=None):
     # copy and trims the others to a one-clause consequence linked to it;
     # refactors.md, not this message, chooses the owner (a family-wide
     # property goes to the family's entry, not to the most specific one).
+    # A basename several files share names its scanned file by path.
+    def _twin_path(slug_value):
+        return (entries[slug_value]["path_key"]
+                if fold_name(slug_value) in ambiguous_files else "")
+
+    # A lead-in ending in a colon introduces its display or list, and
+    # equations.md has sibling entries bind their symbols there in like
+    # words, so neither duplicate path reads it.
     sentence_owners = {}
     for _slug, _entry in sorted(entries.items()):
         for _normalized, _surface in duplicate_sentence_surfaces(
                 _entry.get("prose", ""), _entry.get("table_spans", ())):
-            sentence_owners.setdefault(_normalized, {}) \
-                .setdefault(_slug, _surface)
+            if not _surface.endswith(":"):
+                sentence_owners.setdefault(_normalized, {}) \
+                    .setdefault(_slug, _surface)
     for _normalized, _owners in sorted(sentence_owners.items()):
         if len(_owners) < 2:
             continue
         _all_slugs = sorted(_owners)
         for _slug in _all_slugs:
-            _peers = [peer for peer in _all_slugs if peer != _slug]
+            _peers = [_twin_path(peer) or peer
+                      for peer in _all_slugs if peer != _slug]
             _snippet = _owners[_slug]
             if len(_snippet) > 180:
                 _snippet = _snippet[:177].rstrip() + "..."
+            problems.current_path = _twin_path(_slug)
             problems.append((
                 _slug, "item9/duplicate-sentence",
                 "a long prose sentence has the same normalized word sequence "
@@ -5612,9 +5640,9 @@ def scan(wiki, images=None, vault=None, settled=None):
     # (`overlap_candidates`), never a `problems` row: a one-clause contrast
     # kept on purpose would otherwise return every run.
     overlap_candidates = build_overlap_candidates(
-        {_slug: duplicate_sentence_surfaces(
+        {_slug: [_row for _row in duplicate_sentence_surfaces(
             _entry.get("prose", ""), _entry.get("table_spans", ()),
-            min_chars=0, min_words=0, split_list_items=True)
+            min_chars=0, min_words=0) if not _row[1].endswith(":")]
          for _slug, _entry in entries.items()},
         {_normalized for _normalized, _owners in sentence_owners.items()
          if len(_owners) > 1})
@@ -5630,6 +5658,7 @@ def scan(wiki, images=None, vault=None, settled=None):
         if len(_owners) < 2:
             continue
         for _slug in sorted(_owners):
+            problems.current_path = _twin_path(_slug)
             problems.append((
                 _slug, "item12/duplicate-embed-candidate",
                 "image %s is also embedded in %s — review only: a figure "
@@ -5637,7 +5666,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "1b's consolidation moves it with its caption when another "
                 "entry clearly owns it"
                 % (_owners[_slug], ", ".join(
-                    peer for peer in sorted(_owners) if peer != _slug))))
+                    _twin_path(peer) or peer
+                    for peer in sorted(_owners) if peer != _slug))))
+    problems.current_path = ""
 
     # ---- discipline-tag census (VALID enum slugs vs off-enum/malformed) ----
     tag_counts = {}                       # VALID discipline slug -> entry count
@@ -7767,29 +7798,76 @@ def run_self_test():
                    "It classifies an instance in three steps:\n\n"
                    "1. Compute each score.\n2) Pick the largest.\n\n"
                    "**Bold** opens a line and a - dash stays.")
-        check("with split_list_items, each list item starts a sentence "
-              "without its marker; bold and an inline dash are no marker",
+        check("each list item starts a sentence without its marker; bold and "
+              "an inline dash are no marker",
               [surface for _normalized, surface in duplicate_sentence_surfaces(
-                  _listed, min_chars=0, min_words=0, split_list_items=True)],
+                  _listed, min_chars=0, min_words=0)],
               ["The main ensemble methods are:",
                "Hard voting picks the majority class.",
                "Soft voting averages the probabilities.",
                "It classifies an instance in three steps:",
                "Compute each score.", "Pick the largest.",
                "Bold opens a line and a - dash stays."])
-        check("the exact duplicate-sentence path keeps a lead-in joined to its "
-              "first list item",
-              [surface for _normalized, surface in duplicate_sentence_surfaces(
-                  _listed, min_chars=0, min_words=0)][:3],
-              ["The main ensemble methods are: - Hard voting picks the "
-               "majority class.", "Soft voting averages the probabilities.",
-               "It classifies an instance in three steps: 1."])
-        check("overlap content words drop function words, plural s, math and "
-              "code sentinels, and compare six-letter stems",
-              sorted(overlap_content_words(
+        _explained = ("Here the learning rate scales each step, so a smaller "
+                      "value makes the descent slower but steadier toward "
+                      "the minimum.")
+        v = os.path.join(tmp, "v4-duplicate-break")
+        _st_write(v, "display-a.md", _st_entry(
+            "Display A", "**Display A** is a worked example. The update "
+            "rule is:\n\n$$\nw = w - \\eta g\n$$\n\n" + _explained))
+        _st_write(v, "display-b.md", _st_entry(
+            "Display B", "**Display B** is another worked example. "
+            + _explained))
+        _st_write(v, "list-a.md", _st_entry(
+            "List A", "**List A** is a worked example. Its training "
+            "differs in one way:\n- " + repeated + "\n- Boosting.\n"))
+        _st_write(v, "list-b.md", _st_entry(
+            "List B", "**List B** is another worked example. " + repeated))
+        _break_res = scan(v)
+        check("a sentence after a lead-in and its display or list marker is "
+              "its own duplicate sentence, and the exact pair is no overlap "
+              "candidate",
+              ([(slug, "item9/duplicate-sentence" in _st_keys(
+                  _break_res, slug))
+                for slug in ("display-a", "display-b", "list-a", "list-b")],
+               _break_res["overlap_candidates"]),
+              ([("display-a", True), ("display-b", True), ("list-a", True),
+                ("list-b", True)], []))
+        _binding = ("For $m$ instances with feature vectors "
+                    "$\\mathbf{x}^{(i)}$, targets $y^{(i)}$ and a prediction "
+                    "function $h$ over the whole training set, the error is:")
+        v = os.path.join(tmp, "v4-lead-in")
+        for _name, _lead in (("abs-error", _binding),
+                             ("sq-error", _binding),
+                             ("root-error", _binding.replace(
+                                 "the error is", "its root error is"))):
+            _st_write(v, _name + ".md", _st_entry(
+                _name.replace("-", " ").capitalize(), "**%s** is a worked "
+                "example. %s\n\n$$\nE = 1\n$$\n" % (_name, _lead)))
+        _lead_res = scan(v)
+        check("a symbol-binding lead-in ending in a colon is neither a "
+              "duplicate sentence nor an overlap candidate",
+              ([slug for slug in ("abs-error", "sq-error", "root-error")
+                if "item9/duplicate-sentence" in _st_keys(_lead_res, slug)],
+               _lead_res["overlap_candidates"]), ([], []))
+        check("overlap content words drop function words, math and code "
+              "sentinels, and compare six-letter stems; a plural keeps its "
+              "s unless the run uses its singular",
+              [sorted(overlap_content_words(
                   "the genomes of a genome carry genes dupmath x u002b y "
-                  "dupcode fit nucleotides")),
-              ["carry", "fit", "gene", "genome", "nucleo"])
+                  "dupcode fit nucleotides", vocabulary))
+               for vocabulary in (frozenset(), frozenset({"gene"}))],
+              [["carry", "fit", "genes", "genome", "nucleo"],
+               ["carry", "fit", "gene", "genome", "nucleo"]])
+        check("an -es or irregular plural compares equal to the singular "
+              "another sentence uses",
+              build_overlap_candidates({
+                  "a": [("the classes share matrices and biases across "
+                         "fungi", "A")],
+                  "b": [("each class shares a matrix and a bias across a "
+                         "fungus", "B")]}, min_words=4),
+              [{"a": "a", "b": "b", "similarity": 1.0, "sentences": [
+                  {"similarity": 1.0, "a": "A", "b": "B"}]}])
         _paste = ("Pasting is preferred only when the data is not noisy and "
                   "the model is not prone to overfitting, because avoiding "
                   "repeated instances then makes its training slightly more "
@@ -7907,6 +7985,23 @@ def run_self_test():
                            "embed-b"),
                ("embed-b", "image doe_x_2025_fig_1.png is also embedded in "
                            "embed-a")])
+        v = os.path.join(tmp, "v4-duplicate-twin")
+        for _rel, _name in (("a/twin.md", "Twin"), ("b/twin.md", "Twin"),
+                            ("other.md", "Other")):
+            _st_write(v, _rel, _st_entry(
+                _name, "**%s** is a worked example. %s\n\n"
+                "![[Doe_X_2025_fig_1.png]]\n*A figure.*" % (_name, repeated)))
+        check("a duplicate sentence or embed in a file whose basename another "
+              "file shares carries its path, and its peers name that path",
+              sorted((p["slug"], p["item"], p.get("path", ""),
+                      "a/twin.md" in p["message"])
+                     for p in scan(v)["problems"]
+                     if p["item"] in ("item9/duplicate-sentence",
+                                      "item12/duplicate-embed-candidate")),
+              [("other", "item12/duplicate-embed-candidate", "", True),
+               ("other", "item9/duplicate-sentence", "", True),
+               ("twin", "item12/duplicate-embed-candidate", "a/twin.md", False),
+               ("twin", "item9/duplicate-sentence", "a/twin.md", False)])
 
         # special-titles.md's cross-domain corpus, its words and its phrases,
         # is the scanner's mechanical minimum.  A single fixture over every
@@ -9719,6 +9814,31 @@ def run_self_test():
                 if p["slug"] == "pasted"
                 and p["item"] == "item12/missing-image"]),
               (True, True, ["Trashed.png"]))
+        _lv = os.path.join(tmp, "v13b-linked-attachments")
+        _lv_outside = os.path.join(tmp, "v13b-linked-outside")
+        os.makedirs(os.path.join(_lv, ".obsidian"))
+        os.makedirs(os.path.join(_lv, "Sources", "Images"))
+        _st_write(_lv_outside, "Linked.png", "")
+        _st_write(_lv, "Wiki/linked.md", _st_entry(
+            "Linked", "**Linked** is a worked example.\n\n"
+            "![[Linked.png]]\n*A linked image.*"))
+        _lv_want = (["item12/image-outside-folder"], True)
+        try:
+            os.symlink(_lv_outside, os.path.join(_lv, "Attachments"))
+            os.symlink(_lv_outside, os.path.join(_lv_outside, "loop"))
+        except (OSError, NotImplementedError, AttributeError):
+            _lv_seen = _lv_want
+        else:
+            _lv_res = scan(os.path.join(_lv, "Wiki"),
+                           os.path.join(_lv, "Sources", "Images"), vault=_lv)
+            _lv_seen = (
+                [p["item"] for p in _lv_res["problems"]
+                 if p["slug"] == "linked" and p["item"].startswith("item12/")],
+                "Attachments/Linked.png" in _st_msg(
+                    _lv_res, "linked", "item12/image-outside-folder"))
+        check("an image in a symlinked vault folder renders, so it is outside "
+              "the image folder, not missing (skipped where symlink creation "
+              "is unavailable)", _lv_seen, _lv_want)
         check("a `.dltmp` download staging name is temporary on its own",
               [looks_staging(name) for name in (
                   "Doe_X_2025_fig_1.png.dltmp", "Doe_X_2025_fig_1.png")],
@@ -12904,6 +13024,18 @@ def run_self_test():
                 if k == "item9/register-candidate"]),
               (["item9/register-candidate"], True,
                ["item9/register-candidate"], True, []))
+        _maya = os.path.join(tmp, "v4-title-praise")
+        _st_write(_maya, "classic-maya-collapse.md", _st_entry(
+            "Classic Maya collapse", "**Classic Maya collapse** emptied the "
+            "southern lowland cities in the Terminal Classic period.",
+            description="Classic Maya collapse is the abandonment of the "
+                        "southern lowland cities.").replace(
+                "The idea this entry is about, stated once.",
+                "Classic Maya collapse, the abandonment of lowland cities."))
+        check("the title in the description, body and card line 1, and a "
+              "proper name inside a sentence, are no praise",
+              [k for k in _st_keys(scan(_maya), "classic-maya-collapse")
+               if k == "item9/register-candidate"], [])
         check("brevity candidates are advisory and never item19 errors",
               ([k for k in _st_keys(res, "long-cue") if k.startswith("item19")],
                "glossary" in _st_msg(res, "glossary-cue",
@@ -12953,7 +13085,8 @@ def run_self_test():
             "Exp extra", "Another notion $\\exp(x)$, stated briefly.\n??\n"
             "Second idea\n"))
         res = scan(v)
-        check("a \\ell with no subscript in body or card math is an item12 "
+        check("a \\ell with no norm-order subscript in body or card math is "
+              "an item12 "
               "finding naming the rename; named norms are not, and an extra "
               "card's needs only its removal",
               ([k for k in _st_keys(res, "ell-loss") if k.startswith("item12")],

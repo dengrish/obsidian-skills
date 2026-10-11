@@ -28,9 +28,11 @@ code when judging a match. Never edit source code to satisfy a prose detector.
 Read the results as follows:
 
 - Required in rendered prose: no H1, exactly one actual Summary callout, no
-  remote-image reference (Markdown, or HTML such as `<img>`, `<picture>` or
-  `<figure>`) left without a failure placeholder, and no confirmed clipping
-  damage.
+  confirmed clipping damage, and no remote-image reference left (Markdown, or
+  HTML such as `<img>`, `<picture>` or `<figure>`): each image is a local embed
+  or has been replaced by its failure placeholder. A kept YouTube or X/Twitter
+  [video or post embed](images.md#download-and-publish) is an expected item 3
+  match.
 - Odd asterisk runs, stacked markers, deep indentation and sibling splits
   (items 7, 8, 12 and 12b) are **candidates**. List bullets, escapes, multiline
   emphasis and genuine nested lists can match. Use the

@@ -843,6 +843,13 @@ def find_caption_blocks(page):
                     and CONTINUED_FIGURE_REFERENCE_RE.search(
                         lines[first - 1][1])):
                 continue
+            # A full-width prose line that breaks mid-sentence wraps a
+            # reference whatever its verb; a centred axis label is narrower.
+            prev_rect, prev = lines[first - 1] if first > 0 else (rect, "")
+            if (_is_prose_line(prev)
+                    and not re.search(r'[.!?:;)]\s*$', prev)
+                    and prev_rect.width >= 0.9 * rect.width):
+                continue
             # A lower-case 'figure N' wrapped mid-sentence is a reference, not
             # a caption.
             kw = text[match.start():].lstrip()
@@ -2188,6 +2195,30 @@ def top_cut_y(page, bbox):
     return max(0.0, min(cut)) if cut else None
 
 
+def bottom_cut(page, bbox, caption_rect):
+    """A drawing that runs on below a bottom caption's crop, or None.
+
+    The caption's top sets that crop's bottom edge. A drawing in the crop's
+    columns that crosses the edge, ends more than 10pt below it and stays
+    clear of the caption's x-range is a figure cut short beside a
+    side-column caption, or a neighbour inside the crop. Drawings only, cut
+    to their clip and the page: an image rect is unclipped.
+    """
+    for d in _drawings(page):
+        r = d.get("rect")
+        if r is None or r.width <= 0 or r.height <= 0:
+            continue
+        r = fitz.Rect(r) & content_rect(page)
+        if d.get("clip") is not None:
+            r &= d["clip"]
+        if (not r.is_empty
+                and min(r.x1, bbox.x1) - max(r.x0, bbox.x0) > CUT_TOL
+                and r.y0 < bbox.y1 - CUT_TOL and r.y1 > bbox.y1 + 10
+                and min(r.x1, caption_rect.x1) <= max(r.x0, caption_rect.x0)):
+            return r
+    return None
+
+
 def _column_rects(page, bbox, rects=None):
     """The drawings and text lines (or `rects`) in `bbox`'s columns."""
     if rects is None:
@@ -2496,6 +2527,17 @@ def suspicious(bbox, region=None, page=None, caption_rect=None, headers=None,
         return (f"content from y={cut_y:.0f} is cut at the page-top bound "
                 f"(crop y={bbox.y0:.0f}) — the top of the figure may be "
                 f"missing; render the page and set an explicit crop")
+    # Coverage stops at the caption's top too, so a figure that runs on
+    # below it beside the caption needs the same check at the bottom edge.
+    low = (bottom_cut(page, bbox, caption_rect)
+           if page is not None and caption_rect is not None
+           and not getattr(placement, "side", None)
+           and caption_rect.y0 >= bbox.y1 - CUT_TOL else None)
+    if low is not None:
+        return (f"content from y={low.y0:.0f} continues below the crop to "
+                f"y={low.y1:.0f} beside the caption — the figure is cut or a "
+                f"neighbour is inside; render the page and set an explicit "
+                f"crop")
     # Everything above measures UNDER-coverage, so a crop that reaches too far
     # UP is structurally uncatchable by any of it — over-reach RAISES coverage.
     # These two close that side. Both were reproduced on a real paper where
@@ -3671,6 +3713,33 @@ def run_self_test():
     ok("...and does not truncate the real caption rectangle",
        found[0][2].y1 >= 325)
     doc.close()
+    # Any verb can end a justified prose line that wraps a reference (Géron,
+    # proteinDPO); a centred axis label of as many words is narrower.
+    for what, rows, want in (
+            ("after 'matches'", (
+                (72, "Now that we have our residual unit, the whole ResNet-34 "
+                     "becomes a stack,"),
+                (72, "so our ResNet34 class is one nn.Sequential module. The "
+                     "code closely matches"),
+                (72, "Figure 12-18:")), []),
+            ("after 'included in'", (
+                (72, "native sequence. Distributional plots of the individual "
+                     "values are included in"),
+                (72, "Extended Data Fig. 1. c, Trained on the same training "
+                     "data as ThermoMPNN,"),
+                (72, "we show the correlation between all model predictions "
+                     "(ThermoMPNN) or")), []),
+            ("below a centred axis label", (
+                (200, "Number of training epochs per run"),
+                (100, "Figure 1. The loss falls as the model trains for "
+                      "longer runs.")), ["1"])):
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        for k, (x, line) in enumerate(rows):
+            page.insert_text((x, 310 + 10 * k), line, fontsize=8)
+        check("a line-start figure label %s" % what,
+              [f[0] for f in find_caption_blocks(page)], want)
+        doc.close()
 
     check("_line_index picks the containing line",
           [_line_index([0, 10, 25], off) for off in (0, 9, 10, 24, 25, 99)],
@@ -3811,6 +3880,23 @@ def run_self_test():
           [(round(row[3].y0), row[5]) for row in detect_figures(doc)],
           [(50, "")] * 3)
     doc.close()
+
+    # --- a figure that runs on below a narrow left-column caption ---------
+    # The caption's top ends the crop, so Alberts' lower panels beside it
+    # were cut off with a clean edge, and nothing was flagged.
+    for lower, want in (((290, 480), "content from y=290 continues below"),
+                        ((200, 280), "")):
+        doc = fitz.open()
+        page = doc.new_page(width=612, height=792)
+        page.draw_rect(fitz.Rect(40, 100, 560, 280), fill=(0.3, 0.5, 0.7))
+        page.draw_rect(fitz.Rect(220, lower[0], 560, lower[1]),
+                       fill=(0.7, 0.3, 0.3))
+        for k, line in enumerate(("Figure 1. A caption set", "in the narrow "
+                                  "left", "column beside the", "figure.")):
+            page.insert_text((40, 310 + 11 * k), line, fontsize=9)
+        check("a drawing at y=%d-%d beside a left-column caption" % lower,
+              [row[5][:len(want)] for row in detect_figures(doc)], [want])
+        doc.close()
 
     pdoc = _st_prose_doc()
     ppage = pdoc[0]
@@ -4630,10 +4716,14 @@ def run_self_test():
     check("...so the placement is contested, not merely thin",
           place.ambiguous, "contested")
     got = list(detect_figures(doc))
+    # The figure runs on below the crop beside the caption, which names the
+    # cut more exactly than the contested reading does.
     ok("...and the figure is flagged rather than cropped in silence",
-       got[0][5].startswith(CAPTION_AMBIGUOUS_TAG))
-    ok("...with a reason that says the other reading has a claim, and does "
-       "not claim thin evidence", "nearly as good a claim" in got[0][5])
+       got[0][5].startswith("content from y=300 continues below the crop"))
+    ok("...with a reason that names the figure beside the caption, and does "
+       "not claim thin evidence",
+       "to y=337 beside the caption" in got[0][5]
+       and "thin evidence" not in got[0][5])
     doc.close()
 
     # The two clauses have to read differently: one fired while the message
@@ -5491,6 +5581,22 @@ def run_self_test():
         code, so, se = run([good, "--emit", "extract"])
         check("--emit extract exits 0", code, 0)
         ok("...and emits no --stem", "--crop" in so and "--stem" not in so)
+        # Figure 1.2 and Figure 1-2 share one output label; the first keeps it.
+        twins = os.path.join(tmp, "Doe_Twins_2025.pdf")
+        d = fitz.open()
+        for label in ("1.2", "1-2"):
+            page = d.new_page(width=612, height=792)
+            page.draw_rect(fitz.Rect(100, 150, 500, 350), fill=(0.2, 0.3, 0.7))
+            page.insert_text((100, 380), "Figure %s. A twin." % label,
+                             fontsize=9)
+        d.save(twins)
+        d.close()
+        code, so, se = run([twins, "--emit", "extract"])
+        check("--emit extract keeps one crop per output label",
+              (code, so.count("--crop"), '--crop "1:1.2:' in so), (0, 1, True))
+        ok("...and names the later caption with its coordinates",
+           "Fig 1-2 on page 2: same output label as page 1" in se
+           and '--crop "2:1-2:' in se)
         code, once, se = run([good, "--pages", "1"])
         code, repeated, se = run([good, "--pages", "1,1"])
         check("duplicate --pages selections are de-duplicated", repeated, once)
@@ -5645,6 +5751,7 @@ def main(argv=None):
     n_warn = 0
     n_skipped = 0
     crop_lines = []
+    emitted = {}              # output label -> the page whose crop has it
     found_labels = []
     for i, fig_num, raw_label, bbox, cap_rect, reason in detect_figures(doc, page_idxs):
         found_labels.append(fig_num)
@@ -5664,10 +5771,21 @@ def main(argv=None):
             if degenerate(bbox):
                 n_skipped += 1
                 continue
-            crop_lines.append(
-                f'    --crop "{i+1}:{fig_num}:'
-                f'{bbox.x0:.0f},{bbox.y0:.0f},{bbox.x1:.0f},{bbox.y1:.0f}"'
-            )
+            crop = (f"{i+1}:{fig_num}:{bbox.x0:.0f},{bbox.y0:.0f},"
+                    f"{bbox.x1:.0f},{bbox.y1:.0f}")
+            # extract_figures.py refuses a command with two crops for one
+            # output label; the first caption keeps it, as in the batch. Its
+            # normalize_fig_num folds dots to dashes (`normalize_label`
+            # folded the rest); importing it would need the shared layer.
+            key = fig_num.replace(".", "-").casefold()
+            if key in emitted:
+                print(f"# Fig {fig_num} on page {i+1}: same output label as "
+                      f"page {emitted[key]} (caption collision); if this is "
+                      f"the real figure, use --crop \"{crop}\" instead",
+                      file=sys.stderr)
+                continue
+            emitted[key] = i + 1
+            crop_lines.append(f'    --crop "{crop}"')
         else:
             # Table mode also prints the caption rect — useful when
             # constructing an explicit fallback crop, since the caption's

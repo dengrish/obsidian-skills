@@ -56,7 +56,7 @@ ownership.
 | `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
 | `item9/list-mismatch-candidate` | Review the lead-in's count or the Repeat item's step against the builder's [numbered-list tests](../../wiki-build/references/writing.md#body-structure). A count of something other than the list's items stays. A real disagreement goes to Task 1b, which settles it from the cited source, correcting the count, restoring a missing step or pointing the Repeat item at the step that begins the repeated work, under [item 9](#9-body-structure-coherence-flow-and-scope). The candidate alone is never an order. |
 | `item9/register-candidate` | Review the praise word or imperative opener under the builder's neutral [register](../../wiki-build/references/writing.md#prose-principles): Task 1 drops praise that adds no claim and restates a definition written as instructions as a fact, keeping every claim; in the description or on card line 1 the review follows [item 7](#7-description) or [item 19](#19-flashcards). The candidate alone is never an order. |
-| `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. |
+| `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. A link to an entry this run's Task 1b retitles (a `rename_candidates` row with `target_exists: false`) waits for the retitle, which rewrites it once; if Task 1b keeps the name, it canonicalizes the link then. |
 | `item10/self` | In Task 2, unlink an ordinary self-mention. Preserve real section/block navigation as a local `[[#Heading|Display]]` or `[[^block|Display]]` anchor. |
 | `item10/ambiguous` | Preserve the whole link and report its competing owners. |
 | `item10/unparsed` | Report only: [item 10](#10-wikilinks); the target file's `item0` or `item1` governs repair. |
@@ -75,7 +75,7 @@ ownership.
 | `item12/duplicate-embed-candidate` | Task 1b consolidates the embeds under [item 9](#9-body-structure-coherence-flow-and-scope) into the entry [media selection](../../wiki-build/references/media.md#selection) makes the figure's owner. The candidate alone is never an order. |
 | `item12/panel-composite`, `item12/remote-image`, `item12/missing-image`, `item12/image-outside-folder` | Report only: [item 12](#12-equations-images-and-tables). |
 | `image_folder_findings` | Report and preserve nested, staging, unreadable, or portable-name-collision paths. Collision records retain all owner paths; an unreadable inventory also suppresses missing-image claims. |
-| `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything. |
+| `item17/alias-candidate` | Apply the same-entity, collision, cross-domain, and Organism-common-name gates before adding anything, under [item 17](#17-alias-identity-and-completeness). |
 | `item18/partial-label` | Task 1 repair; a label naming another entity goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item18/cross-domain-alias` | The alias is a bare cross-domain term, which is never an alias. Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Remove each extra card under the [card set](flashcards.md#card-set) rule; a finding on an extra card, its line-1 `item12` findings included, needs no repair beyond that removal. Content after a card's line 3 that is not a recognized attachment, and any other block in the section, is report-only unless it holds [card syntax](../../wiki-build/references/flashcards-and-emphasis.md#card-set), which makes it an extra card to remove. |
@@ -84,7 +84,7 @@ ownership.
 | `item19/card-equation-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): add the expression inline in the compact form the [line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage) asks for, and keep the cue verbal when the display is no short definition or words state it as directly; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
-| `neighbors` | Input to item 9's per-entry [coherence review](#9-body-structure-coherence-flow-and-scope) in a narrowed run and to a repair's one-hop [neighbor reread](source-backed-corrections.md#correct-and-publish); it authorizes no edit. |
+| `neighbors` | Input to item 9's per-entry [coherence review](#9-body-structure-coherence-flow-and-scope) in a narrowed run or for an unplaced entry, and to a repair's one-hop [neighbor reread](source-backed-corrections.md#correct-and-publish); it authorizes no edit. |
 | `overlap_candidates` | A review-only reading list for item 9's family pass. Task 1b consolidates a real duplicate under item 9; a pair that keeps only the one clause the [atomicity test](../../wiki-build/references/writing.md#body-structure) allows stays as written, however often it returns. The list is never an order. |
 | `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. A `new_slug` that differs from the filename only in case or Unicode normalization names the entry's own file, which the protocol respells. An occupied destination is never retitled into: a same-entity occupant goes to Task 1b's [merge check](#5-filename-collision-and-disambiguation), and any other stays a disambiguation report with its collision warning. |
 | `collision_candidates` | Task 1b's [merge check](#5-filename-collision-and-disambiguation): merge the pair through the [refactor protocol](refactors.md) only when it is one entity under alternate names; a probe match alone never activates a merge. |
@@ -327,7 +327,9 @@ opener, equations, flashcard and neighbors. They must identify the same
 entity and sense without incompatible scope, conditions, direction, or
 notation. In a whole-wiki run, Task 1 reviews entries family by family (a
 parent other than a discipline root, with its direct children; an entry
-whose only parent is a root is a family of one). It reads each family together, with
+whose only parent is a root is a family of one; an entry Task 3 has not yet
+placed, with empty `parents:` and not a discipline root, is compared with its
+`neighbors`). It reads each family together, with
 the cross-family pairs that `item9/duplicate-sentence` rows and
 `overlap_candidates` name, and lists every explanation, example, exhibit,
 contrast, claim or name that the family states twice beyond the one clause
@@ -372,7 +374,9 @@ cited sources (plus the clarification 5(h) admits) and keeps the variant as
 one linked example. Task 1b likewise frames an entry in its
 [own field](../../wiki-build/references/writing.md#prose-principles): a
 general concept's display never borrows one application's parameter notation,
-and the entry names and links its nearest contrast when its sources draw one. A
+and the entry names and links its nearest contrast when its sources draw one,
+or returns it, under
+[teaching order](../../wiki-build/references/writing.md#prose-principles). A
 neighbor conflict may also expose a wrong link, a duplicated explanation
 (consolidated below), or an atomicity failure (split below).
 
@@ -444,9 +448,8 @@ excludes, including a claim hedged below its source; card line 1 follows
 the source teaches is explanation. Task 1 removes empty rhetoric and repetition
 (the local repairs below) and well-definedness boilerplate (item 12). Task 1b
 removes every hedge and caveat principle 3 excludes, its full "Leave out" list
-included (defensive terminology distinctions, implementation and numerical
-details such as a library's default tolerance, rare failure modes,
-troubleshooting about neighbors), under
+included (every kind it names, numerical details such as a library's default
+tolerance among them), under
 [*Hedges*](source-backed-corrections.md#correct-and-publish). It keeps a limit
 only when the plain claim is false for the ordinary case, naming the condition
 instead of a hedge word, and keeps evidence-bearing uncertainty in research
@@ -539,7 +542,10 @@ unchanged evidence changes nothing.
 
 For a missing `Person`/`Event` opener date, copy the exact date only when it is
 already present elsewhere in the entry. Normalize an existing malformed date
-only when all values and qualifiers are unambiguous. Otherwise report it.
+only when all values and qualifiers are unambiguous. Otherwise Task 1b
+supplies it from a cited source or, as a 5(h) clarification in the
+[rare-types forms](../../wiki-build/references/rare-types.md#dates-in-the-opener-person-and-event),
+from standard references, and reports only a date none of these settles.
 
 ### 10. Wikilinks
 
@@ -615,7 +621,7 @@ it. Task 1 inserts a useful equation only when the note's own
 prose supplies every operand, operation, and essential assumption. A verified
 standard equation absent from that prose, such as a confidence interval's
 estimate plus or minus a critical value times its standard error, is Task 1b's
-to add from the cited source or accurate background, with every symbol bound
+to add from the cited source or as the 5(h) clarification equations §1 allows, with every symbol bound
 and the relation explained. Never invent a denominator or generalize a
 restricted case without a source or standard form.
 
@@ -750,16 +756,20 @@ creating a recurring finding.
 ### 17. Alias identity and completeness
 
 Use the canonical [alias rule](../../wiki-build/references/writing.md#aliases).
-The note body itself can establish a missing alternate name for its subject;
-add its slug only after the same-entity, own-slug, cross-domain, Organism
-common-name, and whole-vault collision gates. A word from the builder's
+The note body itself can establish a missing alternate name for its subject.
+Task 1 adds a name [5(h)](../../wiki-build/references/writing.md#prose-principles)
+admits without a source and hands any other to Task 1b, which adds it only
+when a cited source uses it and otherwise removes its introduction as new
+information. Either adds a slug only after the
+same-entity, own-slug, cross-domain, Organism common-name, and whole-vault
+collision gates. A word from the builder's
 [cross-domain corpus](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation)
 never becomes an alias, so the scanner does not propose one; its italic
-introduction stays in the body. A semantic-invalid existing alias
-is not list cleanup: Task 1 preserves it, and Task 1b removes it through the
-[alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias), with
-the canonical owner and complete inbound rewrite. Ambiguous ownership is
-reported.
+introduction stays in the body. An existing alias the
+[alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias) covers
+is not list cleanup: Task 1 preserves it, and Task 1b removes it through that
+protocol, with the canonical owner and complete inbound rewrite. Ambiguous
+ownership is reported.
 
 ### 18. Alias form, collisions, and display labels
 
@@ -772,8 +782,8 @@ create an ambiguous alias merely to silence a display-label finding. When an `it
 cross-domain synonym, or a compound title's cross-domain modifier
 (`transformer` for Transformer architecture), that its target does not
 introduce, reword the label to a claimed form, or let Task 1b add the word's
-italic introduction to the target when its cited source or standard usage
-gives the target that name. A
+italic introduction to the target when its cited source gives the target
+that name. A
 recurring finding on a cross-domain word outside the corpus is a
 [proposal](backlogs.md#proposal-scope) to extend the corpus.
 

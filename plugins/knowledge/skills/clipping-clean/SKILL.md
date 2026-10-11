@@ -320,12 +320,9 @@ python3 '<skill>/scripts/fetch_images.py' place \
     --owner-note '<vault>/Articles/<slug>.md'
 ```
 
-If a late image-slot conflict is refused, keep the published note as owner for
-images already placed: never withdraw the only note that proves ownership of
-files already placed. Publish its placeholder version against a
-`snapshot --replace` record, following the
-[late slot-conflict recipe](references/images.md#failures-and-readability),
-and report the conflict and retained scratch file.
+If `place` refuses a late slot conflict, publish the placeholder version
+against a `snapshot --replace` record by the
+[late slot-conflict recipe](references/images.md#failures-and-readability).
 
 Read back the published note and verify its final embeds before reporting
 completion. Report refused phases and retained recovery paths; a changed-slug

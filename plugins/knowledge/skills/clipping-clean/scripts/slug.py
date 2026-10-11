@@ -970,8 +970,9 @@ def run_self_test():
     check("...and the note reaches build_slug's output",
           any("Ma" in n for n in build_slug(author="Jack Ma", topic="Alibaba",
                                             year=2024)["notes"]), True)
+    quiet = []
     check("an unambiguous suffix stays silent, because there is no call to make",
-          surname("Ruxandra Teslo PhD", []) and [], [])
+          (surname("Ruxandra Teslo PhD", quiet), quiet), ("Teslo", []))
 
     # The credential reading is still available where the writing marks it:
     # capitals inside a name that is not, or a comma.

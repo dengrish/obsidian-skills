@@ -277,7 +277,8 @@ retitle also activates this protocol.
    advances `updated:` and never resets `read:`; an issue it resolves is
    then cleared, and `read:` reset, under
    [User issues](../SKILL.md#user-issues). Keep the old slug as an alias only
-   when it is still a valid same-entity name. A bare cross-domain old slug
+   when the [alias rule](../../wiki-build/references/writing.md#aliases)
+   admits it. A bare cross-domain old slug
    never stays, since the bare term is never an alias, and a proven wrong or
    misleading name is not retained merely to make old links resolve.
 3. Inventory the references to the old filename and its aliases under
@@ -295,7 +296,9 @@ retitle also activates this protocol.
    entry version with `publish_files.py remove` against step 1's source
    record, re-scan: every changed link must resolve uniquely to the new entry, the
    old slug must have no unresolved inbound surface, and the new entry must
-   pass the current entry rules.
+   pass the current entry rules apart from findings that pair it with the old
+   file (`item9/duplicate-sentence`, `item12/duplicate-embed-candidate`, and
+   an alias or exact collision with the old slug), which the removal clears.
    Then rebuild the connected Task 3 closure from the resulting tree, which a
    default pass's Task 3 does, and re-scan.
 
@@ -336,9 +339,11 @@ the [merge check](qc-items.md#5-filename-collision-and-disambiguation).
 
 Task 1b removes an alias once evidence proves it names another entity, such
 as a bare cross-domain term, which is
-[never an alias](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation);
+[never an alias](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation),
+or is a name its cited sources do not use and 5(h) does not admit
+([aliases](../../wiki-build/references/writing.md#aliases));
 an explicit request also runs this protocol. The removal first identifies the
-canonical owner. It then inventories and rewrites, under
+canonical owner, this entry for such an unsourced name. It then inventories and rewrites, under
 [step 3 above](#establish-evidence-and-complete-scope), every real reference
 that resolves through the alias and every link to this entry whose alias label
 names a different entity, publishing

@@ -171,7 +171,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               to one, card sums over every term); agent reviews
       12-equation-typography  raw ell-norm or micrometre symbols in body/card
                               surfaces that require inline LaTeX
-      12-ell-non-norm         a `\\ell` with no subscript in body or card
+      12-ell-non-norm         a `\\ell` with no norm-order subscript (a
+                              number, p, q or infinity) in body or card
                               math: `\\ell` names only norms, so a loss is
                               `L` and an index takes another letter
       12-exp-macro            an `\\exp`, or an upright exp applied to
@@ -1098,7 +1099,7 @@ def _check_description(fm, findings, title=None):
             "ordinary case plainly when the note establishes it",
             {"words": hedge_words, "description": desc,
              "agent_review": True}))
-    praise_words = register_hints(desc)
+    praise_words = register_hints(desc, title=title)
     if praise_words:
         findings.append(_f(
             "9-register-candidate", "warning",
@@ -1725,7 +1726,8 @@ def _check_equation_coverage_candidates(fm, sections, findings,
     # card's removal is its only repair, so its finding drops the remedy.
     notation = (
         ("12-ell-non-norm", find_ell_non_norm_candidates,
-         "`\\ell` without a subscript in math; `\\ell` names only norms "
+         "`\\ell` without a norm-order subscript in math; `\\ell` names "
+         "only norms "
          "($\\ell_1$, $\\ell_2$, $\\ell_p$)",
          ", so a loss is $L$ and an index takes another letter: rename the "
          "symbol and every prose reference to it in the same edit"),
@@ -2127,7 +2129,8 @@ def _check_register(fm, sections, findings):
     prose, first_line = _shared_prose(fm, sections)
     tables = _markdown_tables(prose)[1]
     spans = find_display_spans(strip_code(prose), tables)
-    for finding in register_findings(prose, spans, tables):
+    for finding in register_findings(prose, spans, tables,
+                                     title=fm.scalar("title")):
         findings.append(_f(
             "9-register-candidate", "warning",
             finding["message"] + "; a candidate is never an order",
@@ -2612,7 +2615,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
         hedge_words = flashcard_hedge_hints(line1)
         if hedge_words:
             hedges.append({"card": card_no, "words": hedge_words})
-        praise_words = register_hints(line1)
+        praise_words = register_hints(line1, title=title)
         if praise_words and card_no not in extras:
             praise.append({"card": card_no, "words": praise_words})
         # The kept card only: an extra card is removed (the scanner shares
@@ -5158,13 +5161,28 @@ def run_self_test():
             if f["item"] == "9-register-candidate"]),
           ([("9-register-candidate", "warning",
              [{"card": 1, "words": ["classic"]}])], []))
+    maya = retitled(
+        "Classic Maya collapse", "maya-collapse",
+        "Classic Maya collapse is the abandonment of the southern lowland "
+        "cities.",
+        "**Classic Maya collapse** emptied the southern lowland cities in the "
+        "Terminal Classic period.", "Classic Maya collapse")
+    check("the title in the description, body and card line 1, and a "
+          "proper name inside a sentence, are no praise",
+          [f["item"] for f in lint_text(mutate(
+              "The plot tracing the trade-off between two error rates as a "
+              "decision threshold moves.", "Classic Maya collapse, the "
+              "abandonment of the southern lowland cities.", maya),
+              "classic-maya-collapse.md")["findings"]
+           if f["item"] == "9-register-candidate"], [])
     # \ell names only norms (item 12); a short defining expression belongs
     # on a card that spells out arithmetic in words (item 19).
     ell_body = mutate("decision threshold moves.\n",
-                      "decision threshold moves. Its loss $\\ell(\\hat{y}, y)$ "
-                      "is not the $\\ell_2$ norm.\n")
-    check("a \\ell with no subscript is an error naming the rename; a named "
-          "norm is not, and an extra card's needs only its removal",
+                      "decision threshold moves. Its loss $\\ell(\\hat{y}, y)$, "
+                      "or $\\ell_i$ per instance, is not the $\\ell_2$ norm.\n")
+    check("a \\ell with no norm-order subscript is one error naming the "
+          "rename; a named norm is not, and an extra card's needs only its "
+          "removal",
           ([(f["item"], f["severity"], len(f["evidence"]["matches"]))
             for f in lint_text(ell_body, "roc-curve.md")["findings"]],
            [(f["evidence"].get("extra_card"), "rename" in f["message"])
@@ -5172,7 +5190,7 @@ def run_self_test():
                 "Another notion $\\ell(x)$, stated briefly.\n??\n"
                 "Second idea\n"), "roc-curve.md")["findings"]
             if f["item"] == "12-ell-non-norm"]),
-          ([("12-ell-non-norm", "error", 1)], [(True, False)]))
+          ([("12-ell-non-norm", "error", 2)], [(True, False)]))
     # The exponential is a power of e (item 12), in body and card math alike.
     exp_entry = mutate(
         "decision threshold moves.\n",

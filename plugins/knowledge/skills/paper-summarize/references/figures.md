@@ -128,8 +128,10 @@ The shape, exactly, and it mirrors the figure shape:
 | Tillage | Soil carbon, 0-30 cm (t/ha) |
 |---|---|
 | No-till | **48.1** |
+| Reduced tillage | 44.9 |
+| Ploughed, cover crop | 43.0 |
 | Conventional | 41.6 |
-*No-till plots held about 6 t/ha more soil carbon after twelve years on this Iowa farm. Final means cover two of four regimes. The other regimes and per-depth rows are omitted.*
+*No-till plots held the most soil carbon after twelve years on this Iowa farm, 48.1 t/ha against 41.6 under conventional tillage. Per-depth rows are omitted.*
 ```
 
 - **In the third, contribution section, under the claim it supports.** Same rule as a figure.

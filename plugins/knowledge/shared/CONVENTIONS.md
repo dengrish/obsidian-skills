@@ -49,8 +49,8 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 
 | Path | Holds | Written by | Read by |
 |---|---|---|---|
-| `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper; a rename's link repair respells a raw's link to the renamed file and changes nothing else | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview), wiki-add and wiki-lint's missing-entry research (URL and same-document checks) read them but never cite them |
-| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and legacy marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize; pdf-organize moves an owned summary note and updates its `sources:` origin and `published:` year during a PDF rename; figure-extract's Extended Data switch repairs links to each `_fig_S<N>` crop it re-extracts as `_fig_ED<N>` (§8b); during a retitle, alias removal, split or merge, wiki-lint retargets every link that resolves to the retired name, never a note's claim wording or `sources:` | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (rename preflight), wiki-lint (cited notes for content repair, and notes its missing-entry research reads under wiki-add's local-source rule) |
+| `Inbox/` | **everything new, unsorted** — Web Clipper `.md` captures and dropped-in documents alike. The **file extension is the dispatch**, and it is the whole of it: `.md` to one skill, `.pdf` to the other, **anything else to neither** | the user, the user's clipper; a rename's link repair, or wiki-lint under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope), rewrites a raw's link and changes nothing else | clipping-clean (`.md` only), pdf-organize (`.pdf` only); wiki-build (routing and preview), wiki-add and wiki-lint's missing-entry research (URL and same-document checks) read them but never cite them |
+| `Articles/` | **flat**; notes *about* a document — cleaned clippings, PDF reading notes and legacy marked research extracts, one schema (§2b), with origin identified by `sources:` item 1 | clipping-clean, paper-summarize; pdf-organize moves an owned summary note and updates its `sources:` origin and `published:` year during a PDF rename; figure-extract's Extended Data switch repairs links to each `_fig_S<N>` crop it re-extracts as `_fig_ED<N>` (§8b); wiki-lint rewrites links under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope), never a note's claim wording or `sources:` | wiki-build, wiki-add (source reuse), clipping-clean (dedup index), paper-summarize (dedup and collision check), pdf-organize (rename preflight), wiki-lint (cited notes for content repair, and notes its missing-entry research reads under wiki-add's local-source rule) |
 | `Sources/PDFs/` | organized source documents, recursive; feed-owned attachments use the separate route in §1c. Knowledge consumers check the canonical stem before deriving files or references (§1a) | pdf-organize (renames an `Inbox/` file **and moves it here**), wiki-add (newly acquired research PDFs only, named under pdf-organize's rules), feed-collect (raw linked PDFs), the user | figure-extract, paper-summarize, wiki-build, wiki-add, wiki-lint (PDFs Wiki entries already cite, and PDFs its missing-entry research reads under wiki-add's local-source rule); feed-collect within its own scope |
 | `Sources/PDFs/<Work>/` | book-chapter PDFs, e.g. `Sources/PDFs/Prince_UDL_2026/`. The folder is what pdf-organize creates when it splits a book. paper-summarize's batch **scans** it — a book is only recognisable as one when a chapter turns up beside it — and then **skips** every chapter it finds, so a sweep never becomes a book's worth of summaries | pdf-organize, the user | figure-extract (extracts the chapters, skips the split book), paper-summarize (scans, skips), wiki-build (processes the chapters instead of the split book), wiki-add (cites the chapters, never the split book), wiki-lint (cited chapters, and chapters its missing-entry research reads) |
 | `Sources/Images/` | **flat**; every figure and downloaded image, all extensions, whatever it came from | figure-extract (including the runs wiki-build and wiki-add start for a PDF's missing figures), clipping-clean, feed-collect (original photo attachments); **pdf-organize** renames in place only within its source rename (§1a) | wiki-build, wiki-add, paper-summarize, clipping-clean (its `rename` path re-reads the folder — §8a), wiki-lint (with `--images`, validates embeds and reports nested/staging residue without opening or deleting files); feed-collect within its own scope |
@@ -58,7 +58,7 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md`; clipping-clean respells only a link or embed to a clipping it renames, never in a dated record (see below) | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>-moc.md` nested outlines plus `misc-moc.md` for Wiki entries tagged `#misc`; no marker comments, H1, or frontmatter | wiki-lint; clipping-clean respells a link to a clipping it renames (§7) | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
-| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones; and `.wiki-lint-settled.json`, wiki-lint's private ledger of settled link decisions (run state, not a log) | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); during their own renames, clipping-clean (a changed-slug reprocess) and wiki-lint (a retitle, alias removal, split or merge) retarget every link in a log that resolves to the renamed note, links inside issue text included, and pdf-organize (a PDF rename) and figure-extract (an Extended Data switch) rewrite the old file name in links and in the plain-text mentions [rename repair](../skills/pdf-organize/references/rename-repair.md#establish-the-owned-family) defines; none changes any other issue text; wiki-lint writes its settled ledger | skills consuming the relevant outputs or verifying a fix; wiki-lint reads the note-content log's open items as a worklist it re-verifies; wiki-lint's scanner reads the settled ledger (`--settled`) |
+| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones; and `.wiki-lint-settled.json`, wiki-lint's private ledger of settled link decisions (run state, not a log) | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); during their own renames and refactors, clipping-clean (a changed-slug reprocess) and wiki-lint (under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope)) retarget or unlink every link in a log that resolves to the retired note, links inside issue text included, and pdf-organize (a PDF rename) and figure-extract (an Extended Data switch) rewrite the old file name in links and in the plain-text mentions [rename repair](../skills/pdf-organize/references/rename-repair.md#establish-the-owned-family) defines; none changes any other issue text; wiki-lint writes its settled ledger | skills consuming the relevant outputs or verifying a fix; wiki-lint reads the note-content log's open items as a worklist it re-verifies; wiki-lint's scanner reads the settled ledger (`--settled`) |
 
 Suggestion logs use current skill names under `Reviews/`. The shared
 [SUGGESTIONS.md](SUGGESTIONS.md) owns attribution, the log format, moving
@@ -198,12 +198,11 @@ plugin; pdf-organize reaches it only on the rename path above, where it is the
 one skill that moves a file another skill wrote.
 `Articles/` is outside wiki-lint's scan and maintenance scope. Its Task 1b
 reads the notes and PDFs entries cite, its missing-entry research reads vault
-material under wiki-add's local-source rule, and a retitle, alias removal,
-split or merge retargets every link in `Articles/` notes that resolves to
-the retired name, including one inside a claim, and never changes claim
-wording or `sources:`. The folder's producers enforce their own notes'
-schema and quality; paper-summarize also runs `note_lint.py` before
-publication.
+material under wiki-add's local-source rule, and wiki-lint rewrites links in
+`Articles/` notes under its refactor rewrite scope, including one inside a
+claim, and never changes claim wording or `sources:`. The folder's producers
+enforce their own notes' schema and quality; paper-summarize also runs
+`note_lint.py` before publication.
 
 ### 1a. Source-file names, and why pdf-organize runs first
 
@@ -748,14 +747,7 @@ retained original keeps `read:` after a pure trim and resets it when its
 explanation is rewritten. A merge's surviving entry is the exception: it
 holds combined content the user has not read in that form, so it gets
 `read: false` from any prior value, missing or unknown included (a missing
-key is inserted directly before `issues:`); its dates follow §2a.
-In Task 1b, deepening (an added example, reason or core facet included), a
-rewritten explanation, an inserted equation and an explanation moved into its
-owner reset `read:`;
-trims, hedge removals, consolidation trims, notation renames, retitles, alias
-removals, link-only changes, an added acronym or full-form parenthetical, and
-naming and linking a contrast in an existing sentence advance `updated:` and
-keep `read:`. An
+key is inserted directly before `issues:`); its dates follow §2a. An
 otherwise unchanged entry whose only change is a rewritten inbound link or
 `parents:` value keeps both (§2a), and so does every note a producer's
 reference repair edits after its own rename.
@@ -817,7 +809,9 @@ deletion (which needs an explicit request in chat), a source the entry does
 not cite (such as an unbuilt chapter, which waits for a wiki-build request
 naming that source; a verified citation for an entry whose `sources:` is
 empty is not one, since wiki-lint's
-[item 4](../skills/wiki-lint/references/qc-items.md#4-sources) adds it), or
+[item 4](../skills/wiki-lint/references/qc-items.md#4-sources) adds it, nor
+is a discipline root's overview page under its
+[form repair](../skills/wiki-lint/references/hierarchy.md#establish-discipline-roots)), or
 a change a builder rule forbids (such as a second card
 or an added caveat); when no evidence settles it or its meaning is unclear; or
 when it asks for something outside wiki-lint's scope, such as other files,
@@ -1009,25 +1003,12 @@ applies the fix through its
 [retitle](../skills/wiki-lint/references/refactors.md#retitle-an-entry) or
 [alias-removal](../skills/wiki-lint/references/refactors.md#remove-a-semantic-invalid-alias)
 protocol, which rewrites the inbound references it inventories before
-retiring the old slug or alias. It retitles an entry whose title is a bare
-cross-domain term under wiki-build's
-[cross-domain tests](../skills/wiki-build/references/special-titles.md#cross-domain-term-disambiguation)
-when the qualified title is determinate under those tests and its slug is
-free (`Tree of life` becomes `Tree of life (biology)`, slug
-`tree-of-life-biology`). It retitles an entry whose title is itself an API
-identifier to its determinate conceptual title, retitles one whose
-acronym-or-full-form choice breaks wiki-build's
-[title rule](../skills/wiki-build/references/writing.md#title) to that rule's
-determinate form (`PPO` becomes `Proximal policy optimization`), retitles
-an `Organism` titled by a common name to the scientific name wiki-build's
-[Organism rule](../skills/wiki-build/references/rare-types.md#the-ten-rare-types)
-requires (`Zebrafish` becomes `Danio rerio`), and retitles a split's retained original whose title does not name exactly the
-one subject it keeps, each when the new slug is free. It renames an entry whose filename does not match
-its title's slug when that slug is free. It removes an alias proven to name
-another entity, such as a bare cross-domain word, and the old bare
-cross-domain slug of a retitled entry never stays as an alias. A retitle or
-removal that these rules do not decide, such as a disputed intended title or
-an occupied destination, is reported with the intended title, slug,
+retiring the old slug or alias. That retitle protocol lists the titles it
+corrects; each applies only when the new title is determinate and its slug
+free. That alias-removal protocol lists the aliases it removes, and the old
+bare cross-domain slug of a retitled entry never stays as an alias. A
+retitle or removal that these rules do not decide, such as a disputed intended title or an occupied destination, is
+reported with the intended title, slug,
 inbound-reference count and collision risk. A request naming one runs the
 same protocol with no second human review. A duplicate spelling inside one
 alias list is a format defect, not this semantic-removal case.
@@ -1184,25 +1165,17 @@ snapshots),
 `naming.py` (§1a), `plurals.py` (English inflection and light
 collision stemming shared by both Wiki skills), `organism_names.py` (Organism
 name and typography evidence shared by both Wiki skills), `entry_structure.py`
-(shared sentence, opener, answer-surface, flashcard structure, and
-meaning-preserving mathematical-title plain-text conversion),
+(the shared entry-structure helpers and hints both Wiki skills use, such as
+the sentence, opener, title, answer-surface, flashcard and register ones),
 `markdown_tables.py` (Markdown-table
 spans and caption checks shared by both Wiki skills), `equation_coverage.py`
-(the conservative missing-display, well-definedness-boilerplate,
-one-equation-per-line and card-equation candidates and the non-norm `\ell`
-check shared by both Wiki skills; paper-summarize's
-`note_lint.py` reports the one-equation-per-line candidates as advisories),
+(the shared equation candidates and notation checks both Wiki skills apply;
+paper-summarize's `note_lint.py` reports the one-equation-per-line candidates
+as advisories and fails on the notation checks),
 `code_typography.py` (bracket special tokens and literal file extensions that
 need backticks in prose), `introduced_aliases.py` (alternate names that body
 prose introduces for the entry's subject), `entry_checks.py` (the per-entry
-Wiki floors both Wiki linters apply: the cross-domain common-noun slug, non-`Software`
-API surface, the description's entity subject, an acronym title's missing
-full form in the opener, a list item's display, paragraph or nested list
-indented short of its text column, merge scars, source-meta phrasing, emphasis, display
-labels (including a label that drops its target title's head word), the
-single-word alias hint, the card-set shape, the primary flashcard among
-several and its answer on card line 3, Spaced
-Repetition markers, and the discipline-root test),
+Wiki floors both Wiki linters apply),
 `check_parsers.py` (installed-version floors for the PDF and image parsers,
 knowledge only), `figure_state.py` (§8b),
 `portable_names.py` (NFC + case-fold filename identity used for case and
@@ -1243,7 +1216,7 @@ does not change the canonical output forms in §2.
 | `[[Wiki/<entry-path>\|Label]]` | body or Related link to an entry whose bare basename has another real vault owner, such as a discipline root beside a previous-layout MOC (`[[Wiki/statistics\|statistics]]`); never guess an ambiguous owner |
 | `[[slug\|Canonical Title]]` | **every** `**Related:**` footer link to an entry, path-qualified as above when the basename is shared — always piped, even when slug-equal |
 | `![[file.png]]` | image embed from `Sources/Images/` (Obsidian resolves the basename vault-wide) |
-| `![alt](https://…)` | an existing remote image in an older URL-origin source note, or in an entry that reuses one: keep its Markdown form, since changing only its syntax to `![[…]]` resolves to nothing and loses the URL. Only clipping-clean replaces one, by downloading it (§8). An entry that cites a page only by its URL (§7) never hotlinks that page's images |
+| `![alt](https://…)` | an existing remote image in an older URL-origin source note, or in an entry that reuses one: keep its Markdown form, since changing only its syntax to `![[…]]` resolves to nothing and loses the URL. Only clipping-clean replaces one, by downloading it (§8); it keeps a YouTube or X/Twitter `![](…)`, a video or post embed that no entry reuses as a figure. An entry that cites a page only by its URL (§7) never hotlinks that page's images |
 | `"[[file.pdf]]"` | a **link** to a local document — quoted, no anchor. This is `sources:` item 1 of a note about that document (§2b). Resolves **by basename, vault-wide**; §1a is what makes that safe |
 | `![[file.pdf]]` | PDF **embed**, rendering the document inline. No skill here writes one today; a legacy note left by an older producer may carry one, and it is left alone (paper-summarize reports such a note as `legacy`; pdf-organize treats an embed-only note as the PDF's summary) |
 | `[[Name.pdf#page=N]]` | source reference, §7 |
@@ -1304,8 +1277,8 @@ slug, never invented, never renamed. An online page is its URL.
   address of the page actually read, with no display text or Markdown link.
   wiki-add cites one for a web page it researched, wiki-lint for the page a
   missing entry it creates was researched from or an entry with an empty
-  `sources:` was verified against, and wiki-lint's missing-root
-  prerequisite for the reference page a new root is derived from; each points
+  `sources:` was verified against, and, for a discipline root it creates or
+  form-repairs, the overview page that root is derived from; each points
   to the page and never creates a note in `Articles/` just to have something to cite.
   Cite the page's canonical address, not a tracking, mobile or AMP variant,
   ranking its `<link rel="canonical">` over its `og:url` as wiki-add's
@@ -1676,11 +1649,9 @@ handoff below.
 - It **does not touch entries it did not write this run.** A bare-text mention of
   an existing entry, in an entry this run didn't write, is not its to wrap.
   The one exception is wiki-build's
-  [ownership handoff](../skills/wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors): when an entry
-  this run writes becomes the owner of an explanation or exhibit a neighbor duplicates,
-  the run trims the neighbor's copy to its consequence in one clause linked to
-  the owner and publishes that
-  neighbor with its own entries.
+  [ownership handoff](../skills/wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors),
+  which may trim a neighbor's duplicate under that rule and publish the
+  neighbor with the run's entries.
 - Its **orphan-link audit is scoped to the entries this run created or merged** —
   a dangling link inside one of its own new entries is repaired then and there
   (the missed entry created, or the link dropped to bare text); the rest

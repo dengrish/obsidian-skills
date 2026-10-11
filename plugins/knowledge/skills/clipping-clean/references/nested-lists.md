@@ -118,7 +118,7 @@ confirmed as damaged, never every matching line in the file, which would
 flatten a genuine nested list. Each keeps a blockquote prefix, never changes
 YAML, and rewrites only the scratch draft (a path inside a vault is refused).
 Fenced code keeps its content: `stacked` skips it, and `overindent` or `dedent`
-moves a list-nested fenced block only as a whole, by its fence's indent change.
+moves a list-nested fenced block only as a whole, by its item's indent change.
 A range that covers part of such a block is refused, so include a code block
 inside a repaired item whole in `--lines`. Review a `--dry-run` first, then run
 the same command without it:

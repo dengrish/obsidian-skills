@@ -62,24 +62,28 @@ Resolve each blocker at its cause, then re-plan:
     after one;
     [§8b](../../../shared/CONVENTIONS.md#8b-the-producer-conventions)) and
     matches its page, and no unrecorded crop under that stem has an
-    uppercase panel letter. Record it under the current stem of the PDF it
-    is named after, such as a chapter of a split book (the blocker prints
-    one command per PDF), with
+    uppercase panel letter. Under the current stem, record it under the
+    stem of the PDF it is named after, such as a chapter of a split book
+    (the blocker prints one command per PDF), with
     `python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' --src '<current PDF>' --out '<vault>/Sources/Images' --adopt-legacy '<current stem>:<label>'`
     (repeat the option per figure; the PDF needs no `--allow-unorganized`
-    for this), then re-plan the rename.
+    for this), then re-plan the rename. Under the target stem it is this
+    PDF's own file, handled as
+    [SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
+    says.
   - *Another tool's crop of this PDF* matches a figure on these pages, as
     each of a slide deck's crops does (one with an uppercase panel letter,
     such as `_fig_1A_B`, and every crop beside it); a note outside
     `Sources/` that embeds it, such as a `Slides/` deck, supports this. It shares the stem, current or target: the PDF
     still takes its natural name.
   - *Any other image*, such as a clipping-clean image or an image these
-    pages do not show, sends a PDF that would keep that stem to a
+    pages do not show, sends a PDF that would take or keep that stem to a
     distinguishing abbreviated title by the
     [target-stem rule](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan).
 
   A crop of either of the last two kinds is not this PDF's figure-extract
-  output, whatever it shows: pass `--foreign-image '<name>'` for it (repeat
+  output, whatever it shows: pass `--foreign-image '<name>'` for it when it
+  sits under the current stem, or when it is another tool's crop (repeat
   the option per file), and it keeps its name outside the family. An
   unconfirmed crop stays a blocker. Never infer ownership from the `_fig`
   name, delete a conflicting occupant, or reset the manifest to make the
@@ -170,6 +174,6 @@ apply once nothing below blocks it.
   Notes that merely cite the PDF never receive this metadata repair.
 
 On a failed apply or verification, follow
-[SKILL step 4](../SKILL.md#4-apply-then-verify-the-whole-family): report the
-remaining references and the rollback result, and never hand-patch them with
-a global replacement, since an old stem can be part of the new stem.
+[SKILL step 4](../SKILL.md#4-apply-then-verify-the-whole-family), and never
+hand-patch the remaining references with a global replacement, since an old
+stem can be part of the new stem.

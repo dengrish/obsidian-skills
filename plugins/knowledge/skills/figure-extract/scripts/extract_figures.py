@@ -119,9 +119,10 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
-from figure_state import (MANIFEST_FILE, file_digest, read_manifest,
-                          read_manifest_snapshot, read_sidecar, write_manifest,
-                          manifest_key, figure_identity, check_manifest_writable,
+from figure_state import (ED_PENDING_FILE, MANIFEST_FILE, file_digest,
+                          read_manifest, read_manifest_snapshot, read_sidecar,
+                          write_manifest, manifest_key, figure_identity,
+                          check_manifest_writable, parse_ed_pending,
                           sidecar_stem_problem)
 import atomic_move
 from naming import (chapter_book_stem, core_stem, is_feed_attachment,
@@ -365,18 +366,86 @@ def _series_mismatch(fig_suffix, captions):
     return None
 
 
-def _extended_data_label(cap_raw, cap_label):
-    """The `--ed-prefix ED` output label of an Extended Data caption, or None.
+#: Casefolded labels in the S namespace (`S1`, `S-1`, `SA1`, `SI1`), where a
+#: default-prefix run puts Extended Data captions, and the labels only
+#: `--ed-prefix ED` writes (`ED1`, `EDA1`, `EDS1`, `EDSI1`).
+_S_LABEL_RE = re.compile(r"s(?:-|[a-z]-?)?[0-9][0-9-]*")
+_ED_LABEL_RE = re.compile(r"ed(?:si|[a-z]-?)?[0-9][0-9-]*")
 
-    `cap_label` is the caption's default-prefix label: `Extended Data Figure
-    1`, `A1` and `S1` are `S1`, `SA1` and `S1`, which a batch run with
-    `--ed-prefix ED` names `ED1`, `EDA1` and `EDS1`.
+
+def _records_extended_data(manifest, stem):
+    """True when the manifest records a `<stem>_fig_ED<N>.png` crop.
+
+    That PDF was extracted with `--ed-prefix ED`, and every later run keeps
+    it, since a default-prefix run would fold its Extended Data captions back
+    into `_fig_S<N>`.
     """
-    if (not re.match(r"\s*extended\s+data\b", cap_raw, re.I)
-            or not cap_label.startswith("S")):
+    prefix = figure_identity(stem + "_fig_")
+    for key in manifest:
+        identity = figure_identity(key)
+        if (identity.startswith(prefix) and identity.endswith(".png")
+                and _ED_LABEL_RE.fullmatch(identity[len(prefix):-len(".png")])):
+            return True
+    return False
+
+
+def unrecorded_extended_data(out_dir, pdfs, manifest):
+    """{PDF: its unrecorded `<stem>_fig_ED<N>.png` names in `out_dir`}.
+
+    A legacy `--ed-prefix ED` crop without an ownership record fixes that
+    PDF's namespace as firmly as a recorded one: under the default prefix
+    the same Extended Data caption would be written again as `_fig_S<N>`,
+    a second copy of one figure. The batch switches such a PDF to `ED`, so
+    its summary reports the occupied slot with an `--adopt-legacy` command.
+    """
+    try:
+        names = sorted(os.listdir(out_dir)) if os.path.isdir(out_dir) else []
+    except OSError:
+        names = []
+    recorded = {figure_identity(key) for key in manifest}
+    by_stem = {}
+    for name in names:
+        identity = figure_identity(name)
+        stem, sep, label = identity.rpartition("_fig_")
+        if (sep and stem and label.endswith(".png")
+                and _ED_LABEL_RE.fullmatch(label[:-len(".png")])
+                and identity not in recorded):
+            by_stem.setdefault(stem, []).append(name)
+    return {source: by_stem[figure_identity(source.stem)] for source in pdfs
+            if figure_identity(source.stem) in by_stem}
+
+
+def _default_s_label(label):
+    """The label a default-prefix run gives the caption labelled `label`.
+
+    `ED1` becomes `S1`, `EDA1` becomes `SA1` and `EDS1` becomes `S1`, the
+    pairs batch_extract's `_s_ed_twins` matches. A label outside the ED
+    namespace is its own.
+    """
+    if not _ED_LABEL_RE.fullmatch(label.casefold()):
+        return label
+    rest = label[2:]
+    return rest if rest[:1].upper() == "S" else "S" + rest
+
+
+def _extended_data_twin(fig_suffix, captions):
+    """The Extended Data caption an `S<N>` FIG_NUM probably meant, or None.
+
+    In a PDF that uses `--ed-prefix ED`, `captions` (found under that
+    prefix) label Extended Data Figure 1 `ED1`, and `S1` is another figure.
+    When no caption carries FIG_NUM but an ED caption folds to it under the
+    default prefix, return that caption's (raw label, output label).
+    """
+    want = figure_identity(fig_suffix)
+    labels = [(normalize_fig_num(num), raw) for num, raw, _rect in captions]
+    if (not _S_LABEL_RE.fullmatch(want)
+            or any(figure_identity(label) == want for label, _raw in labels)):
         return None
-    printed = cap_raw.split()[-1]
-    return "ED" + (cap_label if printed.startswith("S") else cap_label[1:])
+    for label, raw in labels:
+        if (_ED_LABEL_RE.fullmatch(figure_identity(label))
+                and figure_identity(_default_s_label(label)) == want):
+            return raw, label
+    return None
 
 
 def positive_int(value):
@@ -1128,20 +1197,20 @@ def run_self_test():
     check("S1 beside Figure SI1 is quiet (a different series)",
           _series_mismatch("S1", [("SI1", "Figure SI1", None)]), None)
 
-    # --- _extended_data_label: the ED form an --ed-prefix ED batch wrote --
-    check("an Extended Data caption's default label has an ED form",
-          [_extended_data_label(raw, label) for raw, label in (
-              ("Extended Data Figure 1", "S1"),
-              ("Extended Data Fig. 2-3", "S2-3"),
-              ("Extended Data Figure A1", "SA1"),
-              ("Extended Data Figure A.1", "SA-1"),
-              ("Extended Data Figure S1", "S1"),
-              ("Extended  data Figure SI1", "SI1"))],
-          ["ED1", "ED2-3", "EDA1", "EDA-1", "EDS1", "EDSI1"])
-    check("...and any other caption has none",
-          [_extended_data_label(raw, label) for raw, label in (
-              ("Supplementary Figure 1", "S1"), ("Figure S1", "S1"),
-              ("Figure 1", "1"))],
+    # --- _extended_data_twin: S<N> beside an --ed-prefix ED caption -------
+    check("an S label beside the ED caption it folds to names that caption",
+          [_extended_data_twin(want, [(num, "Extended Data Figure", None)])
+           for want, num in (("S1", "ED1"), ("S2-3", "ED2.3"),
+                             ("SA-1", "EDA.1"), ("s1", "EDS1"),
+                             ("SI1", "EDSI1"))],
+          [("Extended Data Figure", lab) for lab in (
+              "ED1", "ED2-3", "EDA-1", "EDS1", "EDSI1")])
+    check("...but not beside its own caption, another number or a bare 1",
+          [_extended_data_twin(want, caps) for want, caps in (
+              ("S1", [("ED1", "Extended Data Figure 1", None),
+                      ("S1", "Supplementary Figure 1", None)]),
+              ("S2", [("ED1", "Extended Data Figure 1", None)]),
+              ("1", [("ED1", "Extended Data Figure 1", None)]))],
           [None, None, None])
 
     tmp = tempfile.mkdtemp(prefix="extract-figures-selftest-")
@@ -2158,6 +2227,9 @@ def run_self_test():
                               fontsize=9)
             cpage.insert_text((320, 182), "caption sits in its top-right "
                               "corner.", fontsize=9)
+            # A descender's ink 1pt below the word box of `caption`.
+            cpage.draw_rect(fitz.Rect(322, 185.4, 340, 186.4), color=None,
+                            fill=(0, 0, 0))
             cpage.set_rotation(rotation)
             shown = cpage.rotation_matrix
             cdoc.save(corner_pdf)
@@ -2185,7 +2257,8 @@ def run_self_test():
 
             check("...keeps the whole crop (rotation %d)" % rotation,
                   shot and (shot.width, shot.height), (400, 400))
-            ok("...whites out the caption (rotation %d)" % rotation,
+            ok("...whites out the caption and its descenders (rotation %d)"
+               % rotation,
                shot is not None
                and colours((318, 158, 466, 187)) == {(255, 255, 255)})
             ok("...and keeps both blocks' fill (rotation %d)" % rotation,
@@ -2225,24 +2298,69 @@ def run_self_test():
         ok("...and says --overwrite replaces the crop already there",
            "replaces the crop already there" in se)
         code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
-                                        "--no-caption-check"])
+                                        "--no-caption-check", "--overwrite"])
         ok("...even when the caption-overlap check is off",
            "'Supplementary Figure 1'" in se)
-        # The check runs under the default prefix, where `Extended Data
-        # Figure 1` is S1. A PDF the batch extracted with --ed-prefix ED keeps
-        # its Supplementary Figure 1 at S1, so the warning also names ED1.
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350"])
+        check("...but a skipped crop prints only that it was skipped",
+              ("Exists, skipped" in so, se), (True, ""))
+        # As in the batch, a PDF with a _fig_ED crop, recorded or not, uses
+        # --ed-prefix ED; otherwise Extended Data Figure 1 is S1.
         ed_pdf = _st_pdf(os.path.join(tmp, "Doe_ExtData_2025.pdf"),
                          caption="Extended Data Figure 1. Synthetic.")
-        code, so, se = run([ed_pdf, "--out", os.path.join(tmp, "EdLabel"),
-                            "--dpi", "72", "--no-trim",
-                            "--crop", "1:1:100,150,500,350"])
-        ok("a bare number on an Extended Data page names both S1 and ED1",
-           code == 0 and "WARNING" in se
-           and "'Extended Data Figure 1'" in se
-           and "'S1' ('ED1' if this PDF uses --ed-prefix ED)" in se)
-        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350"])
-        ok("...while a Supplementary caption's warning has no ED form",
+        ed_default = [ed_pdf, "--out", os.path.join(tmp, "EdLabel"),
+                      "--dpi", "72", "--no-trim"]
+        code, so, se = run(ed_default + ["--crop", "1:1:100,150,500,350"])
+        ok("a bare number on an Extended Data page names S1 by default",
+           code == 0 and "'Extended Data Figure 1' has output label 'S1'. "
+           in se)
+        code, so, se = run(supp_base + ["--crop", "1:1:100,150,500,350",
+                                        "--overwrite"])
+        ok("...as a Supplementary caption's warning does, with no ED form",
            "WARNING" in se and "--ed-prefix ED" not in se)
+        code, so, se = run(ed_default + ["--crop", "1:ED1:100,150,500,350"])
+        ok("...and an ED label there says it switches later batch runs",
+           code == 0 and "has no _fig_ED crop" in se and "'S1'" in se
+           and "to --ed-prefix ED" in se)
+        ed_dir = os.path.join(tmp, "EdNamespace")
+        os.makedirs(ed_dir)
+        _st_png(os.path.join(ed_dir, "Doe_ExtData_2025_fig_ED2.png"),
+                (24, 18), (180, 20, 40))
+        ed_base = [ed_pdf, "--out", ed_dir, "--dpi", "72", "--no-trim"]
+        code, so, se = run(ed_base + ["--crop", "1:1:100,150,500,350"])
+        ok("beside a _fig_ED crop, a bare number's warning names ED1 only",
+           code == 0 and "has output label 'ED1' (this PDF uses --ed-prefix "
+           "ED)" in se and "'S1'" not in se)
+        ed_s1 = os.path.join(ed_dir, "Doe_ExtData_2025_fig_S1.png")
+        code, so, se = run(ed_base + ["--crop", "1:S1:100,150,500,350"])
+        ok("...an S1 crop of an ED1 caption is warned about",
+           code == 0 and "'ED1' (this PDF uses --ed-prefix ED)" in se
+           and ed_s1 in se)
+        ed_s1_bytes = open(ed_s1, "rb").read()
+        code, so, se = run(ed_base + ["--crop", "1:S1:100,150,400,350",
+                                      "--overwrite"])
+        check("...and refused when --overwrite would replace that S1 crop",
+              (code != 0 and "Pass 'ED1'" in str(code),
+               open(ed_s1, "rb").read() == ed_s1_bytes), (True, True))
+        # The batch keeps an S crop listed in .figure-ed-pending.txt until
+        # its links move to the ED name; an explicit --overwrite does too.
+        pend_dir = os.path.join(tmp, "EdPending")
+        pend_args = [ed_pdf, "--out", pend_dir, "--dpi", "72", "--no-trim",
+                     "--crop", "1:S1:100,150,400,350", "--overwrite"]
+        run(pend_args[:-2] + ["1:S1:100,150,500,350"])
+        pend_s1 = os.path.join(pend_dir, "Doe_ExtData_2025_fig_S1.png")
+        pend_bytes = open(pend_s1, "rb").read()
+        for digest, label in (
+                (file_digest(pend_s1),
+                 "an S crop .figure-ed-pending.txt keeps refuses --overwrite"),
+                ("f" * 64, "...until the crop no longer has its row's bytes")):
+            with open(os.path.join(pend_dir, ED_PENDING_FILE), "w",
+                      encoding="utf-8") as fh:
+                fh.write("Doe_ExtData_2025\tS1\t%s\n" % digest)
+            code, so, se = run(pend_args)
+            check(label, (code != 0 and ED_PENDING_FILE in str(code),
+                          open(pend_s1, "rb").read() == pend_bytes),
+                  (digest != "f" * 64,) * 2)
 
         blank_cli = os.path.join(tmp, "BlankCli")
         code, so, se = run([
@@ -2966,11 +3084,53 @@ def main(argv=None):
         check_manifest_writable(manifest_path)
     except (OSError, UnicodeError, ValueError) as exc:
         die(f"Refusing explicit crops: cannot safely read {manifest_path}: {exc}")
+    # The batch's S crops that still hold an Extended Data figure.
+    pending_path = os.path.join(out_dir, ED_PENDING_FILE)
+    try:
+        pending = {figure_identity(f"{stem}_fig_{label}.png"): digest
+                   for stem, label, digest in parse_ed_pending(
+                       read_sidecar(pending_path)[0])}
+    except (OSError, UnicodeError, ValueError) as exc:
+        die(f"Refusing explicit crops: cannot safely read {pending_path}: {exc}")
+    # As in the batch, a PDF with a `_fig_ED<N>` crop, recorded or not, uses
+    # --ed-prefix ED: its Extended Data captions are ED<N>, and S<N> is
+    # another figure.
+    ed_namespace = (_records_extended_data(manifest, args.stem) or bool(
+        unrecorded_extended_data(out_dir, [Path(pdf_path)], manifest)))
+
+    # Captions, for the label checks and the "is the caption inside this
+    # crop?" warning. Imported lazily and defensively: the checks are a
+    # convenience, and a sibling-module import problem must not stop an
+    # explicit crop from being written — that crop is usually the fallback
+    # for something else that already went wrong.
+    find_caption_blocks = None
+    to_page_space = None
+    try:
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from auto_fig_bbox import (configure_marker_prefix,
+                                   find_caption_blocks, to_page_space)
+        configure_marker_prefix("Extended Data", "ED" if ed_namespace else "S")
+    except (Exception, SystemExit) as e:
+        # SystemExit too: auto_fig_bbox exits with a message rather than
+        # a traceback when PyMuPDF is missing, and that must not take
+        # this script's own crop down with it.
+        print(f"note: caption checks unavailable ({e})", file=sys.stderr)
+    page_captions = {}
+    for _spec, page_idx, _suffix, _rect in parsed_crops:
+        if find_caption_blocks is None or page_idx in page_captions:
+            continue
+        try:
+            page_captions[page_idx] = find_caption_blocks(doc[page_idx])
+        except Exception as e:
+            page_captions[page_idx] = []
+            print(f"note: caption checks skipped on page {page_idx + 1} "
+                  f"({e})", file=sys.stderr)
+
     # Preflight every target even in a legacy folder. An absent manifest is
     # not proof that an occupied slot belongs to this PDF: clippings share
     # these filenames. An explicit crop must not bypass the batch ownership guard.
     preflight_digests = {}
-    for _spec, _page_idx, suffix, _rect in parsed_crops:
+    for spec, page_idx, suffix, _rect in parsed_crops:
         target = os.path.join(out_dir, f"{args.stem}_fig_{suffix}.png")
         conflict = _figure_slot_conflict(out_dir, args.stem, suffix, target)
         if conflict is not None:
@@ -2992,55 +3152,71 @@ def main(argv=None):
                 "--adopt-legacy, and repair a changed recorded crop only with the "
                 "user's authorization (the skill's review reference, ownership "
                 "section); --overwrite does not claim another file.")
+        # The batch keeps these S crops until their links move; so does this.
+        if args.overwrite and pending.get(
+                figure_identity(os.path.basename(target))) == digest:
+            die(f"Refusing explicit crop of {target}: it still holds an "
+                "Extended Data figure whose links could not move "
+                f"({ED_PENDING_FILE}); fix the link blocker and rerun the "
+                "batch with --ed-prefix ED, or report the S crop as kept")
+        twin = ed_namespace and _extended_data_twin(
+            suffix, page_captions.get(page_idx, []))
+        if args.overwrite and twin:
+            die(f"Refusing --crop {spec!r}: this PDF uses --ed-prefix ED, so "
+                f"its caption {twin[0]!r} on page {page_idx + 1} has output "
+                f"label {twin[1]!r}, and --overwrite would replace {target}, "
+                f"another figure's crop. Pass {twin[1]!r}")
         preflight_digests[target] = digest
 
     os.makedirs(out_dir, exist_ok=True)
 
-    # Captions, for the label check and the "is the caption inside this
-    # crop?" warning. Imported lazily and defensively: the checks are a
-    # convenience, and a sibling-module import problem must not stop an
-    # explicit crop from being written — that crop is usually the fallback
-    # for something else that already went wrong.
-    find_caption_blocks = None
-    to_page_space = None
-    try:
-        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-        from auto_fig_bbox import find_caption_blocks, to_page_space
-    except (Exception, SystemExit) as e:
-        # SystemExit too: auto_fig_bbox exits with a message rather than
-        # a traceback when PyMuPDF is missing, and that must not take
-        # this script's own crop down with it.
-        print(f"note: caption checks unavailable ({e})", file=sys.stderr)
-
     blank_crops = 0
     for spec, page_idx, fig_suffix, (x0, y0, x1, y1) in parsed_crops:
         out_path = os.path.join(out_dir, f"{args.stem}_fig_{fig_suffix}.png")
-        captions = []
-        if find_caption_blocks is not None:
+        # Skip-existing is batch_extract.py's documented default and this is
+        # the same output folder, so it is the default here too. Without it,
+        # an explicit crop and a batch run silently overwrite each other's work
+        # depending only on which ran last.
+        expected_digest = preflight_digests[out_path]
+        if expected_digest is not None and not args.overwrite:
             try:
-                captions = find_caption_blocks(doc[page_idx])
-            except Exception as e:
-                print(f"note: caption checks skipped on page {page_idx + 1} "
-                      f"({e})", file=sys.stderr)
+                current_digest = _stable_output_digest(out_path)
+            except OSError as exc:
+                die(f"Refusing to skip {out_path}: {exc}")
+            if current_digest != expected_digest:
+                die(f"Refusing to skip {out_path}: its verified bytes changed "
+                    "after preflight. Inspect the current occupant and retry.")
+            print(f"Exists, skipped: {out_path} (pass --overwrite to replace)")
+            continue
+        captions = page_captions.get(page_idx, [])
         # A printed number is not always the output label: `Supplementary
         # Figure 1` is `S1`. Passing `1` would write, and with --overwrite
         # replace, the main Figure 1 crop.
-        mismatch = _series_mismatch(fig_suffix, captions)
-        if mismatch is not None:
+        mismatch = (_series_mismatch(fig_suffix, captions)
+                    or (ed_namespace
+                        and _extended_data_twin(fig_suffix, captions)))
+        if mismatch:
             cap_raw, cap_label = mismatch
-            # This check runs under the default prefix; a PDF the batch
-            # extracted with --ed-prefix ED names its Extended Data crops ED<N>.
-            ed_label = _extended_data_label(cap_raw, cap_label)
-            ed_form = (f" ({ed_label!r} if this PDF uses --ed-prefix ED)"
-                       if ed_label else "")
             replaces = (", and --overwrite replaces the crop already there"
-                        if args.overwrite and os.path.lexists(out_path) else "")
+                        if expected_digest is not None else "")
             print(
                 f"WARNING: --crop {spec!r} is labelled {fig_suffix!r}, but no "
                 f"caption on page {page_idx + 1} is; its caption {cap_raw!r} "
-                f"has output label {cap_label!r}{ed_form}. This crop goes to "
-                f"{out_path}{replaces}. Pass the Fig label auto_fig_bbox.py "
-                f"reports, not the printed number.",
+                f"has output label {cap_label!r}"
+                + (" (this PDF uses --ed-prefix ED)" if _ED_LABEL_RE.fullmatch(
+                    figure_identity(cap_label)) else "")
+                + f". This crop goes to {out_path}{replaces}. Pass the Fig "
+                f"label auto_fig_bbox.py reports, not the printed number.",
+                file=sys.stderr,
+            )
+        elif (not ed_namespace
+                and _ED_LABEL_RE.fullmatch(figure_identity(fig_suffix))):
+            print(
+                f"WARNING: --crop {spec!r} is labelled {fig_suffix!r}, but "
+                f"this PDF has no _fig_ED crop, so its Extended Data caption "
+                f"has output label {_default_s_label(fig_suffix)!r}. An ED "
+                f"crop switches every later batch run of this PDF to "
+                f"--ed-prefix ED.",
                 file=sys.stderr,
             )
         # The crop must stay clear of every caption, whichever side it sits
@@ -3063,11 +3239,13 @@ def main(argv=None):
                     continue
                 if args.blank_captions:
                     # Word boxes, not the caption rect, so figure content
-                    # beside a short caption line is kept.
+                    # beside a short caption line is kept. Descenders reach
+                    # past a word's box, so its height sets the margin.
                     blank_rects += [
-                        to_page_space(page, fitz.Rect(w[:4])
-                                      + (-0.5, -0.5, 0.5, 0.5))
-                        for w in page.get_text("words", clip=content_cap)]
+                        to_page_space(page, r + (-0.5, -r.height / 4,
+                                                 0.5, r.height / 4))
+                        for r in (fitz.Rect(w[:4]) for w in page.get_text(
+                            "words", clip=content_cap))]
                     print(f"--crop {spec!r}: blanked caption {cap_raw!r} "
                           f"inside the crop")
                 else:
@@ -3091,21 +3269,6 @@ def main(argv=None):
                 return
             occupied, why = conflict
             raise FileExistsError(errno.EEXIST, why, occupied)
-        # Skip-existing is batch_extract.py's documented default and this is
-        # the same output folder, so it is the default here too. Without it,
-        # an explicit crop and a batch run silently overwrite each other's work
-        # depending only on which ran last.
-        expected_digest = preflight_digests[out_path]
-        if expected_digest is not None and not args.overwrite:
-            try:
-                current_digest = _stable_output_digest(out_path)
-            except OSError as exc:
-                die(f"Refusing to skip {out_path}: {exc}")
-            if current_digest != expected_digest:
-                die(f"Refusing to skip {out_path}: its verified bytes changed "
-                    "after preflight. Inspect the current occupant and retry.")
-            print(f"Exists, skipped: {out_path} (pass --overwrite to replace)")
-            continue
         try:
             (rw, rh), (fw, fh), blank, publication = extract_one_figure(
                 doc, page_idx, (x0, y0, x1, y1), out_path,
