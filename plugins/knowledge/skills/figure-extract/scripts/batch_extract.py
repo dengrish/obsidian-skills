@@ -3778,6 +3778,8 @@ def run_self_test():
             check("a distinct NFD PNG remains a portable-slot collision",
                   (unicode_again["skipped"], len(unicode_again["occupied"])),
                   (0, 1))
+            ok("NFD same-entry duplicate regression skipped on this filesystem",
+               True)
         # The same holds for a recorded lowercase spelling of the crop.
         case_own_dir = Path(tmp) / "CaseOwned"
         case_own_dir.mkdir()
@@ -4532,6 +4534,11 @@ def run_self_test():
             check("a distinct variant spelling is refused and left unclaimed",
                   (code, (variant_out / MANIFEST_FILE).exists(),
                    variant_png.read_bytes()), (1, False, variant_bytes))
+            code, so, se = run(["--src", str(legacy_pdf), "--out",
+                                str(variant_out), "--dpi", "72"])
+            ok("an unclaimed variant spelling stays an occupied slot on rerun",
+               code == 1 and "occupied by an unrecorded" in so
+               and variant_png.read_bytes() == variant_bytes)
 
         late_out = Path(tmp) / "legacy-late-slot-conflict"
         late_out.mkdir()

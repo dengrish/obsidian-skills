@@ -11176,6 +11176,9 @@ def run_self_test():
                       "item10/alias"),
                    _fold_cli(_fold_variant) == _fold_cli(_fold_wiki)),
                   (True, True))
+        else:
+            check("case-variant WIKI regression skipped on a case-sensitive "
+                  "filesystem", True, True)
 
         # A filename that is not valid UTF-8 (a lone surrogate on Linux)
         # reaches --out as a JSON escape, as it reaches stdout.

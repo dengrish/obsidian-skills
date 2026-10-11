@@ -1,15 +1,15 @@
 {
   "schema": 1,
   "plugin": "knowledge",
-  "plugin_version": "1.31.0",
+  "plugin_version": "1.31.1",
   "repository": "https://github.com/dengrish/obsidian-skills",
-  "source_commit": "bf2f092ff34a8af7432d2b8bf4c97e2b468d7471",
-  "source_url": "https://github.com/dengrish/obsidian-skills/commit/bf2f092ff34a8af7432d2b8bf4c97e2b468d7471",
+  "source_commit": "f715477be4afc9b56ec29a3a81faa216365ad322",
+  "source_url": "https://github.com/dengrish/obsidian-skills/commit/f715477be4afc9b56ec29a3a81faa216365ad322",
   "source_status": "committed",
-  "runtime_sha256": "d7cdff0c2b771c4d9e229d1dc5e107f35f07fa63fbf6c0c096b48aad77da5ca5",
+  "runtime_sha256": "07c27dd584bfc1c0ddab54c9422be7cd65ef482d915fd34e402cda69912a90ed",
   "files": {
-    ".claude-plugin/plugin.json": "bd955cb3d5d56dec9f5a43912b0ed0f92f211e309d9ef27d8156f4fe7f18c80e",
-    ".codex-plugin/plugin.json": "c353ffb2802c26c520b6e480e740cebc5df186454881631fe9799b67e19e369b",
+    ".claude-plugin/plugin.json": "316967adf7cb397472e6946c7c368315cffc2b0f93c2c88438ff5815a552e25c",
+    ".codex-plugin/plugin.json": "5c386bf7557138292694a2c219248dff80c1ddbe55e2c12b655efab4f23b8d0c",
     "README.md": "1b91c542df58812eabb4ff11b416b67f348926c1a1fffe0137eb7eefde3b2728",
     "requirements.txt": "09ecd45b790b05db2567581aed62c0283c3523b85b9234df94d618e7bf9295f9",
     "shared/CONVENTIONS.md": "db022214469fe0e9f6b6dae9a7a605fb75990b161a4c4fadb6510748d05f2377",
@@ -57,7 +57,7 @@
     "skills/figure-extract/SKILL.md": "81a8b1fb1e94db3e0e1beeb5355df08e8fca4a7151396969c5ee77831f2d0ae6",
     "skills/figure-extract/references/review-and-repair.md": "4d45b9c07f4b050ea65e04d165f5503b817d732b6de315c5fc058da6cc44bd4f",
     "skills/figure-extract/scripts/auto_fig_bbox.py": "ae13f6a8e47071d43395afd76aaa9e48e3de3df6ca84a4c70bba3ab29387e86e",
-    "skills/figure-extract/scripts/batch_extract.py": "c5684d5c19f707b09a587066ea83d41ae7533b1d0cf11f20cce377ffc0ff4072",
+    "skills/figure-extract/scripts/batch_extract.py": "4aa482310000006bf05ed4c26ba241fba245bc310a81e630c70eaac0be67fbbd",
     "skills/figure-extract/scripts/extract_figures.py": "877ca031aa9c413828e979c84e765fab2dc68a7189a54618e25d4882af417ac3",
     "skills/figure-extract/scripts/render_page.py": "bda43e84254e5123a4e7dee1fe2cbc2e25999b24672207932cab005b345a5fb0",
     "skills/figure-extract/scripts/requirements.txt": "a7e9da54fd73bd3253c49a64b77bc2193364ad8a35f3cac7c1b7fd03104365cf",
@@ -106,6 +106,6 @@
     "skills/wiki-lint/references/refactors.md": "baa8ec8f8a923a905bc1d9e4b6e865c38e3e16a0f5785f2513dfd75e47410ba0",
     "skills/wiki-lint/references/scanner.md": "19e503fa7a3a9398ecd33a03b9f3a7621e9cb0df94459350b25d5b6969a68603",
     "skills/wiki-lint/references/source-backed-corrections.md": "ed44893f9eb3f1b0bfbee1538a0cd2acdf502ac9dc122f3e874f07bcaf8aabb0",
-    "skills/wiki-lint/scripts/scan_vault.py": "b64f4147abb716465afb03da068f70ec6449e137cd9c285ce334d9a828a80779"
+    "skills/wiki-lint/scripts/scan_vault.py": "c9f6930300a339c445d24087d307f01440b7825ab85f812228a34d5dcfa5989a"
   }
 }
