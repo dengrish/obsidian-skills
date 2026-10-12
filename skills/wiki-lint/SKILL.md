@@ -238,8 +238,10 @@ Repair in this order:
    protocol: new information the cited sources do not give, removed with its
    copies in the description and card, and in `aliases:` through step 4's
    alias-removal protocol; over-qualification and edge-case
-   caveats; core-facet gaps; unexplained statements; self-containment terms;
-   acronym and full-form pairs; framing in the entry's own field and against
+   caveats; core-facet gaps; unexplained statements; misplaced sentences,
+   missing links between adjacent facts and repeats within a note
+   ([named prose defects](../wiki-build/references/writing.md#editorial-reread));
+   self-containment terms; acronym and full-form pairs; framing in the entry's own field and against
    the nearest contrast its sources draw; a prototype-first opening that says
    what the subject is, with the variants, secondary senses and other
    applications its sources give named once, later in the body; and a
@@ -275,7 +277,7 @@ not applied: it goes under *Notes for the user* with both options and is
 never logged. A conflict stays an open log item only when the references
 consulted disagree or none is reachable, and the item names them.
 
-**Refresh before Task 2.** The run keeps a private copy of each entry under `<scratch>` before its first edit. Once Task 1b's repairs are done, it runs the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against that copy; a fix this final reread makes gets only its passage reread. Whenever Task 1 or Task 1b changed entries, re-run Step 0 so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from Step 0's scan is this run's own copy, unless it pairs an entry with its own retitle destination; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, rereads that whole entry against its copy and re-runs Step 0 once more. Use the refreshed worklists, but keep the logical-run timestamp, an inherited coordinator timestamp included, and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
+**Refresh before Task 2.** The run keeps a private copy of each entry under `<scratch>` before its first edit. Once Task 1 and any Task 1b repairs are done, it runs the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against that copy, reviewing each `9-cut-join-candidate` that `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' --baseline '<copy>' '<entry>'` raises; a fix this final reread makes gets only its passage reread. Whenever Task 1 or Task 1b changed entries, re-run Step 0 so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from Step 0's scan is this run's own copy, unless it pairs an entry with its own retitle destination; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, rereads that whole entry against its copy and re-runs Step 0 once more. Use the refreshed worklists, but keep the logical-run timestamp, an inherited coordinator timestamp included, and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
 
 ## Task 2 — Link hygiene
 
@@ -313,7 +315,7 @@ At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Re
 
 ### Churn-avoidance contract
 
-**Write only what actually changes.** Leave an unaffected entry byte-for-byte untouched, ordering and whitespace included. Make a targeted repair to a violation, never a discretionary rewrite of conforming prose. Every Task 1b repair fixes a concrete defect a builder rule or a [user issue](#user-issues) names, and its owner and notation choices follow their stated tie-breaks, so they settle once. Preserve legacy `importance:`, Obsidian appearance/publish keys, and the kept card's user-disabled `!!` separator and scheduling metadata; an [extra card](references/flashcards.md#card-set) is removed with its attachments.
+**Write only what actually changes.** Leave an unaffected entry byte-for-byte untouched, ordering and whitespace included. Make a targeted repair to a violation, never a discretionary rewrite of conforming prose; repairing a [named prose defect](../wiki-build/references/writing.md#editorial-reread) is such a repair, not rewording. Every Task 1b repair fixes a concrete defect a builder rule or a [user issue](#user-issues) names, and its owner and notation choices follow their stated tie-breaks, so they settle once. Preserve legacy `importance:`, Obsidian appearance/publish keys, and the kept card's user-disabled `!!` separator and scheduling metadata; an [extra card](references/flashcards.md#card-set) is removed with its attachments.
 
 Conforming hand edits survive. A complete pass converges: a rerun on
 unchanged evidence finds nothing to change, never oscillates, reorders for

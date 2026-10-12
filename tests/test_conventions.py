@@ -6530,7 +6530,12 @@ SELFTEST_MIN_CASES = {
     # 2026-10-11 (knowledge 1.32.0): the shared rows for a short numbered
     # list, a cue with a colon, shell dollars, a raw μm or ℓ and a caption
     # link beside its prose link, and a footer listing one entry twice.
-    "skills/wiki-build/scripts/lint_entry.py": 546,
+    # 2026-10-11 (knowledge 1.34.0): --baseline's 9-cut-join-candidate rows
+    # for a cut's neighbors, a dangling connective and a one-sentence
+    # paragraph; none without a baseline, for an unchanged copy, for a
+    # pure insertion or for a move, and none for an opening "Also called"
+    # or "Either ... or".
+    "skills/wiki-build/scripts/lint_entry.py": 562,
     # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
     # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
     # `.md` or path, and keep one another vault file needs.
@@ -9407,9 +9412,11 @@ def check_dangler_hand_off(rep, _conv):
          "no longer settles a dangler in Task 1b before Task 2 drops it"),
         (refactors, "### Dangling-link hand-off",
          "lost the dangler hand-off section"),
-        (refactors, "gets a one-clause gloss at that mention",
-         "no longer glosses a dangling term whose sentence needs its "
-         "meaning"),
+        # 2026-10-11 (knowledge 1.34.0): the gloss is item 14's brief
+        # definition, placed so it overloads no sentence.
+        (refactors, "gets the brief definition [item 14](qc-items.md#14-"
+         "self-containment) requires", "no longer glosses a dangling term "
+         "whose sentence needs its meaning"),
         (refactors, "[waits for Task 3](link-hygiene.md#dangling-links-"
          "target-missing)", "no longer leaves a missing root's link to "
          "Task 3"),
@@ -9657,8 +9664,13 @@ WRITING_RULE_PINS = (
         "otherwise by its actor and verb",
         "a stage name keeps its first-mention wikilink",
         "which counts as one of the steps",
-        "as is a plain-words summary of a procedure the entry gives in full "
-        "elsewhere",
+        # 2026-10-11 (knowledge 1.34.0): the steps appear only in the list,
+        # the lead-in does nothing else, and a step whose action makes its
+        # reason plain needs none.
+        "The steps appear only in the list; other prose, the opener "
+        "included, names at most the procedure's idea",
+        "Introduce the list with one prose sentence, which does nothing else",
+        "unless its action makes that plain",
         # 2026-10-07 (knowledge 1.24.0): the Related footer has a blank line
         # on each side, so it never joins the block above it.
         "Write one line above the Flashcards separator, with a blank line on "
@@ -9700,7 +9712,6 @@ WRITING_RULE_PINS = (
         "is reduced to its point or left out",
         "and one clause can set them up",
         "an example that only restates the definition with a number",
-        "A single one-clause gloss of a term is no overload",
         "*such*, *it* or *the former* unambiguous, within its own or the "
         "previous sentence",
         "A garden path is a defect",
@@ -9710,11 +9721,6 @@ WRITING_RULE_PINS = (
         "becomes one claim with the condition that decides between them",
         "**Flow sweep.** Label each paragraph's job in a few words, "
         "one-paragraph bodies included",
-        "never add one to end on",
-        # A closing consequence, main limitation or nearest contrast is the
-        # ending; any other closing point is the stray.
-        "Any other closing sentence or final one-sentence paragraph that "
-        "opens a new point",
         "A caption follows [captions](media.md#captions) instead",
         "goes whatever its source support",
         "a sentence that only previews claims the following sentences "
@@ -9794,16 +9800,17 @@ WRITING_RULE_PINS = (
         "An example uses only steps the note or a linked entry explains; "
         "when it needs another, choose a simpler case rather than teach the "
         "step",
-        "After a removal or move, reread the whole note against its pre-edit "
-        "text",
+        # 2026-10-11 (knowledge 1.34.0): any edit gets the whole-note reread.
+        "After any deletion, move, insertion or rewrite, reread the whole "
+        "note against its pre-edit text",
         "wiki-lint's Task 1b does this once per changed entry",
         "Nothing may point at a deleted passage",
-        "a moved passage leaves both places in order",
         "name, relationship, direction, number, unit, count, scope or "
         "preference",
         "takes a name its owner entry or the field uses (intercept, not "
         "height), and a value its owner's unit",
-        "passes [principle 9](#prose-principles)'s reading-speed test",
+        # 2026-10-11 (knowledge 1.34.0): principle 9 counts an overload.
+        "passes [principle 9](#prose-principles)'s overload test",
         "A passage whose subject is a linked entry's",
         "leaving only what the [atomicity test](#body-structure) keeps here",
         "When that entry clearly owns it and lacks it, the passage moves there",
@@ -9818,8 +9825,17 @@ WRITING_RULE_PINS = (
         "run's entries; a passage it may not remove or move stays, with a",
         "No claim recurs, within a sentence or across sentences and "
         "paragraphs",
-        "linked to an entry that states it (open the target when the "
-        "sentence leaves the reason to the link)",
+        # 2026-10-11 (knowledge 1.34.0): a link no longer stands in for a
+        # reason; the term audit gives the reason its cited sources or the
+        # entry's own claims supply, and a claim with neither stays as
+        # stated, while a complexity, bound or derivation result follows the
+        # equation guide, which gives its intuition or else its takeaway.
+        "recommendation is given its reason ([principle 5](#prose-principles)) "
+        "when its cited sources or the entry's own claims supply one, and "
+        "otherwise stays as stated, while a complexity, iteration bound or "
+        "derivation result follows the [equation guide](equations.md)",
+        "by its link and any clause the [atomicity test](#body-structure) "
+        "adds, as the [term audit](#editorial-reread) says",
         # 2026-10-10 (knowledge 1.30.0): a form a label carve-out allows links
         # in place, matching item 10's first eligible occurrence.
         "one that clears the bar links in place when a [label "
@@ -10074,9 +10090,14 @@ WRITING_RULE_PINS = (
     # example that would only restate the definition is not added.
     (("wiki-lint", "references", "qc-items.md"), (
         "as the detection pass on every in-scope entry",
-        "A multi-job paragraph or a tacked-on ending the flow sweep finds is "
-        "a concrete defect",
-        "Task 1b moves it further, or cuts it under principle 6 or 7",
+        # 2026-10-11 (knowledge 1.34.0): every prose defect the editorial
+        # reread names is concrete, so its repair is never churn; Task 1
+        # moves a misplaced sentence where the placement test puts it under
+        # one heading, and Task 1b makes any other move.
+        "each named prose defect of that reread is concrete, so its repair is "
+        "never churn",
+        "Task 1b moves a misplaced sentence across headings or where the move "
+        "needs rewording, or cuts it under principle 6 or 7",
         "on each body claim, against every other claim in the note",
         # Only an opener that fails principle 1's self-check is rewritten
         # from the card; one whose verb states the defining action stays.
@@ -10110,6 +10131,12 @@ WRITING_RULE_PINS = (
         # otherwise leave an open question gets its one clause.
         "A consequence carried from a linked entry gets its reason or key "
         "value only when it would otherwise leave an open question",
+        # 2026-10-11 (knowledge 1.34.0): the atomicity test, which owns the
+        # rule that a source-given reason always leaves one open (a link is
+        # never that reason), decides it.
+        "only when it would otherwise leave an open question, as the "
+        "[atomicity test](../../wiki-build/references/writing.md#body-"
+        "structure) defines it",
         "source support alone never keeps that material",
         "unless it would only restate the definition with a number",
         "A definite noun phrase whose referent only the source's running "
@@ -10150,9 +10177,11 @@ WRITING_RULE_PINS = (
         "`overlap_candidates` name",
         "that the family states twice beyond the one clause",
         "one sibling states and another lacks goes to the depth review",
+        # 2026-10-11 (knowledge 1.34.0): a family entry owns only a property
+        # every member shares.
         "Content moves only when that test clearly names another owner (a "
-        "more specific entry, or the family's for a shared property); "
-        "otherwise the entry holding it keeps it",
+        "more specific entry, or the family's for a property every member "
+        "shares); otherwise the entry holding it keeps it",
         "A narrowed run compares each in-scope entry with its `neighbors` "
         "instead",
         "its contradiction check reading the entries the coherence review "
@@ -10168,7 +10197,9 @@ WRITING_RULE_PINS = (
         "however often it returns",
     )),
     (("wiki-lint", "references", "refactors.md"), (
-        "keeping only the one-clause reason or key value the",
+        # 2026-10-11 (knowledge 1.34.0): a consolidation trim keeps the
+        # consequence plus its one-clause reason, never the consequence alone.
+        "for that entry plus the one-clause reason or key value the",
         "an exhibit moves with its caption and carries its source citation",
         "every explanation, example and exhibit the using entries hold about "
         "its subject",
@@ -10195,10 +10226,14 @@ WRITING_RULE_PINS = (
         "applications its sources give named once",
     )),
     (("wiki-lint", "references", "source-backed-corrections.md"), (
-        "Remove the new information the cited sources do not give, however "
+        "the new information the cited sources do not give, however "
         "accurate",
-        "keeping the rest of its sentence; what the equation rules require "
-        "changes only under them",
+        # 2026-10-11 (knowledge 1.34.0): the rest of a sentence any removal
+        # trims stays unless it only repeats or fills, a caveat's removal
+        # included, and the equation rules decide what they protect.
+        "a removal keeps the rest of its sentence unless it only repeats or "
+        "fills, and one that would overload is split",
+        "What the equation rules require changes only under them",
         # 2026-10-10 (knowledge 1.30.0): only a sentence the user's request
         # or `issues:` names as the user's own edit escapes trimming.
         "an uncited sentence that the user's request or the entry's "
@@ -10230,6 +10265,51 @@ WRITING_RULE_PINS = (
         "family's entry",
         "adding beyond it only the clarification",
     )),
+    # 2026-10-11 (knowledge 1.34.0): Task 1b repairs misplaced sentences,
+    # missing links and repeats within a note; repairing a named prose
+    # defect is not rewording (the placement test alone says that a placed
+    # sentence stays); the final reread and each draft lint
+    # review the `--baseline` cut-join candidates, each draft against its
+    # own repair's snapshot, and a checked cut-join row never blocks
+    # publication. A trim keeps only a remainder that does a job, and the
+    # deletion list checks the join on each side of a cut. Deepening keeps
+    # every claim the deletion list does not let go and narrows a scope
+    # failure, an excluded caveat is deleted rather than reworded, and a
+    # figure's scope is named as the scope check says. Inserted, moved and
+    # consolidated text gets the editorial reread, a
+    # consolidation trim keeps its one-clause reason, and a dangler gloss is
+    # item 14's brief definition, which overloads no sentence.
+    (("wiki-lint", "SKILL.md"), (
+        "unexplained statements; misplaced sentences, missing links between "
+        "adjacent facts and repeats within a note",
+        "repairing a [named prose defect](../wiki-build/references/"
+        "writing.md#editorial-reread) is such a repair, not rewording",
+        "reviewing each `9-cut-join-candidate` that",
+        "lint_entry.py' --baseline '<copy>' '<entry>'",
+    )),
+    (("wiki-lint", "references", "source-backed-corrections.md"), (
+        "Keep the definition card with its attachments byte-for-byte and in "
+        "place, and every existing claim except those the [deletion "
+        "list](#correct-and-publish) allows removing; narrow a claim that "
+        "fails the [scope check]",
+        "and the sentence on either side of each cut, which must show no "
+        "[broken join]",
+        "caveat, filler, scaffolding",
+        "never rewording it into a more accurate one",
+        "keep the source's figure only within the scope that makes it true, "
+        "named as the [scope check]",
+        "Keep each fact before its first use, and reread the passage",
+        "lint_entry.py' --baseline '<copy>'",
+        "where `<copy>` is step 1's snapshot",
+        "The correction must introduce no new lint finding beyond the "
+        "cut-join rows the deletion list checked",
+    )),
+    (("wiki-lint", "references", "refactors.md"), (
+        "plots built on the metric keep the consequence, its one-clause "
+        "reason and a link",
+        "gets the brief definition [item 14](qc-items.md#14-self-containment) "
+        "requires",
+    )),
     (("wiki-lint", "references", "hierarchy.md"), (
         "it never adds a branch or method no cited page gives",
     )),
@@ -10253,7 +10333,9 @@ WRITING_RULE_PINS = (
         "once on the whole of every entry the run changed, against that copy",
         "a fix this final reread makes gets only its passage reread",
         "row absent from Step 0's scan is this run's own copy",
-        "Once Task 1b's repairs are done, it runs the builder's",
+        # 2026-10-11 (knowledge 1.34.0): a run that skips Task 1b still gets
+        # the final reread and its cut-join candidates.
+        "Once Task 1 and any Task 1b repairs are done, it runs the builder's",
         # 2026-10-10 (knowledge 1.30.0): an entry the post-refresh
         # consolidation changes is reread whole; a row pairing an entry with
         # its own retitle destination is no own copy.
@@ -10319,9 +10401,12 @@ WRITING_RULE_PINS = (
         # states them; gathering one beyond an adjacent paragraph is Task 1b
         # work, as is any move Task 1's reorder limit does not allow.
         "with three or more steps stated anywhere in the entry",
-        "and so is gathering a step stated beyond an adjacent paragraph",
-        "If the change moves material beyond an adjacent paragraph under its "
-        "heading",
+        # 2026-10-11 (knowledge 1.34.0): Task 1 moves material anywhere
+        # under one heading; a move across headings or one that needs
+        # rewording is Task 1b's.
+        "and so is gathering a step stated under another heading",
+        "If the change moves material across a heading or needs rewording to "
+        "move it",
         "A display moves into its step with its math unchanged",
         # 2026-10-07 (knowledge 1.23.0): the conversion keeps period facts as
         # bullets and keeps shared notation before the list.
@@ -10334,8 +10419,10 @@ WRITING_RULE_PINS = (
         "before the list",
         "and otherwise with its actor and verb",
         "(a loop's closing Repeat item counts as a step)",
-        "a plain-words summary of a procedure the entry gives in full "
-        "elsewhere, such as the opener's overview, stays prose",
+        # 2026-10-11 (knowledge 1.34.0): the steps appear only in the list,
+        # and an opener that walks through them keeps only the idea.
+        "Task 1b cuts an opener that walks through the steps to the "
+        "procedure's idea",
     )),
     # Reading notes explain each equation and bound, and check equations on
     # the page image, never the text capture.
@@ -10672,7 +10759,10 @@ WRITING_RULE_PINS = (
         "removing a repeated target's later items, is determinate",
         "keeping the old form as an alias only when the [alias rule]",
         "Lint never adds a second card.",
-        "the description hedges `item7/hedge-candidate` lets it drop",
+        # 2026-10-11 (knowledge 1.34.0): a flagged hedge is a frequency word,
+        # which only the cited source can show principle 3 keeps, so Task 1b
+        # reviews it.
+        "Task 1b reviews the description under [item 7](#7-description)",
         "Whole-vault maintenance uses the scanner's [collision "
         "probes](scanner.md#collision_candidates)",
     )),
@@ -10693,6 +10783,181 @@ WRITING_RULE_PINS = (
     # an entry that already cites its source.
     (("wiki-build", "references", "writing.md"), (
         "and so is a second link to one target",
+    )),
+    # 2026-10-11 (knowledge 1.34.0): the editorial reread names its prose
+    # defects, each concrete, and runs on the whole note after any edit, with
+    # the `--baseline` cut-join candidates for an existing entry. The
+    # placement test replaces the ending rule; one copy of a repeated claim
+    # stays; principle 9 counts an overload and an edit never brings a
+    # sentence to two; one thing keeps one name; a link never stands in for
+    # a reason; filler is deleted, never reworded; a clarification brings in
+    # no outside fact, which is never a close call; the ordinary case is the
+    # typical example the sources teach, and subtype qualifiers, partial-cause
+    # hedges, minority proposals and misconception warnings go, while a
+    # source's own frequency word stays.
+    (("wiki-build", "references", "writing.md"), (
+        # The pre-edit copy is the published entry in wiki-build and the
+        # run's private copy in wiki-lint; removals settle before any repair
+        # is made to the text they remove, so which copy of a repeat stays
+        # never depends on a reason a repair just added.
+        "For an edit to an existing entry, run `lint_entry.py --baseline "
+        "'<pre-edit copy>' '<draft>'` (in wiki-build, the published entry) "
+        "and review the cut-join candidates it flags "
+        "(`9-cut-join-candidate`)",
+        "The reread finds these named prose defects anywhere in the note, "
+        "each a concrete defect, never a wording preference, and settles "
+        "every removal before any split, move or added reason",
+        # A cut an earlier run made still leaves a broken join.
+        "a broken join after any cut, however old: a sentence that lost its "
+        "referent, reason, contrast or evidence, a connective whose other "
+        "half is gone",
+        "or a paragraph a cut left as a one-sentence stub of its old topic",
+        "join the sentence to the one it now serves or restore its reason in "
+        "one clause from the cited source",
+        "a misplaced sentence, which fails the placement test",
+        "a missing link between adjacent facts",
+        "a claim stated twice anywhere in the note (repeat check)",
+        "two names for one thing, or a made-up label",
+        "an undefined symbol or term at first use",
+        "a vague summary or word in place of the claim",
+        # Placement follows dependencies: a sentence comes after every claim
+        # it depends on, several that develop one claim keep their order, a
+        # sentence about the whole subject keeps teaching order's place, a
+        # definition right after its term's sentence counts as defining it
+        # at first use, and a variant takes its own paragraph, however short.
+        "**Placement test.** A sentence goes after every claim it depends "
+        "on: a reason, qualifier, example, contrast or consequence right "
+        "after the claim it develops, with several that develop one claim in "
+        "their existing order; a result after its setup; and one that "
+        "develops several claims after the last of them",
+        "A consequence, limitation or contrast about the subject as a whole "
+        "keeps [teaching order](#prose-principles)'s place",
+        "a sentence that develops nothing earlier starts its own paragraph "
+        "after any chain of reasoning it would break",
+        "Nothing splits a *therefore* or *so* chain from its premise, and a "
+        "definition or name remark directly follows the sentence introducing "
+        "its term, which counts as defining it at first use",
+        "A variant, secondary sense or other application joins a later "
+        "passage on that case, else takes its own paragraph after the general "
+        "explanation, even of one sentence",
+        "never to the nearest paragraph end or just to change how the note "
+        "opens or ends; a sentence the test already places stays",
+        # The opening paragraph's copy wins, so the opener check keeps its
+        # property and the procedure's idea; a list step is never cut; the
+        # tie-break between other copies keeps the fuller, else the earlier,
+        # and what another copy adds stays where it stands.
+        "**Leave-out check.**",
+        "**Repeat check.** No claim recurs",
+        "compare each sentence and list item with the whole note and keep one "
+        "copy: the first in the opening paragraph, else the one with the "
+        "reason, numbers or steps, else the earlier",
+        "Every other copy, a list step excepted, is cut to what it adds, or "
+        "goes",
+        "Outside the opening paragraph, a sentence that only previews claims",
+        "a link only deleted text had moves to the next mention of its target, "
+        "or else to the Related footer",
+        "Then name how each pair of adjacent sentences relates",
+        "**Overload test.** Count each inserted aside",
+        # A comma-set-off phrase is an aside, and a trailing *so* clause is
+        # never counted twice.
+        "parenthetical in brackets or commas",
+        "trailing *so*, *so that* or *leaving* clause, appended *as a* or "
+        "*like those* phrase, other independent clause after the first and "
+        "inline series of three",
+        "Three is an overload",
+        # An acronym parenthetical a rule requires keeps its place,
+        # wherever it stands.
+        "but not a parenthetical 5(e)–(f) or the date rule requires",
+        "A definition, reason or remark an edit inserts never brings a "
+        "sentence to two; it gets its own short sentence",
+        "state the claim itself, never a vaguer summary or word for it",
+        "One thing keeps one name, its owner entry's or the field's, else the "
+        "entry's first",
+        "an acronym follows 5(e)",
+        # A name is a noun label, not a describing clause.
+        "Reordered words or a describing clause (*tuning hyperparameters*) "
+        "are no second name; a relabeling appositive (*as a pipeline*) is",
+        "*one*, *an alternative*, *the variants*, *the reverse*",
+        # The reason comes from this entry's or the owner's cited source.
+        "as it does whenever this entry's or the owner's cited source gives a "
+        "reason, since a link never stands in for one",
+        "a plot built on the metric keeps the consequence, its one-clause "
+        "reason and a link",
+        # A linked entry's argument is explained by its link plus any clause
+        # the atomicity test adds, as the user's link-don't-re-explain rule
+        # asks.
+        "every claim, rule, number, complexity or equation the entry states "
+        "is explained here or, when a linked entry owns the argument, by its "
+        "link and any clause the [atomicity test](#body-structure) adds",
+        "or a second derivation or reading of the same result, is not a "
+        "reason",
+        # A symbol, a linked function's argument included, is never defined
+        # by a link; an operation needs its reason too.
+        "is defined or linked at its first use in reading order, captions "
+        "included (a display's symbols by its *where* clause; a linked term, "
+        "never a symbol, by its first prose link)",
+        "Every number, operation, causal or comparative claim, rule or "
+        "recommendation",
+        "which \"an example of [[X]]\" does not",
+        "a near-tautology, vague importance framing, an obvious purpose "
+        "clause (one its verb already states)",
+        "deleted rather than reworded even when the source says it",
+        "a definition, a needed reason, the atomicity test's one clause and "
+        "an equation's explanation are never filler",
+        # An aside about a linked entry that the sentence's claim does not
+        # use is filler like a navigation-only aside.
+        "an aside that carries a link and nothing the sentence's claim uses",
+        # A vague word or unexplained modifier is a vague summary too.
+        "(*characterizes*, an unexplained *unifying*)",
+        # The tightening binds what a definition, reason or example brings
+        # in; the counterparts, dates, atomicity clause and equation
+        # statements 5(h) lists keep their own rules.
+        "A definition, reason or example the entry adds explains only what "
+        "it already says and brings in no fact, number, mechanism, variable, "
+        "method or comparison its sources do not give about the subject",
+        # A constructed example's own values are no outside number.
+        "(a constructed example's values aside)",
+        "a passage carrying an outside fact is never one, and none is exempt "
+        "from the [editorial reread](#editorial-reread)",
+        # Under equations §1's general-form rule the ordinary case is the
+        # general form, so the source's special case keeps its condition.
+        "State the ordinary case, the typical example its sources teach or "
+        "the general form [equations "
+        "§1](equations.md#1-coverage--explanatory-value-before-notation) "
+        "sets, plainly",
+        # Any frequency or scope word a source puts on its claim stays,
+        # whatever the word; one that covers only an edge case goes.
+        "nor strengthen one by dropping a frequency or scope word the source "
+        "puts on it (*often*, *usually*, *some models*, *in most cases*)",
+        "dropping a hedge word drops its qualifier too",
+        "subtype or regime qualifiers on a claim true of the ordinary case, "
+        "partial-cause hedges on the ordinary mechanism, minority proposals, "
+        "warnings against a misconception the entry never states or suggests",
+        "goes unless the subject's explanation needs it",
+        "an item given a role it lacks, an example the definition excludes",
+        # Only a note the run may edit loses the caveat; a wiki-build
+        # neighbor follows conflict handling.
+        "deleting in each note the run may edit a caveat [principle "
+        "3](#prose-principles) leaves out",
+        "whose *generally* covers only a brief dip",
+        "precision rises\"), never a word principle 3 keeps",
+        # A scope is named only outside the entry's ordinary case, so the
+        # scope check and the leave-out list agree.
+        "sets, and name that scope only when the entry's ordinary case lies "
+        "outside it",
+        "named as [principle 3](#prose-principles)'s scope check says",
+        "a shortened source sentence keeps the relation and reason it states",
+        "a paragraph break never repairs a missing link",
+        "only when the evidence establishes that relationship for every item "
+        "it joins",
+        # A list item needs no reason its own action makes plain, and the
+        # opener names a procedure only by its defining action.
+        "each item keeps its why unless the item makes it plain",
+        "names at most the procedure's idea, its defining action without a "
+        "step's conditions or formulas",
+        "names the members its sources name that fit the note's definition",
+        "though a case the definition itself names is no variant",
+        "or a rule the note states, is left out",
     )),
     (("wiki-lint", "references", "scanner.md"), (
         "a dash never stands for a space that a title, base term or common "
@@ -10716,8 +10981,72 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "qc-items.md"), (
         "discovery history "
         "([principle 6](../../wiki-build/references/writing.md#prose-principles))",
+        # 2026-10-11 (knowledge 1.34.0): the whole-entry reread's repeat
+        # check removes any copy the conversion leaves.
         "A numbered list of fewer than three steps becomes prose as an "
         "item-9 local editorial repair",
+    )),
+    # 2026-10-11 (knowledge 1.34.0): item 9's local repairs fix the named
+    # prose defects. An overloaded sentence splits, and sentences merge only
+    # when the result passes; a double name takes principle 9's name;
+    # filler and every repeat but the kept copy go, a link only the deleted
+    # text had moving on; Task 1 writes a link between adjacent facts the
+    # entry establishes and Task 1b one the cited source gives; a Task 1
+    # edit gets the reread on the whole entry. A reason covers rules,
+    # numbers and an example's point, as the term audit says; a claim a
+    # dropped frequency word overstates is a caveat defect; claims are plain
+    # for the ordinary case; an opener mention goes where the placement test
+    # puts a variant; a standard equation follows equations §1; a
+    # navigation cue the passage does not need goes, its link
+    # moving on; a definition overloads no sentence.
+    (("wiki-lint", "references", "qc-items.md"), (
+        "Split an overloaded sentence",
+        "merge sentences only when the result passes that test",
+        # Principle 9 owns which name wins; the repeat check owns which copy
+        # of a repeat stays; a missing link no evidence supports is
+        # reorganized under principle 4, never invented as a 5(h) reason.
+        "Call a thing the entry names two ways by the name principle 9 gives "
+        "it",
+        "Delete principle 6's filler and every copy of a repeated claim the "
+        "repeat check does not keep",
+        "When removing repetition or filler, keep every qualifier, and move a "
+        "link only the deleted text had as the [repeat check](../../"
+        "wiki-build/references/writing.md#editorial-reread) says",
+        "puts it under the same heading; split or merge adjacent paragraphs",
+        "only from a relationship the entry already establishes, never from "
+        "proximity; Task 1b supplies one the entry no longer states from the "
+        "cited source, or else reorganizes under [principle 4]",
+        "to the whole entry. Repair any regression",
+        # An operation the entry describes needs its reason too.
+        "a rule, recommendation, operation, number, result, complexity or "
+        "derivation step without its reason; an example whose point is "
+        "unstated",
+        "gets its reason in Task 1b, in one sentence, as the builder's [term "
+        "audit]",
+        # A flagged hedge is a frequency word, which only the cited source
+        # can show principle 3 keeps, so Task 1b reviews it in the
+        # description and on the card, and the caveat review and the hedge
+        # sweep agree.
+        "including a claim hedged below its source or stated above it",
+        "against the cited source: it drops a hedge whose plain claim the "
+        "note establishes for the ordinary case unless principle 3 keeps it",
+        "Task 1b reviews the cue under [flashcard "
+        "maintenance](flashcards.md#improving-the-card) against the cited "
+        "source",
+        "keeping a word that states the definition itself or that principle "
+        "3 keeps",
+        "State the plain claim under principle 3",
+        "sets, naming a scope only when that check does",
+        "which places it, with its link, where the [placement test](../../"
+        "wiki-build/references/writing.md#editorial-reread) puts a variant",
+        "Every list item keeps its reason unless the item makes it plain",
+        # Equations §1 alone sets which calculations an equation writes.
+        "A verified standard equation absent from that prose is Task 1b's to "
+        "add",
+        "when it does not, the cue goes, its link moving as the builder's "
+        "[repeat check]",
+        "gets a brief definition at its first use, inserted as principle 9 "
+        "says",
     )),
     (("wiki-lint", "references", "refactors.md"), (
         "Cite that teaching document at the page that teaches the term: "
@@ -10736,6 +11065,56 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "scanner.md"), (
         "A ledger whose `bar` is older than the scanner's closeness-bar "
         "revision, or that has none, settles nothing.",
+    )),
+    # 2026-10-11 (knowledge 1.34.0): an added equation writes a calculation
+    # the cited sources teach, even only in words, and one that brings in a
+    # quantity, method or second derivation they never mention is left out;
+    # every symbol a sentence uses is bound at first use, and a display gets
+    # no explanation other prose already gives. The step-7 gates name the
+    # reread's prose defects; a handoff keeps its reason and repairs its join; a
+    # merged fact is placed by the placement test; a table keeps only what
+    # the prose uses; the source check compares stated relations. A model's
+    # objective and the general form stay, and wiki-build clears the prose
+    # defects in what it writes.
+    (("wiki-build", "references", "equations.md"), (
+        "when it writes a calculation the cited sources teach, even only in "
+        "words",
+        "An equation that brings in a quantity, method or second derivation "
+        "the sources never mention is left out",
+        # The user kept the training-objective and general-form rules.
+        "a model's objective and the general form this section requires stay",
+        "Introduce each symbol a sentence or display uses at its first use, "
+        "even one a linked entry defines",
+        "when the entry's prose already explains it, add nothing",
+    )),
+    (("wiki-build", "references", "quality-checklist.md"), (
+        # wiki-build clears the defects in prose it writes; pre-existing
+        # ones are wiki-lint's.
+        "free of every prose defect the reread names in prose this run "
+        "writes and at its joins",
+        "whose steps keep their reasons unless a step makes its reason plain",
+        "no open questions, causal and comparative claims included (term "
+        "audit)",
+        "Every term and symbol defined, or a term linked, at first use in "
+        "reading order, captions and added clarifications included",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "`Hard voting` keeps its consequence for ensemble errors, its "
+        "one-clause reason and a link",
+        "its consequence for itself, any one-clause reason that test allows "
+        "and a wikilink",
+        "change nothing else in it but the join the trim leaves",
+    )),
+    (("wiki-build", "references", "merge.md"), (
+        "Place each new fact by the [placement "
+        "test](writing.md#editorial-reread)",
+    )),
+    (("wiki-build", "references", "media.md"), (
+        "keep only the rows and columns the prose beside it uses",
+    )),
+    (("wiki-build", "SKILL.md"), (
+        "each relation the passage states between two claims",
+        "restore a dropped relation",
     )),
 )
 
@@ -10931,10 +11310,97 @@ WRITING_RULE_RETIRED = (
     "keeps the variant as one linked example",
     "a display's verbal reading",
     "Routine lint never adds a second card",
+    # 2026-10-11 (knowledge 1.34.0): the placement test replaced the ending
+    # rule; no prose summary of a procedure sits beside its list; a gloss
+    # counts toward an overload, and a dangler's is item 14's brief
+    # definition; a link never stands in for a reason; a
+    # minority proposal goes rather than keeping its attribution; every
+    # adjacent pair is read, not only opening sentences.
+    "one-clause gloss of a term is no overload",
+    "one-clause gloss at that mention",
+    "never add one to end on",
+    "Any other closing sentence or final one-sentence paragraph",
+    "The note ends on a consequence",
+    "as is a plain-words summary of a procedure",
+    "when the sentence leaves the reason to the link",
+    "metric keeps the consequence and a link",
+    "Name the relationship between ideas when adjacency",
+    "attribution (\"some scientists have proposed\")",
+    "Then read only the opening sentences",
     # 2026-10-11 (knowledge 1.33.0): a version-1 ledger is outdated like any
     # ledger without a bar, so its upgrade records are gone.
     "settled.upgrade",
     "each of its backfill records settles its entry and target",
+    # 2026-10-11 (knowledge 1.34.0): a trim no longer keeps the whole rest of
+    # its sentence or shields every equation the rules require, keeping
+    # every existing claim no longer protects filler or a scope failure, and
+    # a consolidation trim no longer drops to a bare one-clause consequence.
+    "keeping the rest of its sentence; what the equation rules require",
+    "Keep every existing claim unless it is wrong or new information",
+    "keeping only the one-clause reason or key value the",
+    "the metric keep the consequence and a link",
+    "for that entry in one clause, linked to the owner",
+    # 2026-10-11 (knowledge 1.34.0): item 9 names no tacked-on ending,
+    # limits no Task 1 move to adjacent paragraphs, rewords no filler,
+    # recombines no sentence past the overload test, keeps no repeat for
+    # emphasis or for its link, discounts no missing link between facts,
+    # strands no fact behind a new paragraph, keeps no prose copy of a
+    # list's steps, and adds no equation its sources do not teach.
+    "a tacked-on ending the flow sweep finds",
+    "between adjacent paragraphs under one heading",
+    "Replace opaque or decorative wording",
+    "split or recombine overloaded sentences",
+    "emphasis needed for interpretation",
+    "Do not drop a link or a qualifier when removing repetition",
+    "a missing transition word",
+    "use a paragraph boundary when no bridge is supported",
+    "such as the opener's overview, stays prose",
+    "the family's for a shared property",
+    "such as a confidence interval's estimate plus or minus",
+    # 2026-10-11 (knowledge 1.34.0): no equation brings in a quantity its
+    # sources never mention, a display's explanation repeats no other prose,
+    # a linked consequence keeps its reason, a merged fact is placed by the
+    # placement test, and a table keeps only what the prose uses.
+    "a confidence interval is the estimate plus or minus",
+    "when nearby prose already explains it",
+    "keeps its consequence for ensemble errors and a link",
+    "its consequence for itself and a wikilink",
+    "Weave each new fact where it advances",
+    "drop rows and columns that do not earn their place",
+    # 2026-10-11 (knowledge 1.34.0): placement settles from the text, not
+    # from which run placed a sentence, and a variant may take a paragraph
+    # of its own; a scanner trim keeps its one-clause reason; a missing link
+    # is never invented as a 5(h) reason; a 5(h) clarification's
+    # equation and objective statements are not new information; a repeat's
+    # unique content folds under the flow sweep, not across headings in
+    # Task 1; the term audit covers every number, not only computed ones.
+    "A supported relation, once written",
+    "and once placed it stays",
+    "a placement or wording a repair settled",
+    "never into a paragraph of its own",
+    "consequence in one clause linked to the owner",
+    "or as a 5(h) reason",
+    "but a fact, number or method it brings in is new information",
+    "folding into the kept copy",
+    "Every computed number",
+    # 2026-10-11 (knowledge 1.34.0): placement follows dependencies, so a
+    # sentence developing two claims goes after the later one, several
+    # developing one claim keep their order, and naming the subject is no
+    # tie; the opening paragraph's copy of a repeat stays, and another
+    # copy's addition stays where it stands; a frequency word's fate turns
+    # on the edge case it covers, which only the cited source shows, so
+    # Task 1 no longer drops a flagged hedge; the equation rules alone say
+    # which calculations they protect.
+    "a sentence that could develop two claims follows the earlier",
+    "stating its tie to the subject",
+    "the opener's definition (its kind and defining property) always",
+    "joined to the kept one",
+    "Outside the opener and the plain-words step",
+    "on its own general claim, not on an edge case",
+    "the description hedges `item7/hedge-candidate` lets it drop",
+    "Task 1 drops a hedge whose plain claim",
+    "What the equation rules require for a calculation the sources teach",
+    "for a calculation its cited sources teach (even one they state only",
 )
 
 
