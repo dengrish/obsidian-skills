@@ -119,6 +119,17 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               from step N" item names no earlier step of its
                               list, or a numbered list has fewer than three
                               items; agent reviews
+      9-cut-join-candidate    --baseline only: each cut from the pre-edit
+                              copy (a removed sentence or display, or a run
+                              of two or more removed words; a sentence moved
+                              unchanged is no cut), naming the
+                              sentences on either side and a connective the
+                              sentence after it opens with (this, these,
+                              such, it, hence, thus, therefore, however,
+                              the reverse) or uses anywhere (also, either),
+                              and each prose paragraph a cut left one
+                              sentence long, the opener excepted; agent
+                              reviews. Without a baseline nothing is raised
       9-register-candidate    advisory: praise (famous, one of the most
                               important; classic, except before example or
                               case in the body) in the
@@ -316,6 +327,9 @@ CLI:
       [--compact]                       compact JSON
       [--findings-only]                 omit entries without findings
                                         (summary still counts every file)
+      [--baseline pre-edit.md]          one entry file only: add
+                                        9-cut-join-candidate rows for each
+                                        cut since this pre-edit copy
 
 Output: {root, entries:[{file, findings:[{item, severity, message,
 evidence}], title, aliases, description_chars}], alias_collisions[],
@@ -352,16 +366,19 @@ never required, its value is never inspected, and it stays in
 order nor unknown.
 
 Findings never set the exit status: read ``summary.clean`` and the findings.
-Exit 0: complete report. Exit 1: incomplete scope (missing target or
-unreadable directory), report-write failure, or a failed ``--test``. Exit 2:
-missing target argument or other usage error.
+Exit 0: complete report. Exit 1: incomplete scope (missing target,
+unreadable directory, or an unreadable or unparseable ``--baseline`` copy),
+report-write failure, or a failed ``--test``. Exit 2: missing target
+argument, ``--baseline`` with a folder, or other usage error.
 """
 
 from __future__ import annotations
 
 import argparse
+import collections
 import copy
 import datetime as _dt
+import difflib
 import json
 import os
 import re
@@ -468,6 +485,7 @@ from entry_structure import (  # noqa: E402
     opener_subject_date_status,
     parse_flashcard_blocks,
     register_hints,
+    split_sentences,
     title_display_form,
     without_leading_title_heading,
 )
@@ -1101,7 +1119,8 @@ def _check_description(fm, findings, title=None):
         findings.append(_f(
             "7-hedge-candidate", "warning",
             "description hedges its claim with a frequency word; state the "
-            "ordinary case plainly when the note establishes it",
+            "ordinary case plainly when the note establishes it, unless the "
+            "cited source uses that word",
             {"words": hedge_words, "description": desc,
              "agent_review": True}))
     praise_words = register_hints(desc, title=title)
@@ -2588,7 +2607,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
     hedge_message = ("card line 1 hedges its definition with a frequency word; "
                      "state the ordinary case plainly when the note "
-                     "establishes it")
+                     "establishes it, unless the cited source uses that word")
     primary_hedges = [row for row in hedges if row["card"] not in extras]
     if primary_hedges:
         findings.append(_f(
@@ -2745,6 +2764,265 @@ def _check_source_duplicates(fm, findings):
              "markdown": values[second], "markdown_line": lines[second],
              "pdf": values[first], "pdf_line": lines[first],
              "review_only": True}))
+
+
+# --------------------------------------------------------------------------
+# item 9: the joins a cut leaves (--baseline)
+# --------------------------------------------------------------------------
+#
+# A cut can strand the sentences beside it: one loses the referent, reason,
+# contrast or evidence it leaned on, a connective loses its other half, or a
+# paragraph is left one sentence long. Grammar survives, so only a comparison
+# with the pre-edit copy sees where to look. These are review candidates:
+# without a baseline nothing is raised, so a rerun cannot oscillate.
+
+#: A partial cut removes at least this many words net ("Unlike drift,");
+#: a whole removed sentence or display is a cut at any length. A one-word
+#: trim (a dropped hedge or connective) is rewording, not a cut.
+_CUT_MIN_WORDS = 2
+_CUT_WORD_RE = re.compile(r"[^\W_]+")
+_CUT_LINK_RE = re.compile(
+    r"\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]|\[([^\]\n]*)\]\([^)\n]*\)")
+_CUT_HEADING_RE = re.compile(r" {0,3}#{1,6}(?:[ \t]|$)")
+_CUT_RULE_RE = re.compile(
+    r" {0,3}(?:(?:\*[ \t]*){3,}|(?:-[ \t]*){3,}|(?:_[ \t]*){3,})")
+_CUT_MARKER_RE = re.compile(r"[ \t]*(?:[-*+]|[0-9]{1,9}[.)])(?:[ \t]+|$)")
+_CUT_IMAGE_RE = re.compile(r"[ \t]*!\[")
+#: Connectives that lean on the sentence before: a sentence right after a
+#: cut that opens with one, or uses *also* or *either* (outside "also
+#: called" and "either ... or", wherever they stand), may have lost its
+#: other half.
+_CUT_ALSO = (r"also\b(?!\s+(?:called|known|named|termed|written|spelled|"
+             r"referred)\b)")
+_CUT_EITHER = r"either\b(?![^.]*\bor\b)"
+_CUT_OPENER_RE = re.compile(
+    r"(%s|%s|(?:hence|the reverse|this|these|such|however|thus|therefore|"
+    r"it)\b)" % (_CUT_ALSO, _CUT_EITHER), re.I)
+_CUT_INNER_RE = re.compile(r"\b(%s|%s)" % (_CUT_ALSO, _CUT_EITHER), re.I)
+
+
+def _cut_join_units(text):
+    """The explanatory body as paragraphs of sentences, or ``None``.
+
+    ``None`` when no frontmatter closes. Each paragraph is ``{"kind",
+    "sentences"}``, ``kind`` one of prose, list (an item or a paragraph
+    indented under one), caption, quote or display (a whole display is one
+    sentence). Each sentence is ``{"text", "plain", "words", "spans",
+    "para", "line"}``: ``plain`` reads a link as its label, ``words`` are its
+    casefolded words with their ``spans`` in ``plain``, and ``line`` is the
+    file line it starts on. Headings, rules, images and tables are skipped.
+    """
+    text = text.replace("\r\n", "\n").replace("\r", "\n")
+    try:
+        text, _provenance = split_provenance(text)
+    except ValueError:
+        pass
+    fm = parse_frontmatter(text)
+    if not fm.found:
+        return None
+    prose, first_line = _shared_prose(fm, split_sections(fm.body))
+    tables = _markdown_tables(prose)[1]
+    lines = strip_code(prose).split("\n")
+    displays = {span["open_line"]: span["close_line"]
+                for span in find_display_spans("\n".join(lines), tables)}
+    table_lines = {i for first, last in tables for i in range(first, last + 1)}
+    blocks, current, index = [], None, 0
+    while index < len(lines):
+        line = lines[index]
+        if index in displays:
+            close = displays[index]
+            blocks.append(("display", [(index, " ".join(
+                part.strip() for part in lines[index:close + 1]))]))
+            current, index = None, close + 1
+            continue
+        after_exhibit = index - 1 in table_lines or (
+            index > 0 and _CUT_IMAGE_RE.match(lines[index - 1]))
+        if (not line.strip() or index in table_lines
+                or _CUT_HEADING_RE.match(line) or _CUT_RULE_RE.fullmatch(line)
+                or _CUT_IMAGE_RE.match(line)):
+            current = None
+        elif _CUT_MARKER_RE.match(line):
+            current = ("list", [(index, line[_CUT_MARKER_RE.match(line).end():])])
+            blocks.append(current)
+        elif current is not None:
+            current[1].append((index, line.strip().lstrip("> ")))
+        else:
+            kind = ("caption" if after_exhibit else "list"
+                    if line[:1].isspace() else "quote"
+                    if line.lstrip().startswith(">") else "prose")
+            current = (kind, [(index, line.strip().lstrip("> "))])
+            blocks.append(current)
+        index += 1
+    paragraphs, sentences = [], []
+    for kind, rows in blocks:
+        para = {"kind": kind, "sentences": []}
+        starts, compact = [], ""
+        for row, row_text in rows:
+            words = " ".join(row_text.split())
+            if not words:
+                continue
+            compact += " " if compact else ""
+            starts.append((len(compact), row))
+            compact += words
+        surfaces = [compact] if kind == "display" else split_sentences(compact)
+        cursor = 0
+        for surface in surfaces:
+            cursor = max(compact.find(surface, cursor), cursor)
+            row = max((r for offset, r in starts if offset <= cursor),
+                      default=rows[0][0])
+            cursor += len(surface)
+            plain = _CUT_LINK_RE.sub(lambda m: m.group(1) or m.group(2) or "",
+                                     surface)
+            found = list(_CUT_WORD_RE.finditer(plain))
+            if not found:
+                continue
+            para["sentences"].append(len(sentences))
+            sentences.append({
+                "text": surface, "plain": plain,
+                "words": [m.group(0).casefold() for m in found],
+                "spans": [m.span() for m in found],
+                "para": len(paragraphs), "line": first_line + row})
+        paragraphs.append(para)
+    return paragraphs, sentences
+
+
+def _check_cut_joins(baseline_text, draft_text, findings):
+    """Item 9: ``9-cut-join-candidate`` rows for each cut since the baseline.
+
+    Sentences are aligned by their words, so a new link, emphasis or line
+    wrap is no change, and the words of each changed run are aligned again.
+    A cut is a removed sentence or display, or a run of at least
+    ``_CUT_MIN_WORDS`` removed words; insertions, rewordings and moves (a
+    whole sentence whose words reappear unchanged among the draft's new
+    sentences) raise nothing, so a placement repair strands no paragraph.
+    Each cut names the surviving sentence on either side (the same
+    sentence twice for a cut inside it) and a connective the sentence after
+    it leans on; each prose paragraph a cut left one sentence long, the
+    opener excepted, is a row too. Returns ``False`` when the baseline has
+    no frontmatter to compare, else ``True``.
+    """
+    base = _cut_join_units(baseline_text)
+    draft = _cut_join_units(draft_text)
+    if base is None:
+        return False
+    if draft is None:
+        return True
+    (b_par, b_sen), (d_par, d_sen) = base, draft
+    cuts, kept = {}, {}
+
+    def cut(left, right, removed, follows, paras):
+        row = cuts.setdefault((left, right), {"removed": [], "follows": False,
+                                              "paras": set()})
+        row["removed"].append(removed)
+        row["follows"] = row["follows"] or follows
+        row["paras"].update(paras)
+
+    def keep(i, j):
+        kept.setdefault(i, set()).add(j)
+
+    matcher = difflib.SequenceMatcher(
+        None, [tuple(s["words"]) for s in b_sen],
+        [tuple(s["words"]) for s in d_sen], autojunk=False)
+    opcodes = matcher.get_opcodes()
+    arrived = collections.Counter(
+        tuple(d_sen[j]["words"]) for tag, _i1, _i2, j1, j2 in opcodes
+        if tag != "equal" for j in range(j1, j2))
+    moved = set()
+    for tag, i1, i2, _j1, _j2 in opcodes:
+        for i in range(i1, i2) if tag != "equal" else ():
+            if arrived[tuple(b_sen[i]["words"])] > 0:
+                arrived[tuple(b_sen[i]["words"])] -= 1
+                moved.add(i)
+    for tag, i1, i2, j1, j2 in opcodes:
+        if tag == "equal":
+            for k in range(i2 - i1):
+                keep(i1 + k, j1 + k)
+        elif tag == "delete":
+            gone = [i for i in range(i1, i2) if i not in moved]
+            if gone:
+                cut(j1 - 1, j1, " ".join(b_sen[i]["text"] for i in gone),
+                    True, {b_sen[i]["para"] for i in gone})
+        elif tag == "replace":
+            b_words = [(i, n) for i in range(i1, i2) if i not in moved
+                       for n in range(len(b_sen[i]["words"]))]
+            d_words = [(j, n) for j in range(j1, j2)
+                       for n in range(len(d_sen[j]["words"]))]
+            words = difflib.SequenceMatcher(
+                None, [b_sen[i]["words"][n] for i, n in b_words],
+                [d_sen[j]["words"][n] for j, n in d_words], autojunk=False)
+            for wtag, a1, a2, c1, c2 in words.get_opcodes():
+                if wtag == "equal":
+                    for k in range(a2 - a1):
+                        keep(b_words[a1 + k][0], d_words[c1 + k][0])
+                    continue
+                if wtag == "insert":
+                    continue
+                lost = (a2 - a1) - (c2 - c1)
+                whole = wtag == "delete" and any(
+                    n == 0 and a + len(b_sen[i]["words"]) <= a2
+                    for a, (i, n) in enumerate(b_words[a1:a2], a1))
+                if lost < _CUT_MIN_WORDS and not whole:
+                    continue
+                removed = []
+                for i in sorted({i for i, _n in b_words[a1:a2]}):
+                    ns = [n for k, n in b_words[a1:a2] if k == i]
+                    spans = b_sen[i]["spans"]
+                    removed.append(b_sen[i]["plain"][
+                        spans[ns[0]][0]:spans[ns[-1]][1]])
+                cut(d_words[c1 - 1][0] if c1 else j1 - 1,
+                    d_words[c2][0] if c2 < len(d_words) else j2,
+                    " … ".join(removed),
+                    c2 == len(d_words) or d_words[c2][1] == 0,
+                    {b_sen[i]["para"] for i, _n in b_words[a1:a2]})
+
+    def sentence(index):
+        return d_sen[index] if 0 <= index < len(d_sen) else None
+
+    stranded = set()
+    for (left, right), row in sorted(cuts.items(),
+                                     key=lambda item: item[0][::-1]):
+        before, after = sentence(left), sentence(right)
+        connective = None
+        if row["follows"] and after is not None and left != right:
+            plain = re.sub(r"^\W+", "", after["plain"])
+            match = _CUT_OPENER_RE.match(plain) or _CUT_INNER_RE.search(plain)
+            if match:
+                connective = match.group(1).lower()
+        removed = " … ".join(row["removed"])
+        shown = removed if len(removed) <= 80 else removed[:77] + "..."
+        message = ("a cut removed %r; reread the sentences on either side: "
+                   "neither may have lost its referent, reason, contrast or "
+                   "evidence" % shown)
+        if connective:
+            message += ("; %r in the sentence after the cut may lean on the "
+                        "removed text" % connective)
+        findings.append(_f(
+            "9-cut-join-candidate", "warning",
+            message + "; a candidate is never an order",
+            {"check": "cut", "line": (after or before or {}).get("line"),
+             "removed": removed,
+             "before": before["text"] if before else None,
+             "after": after["text"] if after else None,
+             "connective": connective, "agent_review": True}))
+        for para in row["paras"]:
+            if len(b_par[para]["sentences"]) < 2:
+                continue
+            stranded.update(d_sen[j]["para"] for i in b_par[para]["sentences"]
+                            for j in kept.get(i, ()))
+    for para in sorted(stranded):
+        sentences = d_par[para]["sentences"]
+        if (para == 0 or d_par[para]["kind"] != "prose"
+                or len(sentences) != 1):
+            continue
+        findings.append(_f(
+            "9-cut-join-candidate", "warning",
+            "a cut left this paragraph one sentence long; reread it with its "
+            "neighbors for a stranded fact or a misplaced sentence; a "
+            "candidate is never an order",
+            {"check": "one-sentence-paragraph",
+             "line": d_sen[sentences[0]]["line"],
+             "paragraph": d_sen[sentences[0]]["text"], "agent_review": True}))
+    return True
 
 
 # --------------------------------------------------------------------------
@@ -3246,12 +3524,14 @@ def _check_folder_link_targets(results, root, parses):
         result["findings"] = findings
 
 
-def lint_path(target, severity_floor=None, cache=None):
+def lint_path(target, severity_floor=None, cache=None, baseline=None):
     """Lint a single entry file or a whole folder (recursively).
 
     ``cache``, an optional dict passed to several calls over the same files,
     re-lints only files whose path or bytes changed; the folder checks still
-    run over every file on every call.
+    run over every file on every call. ``baseline``, the path of a single
+    entry's pre-edit copy, adds its ``9-cut-join-candidate`` rows; a folder
+    target or an unreadable or unparseable copy is a scope problem instead.
     """
     target = os.path.abspath(target)
     report = {"root": target, "entries": [], "alias_collisions": [],
@@ -3277,6 +3557,23 @@ def lint_path(target, severity_floor=None, cache=None):
     snapshot_text = {}
     results = [lint_file(p, _snapshot_text=snapshot_text, _cache=cache)
                for p in paths]
+    if baseline is not None and folder_mode:
+        report["problems"].append(
+            "--baseline compares one entry file, not a folder: %s" % target)
+    elif baseline is not None:
+        try:
+            with open(baseline, "rb") as handle:
+                baseline_text = handle.read().decode("utf-8-sig",
+                                                     errors="replace")
+        except OSError as exc:
+            report["problems"].append("unreadable --baseline copy: %s" % exc)
+        else:
+            draft_text = snapshot_text.get(results[0]["file"])
+            if draft_text is not None and not _check_cut_joins(
+                    baseline_text, draft_text, results[0]["findings"]):
+                report["problems"].append(
+                    "--baseline copy has no closed frontmatter to compare: %s"
+                    % os.path.abspath(baseline))
     if folder_mode:
         report["alias_collisions"] = _check_alias_collisions(results)
         parses = _folder_parses(snapshot_text)
@@ -6199,6 +6496,114 @@ def run_self_test():
           "clean",
           items(su2, slug_stem("SU(2)") + ".md"), [])
 
+    # --baseline: the joins a cut leaves, as review candidates.
+    cut_base = mutate(
+        "moves.\n\n**Related:**",
+        "moves.\n\nEach point is one threshold. Lowering the threshold flags "
+        "more cases, so both rates rise together. This is why the curve "
+        "climbs from the lower left to the upper right.\n\nThe area under "
+        "the curve summarizes the plot in one number. A random classifier "
+        "scores one half, because its curve is the diagonal. Hence the "
+        "diagonal is the baseline that any useful model beats.\n\nThe rates "
+        "come from the counts:\n\n$$\n\\mathrm{TPR} = \\frac{TP}{TP + FN}\n"
+        "$$\n\nwhere TP counts true positives.\n\n**Related:**")
+    opener = ("A **ROC curve** plots the trade-off between two error rates "
+              "as a decision threshold moves.")
+    each, lowering = ("Each point is one threshold.", "Lowering the threshold "
+                      "flags more cases, so both rates rise together.")
+    this_why = ("This is why the curve climbs from the lower left to the "
+                "upper right.")
+    hence = "Hence the diagonal is the baseline that any useful model beats."
+
+    def cut_rows(draft, base=None):
+        found = []
+        ran = _check_cut_joins(cut_base if base is None else base, draft,
+                               found)
+        return ran, [(f["evidence"]["check"], f["evidence"].get("before"),
+                      f["evidence"].get("after"),
+                      f["evidence"].get("connective")) for f in found]
+
+    def cut(old, new="", base=None):
+        return mutate(old, new, cut_base if base is None else base)
+
+    check("an unchanged baseline raises no cut-join candidate",
+          cut_rows(cut_base), (True, []))
+    check("a pure insertion raises no cut-join candidate",
+          cut_rows(cut(each, each + " Raising it does the opposite.",
+                       cut(" useful model beats.", " useful model beats.\n\n"
+                           "Curves are compared by their area."))),
+          (True, []))
+    check("a new link, emphasis or line wrap is no cut",
+          cut_rows(cut("one threshold. Lowering", "one [[decision-threshold|"
+                       "threshold]].\n*Lowering*")), (True, []))
+    check("a deleted sentence is a cut naming the sentences on either side "
+          "and the connective the next one opens with",
+          cut_rows(cut(" " + lowering)),
+          (True, [("cut", each, this_why, "this")]))
+    check("a clause trimmed from a sentence's end is a cut before the next "
+          "sentence",
+          cut_rows(cut(", because its curve is the diagonal")),
+          (True, [("cut", "A random classifier scores one half.", hence,
+                   "hence")]))
+    trimmed = "Lowering the threshold flags more cases together."
+    check("a cut inside a sentence names that sentence on both sides",
+          cut_rows(cut(", so both rates rise together", " together")),
+          (True, [("cut", trimmed, trimmed, None)]))
+    check("a one-word trim is rewording, not a cut",
+          cut_rows(cut(" together")), (True, []))
+    check("a removed display is a cut between its lead-in and its "
+          "explanation",
+          cut_rows(cut("$$\n\\mathrm{TPR} = \\frac{TP}{TP + FN}\n$$\n\n")),
+          (True, [("cut", "The rates come from the counts:",
+                   "where TP counts true positives.", None)]))
+    two_opener = cut("moves.\n\nEach", "moves. It needs only scores.\n\nEach")
+    check("a paragraph a cut left one sentence long is a candidate, the "
+          "opener excepted",
+          (cut_rows(cut(" " + this_why, "", cut(each + " "))),
+           cut_rows(cut_base, two_opener)),
+          ((True, [("cut", opener, lowering, None),
+                   ("cut", lowering, "The area under the curve summarizes "
+                    "the plot in one number.", None),
+                   ("one-sentence-paragraph", None, None, None)]),
+           (True, [("cut", opener, each, None)])))
+    check("a moved sentence is no cut",
+          cut_rows(cut(" useful model beats.", " useful model beats. " + each,
+                       cut(each + " "))),
+          (True, []))
+    check("a move that leaves its old paragraph one sentence long strands "
+          "nothing",
+          cut_rows(cut(" useful model beats.", " useful model beats. %s %s"
+                       % (lowering, this_why),
+                       cut(" %s %s" % (lowering, this_why)))),
+          (True, []))
+    joined = cut("moves.\n\nEach point", "moves.\n\nScores are sorted first. "
+                 "Ties are broken at random. %s\n\nEach point")
+    check("a dangling connective after a cut is named; also called and "
+          "either-or are not",
+          [cut_rows(cut("Ties are broken at random. ", "", joined % opening),
+                    joined % opening)[1][0][3] for opening in (
+                  "This sets the order.", "These set it.", "Such ties are "
+                  "rare.", "It runs once.", "Hence the order.", "Thus it "
+                  "ends.", "Therefore it ends.", "However, it ends.", "The "
+                  "reverse holds.", "Also, it ends.", "Either way, it ends.",
+                  "The order also holds.", "No order holds either.",
+                  "The order is also called a ranking.", "The order is "
+                  "either kept or dropped.")],
+          ["this", "these", "such", "it", "hence", "thus", "therefore",
+           "however", "the reverse", "also", "either", "also", "either",
+           None, None])
+    check("an opening also called or either-or is no dangling connective",
+          [cut_rows(cut("Ties are broken at random. ", "", joined % opening),
+                    joined % opening)[1][0][3] for opening in (
+                  "Either the tree splits or the leaf stays.",
+                  "Also called a stump, it has one split.")],
+          [None, None])
+    check("a baseline without frontmatter is refused; a draft without one "
+          "raises nothing",
+          (cut_rows(cut_base, "Each point is one threshold."),
+           cut_rows("Each point is one threshold.")),
+          ((False, []), (True, [])))
+
     tmp = tempfile.mkdtemp(prefix="lint_entry-selftest-")
     try:
         wiki = os.path.join(tmp, "Wiki")
@@ -6523,6 +6928,38 @@ def run_self_test():
         check("a run with no target exits 2 and says so",
               (rc, "target" in buf.getvalue()), (2, True))
 
+        cut_dir = os.path.join(tmp, "cut")
+        os.makedirs(cut_dir)
+        cut_paths = {}
+        for name, text in (("roc-curve.md", cut(" " + lowering)),
+                           ("copy.md", cut_base), ("bare.md", each)):
+            cut_paths[name] = os.path.join(cut_dir, name)
+            with open(cut_paths[name], "w", encoding="utf-8") as handle:
+                handle.write(text)
+        cut_runs = []
+        for argv in ([cut_paths["roc-curve.md"], "--baseline",
+                      cut_paths["copy.md"]], [cut_paths["roc-curve.md"]]):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf), contextlib.redirect_stderr(buf):
+                rc = main(argv + ["--compact"])
+            cut_runs.append((rc, [
+                (f["severity"], f["evidence"]["agent_review"])
+                for f in json.loads(buf.getvalue())["entries"][0]["findings"]
+                if f["item"] == "9-cut-join-candidate"]))
+        check("--baseline adds review-only warning candidates; without it "
+              "there are none", cut_runs, [(0, [("warning", True)]), (0, [])])
+        cut_codes = []
+        for target, copy_path in ((cut_dir, cut_paths["copy.md"]),
+                                  (cut_paths["roc-curve.md"],
+                                   os.path.join(cut_dir, "missing.md")),
+                                  (cut_paths["roc-curve.md"],
+                                   cut_paths["bare.md"])):
+            with contextlib.redirect_stdout(io.StringIO()), \
+                    contextlib.redirect_stderr(io.StringIO()):
+                cut_codes.append(main([target, "--baseline", copy_path]))
+        check("--baseline with a folder exits 2; an unreadable or "
+              "frontmatter-less copy exits 1", cut_codes, [2, 1, 1])
+
         vault_root = os.path.join(tmp, "vault-root")
         os.makedirs(os.path.join(vault_root, "Wiki"))
         obsidian_root = os.path.join(tmp, "obsidian-root")
@@ -6569,7 +7006,8 @@ def _build_parser():
                     "entries (stdlib only). Findings do not set the exit "
                     "status; an incomplete scope, a report-write failure or "
                     "a usage error does.",
-        epilog="example: lint_entry.py ~/Vault/Wiki --severity error",
+        epilog="examples: lint_entry.py ~/Vault/Wiki --severity error; "
+               "lint_entry.py --baseline pre-edit.md draft.md",
     )
     # `nargs="?"`, so `--test` is reachable: argparse refuses a missing
     # positional before main() runs.  A real run without one is refused below,
@@ -6587,6 +7025,11 @@ def _build_parser():
     p.add_argument("--findings-only", action="store_true",
                    help="omit entries without findings from the printed or "
                         "written report; summary still counts every file")
+    p.add_argument("--baseline", metavar="PRE_EDIT_COPY",
+                   help="single-file mode: the entry's pre-edit copy; adds a "
+                        "review-only 9-cut-join-candidate for each cut, naming "
+                        "the sentences on either side, and for each paragraph "
+                        "a cut left one sentence long (without it, none)")
     return p
 
 
@@ -6620,7 +7063,13 @@ def main(argv=None):
                           "error": "target looks like a vault root: %s; pass "
                                    "<vault>/Wiki" % args.target}, indent=2))
         return 2
-    report = lint_path(args.target, severity_floor=args.severity)
+    if args.baseline is not None and os.path.isdir(args.target):
+        print(json.dumps({"ok": False,
+                          "error": "--baseline compares one entry file, not "
+                                   "a folder: %s" % args.target}, indent=2))
+        return 2
+    report = lint_path(args.target, severity_floor=args.severity,
+                       baseline=args.baseline)
     report_complete = not report["problems"]
     if args.findings_only:
         # Output only: lint_path stays complete for review_tree and callers.

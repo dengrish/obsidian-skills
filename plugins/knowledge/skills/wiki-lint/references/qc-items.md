@@ -49,8 +49,8 @@ ownership.
 | `item2/provenance` | Preserve the record and report malformed, duplicate or misplaced attribution. Legacy metadata is read-only compatibility data; do not add or refresh it or infer a historical creator. |
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
 | `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source (a chapter beside its whole book is proven by its name); otherwise report. |
-| `item7/hedge-candidate` | Review the description under [item 7](#7-description) and item 9's [caveat review](#9-body-structure-coherence-flow-and-scope): Task 1 drops a hedge whose plain claim the note establishes for the ordinary case; otherwise Task 1b names the condition from the cited source, or keeps evidence-bearing uncertainty. Keep the description, opener and card aligned; the candidate alone is never an order. |
-| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise Task 1b states the relationship from the entry's or the linked entry's cited source, or as a 5(h) clarification, and integrates the link. |
+| `item7/hedge-candidate` | Task 1b reviews the description under [item 7](#7-description) and item 9's [caveat review](#9-body-structure-coherence-flow-and-scope) against the cited source: it drops a hedge whose plain claim the note establishes for the ordinary case unless principle 3 keeps it, and otherwise names the condition or keeps evidence-bearing uncertainty. Keep the description, opener and card aligned; the candidate alone is never an order. |
+| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise, when the passage needs the target, Task 1b states the relationship from the entry's or the linked entry's cited source, or as a 5(h) clarification, and integrates the link; when it does not, the cue goes, its link moving as the builder's [repeat check](../../wiki-build/references/writing.md#editorial-reread) says. |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or as a 5(h) clarification, under [item 14](#14-self-containment); item 17's alias gates and item 19's line-3 counterpart follow in the same edit. A title whose letters stand for no established full form keeps its opener. |
 | `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
@@ -80,7 +80,7 @@ ownership.
 | `item18/cross-domain-alias` | The alias is a bare cross-domain term, which is never an alias. Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Remove each extra card under the [card set](flashcards.md#card-set) rule; a finding on an extra card, its line-1 `item12` findings included, needs no repair beyond that removal. Content after a card's line 3 that is not a recognized attachment, and any other block in the section, is report-only unless it holds [card syntax](../../wiki-build/references/flashcards-and-emphasis.md#card-set), which makes it an extra card to remove. |
 | `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#improving-the-card) and shorten it when the shorter cue is clearer and still rules out its rivals; the candidate alone is never an order. |
-| `item19/hedge-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): drop a hedge whose plain claim the note establishes for the ordinary case, and keep a word that states the definition itself; the candidate alone is never an order. |
+| `item19/hedge-candidate` | Task 1b reviews the cue under [flashcard maintenance](flashcards.md#improving-the-card) against the cited source: it drops a hedge whose plain claim the note establishes for the ordinary case, keeping a word that states the definition itself or that principle 3 keeps; the candidate alone is never an order. |
 | `item19/card-equation-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): add the expression inline in the compact form the [line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage) asks for, and keep the cue verbal when the display is no short definition or words state it as directly; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
@@ -337,7 +337,8 @@ the [atomicity test](../../wiki-build/references/writing.md#body-structure)
 allows, states differently, or holds outside the entry that test makes its
 owner. Each becomes a Task 1b coordinated repair. Content moves only when
 that test clearly names another owner (a more specific entry, or the
-family's for a shared property); otherwise the entry holding it keeps it. A
+family's for a property every member shares); otherwise the entry holding
+it keeps it. A
 [core facet](../../wiki-build/references/writing.md#prose-principles) one
 sibling states and another lacks goes to the depth review below, which fills
 it only from the lacking entry's own cited sources, never by symmetry with
@@ -357,8 +358,10 @@ or one model's or organism's section fails the builder's
 [scope check](../../wiki-build/references/writing.md#editorial-reread):
 Task 1b restores the scope its cited sources establish, or the general form
 [equations §1](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
-sets. State the plain claim under principle 3 (a hedge or caveat that covers only an edge
-case goes even when the source makes it; evidence-bearing uncertainty stays),
+sets, naming a scope only when that check does. State the plain claim
+under principle 3 (a hedge
+or caveat that covers only an edge case goes even when the source makes it;
+evidence-bearing uncertainty stays),
 or trim a neighbor's detail to the relationship and a wikilink, rather than
 appending qualifications. The
 description, opening paragraph and primary card lead with the prototype, never
@@ -366,8 +369,9 @@ a variant: a variant, a secondary sense of the name or another application is
 named once, later in the body, after the general explanation. When the body
 already states the prototype, Task 1 repairs the description under item 7 and
 the card under item 19; moving an opening-paragraph mention is Task 1b's,
-which folds it, with its link, into the later passage (Learning rate's
-boosting clause), applying builder
+which places it, with its link, where the
+[placement test](../../wiki-build/references/writing.md#editorial-reread)
+puts a variant (Learning rate's boosting clause), applying builder
 [item 13](../../wiki-build/references/quality-checklist.md)'s each-sense-once rule
 outside merges too. When the prototype is missing, Task 1b writes it from the
 cited sources (plus the clarification 5(h) admits). Task 1b likewise frames an entry in its
@@ -393,20 +397,20 @@ close call stays unapplied under
 **Editorial and ownership review.** Apply the shared
 [prose principles](../../wiki-build/references/writing.md#prose-principles)
 to phrasing, sentence clarity, paragraph focus, transitions, and succinctness.
-Judge a concrete defect, not a preference for different wording. Run every
-sweep of the builder's
+Run every sweep of the builder's
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread)
 as the detection pass on every in-scope entry, its contradiction check
-reading the entries the coherence review names. A multi-job paragraph or a
-tacked-on ending the flow sweep finds is a concrete defect:
-Task 1 splits it, or moves the sentence between adjacent paragraphs under one
-heading; Task 1b moves it further, or cuts it under principle 6 or 7 after
-checking the source.
+reading the entries the coherence review names. Judge a concrete defect, not
+a preference for different wording: each named prose defect of that reread
+is concrete, so its repair is never churn. Task 1b moves a misplaced sentence
+across headings or where the move needs rewording, or cuts it under
+principle 6 or 7 after checking the source.
 Each passage takes the builder's
 [form for its shape](../../wiki-build/references/writing.md#body-structure):
 bullets for parallel items, a numbered list for a procedure or the
 time-ordered stages of one process, and prose for a causal chain or an
-argument. Every list item keeps its reason, and each list passes that guide's
+argument. Every list item keeps its reason unless the item makes it plain,
+and each list passes that guide's
 tests: a loop's Repeat target and starting step, a lead-in's step count, and
 parallel bullets that never include the entry's own subject. Body links sit
 in sentences that state their relationships. Task 1b trims source/tutorial
@@ -424,11 +428,13 @@ The one-clause reason or key value [item 14](#14-self-containment) keeps is
 no duplicate. Every such trim follows [Dates](../SKILL.md#dates).
 
 A statement about this entry's own subject that the entry leaves
-unexplained, such as an equation without its meaning, a complexity without
-its reason, a derivation step, a result, or a claim that something suits, is
-preferred for, helps, works better or matters, gets its reason in Task 1b, in
-one sentence from the cited source or as a 5(h) clarification; a linked entry's
-fact used here follows [item 14](#14-self-containment). Task 1b likewise replaces a derivation longer than
+unexplained, such as an equation without its meaning; a rule, recommendation,
+operation, number, result, complexity or derivation step without its reason; an example
+whose point is unstated; or a claim that something suits, is preferred for,
+helps, works better or matters, gets its reason in Task 1b, in one sentence,
+as the builder's
+[term audit](../../wiki-build/references/writing.md#editorial-reread) says; a linked
+entry's fact used here follows [item 14](#14-self-containment). Task 1b likewise replaces a derivation longer than
 [equations §3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
 allows, or a multi-step complexity analysis, with its one-sentence intuition,
 or, when none exists, with the takeaway alone, omitting the bound
@@ -438,17 +444,17 @@ A term with neither definition nor link follows
 stated result is itself wrong or imprecise, the defect is a conflict between
 the cited source and standard references, resolved as in the coherence review:
 Task 1b corrects the result, keeping the source's figure only within the scope
-that makes it true, and never invents a reason. Length, a missing transition
-word, list shape, or lexical similarity alone proves nothing.
+that makes it true, and never invents a reason. Length, list shape or lexical
+similarity alone proves nothing.
 
 **Caveat review.** Inspect qualifications, final paragraphs, captions and the
 description for the hedges and caveats
 [principle 3](../../wiki-build/references/writing.md#prose-principles)
-excludes, including a claim hedged below its source; card line 1 follows
+excludes, including a claim hedged below its source or stated above it; card line 1
+follows
 [item 19](#19-flashcards). Never add caveats from memory; a main limitation
-the source teaches is explanation. Task 1 removes empty rhetoric and repetition
-(the local repairs below), well-definedness boilerplate (item 12) and the
-description hedges `item7/hedge-candidate` lets it drop. Task 1b removes every
+the source teaches is explanation. Task 1 removes filler and repetition
+(the local repairs below) and well-definedness boilerplate (item 12). Task 1b removes every
 other hedge and caveat principle 3 excludes, its full "Leave out" list
 included (every kind it names, numerical details such as a library's default
 tolerance among them), under
@@ -475,18 +481,25 @@ build under those rules and is not proposed.
 **Local editorial repairs.** Apply these autonomously when the existing entry
 establishes an unambiguous meaning:
 
-- Repair grammar, fragments, awkward phrasing, or an unclear pronoun with a
-  known referent; split or recombine overloaded sentences without changing
-  their claims.
-- Replace opaque or decorative wording with its direct equivalent. Remove
-  empty framing or consolidate repetition only when it adds no distinct
-  claim, condition, emphasis needed for interpretation, or explanatory step.
-- Reorder sentences within a paragraph or between adjacent paragraphs under
-  one heading; split or merge adjacent paragraphs to restore focus and useful
-  progression. Keep definitions before uses and qualifiers beside their claims.
-- Clarify a transition only from a relationship already established in the
-  entry. Do not infer causation, contrast, chronology, or generality from
-  proximity; use a paragraph boundary when no bridge is supported.
+- Repair grammar, fragments, awkward phrasing, or an unclear pointer word
+  with a known referent. Split an overloaded sentence
+  ([principle 9](../../wiki-build/references/writing.md#prose-principles)),
+  and merge sentences only when the result passes
+  that test, keeping their claims. Call a thing the entry names two
+  ways by the name principle 9 gives it, and replace a
+  made-up label or vague summary with the specific wording the entry already
+  states; one only the cited source can make specific is Task 1b's.
+- Replace opaque wording with its direct equivalent. Delete principle 6's
+  filler and every copy of a repeated claim the repeat check does not keep.
+- Move a sentence to where the reread's
+  [placement test](../../wiki-build/references/writing.md#editorial-reread)
+  puts it under the same heading; split or merge adjacent paragraphs to
+  restore focus. Keep definitions before later uses.
+- Write a missing link between adjacent facts only from a relationship the
+  entry already establishes,
+  never from proximity; Task 1b supplies one the entry no longer states
+  from the cited source, or else reorganizes under
+  [principle 4](../../wiki-build/references/writing.md#prose-principles).
 - Convert an already explicit causal chain, argument or sequence of fewer
   than three steps from bullets or a numbered list to prose, or integrate a
   navigation-only link when adjacent prose already states the relationship.
@@ -498,15 +511,13 @@ establishes an unambiguous meaning:
   each keeping its reason and every claim. A stage item opens with its stage
   name when the entry names the stages, and otherwise with its actor and
   verb, in the same form across the list; naming unnamed stages is Task 1b
-  work, from the cited source, and so is gathering a step stated beyond an
-  adjacent paragraph, since Task 1 moves material only between adjacent
-  paragraphs under one heading. Notation and
-  conditions that hold for every step stay in the prose before the list,
+  work, from the cited source, and so is gathering a step stated under
+  another heading, since Task 1 moves material only within one heading.
+  Notation and conditions that hold for every step stay in the prose before the list,
   which ends with the introducing sentence. A display moves into its step
   with its math unchanged, indented to the item's text column. Parallel facts
-  by period or age window stay bullets, and a plain-words summary of a
-  procedure the entry gives in full elsewhere, such as the opener's overview,
-  stays prose.
+  by period or age window stay bullets. Task 1b cuts an opener that walks
+  through the steps to the procedure's idea.
 - Rewrite parallel facts about several items (the same gene in several
   organisms, one property per variant) as one bullet per item, keeping every
   claim.
@@ -521,19 +532,22 @@ remain an example; a small improvement must not become an unqualified one.
 Nor may an edit add a caveat, exception, or clarification the explanation
 does not need. Keep existing link tokens, citations, math spans and numerical values,
 image/table-plus-caption units, the complete flashcard section, and frontmatter
-verbatim during a Task 1 item 9 edit. Do not drop a link or a qualifier when removing
-repetition. Descriptions follow item 7; links, equations, exhibits, and cards
-may change only under their own authorized checks, recorded separately.
+verbatim during a Task 1 item 9 edit. When removing repetition or filler,
+keep every qualifier, and move a link only the deleted text had as the
+[repeat check](../../wiki-build/references/writing.md#editorial-reread) says.
+Descriptions follow item 7;
+links, equations, exhibits, and cards may change only under their own
+authorized checks, recorded separately.
 Task 1's editorial changes never advance dates or reset review state; Task 1b's
 changes follow [Dates](../SKILL.md#dates).
 
 Compare protected content before and after the edit and apply the shared
 [editorial reread](../../wiki-build/references/writing.md#editorial-reread)
-to the finished passage. Repair any regression and re-run the per-entry lint
+to the whole entry. Repair any regression and re-run the per-entry lint
 before publication. Leave conforming prose untouched and report the defect and
 repair for each changed entry; there is no shortening quota.
 
-If the change moves material beyond an adjacent paragraph under its heading,
+If the change moves material across a heading or needs rewording to move it,
 changes a fact, removes substantive content, chooses between claims, or
 redistributes material across entries, Task 1 preserves it and hands it to
 Task 1b. Task 1b verifies the change against
@@ -624,8 +638,7 @@ A simple verbal rule such as hard voting can remain prose-only even when every
 operation is specified. Do not manufacture an argmax/indicator formalism for
 it. Task 1 inserts a useful equation only when the note's own
 prose supplies every operand, operation, and essential assumption. A verified
-standard equation absent from that prose, such as a confidence interval's
-estimate plus or minus a critical value times its standard error, is Task 1b's
+standard equation absent from that prose is Task 1b's
 to add from the cited source or as the 5(h) clarification equations §1 allows, with every symbol bound
 and the relation explained. Never invent a denominator or generalize a
 restricted case without a source or standard form.
@@ -699,7 +712,8 @@ cited source or as a 5(h) clarification:
   including terms in added clarifications or corrections, goes on Task 2's
   link worklist when its entry exists, where a sentence that needs its
   meaning [clears the closeness bar](link-hygiene.md#the-closeness-bar),
-  and otherwise gets a brief defining clause; a dangling link's
+  and otherwise gets a brief definition at its first use, inserted as
+  principle 9 says; a dangling link's
   term follows the [dangler hand-off](refactors.md#dangling-link-hand-off). A
   term that meets the [missing-entry rule](refactors.md#create-a-missing-entry)
   gets its own entry instead, which Task 2 then links. A definite noun phrase
@@ -707,10 +721,10 @@ cited source or as a 5(h) clarification:
   districts") follows 5(d): the example is introduced briefly inline, or it
   goes.
 - A consequence carried from a linked entry gets its reason or key value
-  only when it would otherwise leave an open question: Task 1b opens the
-  owner and adds the one clause the
+  only when it would otherwise leave an open question, as the
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
-  allows; consolidation keeps that clause and trims anything beyond it.
+  defines it: Task 1b opens the owner and adds the one clause the atomicity
+  test allows; consolidation keeps that clause and trims anything beyond it.
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.
@@ -729,7 +743,7 @@ during semantic review, judging an example by purpose, never by length.
 Trimming an unnecessary, tangential or repetitive example, or other material
 principles 6 and 7 leave out, needs the source, so Task 1b does it after
 reading the cited source; source support alone never keeps that material
-([flow sweep](../../wiki-build/references/writing.md#editorial-reread)). A
+([leave-out check](../../wiki-build/references/writing.md#editorial-reread)). A
 worked example lives in one
 entry, its owner under item 9's consolidation; the others state the
 consequence and link the owner. A Concept that is abstract, quantitative or

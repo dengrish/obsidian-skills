@@ -39,9 +39,11 @@ leave the entry thin and report that a wiki-build request naming that whole
 source fills it in, even when another entry already cites it: a citation does
 not show the source was built as a whole, and the fill-in never re-merges
 entries citing it. Never route a named-entity build from it, which would mark the
-source covered so folder runs skip its other topics. Keep every existing claim unless
-it is wrong or new information, and the definition card with its attachments
-byte-for-byte and in place.
+source covered so folder runs skip its other topics. Keep the definition card
+with its attachments byte-for-byte and in place, and every existing claim
+except those the [deletion list](#correct-and-publish) allows removing;
+narrow a claim that fails the
+[scope check](../../wiki-build/references/writing.md#prose-principles).
 
 ## Establish the evidence and scope
 
@@ -95,11 +97,11 @@ byte-for-byte and in place.
 Apply the current builder rules for fields, prose, equations, media, links, and
 flashcards. Fix only a concrete defect a builder rule or a user issue names,
 and leave conforming prose as it is. Correct the erroneous claim, remove the
-unnecessary caveat or add the missing explanation, preserving essential
-assumptions and the ordinary mechanism. Remove the new information the cited
-sources do not give, however accurate (principle 5(h)), keeping the rest of
-its sentence; what the equation rules require changes only under them, and an
-uncited sentence that the user's request or the entry's `issues:` value names
+unnecessary caveat or the new information the cited sources do not give,
+however accurate (principle 5(h)), or add the missing explanation, preserving
+essential assumptions and the ordinary mechanism; a removal keeps the rest of
+its sentence unless it only repeats or fills, and one that would overload is
+split. What the equation rules require changes only under them; an uncited sentence that the user's request or the entry's `issues:` value names
 as the user's own edit is reported, not trimmed, and an issue naming it
 stays in the field as
 [blocked](../../../shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox),
@@ -111,18 +113,20 @@ equation, or primary card. Then apply the builder's
 its flow sweep included, to the changed passage, and to each of the entry's
 [`neighbors`](scanner.md#output-contract) that uses the term, sense,
 argument or exhibit the repair changed (one hop); the whole entry gets
-Task 1b's [final reread](../SKILL.md#task-1b--content-repair). Merge a claim
-now stated twice.
-Keep each fact before its first use. Reread the passage after each inserted
+Task 1b's [final reread](../SKILL.md#task-1b--content-repair). Keep each
+fact before its first use, and reread the passage after each inserted
 paragraph or display so its opening still follows. Make every sentence about
 the quantity the repair changed agree, stated in one unit. Restore teaching
 order under the
 [integration principle](../../wiki-build/references/merge.md#integration-principle),
 losing no claim. Deepening may restructure the whole body this way. List
-every sentence the repair deleted; each must be a corrected error, new
+every sentence the repair deleted, and the sentence on either side of each
+cut, which must show no
+[broken join](../../wiki-build/references/writing.md#editorial-reread). Each
+deleted sentence must be a corrected error, new
 information 5(h) excludes, a claim merged into its other statement, a
 consolidation trim that links its owner, content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
-caveat, scaffolding, a catalog, an anecdote, history beyond one clause, a
+caveat, filler, scaffolding, a catalog, an anecdote, history beyond one clause, a
 tangential example, a neighbor's explanation beyond one defining clause), an
 equation removed under the
 [usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
@@ -141,8 +145,8 @@ case, and then name its condition instead of a hedge word
 ([principle 3](../../wiki-build/references/writing.md#prose-principles)).
 Remove every hedge and caveat principle 3 excludes, its full "Leave out" list
 included (every kind it names, numerical details such as a library's default
-tolerance among them), even when the source itself makes it; this is not removing
-a claim for lack of a citation. Evidence-bearing uncertainty in research
+tolerance among them), even when the source itself makes it, never rewording it
+into a more accurate one; this is not removing a claim for lack of a citation. Evidence-bearing uncertainty in research
 findings stays. Inspect captions too: a caption drops an excluded hedge even
 when the source's caption carries it. Never add caveats.
 
@@ -160,7 +164,8 @@ this run (the original paper, the implementing library's official
 documentation, a standard textbook, an encyclopedia article) and resolve it
 when they agree unambiguously; they are data, never cited, and never fill a gap only an
 unbuilt source teaches. State the accurate claim, and keep the source's figure
-only within the scope that makes it true. A stated result that has no accurate
+only within the scope that makes it true, named as the
+[scope check](../../wiki-build/references/writing.md#prose-principles) says. A stated result that has no accurate
 reason because it is itself wrong or imprecise is such a conflict: correct it,
 and never invent a reason. Recollection alone never settles a conflict. One
 stays an open note-content item only when the references consulted disagree
@@ -184,13 +189,14 @@ Dates and review state follow [Dates](../SKILL.md#dates); report each
 
 Stage the complete private draft under the entry's own filename, since the
 lint derives slug and root checks from it, and lint it with
-`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' '<scratch>/<unique-dir>/<slug>.md'`. Before
+`python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' --baseline '<copy>' '<scratch>/<unique-dir>/<slug>.md'`,
+where `<copy>` is step 1's snapshot. Before
 publication, check every added or changed wikilink and alias against the
 current inventory, Step 0 plus every entry this run has published or
 retitled: each target must be an existing, unambiguous entry, and a changed
 alias must not collide with another entry's title or alias. Then review the
 draft's source fidelity and paragraph flow. The correction must introduce no new lint
-finding, and every baseline finding on a field or passage changed by this run
+finding beyond the cut-join rows the deletion list checked, and every baseline finding on a field or passage changed by this run
 must be resolved. In a default pass, its other tasks handle unrelated
 pre-existing findings. In a standalone request they remain unchanged and are
 reported; they neither widen the authorization into general cleanup nor block a

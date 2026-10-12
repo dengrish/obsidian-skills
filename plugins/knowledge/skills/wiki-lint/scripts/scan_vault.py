@@ -4009,7 +4009,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                     "description hedges with "
                     + ", ".join(f'"{word}"' for word in _desc_hedges)
                     + " — state the ordinary case plainly when the note "
-                    "establishes it; a candidate is never an order"))
+                    "establishes it, unless the cited source uses that word; "
+                    "a candidate is never an order"))
             # Praise is a register candidate wherever it appears (lint_entry's
             # 9-register-candidate).
             _desc_praise = register_hints(e["desc"], title=e["title"])
@@ -4763,7 +4764,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                         f'{_lead}{tag} line 1 hedges with '
                         + ", ".join(f'"{word}"' for word in _hedges)
                         + " — state the ordinary case plainly when the note "
-                        "establishes it; a candidate is never an order"))
+                        "establishes it, unless the cited source uses that "
+                        "word; a candidate is never an order"))
                 # Shared with lint_entry (equation_coverage); the kept card
                 # only, since an extra card is removed.
                 _card_equation = None if _extra else \
@@ -5661,7 +5663,8 @@ def scan(wiki, images=None, vault=None, settled=None):
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
     # not proof that either copy is wrong: each entry is clean in isolation,
     # while only one is the explanation's owner. Task 1b keeps the owner's
-    # copy and trims the others to a one-clause consequence linked to it;
+    # copy and trims the others to their consequence plus the one-clause
+    # reason or key value the atomicity test allows, linked to it;
     # refactors.md, not this message, chooses the owner (a family-wide
     # property goes to the family's entry, not to the most specific one).
     # A basename several files share names its scanned file by path.
@@ -5695,8 +5698,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "a long prose sentence has the same normalized word sequence "
                 "in %s: %r — Task 1b consolidates it in its owner under the "
                 "refactors.md consolidation rule and trims every other copy "
-                "to its consequence in one clause linked to the owner; "
-                "normalized similarity alone never chooses the owner"
+                "to its consequence plus the one-clause reason or key value "
+                "the atomicity test allows, linked to the owner; normalized "
+                "similarity alone never chooses the owner"
                 % (", ".join(_peers), _snippet)))
     # The fuzzy variant over all entry pairs is a review-only reading list
     # (`overlap_candidates`), never a `problems` row: a one-clause contrast
