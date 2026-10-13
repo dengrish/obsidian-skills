@@ -209,7 +209,8 @@ Task 1b applies the source-dependent builder rules Task 1 cannot: to the
 [user issues](#user-issues) it owns, first, then to Task 1's handed-over
 findings and the note-content log's Open items, sweeping each item's class
 across the run's scope; a user issue's change that no builder rule names
-stays within its entry. Read the
+stays within its entry. A [reviewed entry](#reviewed-entries) takes only
+the repairs that section allows. Read the
 [source-backed correction protocol](references/source-backed-corrections.md)
 before the first repair, and the [refactor protocol](references/refactors.md)
 before a consolidation, merge, split, retitle, alias removal, new entry or
@@ -323,6 +324,34 @@ variety, or rewords a conforming choice. A genuine defect a later pass still
 finds, such as a missed hierarchy placement, is fixed and the earlier miss
 reported, never left in place to keep a pass idempotent. The backlog's
 recurrence counters follow their own update rules.
+
+### Reviewed entries
+
+An entry with `read: true` holds text the user has already reviewed, and
+`read:` is the only record of that review. A default pass or a class-wide
+sweep changes such an entry's body or card claim only to fix one of these:
+
+- a [user issue](#user-issues) on that entry;
+- a claim its cited sources contradict, a [conflict](references/source-backed-corrections.md)
+  with a neighbor, or new information
+  [principle 5(h)](../wiki-build/references/writing.md#prose-principles)
+  removes;
+- a scanner finding, under its own [QC action](references/qc-items.md#finding-actions);
+- a coordinated repair, merge, split or retitle that another entry's
+  repair cannot complete without it, cut to the passage involved.
+
+It never applies a named prose defect, hedge, flow, placement or leave-out
+repair, or a card line-1 rewrite for clarity, to a reviewed entry for
+wording alone, including after a release
+that sharpens those rules: the user approved that wording, and a rewrite
+they did not ask for costs them the review. Every body change the list
+above allows resets `read: false` under the
+[body-change rule](../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox),
+whatever its size, except the mechanical edits that rule already exempts
+(a rewritten link or `parents:` value, a scanner-required card fix). A request
+naming the entry, or asking to polish reviewed entries too, lifts this
+limit for its scope. Report the reviewed entries left as they are under
+*Entries untouched*.
 
 ### Publishing
 
