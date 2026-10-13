@@ -109,7 +109,9 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
    one entity, splits an entry that defines several subjects, retitles
    ambiguous bare titles and creates a missing entry only from a vault
    document the entries using its term already cite. Each new or merged entry
-   is marked unread.
+   is marked unread. An entry you have marked `read` is not reworded for
+   style: it changes only for a factual or source problem, a scanner finding
+   or an issue you flagged, and any such change marks it unread again.
 3. **Task 2** adds and prunes links, including links to the new entries.
 4. **Task 3** rebuilds `parents:` and the MOCs.
 
