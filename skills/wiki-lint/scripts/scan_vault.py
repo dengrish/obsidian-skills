@@ -1380,10 +1380,11 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
     ``root_targets`` are discipline-root slugs: a root surface directly after a
     modifier word ("cell biology") is a compound, so it is neither proposed nor
     counted as an earlier mention. When ``late_links`` is a list, it receives
-    ``(slug, target, matched, surface, line, context)`` for each linked
-    target whose first body link follows an earlier plain mention of the
-    target's title, alias or first-link display label, with the mention's
-    1-based body line and the :func:`settle_context` of its sentence;
+    ``(slug, target, matched, surface, line, context)`` for each plain
+    mention of a linked target's title, alias or first-link display label
+    before its first body link, one per sentence and each target's in text
+    order, with the mention's 1-based body line and the
+    :func:`settle_context` of its sentence;
     ``quiet_surfaces`` (alias-only bare nouns of
     qualified destinations) never count as such a mention, and neither does
     the word of a first-link label that is a cross-domain synonym its target
@@ -1505,7 +1506,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         masked = "\n".join(masked_lines)
         proposed = {}                     # target -> contexts already proposed
         splits = {}                       # block -> its sentences
-        late = set()
+        late = {}                         # target -> {context: earlier mention}
 
         def _plain_context(offset):
             # The settled-ledger key of the sentence holding ``offset``, with
@@ -1602,12 +1603,12 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
             if tgt in linked:
                 # A linked target mentioned in plain text before its first
                 # link: item 10 wants the link on the first eligible mention.
-                if (late_links is not None and tgt not in late
+                # Every such sentence is kept, so a settled one cannot hide
+                # a later one.
+                if (late_links is not None
                         and _earlier_mention(tgt, start, end, surface)):
-                    late.add(tgt)
-                    late_links.append((sl, tgt, matched, surface,
-                                       _body_line(start),
-                                       _plain_context(start)))
+                    late.setdefault(tgt, {}).setdefault(
+                        _plain_context(start), (start, matched, surface))
                 continue
             if tgt in root_targets and _compound_modifier_before(masked, start):
                 continue
@@ -1632,7 +1633,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         # label, too, unless the hit sits inside a longer indexed surface.
         displays = {}
         for owner, (offset, display) in first_link.items():
-            if owner in late or owner == sl or not display:
+            if owner == sl or not display:
                 continue
             # A cross-domain synonym label resolves its sense only at the link,
             # so, like an alias-only bare noun, its word is not a mention.
@@ -1643,25 +1644,27 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                     record.get("prose", "")):
                 continue
             for form in {display.lower(), plural_surface(display).lower()}:
-                displays.setdefault(form, owner)
-        if not displays:
-            continue
+                displays.setdefault(form, []).append(owner)
         display_tokens, display_words = _late_link_index(displays)
         label_quiet = quiet_surfaces - base_only_surfaces
-        for start, end, surface, matched in _scan_surface_spans(
-                masked, display_tokens, display_words):
-            owner = displays[surface]
-            if (owner in late or _in_math(start, end)
-                    or not _earlier_mention(owner, start, end, surface,
-                                            label_quiet)):
+        for start, end, surface, matched in (_scan_surface_spans(
+                masked, display_tokens, display_words) if display_words else ()):
+            if _in_math(start, end) or any(
+                    g_start <= start and end <= g_end
+                    and (g_end - g_start) > (end - start)
+                    for g_start, g_end in global_hits):
                 continue
-            if any(g_start <= start and end <= g_end
-                   and (g_end - g_start) > (end - start)
-                   for g_start, g_end in global_hits):
-                continue
-            late.add(owner)
-            late_links.append((sl, owner, matched, surface, _body_line(start),
-                               _plain_context(start)))
+            for owner in displays[surface]:
+                if _earlier_mention(owner, start, end, surface, label_quiet):
+                    # A sentence the surface pass already holds keeps its
+                    # surface, so its ledger key is unchanged.
+                    late.setdefault(owner, {}).setdefault(
+                        _plain_context(start), (start, matched, surface))
+        for owner, mentions in late.items():
+            for context, (start, matched, surface) in sorted(
+                    mentions.items(), key=lambda item: item[1][0]):
+                late_links.append((sl, owner, matched, surface,
+                                   _body_line(start), context))
     return backfill
 
 
@@ -2724,10 +2727,11 @@ SETTLED_FIELDS = {"backfill": ("entry", "target", "surface", "context"),
                   "late_link": ("entry", "target", "surface", "context")}
 
 #: The revision of link-hygiene.md's closeness bar that this scanner applies.
-#: Raise it when the bar changes in a way that can flip a settled decision:
-#: a ledger written under an older revision then settles nothing, so the
-#: next run judges every row under the new bar (tests/test_conventions.py
-#: ties it to the bar's text).
+#: Raise it when the bar or the late-first-links rule changes in a way that
+#: can flip a settled backfill rejection, kept hub item or late link left in
+#: place: a ledger written under an older revision then settles nothing, so
+#: the next run judges every row under the new bar (tests/test_conventions.py
+#: ties it to the text of both).
 CLOSENESS_BAR = 2
 
 
@@ -2805,9 +2809,10 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True,
     rows themselves were then not computed. A ledger judged under an older
     closeness bar is ``outdated``: it settles nothing, and ``stale`` lists
     all its records. ``bar`` is the revision the closeout writes.
-    ``late_links`` holds the ``settle_key`` of every late link found; a
-    matching ``late_link`` record settles a link left in place, and
-    :func:`settled_late_links` applies the same test to ``problems``.
+    ``late_links`` holds the ``settle_key`` of each earlier-mention sentence
+    of every late link found; a matching ``late_link`` record settles that
+    mention of a link left in place, and :func:`settled_late_links` applies
+    the same test to ``problems``.
     """
     settled = {"path": path, "backfill_suppressed": 0,
                "hub_footer_suppressed": 0, "late_link_suppressed": 0,
@@ -5675,29 +5680,40 @@ def scan(wiki, images=None, vault=None, settled=None):
                                spelled_surfaces=(_title_surf | _base_surf
                                                  | _organism_common_surf))
                 if alias_inventory_complete else [])
-    # A late link Task 2 left in place is settled by its ledger record until
-    # the sentence of the earlier mention changes; `late_links` lists the
-    # unsettled ones with the record a closeout stores.
+    # A late link Task 2 left in place is settled by the ledger records of
+    # its earlier mentions' sentences: a link stays reported while one of
+    # them is unsettled, so a settled sentence never hides a new one.
+    # `late_links` names the first unsettled mention and the records a
+    # closeout stores.
     _late_settled = settled_late_links(settled)
-    _late_keys, late_link_rows = [], []
-    for _sl, _target, _matched, _surface, _line, _context in sorted(_late_links):
+    _late_keys, late_link_rows, _late_mentions = [], [], {}
+    for _sl, _target, _matched, _surface, _line, _context in _late_links:
         _settle_key = {"entry": _sl, "target": _entry_link_target(entries[_target]),
                        "surface": _surface, "context": _context}
         _late_keys.append(_settle_key)
-        if tuple(_settle_key[f] for f in SETTLED_FIELDS["late_link"]) in _late_settled:
-            continue
+        if tuple(_settle_key[f] for f in SETTLED_FIELDS["late_link"]) not in _late_settled:
+            _late_mentions.setdefault((_sl, _target), []).append(
+                (_matched, _line, _settle_key))
+    for (_sl, _target), _open in sorted(_late_mentions.items()):
+        _matched, _line, _settle_key = _open[0]
         late_link_rows.append({"slug": _sl, "target": _settle_key["target"],
-                               "surface": _surface, "line": _line,
-                               "settle_key": _settle_key})
+                               "surface": _settle_key["surface"], "line": _line,
+                               "settle_key": _settle_key,
+                               "settle_keys": [key for _m, _l, key in _open]})
         _target_title = entries[_target].get("title") or _target
         problems.current_path = (entries[_sl]["path_key"]
                                  if fold_name(_sl) in ambiguous_files else "")
         problems.append((
             _sl, "item10/late-link",
-            f'the first body link to "{_target_title}" follows an earlier '
-            f'plain mention "{_matched}" on body line {_line} — move the '
-            "link there when that mention names the same entity; a different "
-            "sense, or a discipline root named only as a setting, stays plain"))
+            f'the first body link to "{_target_title}" follows '
+            + ("an earlier plain mention " if len(_open) == 1
+               else "earlier plain mentions ")
+            + ", ".join(f'"{m}" on body line {l}' for m, l, _k in _open)
+            + (" — move the link there when that mention names the same "
+               "entity" if len(_open) == 1 else
+               " — move the link to the first that names the same entity")
+            + "; a different sense, or a discipline root named only as a "
+            "setting, stays plain"))
     problems.current_path = ""
 
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
@@ -6484,7 +6500,8 @@ def scan(wiki, images=None, vault=None, settled=None):
         "backfill_candidates": _backfill_rows,
         # Report-only; Task 2 judges each listed footer item; no write authority.
         "hub_footer": hub_footer,
-        # Each unsettled item10/late-link finding with the ledger record a
+        # Each unsettled item10/late-link finding at its first unsettled
+        # earlier mention, with the ledger records of every unsettled one a
         # closeout stores when Task 2 leaves that link in place.
         "late_links": late_link_rows,
         # The --settled ledger's effect, and the closeness-bar revision the
@@ -14124,6 +14141,97 @@ def run_self_test():
               "item10/late-link" in _st_keys(
                   scan(_late_wiki, settled=_late_ledger), "late-settled"),
               True)
+        # Every earlier mention's sentence carries its own record, so a
+        # settled sentence never hides a later one; a label reaches one too.
+        _mentions = os.path.join(tmp, "v-late-mentions")
+        _st_write(_mentions, "training-set.md", _st_entry(
+            "Training set", "A **training set** is a worked example."))
+        _two_prose = ("**Late two** splits a training set from a larger "
+                      "training set first.\n\nA training set is then "
+                      "reused.\n\nIt keeps the [[training-set]].")
+        _st_write(_mentions, "late-two.md", _st_entry("Late two", _two_prose))
+        _st_write(_mentions, "late-mixed.md", _st_entry(
+            "Late mixed", "**Late mixed** draws a sample first.\n\nIt fits "
+            "a model on a sample of the training set.\n\nIt reuses the "
+            "[[training-set|sample]]."))
+        _st_write(_mentions, "late-display.md", _st_entry(
+            "Late display", "**Late display** draws a sample first. It then "
+            "fits the [[training-set|sample]] again."))
+        _mentions_ledger = os.path.join(tmp, "late-mentions.json")
+
+        def _late_rec(slug_, surface, sentence):
+            return {"entry": slug_, "target": "training-set",
+                    "surface": surface, "context": settle_context(sentence)}
+
+        def _late_scan(*records):
+            with open(_mentions_ledger, "w", encoding="utf-8") as fh:
+                json.dump({"version": 2, "bar": CLOSENESS_BAR,
+                           "late_link": list(records)}, fh)
+            res = scan(_mentions, settled=_mentions_ledger)
+            return res, {row["slug"]: (
+                row["line"], row["surface"], row["settle_key"],
+                row["settle_keys"], "item10/late-link" in _st_keys(
+                    res, row["slug"])) for row in res["late_links"]}
+
+        _two = [_late_rec("late-two", "training set", sentence) for sentence
+                in ("**Late two** splits a training set from a larger "
+                    "training set first.", "A training set is then reused.")]
+        _mixed = [_late_rec("late-mixed", "sample",
+                            "**Late mixed** draws a sample first."),
+                  _late_rec("late-mixed", "training set", "It fits a model "
+                            "on a sample of the training set.")]
+        _display = _late_rec("late-display", "sample",
+                             "**Late display** draws a sample first.")
+        _m0, _rows0 = _late_scan()
+        check("a late link lists each earlier mention's sentence once, in "
+              "text order, through a surface or the link's label, a "
+              "sentence holding both keeping its surface",
+              (_rows0, _st_msg(_m0, "late-two", "item10/late-link").count(
+                  'mentions "training set" on body line 1, "training set" '
+                  'on body line 3 — move the link to the first')),
+              ({"late-two": (1, "training set", _two[0], _two, True),
+                "late-mixed": (1, "sample", _mixed[0], _mixed, True),
+                "late-display": (1, "sample", _display, [_display], True)},
+               1))
+        _m1, _rows1 = _late_scan(_two[0], _mixed[0])
+        check("a settled first mention leaves the link reported at the next",
+              ([_rows1.get(slug_) for slug_ in ("late-two", "late-mixed")],
+               _m1["settled"]["late_link_suppressed"]),
+              ([(3, "training set", _two[1], [_two[1]], True),
+                (3, "training set", _mixed[1], [_mixed[1]], True)], 2))
+        _m2, _rows2 = _late_scan(*_two)
+        check("a late link whose every earlier mention is settled is no "
+              "finding",
+              ("item10/late-link" in _st_keys(_m2, "late-two"), sorted(_rows2),
+               _m2["settled"]["late_link_suppressed"],
+               _m2["settled"]["stale"]["late_link"]),
+              (False, ["late-display", "late-mixed"], 2, []))
+        _st_write(_mentions, "late-two.md", _st_entry("Late two", _two_prose
+                  .replace("\n\nIt keeps", "\n\nEach training set is drawn "
+                           "once.\n\nIt keeps")))
+        _new = _late_rec("late-two", "training set",
+                         "Each training set is drawn once.")
+        _m3, _rows3 = _late_scan(*_two)
+        check("a new mention between a settled one and the link brings the "
+              "late link back",
+              (_rows3.get("late-two"), _m3["settled"]["stale"]["late_link"]),
+              ((5, "training set", _new, [_new], True), []))
+        _m4, _rows4 = _late_scan(_display)
+        check("a late link reached through its label is settled by the "
+              "record of the earlier sentence",
+              ("item10/late-link" in _st_keys(_m4, "late-display"),
+               "late-display" in _rows4,
+               _m4["settled"]["late_link_suppressed"]),
+              (False, False, 1))
+        _st_write(_mentions, "test-set.md", _st_entry(
+            "Test set", "A **test set** is a worked example."))
+        _st_write(_mentions, "late-display.md", _st_entry(
+            "Late display", "**Late display** draws a sample first. It fits "
+            "the [[training-set|sample]] and scores the [[test-set|sample]]."))
+        check("a label two first links share is an earlier mention of each",
+              sorted(row["target"] for row in scan(_mentions)["late_links"]
+                     if row["slug"] == "late-display"),
+              ["test-set", "training-set"])
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 

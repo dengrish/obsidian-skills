@@ -612,7 +612,7 @@ def asset_key(item, revision):
 
 
 def owned_twin(store, vault, identity, item, sha256):
-    """An earlier revision's downloaded receipt for the same URL whose file still holds ``sha256``."""
+    """Any article's downloaded receipt for the same URL whose file still holds ``sha256``."""
     for other, receipt in store.data['assets'].items():
         if (other == identity or receipt.get('kind') != item['kind'] or receipt.get('url') != item['url']
                 or receipt.get('status') != 'downloaded'
@@ -662,7 +662,15 @@ def assets(store, vault, *, download=False, max_downloads=None, max_bytes=None,
         receipt = store.data['assets'].setdefault(identity, {**item, 'status': 'deferred'})
         try:
             if receipt['status'] == 'downloaded':
-                if read_owned(vault, receipt['path'], receipt['sha256']) is None:
+                try:
+                    present = read_owned(vault, receipt['path'], receipt['sha256'])
+                except RSSError:
+                    # A receipt sharing another's file owns none of its bytes:
+                    # an explicit retry refetches instead of keeping a conflict.
+                    if not retry or 'publication_receipt' in receipt:
+                        raise
+                    present = None
+                if present is None:
                     if not retry:
                         raise RSSError('rss_asset_missing')
                     receipt['status'] = 'failed'
@@ -708,9 +716,9 @@ def assets(store, vault, *, download=False, max_downloads=None, max_bytes=None,
                 cache = captured['data']
                 twin = owned_twin(store, vault, identity, item, common.digest(cache))
                 if twin is not None:
-                    # A revised article that links the same bytes reuses the
-                    # file it already has instead of publishing a copy.
-                    for key in ('cache_name', 'publication_receipt', 'recovery_paths'):
+                    # The same bytes from the same URL reuse a saved file
+                    # instead of publishing a copy.
+                    for key in ('cache_name', 'publication_receipt'):
                         receipt.pop(key, None)
                     receipt.update(status='downloaded', sha256=twin['sha256'], path=twin['path'],
                                    retrieved_at=now())
@@ -1221,6 +1229,29 @@ def run_self_test():
             body, _ = current_body(version, receipts, 'Investments/Sources/RSS/example/post.md')
             self.assertIn('[Read report](../../../../Sources/PDFs/example.pdf)', body)
             self.assertIn('    [PDF](https://example.com/report.pdf)', body)
+        def test_receipt_sharing_a_changed_file_refetches_on_retry_and_keeps_recovery_paths(self):
+            from types import SimpleNamespace
+            item, path, new = {'kind': 'pdf', 'url': 'https://example.com/r.pdf'}, 'Sources/PDFs/r.pdf', b'new'
+            owner, twin = (asset_key(item, digit * 64) for digit in '12')
+            versions = [{'revision_sha256': digit * 64, 'attachments': [item]} for digit in '12']
+            store = SimpleNamespace(save=lambda: None, data={'articles': {'a': {'feed_id': 'f', 'versions': versions}},
+                'assets': {owner: {**item, 'status': 'downloaded', 'path': path, 'sha256': common.digest(new),
+                                   'publication_receipt': {}},
+                           twin: {**item, 'status': 'downloaded', 'path': path, 'sha256': common.digest(b'old'),
+                                  'recovery_paths': ['kept']}}})
+            def fetch(url, kind, budget):
+                budget['requests'] += 1
+                return {'data': new}
+            with tempfile.TemporaryDirectory() as directory:
+                vault = Path(directory).resolve()
+                (vault / 'Sources/PDFs').mkdir(parents=True)
+                (vault / path).write_bytes(new)
+                for retry, requests in ((False, 0), (True, 1)):
+                    self.assertEqual(assets(store, vault, download=True, retry=retry, fetch=fetch,
+                                            feed_ids={'f'})['requests'], requests)
+            receipt = store.data['assets'][twin]
+            self.assertEqual((receipt['sha256'], receipt.get('error'), receipt['recovery_paths']),
+                             (common.digest(new), None, ['kept']))
     suite = unittest.defaultTestLoader.loadTestsFromTestCase(Tests)
     result = unittest.TextTestRunner().run(suite)
     print(str(result.testsRun - len(result.errors) - len(result.failures)) + '/' + str(result.testsRun) + ' tests passed')

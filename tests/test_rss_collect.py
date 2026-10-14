@@ -418,18 +418,106 @@ class RSSCollectionTests(unittest.TestCase):
         self.assertTrue((self.vault / old['assets'][0]['path']).is_file())
         self.assertEqual(rss.context(self.vault, FIRST)['items'][0]['assets'], old['assets'])
 
-    def test_new_revision_with_unchanged_attachment_reuses_existing_file(self):
+    def revise_report(self, before_second=lambda path: None):
         link = '<a href="https://example.com/report.pdf">Report</a>'
         fetch = Fetch(body(item(text='<p>First.</p>' + link)), body(item(text='<p>Updated.</p>' + link)))
-        rss.collect(self.vault, fetch=fetch, asset_fetch=self.asset_fetch)
-        old = rss.context(self.vault, FIRST)['items'][0]
+        self.collect(fetch)
+        old = rss.context(self.vault, FIRST)['items'][0]['assets'][0]
+        before_second(self.vault / old['path'])
         self.clock.return_value = LATER
-        rss.collect(self.vault, fetch=fetch, asset_fetch=self.asset_fetch)
-        new = rss.context(self.vault, LATER)['items'][0]
-        self.assertNotEqual(old['assets'][0]['asset_key'], new['assets'][0]['asset_key'])
-        self.assertEqual(old['assets'][0]['path'], new['assets'][0]['path'])
+        self.collect(fetch)
+        return old, rss.context(self.vault, LATER)['items'][0]['assets'][0]
+
+    def test_new_revision_with_unchanged_attachment_reuses_existing_file(self):
+        old, new = self.revise_report()
+        self.assertNotEqual(old['asset_key'], new['asset_key'])
+        self.assertEqual(old['path'], new['path'])
         self.assertEqual(len(list((self.vault / 'Sources' / 'PDFs').glob('rss-*'))), 1)
-        self.assertEqual(rss.context(self.vault, FIRST)['items'][0]['assets'], old['assets'])
+        self.assertEqual(rss.context(self.vault, FIRST)['items'][0]['assets'], [old])
+
+    def test_articles_linking_the_same_attachment_bytes_share_one_file(self):
+        link = '<a href="https://example.com/report.pdf">Report</a>'
+        self.collect(Fetch(body(item('one', '<p>One.</p>' + link), item('two', '<p>Two.</p>' + link))))
+        rows = [row['assets'][0] for row in rss.context(self.vault, FIRST)['items']]
+        self.assertEqual([row['eligible'] for row in rows], [True, True])
+        self.assertEqual(len({row['path'] for row in rows}), 1)
+        self.assertEqual(len(list((self.vault / 'Sources' / 'PDFs').glob('rss-*'))), 1)
+
+    def test_lost_file_of_a_paused_feed_article_is_not_reused(self):
+        link = '<a href="https://example.com/report.pdf">Report</a>'
+        self.collect(Fetch(body(item('one', '<p>One.</p>' + link))))
+        (old,) = (receipt['path'] for receipt in self.state()['assets'].values())
+        (self.vault / old).unlink()
+        self.roster.write_text('- [ ] ' + URL + '\n- [x] https://second.example.com/feed\n', encoding='utf-8')
+        self.collect(Fetch(body(item('two', '<p>Two.</p>' + link))))
+        new = [receipt['path'] for receipt in self.state()['assets'].values()][-1]
+        self.assertNotEqual(new, old)
+        self.assertTrue((self.vault / new).is_file())
+
+    def test_new_revision_saves_its_own_copy_when_the_earlier_file_is_missing(self):
+        old, new = self.revise_report(lambda path: path.unlink())
+        self.assertTrue(new['eligible'])
+        self.assertNotEqual(old['path'], new['path'])
+        self.assertTrue((self.vault / new['path']).is_file())
+
+    def test_new_revision_saves_its_own_copy_and_retry_keeps_an_edited_earlier_file(self):
+        old, new = self.revise_report(lambda path: path.write_bytes(b'edited'))
+        self.assertTrue(new['eligible'])
+        self.assertNotEqual(old['path'], new['path'])
+        with patch.object(rss.feed_media, 'fetch_asset', side_effect=AssertionError('Edited file refetched')):
+            self.assertEqual(rss.collect_attachments(self.vault, retry_attachments=True)['requests'], 0)
+        self.assertEqual((self.vault / old['path']).read_bytes(), b'edited')
+
+    def test_retry_recovers_revisions_sharing_a_lost_file_after_the_image_changes(self):
+        image = '<img src="https://example.com/chart.png">'
+        fetch = Fetch(body(item(text='<p>First.</p>' + image)), body(item(text='<p>Updated.</p>' + image)))
+        self.collect(fetch)
+        self.clock.return_value = LATER
+        self.collect(fetch)
+        (path,) = {receipt['path'] for receipt in self.state()['assets'].values()}
+        (self.vault / path).unlink()
+        changed = media_fixtures.png(raster=b'\0\xff\0\0')
+
+        def changed_image(url, kind, budget):
+            budget['requests'] += 1
+            return {'data': changed, 'content_type': 'image/png', 'final_url': url}
+
+        result = rss.collect_attachments(self.vault, asset_fetch=changed_image, retry_attachments=True)
+        self.assertEqual(result['status'], 'ready')
+        self.assertEqual({(receipt['path'], receipt['sha256'], receipt.get('error'))
+                          for receipt in self.state()['assets'].values()},
+                         {(path, rss.common.digest(changed), None)})
+        note = (self.vault / self.entry()['note_relative']).read_text(encoding='utf-8')
+        self.assertIn('![[' + path + ']]', note)
+
+    def test_reusing_a_file_keeps_the_recovery_path_and_bytes_of_a_changed_cache(self):
+        real = rss.guarded_publish
+
+        def interrupt(store, vault, path, *args, **kwargs):
+            if path.startswith('Sources/PDFs/'):
+                raise RuntimeError('Crash before publication')
+            return real(store, vault, path, *args, **kwargs)
+
+        crash = patch.object(rss, 'guarded_publish', side_effect=interrupt)
+
+        def lose_file_then_crash(path):
+            path.unlink()
+            crash.start()
+
+        with self.assertRaises(RuntimeError):
+            self.revise_report(lose_file_then_crash)
+        crash.stop()
+        receipts = self.state()['assets'].values()
+        cache = self.vault / rss.STATE_REL / 'assets' / next(
+            receipt['cache_name'] for receipt in receipts if receipt['status'] == 'prepared')
+        cache.write_bytes(b'changed')
+        rss.collect_attachments(self.vault, asset_fetch=self.asset_fetch, retry_attachments=True)
+        receipts = self.state()['assets'].values()
+        self.assertEqual(len({receipt['path'] for receipt in receipts}), 1)
+        self.assertEqual([receipt.get('recovery_paths') for receipt in receipts if 'publication_receipt' not in receipt],
+                         [[str(cache)]])
+        self.assertEqual(rss.collect_attachments(self.vault, asset_fetch=self.asset_fetch)['status'], 'ready')
+        self.assertEqual(cache.read_bytes(), b'changed')
 
     def test_images_and_pdfs_are_local_in_latest_note_and_cutoff_checked(self):
         text = '<p>Thesis.</p><img src="https://example.com/figure.png" alt="Growth"><a href="https://example.com/report.pdf">Report</a>'

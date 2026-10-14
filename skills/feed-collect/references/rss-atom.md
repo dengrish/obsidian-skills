@@ -140,8 +140,8 @@ link positions with the source's labels; use a labeled fallback only when the
 feed supplies the PDF solely as an enclosure.
 Unchanged revisions reuse their media receipts. New article revisions recheck
 media even when the URL is unchanged, so an updated chart cannot silently reuse
-old bytes; earlier evidence keeps its earlier assets. When the recheck
-returns the same bytes as an earlier revision's file at that URL, the new
+old bytes; earlier evidence keeps its earlier assets. When a download
+returns the same bytes as any article's file from that URL, the new
 receipt points at that file instead of saving a duplicate. Missing or rejected downloads retain
 their source links and limitations rather than producing broken local embeds.
 Preserve unknown or edited files; generated notes and assets require positive

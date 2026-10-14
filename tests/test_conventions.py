@@ -6252,7 +6252,9 @@ SELFTEST_MIN_CASES = {
     "skills/feed-collect/scripts/feed_collect.py": 13,
     "skills/feed-collect/scripts/feed_media.py": 4,
     "skills/feed-collect/scripts/rss_source.py": 4,
-    "skills/feed-collect/scripts/rss_collect.py": 5,
+    # 2026-10-14 (investments 1.16.15): a receipt sharing another receipt's
+    # changed file refetches on retry and keeps its recovery paths.
+    "skills/feed-collect/scripts/rss_collect.py": 6,
     "skills/stock-research/scripts/market_notes.py": 113,
     "skills/stock-research/scripts/stock_acquire.py": 2,
     "skills/stock-research/scripts/stock_history.py": 1,
@@ -6650,7 +6652,11 @@ SELFTEST_MIN_CASES = {
     # 2026-10-11 (knowledge 1.33.0): a ledger judged under an older
     # closeness bar, or recording none, settles nothing and is all stale,
     # even while alias ownership is incomplete; a malformed bar is reported.
-    "skills/wiki-lint/scripts/scan_vault.py": 802,
+    # 2026-10-14 (knowledge 1.35.1): a late link left in place is settled by
+    # the records of its earlier mentions' sentences, reached through a
+    # surface or its label, so a settled one never hides another; an
+    # outdated ledger settles none.
+    "skills/wiki-lint/scripts/scan_vault.py": 812,
 }
 
 
@@ -7902,10 +7908,11 @@ def check_moc_placement(rep, conv):
                         "the shape §3 defines has no consumer statement left")
 
 
-#: SHA-1 of link-hygiene.md's closeness-bar section (whitespace collapsed),
-#: per scan_vault.py CLOSENESS_BAR revision; see check_link_rules.
+#: SHA-1 of link-hygiene.md's **Late first links.** paragraph and
+#: closeness-bar section (whitespace collapsed), per scan_vault.py
+#: CLOSENESS_BAR revision; see check_link_rules.
 CLOSENESS_BAR_TEXT = {
-    2: "597ac47fbdf5dcade0233bf631637f9d81e3d972",
+    2: "d1259fc768b741be6f323dc269a9473096b3c056",
 }
 
 
@@ -7978,29 +7985,36 @@ def check_link_rules(rep, conv):
     # closeness bar's revision, so an edit to the bar must decide whether
     # settled decisions are re-judged (knowledge 1.32.0 changed the bar and
     # left 82 rejections settled under the old one).
+    # 2026-10-14 (knowledge 1.35.1): a late link left in place is settled
+    # under the same bar, so the digest covers Late first links too.
     lh = os.path.join(SKILLS_DIR, "wiki-lint", "references", "link-hygiene.md")
     bar_text = re.search(r"^#### The closeness bar\n(.*?)(?=^#{1,4} )",
                          read(lh), re.M | re.S)
+    late_text = re.search(r"^\*\*Late first links\.\*\*.*?(?=\n[ \t]*\n|\Z)",
+                          read(lh), re.M | re.S)
     bar_rev = re.search(r"^CLOSENESS_BAR = (\d+)$", read(SCAN_VAULT), re.M)
-    if not bar_text or not bar_rev:
+    if not bar_text or not late_text or not bar_rev:
         rep.fail(check, "cannot find link-hygiene.md's closeness-bar section "
-                 "or scan_vault.py's CLOSENESS_BAR", rel(lh))
+                 "or Late first links, or scan_vault.py's CLOSENESS_BAR",
+                 rel(lh))
     else:
-        digest = hashlib.sha1(
-            " ".join(bar_text.group(1).split()).encode("utf-8")).hexdigest()
+        digest = hashlib.sha1(" ".join(
+            (late_text.group(0) + "\n" + bar_text.group(1)).split()
+        ).encode("utf-8")).hexdigest()
         rev = int(bar_rev.group(1))
         if CLOSENESS_BAR_TEXT.get(rev) != digest:
-            rep.fail(check, "link-hygiene.md's closeness bar changed (text "
-                     "SHA-1 %s) under CLOSENESS_BAR = %d. If the change can "
-                     "flip a settled backfill rejection or kept hub item, "
+            rep.fail(check, "link-hygiene.md's closeness bar or Late first "
+                     "links changed (text SHA-1 %s) under CLOSENESS_BAR = "
+                     "%d. If the change can flip a settled backfill "
+                     "rejection, kept hub item or late link left in place, "
                      "raise CLOSENESS_BAR in scan_vault.py, so every ledger "
                      "judged under the old bar is re-judged once, and record "
                      "this digest under the new revision in "
                      "CLOSENESS_BAR_TEXT; otherwise record it under the "
                      "current revision." % (digest, rev), rel(lh))
         else:
-            rep.ok(check, "the closeness bar's text matches revision %d of "
-                   "the settled ledger" % rev, rel(lh))
+            rep.ok(check, "the closeness bar and Late first links match "
+                   "revision %d of the settled ledger" % rev, rel(lh))
     n_files = 0
     for skill, path, text in walk_skill_files():
         n_files += 1
@@ -8452,6 +8466,8 @@ def check_linter_finding_routes(rep, _conv):
     pins += [("scanner", key) for key in top_keys + hierarchy_keys]
     pins += [("actions", "card_rivals"), ("hierarchy", "unlinked_children"),
              ("links", "hub_footer"),
+             # 2026-10-14 (knowledge 1.35.1): Task 2's late-link worklist.
+             ("links", "late_links"),
              # 2026-10-09 (knowledge 1.26.0): item 9's neighbor and overlap
              # reading lists.
              ("actions", "neighbors"), ("actions", "overlap_candidates")]
@@ -11116,6 +11132,39 @@ WRITING_RULE_PINS = (
         "each relation the passage states between two claims",
         "restore a dropped relation",
     )),
+    # 2026-10-14 (knowledge 1.35.1): a late link's row lists every unsettled
+    # earlier mention; Task 2 judges them all, moves the link to the first
+    # eligible one and leaves it only when none is, and the closeout then
+    # settles every listed mention. The ledger suppresses no other `problems`
+    # finding, and a new sentence holding a listed occurrence reopens a row.
+    (("wiki-lint", "references", "link-hygiene.md"), (
+        "its `late_links` row lists each such mention not yet settled",
+        "Judge every listed mention, and move the link to the first eligible "
+        "one",
+        "Leave the placement unchanged only when no listed mention is "
+        "eligible; the closeout then [settles](#settled-decisions) every "
+        "listed mention",
+        "the row, with a late link's `item10/late-link` finding, is omitted "
+        "only when every such occurrence is settled",
+        "and so does a new sentence holding an occurrence that row would list",
+        "Of the `problems` findings, the ledger suppresses only "
+        "`item10/late-link`.",
+        "each candidate this run rejected, the `settle_key` of every "
+        "`hub_footer` item it kept, and every `settle_keys` record of each "
+        "`late_links` row whose link it left in place",
+        "`backfill`, `hub_footer`, `late_link` and each record's fields",
+    )),
+    (("wiki-lint", "references", "scanner.md"), (
+        "A `backfill_candidates` or `late_links` row whose `settle_key` "
+        "matches one yields to the target's next eligible occurrence",
+        "the row, with a late link's `item10/late-link` finding, is omitted "
+        "only when every such occurrence is settled",
+        "`settle_keys` lists that record and those of the later unsettled "
+        "ones, in text order, all of which the closeout stores when Task 2 "
+        "leaves the link in place",
+        "Of the `problems` findings, the ledger suppresses only a settled "
+        "`item10/late-link`.",
+    )),
 )
 
 #: Retired writing rules: the default against examples, the hedge repair
@@ -11401,6 +11450,18 @@ WRITING_RULE_RETIRED = (
     "Task 1 drops a hedge whose plain claim",
     "What the equation rules require for a calculation the sources teach",
     "for a calculation its cited sources teach (even one they state only",
+    # 2026-10-14 (knowledge 1.35.1): the ledger suppresses item10/late-link,
+    # and a late link is judged and settled on every earlier mention, not
+    # on the first alone.
+    "The ledger suppresses only these two row kinds, never a `problems` "
+    "finding",
+    "The ledger never suppresses a `problems` finding.",
+    "When the earlier mention names the same entity, move the link there",
+    "later scans omit its finding until the earlier mention's sentence "
+    "changes",
+    "the `settle_key` of every `late_links` row whose link it left in place",
+    "A late link whose `settle_key` matches a record has neither",
+    "and so does a new sentence that mentions the target",
 )
 
 
