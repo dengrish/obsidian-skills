@@ -611,6 +611,21 @@ def asset_key(item, revision):
     return common.digest((revision + ':' + item['kind'] + ':' + item['url']).encode('utf-8'))
 
 
+def owned_twin(store, vault, identity, item, sha256):
+    """An earlier revision's downloaded receipt for the same URL whose file still holds ``sha256``."""
+    for other, receipt in store.data['assets'].items():
+        if (other == identity or receipt.get('kind') != item['kind'] or receipt.get('url') != item['url']
+                or receipt.get('status') != 'downloaded'
+                or receipt.get('error') or receipt.get('sha256') != sha256):
+            continue
+        try:
+            if read_owned(vault, receipt['path'], sha256) is not None:
+                return receipt
+        except (RSSError, common.FeedError, OSError):
+            continue
+    return None
+
+
 def selected_entries(store, feed_ids):
     return [entry for entry in store.data['articles'].values()
             if set(entry.get('feed_ids', [entry['feed_id']])) & feed_ids]
@@ -691,6 +706,18 @@ def assets(store, vault, *, download=False, max_downloads=None, max_bytes=None,
                 store.save()
                 captured = fetch(item['url'], item['kind'], budget)
                 cache = captured['data']
+                twin = owned_twin(store, vault, identity, item, common.digest(cache))
+                if twin is not None:
+                    # A revised article that links the same bytes reuses the
+                    # file it already has instead of publishing a copy.
+                    for key in ('cache_name', 'publication_receipt', 'recovery_paths'):
+                        receipt.pop(key, None)
+                    receipt.update(status='downloaded', sha256=twin['sha256'], path=twin['path'],
+                                   retrieved_at=now())
+                    receipt.pop('error', None)
+                    store.save()
+                    summary['reused'] += 1
+                    continue
                 suffix = feed_media.extension(cache, item['kind'], captured.get('content_type', ''))
                 receipt.update(status='prepared', sha256=common.digest(cache), retrieved_at=now(),
                     path='Sources/' + ('Images' if item['kind'] == 'image' else 'PDFs') + '/rss-' + identity[:32] + '.' + suffix,

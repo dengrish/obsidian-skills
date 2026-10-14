@@ -1380,9 +1380,10 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
     ``root_targets`` are discipline-root slugs: a root surface directly after a
     modifier word ("cell biology") is a compound, so it is neither proposed nor
     counted as an earlier mention. When ``late_links`` is a list, it receives
-    ``(slug, target, matched, surface, line)`` for each linked target whose
-    first body link follows an earlier plain mention of the target's title,
-    alias or first-link display label, with the mention's 1-based body line;
+    ``(slug, target, matched, surface, line, context)`` for each linked
+    target whose first body link follows an earlier plain mention of the
+    target's title, alias or first-link display label, with the mention's
+    1-based body line and the :func:`settle_context` of its sentence;
     ``quiet_surfaces`` (alias-only bare nouns of
     qualified destinations) never count as such a mention, and neither does
     the word of a first-link label that is a cross-domain synonym its target
@@ -1505,6 +1506,13 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
         proposed = {}                     # target -> contexts already proposed
         splits = {}                       # block -> its sentences
         late = set()
+
+        def _plain_context(offset):
+            # The settled-ledger key of the sentence holding ``offset``, with
+            # its links read as their display text.
+            return settle_context(WIKILINK.sub(
+                lambda m: (m.group(2) or m.group(1)).strip(),
+                _sentence_at(sentence_text, offset, splits)))
         global_hits = []
         # A `_` or `*` inside LaTeX (`$\hat{y}_{i}$`, `$\theta^*$`) is not an
         # emphasis delimiter. Fill math with a word character, not a space,
@@ -1598,7 +1606,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                         and _earlier_mention(tgt, start, end, surface)):
                     late.add(tgt)
                     late_links.append((sl, tgt, matched, surface,
-                                       _body_line(start)))
+                                       _body_line(start),
+                                       _plain_context(start)))
                 continue
             if tgt in root_targets and _compound_modifier_before(masked, start):
                 continue
@@ -1610,9 +1619,7 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                 continue
             # One row per sentence: when the ledger settles a rejected
             # occurrence, the target's next sentence is offered instead.
-            context = settle_context(WIKILINK.sub(
-                lambda m: (m.group(2) or m.group(1)).strip(),
-                _sentence_at(sentence_text, start, splits)))
+            context = _plain_context(start)
             if context in proposed.setdefault(tgt, set()):
                 continue
             proposed[tgt].add(context)
@@ -1653,7 +1660,8 @@ def build_backfill(entries, surf_map, non_entry_bare_targets=(), resolve_target=
                    for g_start, g_end in global_hits):
                 continue
             late.add(owner)
-            late_links.append((sl, owner, matched, surface, _body_line(start)))
+            late_links.append((sl, owner, matched, surface, _body_line(start),
+                               _plain_context(start)))
     return backfill
 
 
@@ -2712,7 +2720,8 @@ def _entry_physical_key(wiki, path):
 #: The settled-decisions ledger's record fields, per row kind
 #: (link-hygiene.md, Settled decisions).
 SETTLED_FIELDS = {"backfill": ("entry", "target", "surface", "context"),
-                  "hub_footer": ("entry", "target", "context")}
+                  "hub_footer": ("entry", "target", "context"),
+                  "late_link": ("entry", "target", "surface", "context")}
 
 #: The revision of link-hygiene.md's closeness bar that this scanner applies.
 #: Raise it when the bar changes in a way that can flip a settled decision:
@@ -2769,7 +2778,20 @@ def read_settled(path):
     return records, bar, None
 
 
-def apply_settled(backfill_rows, hub_footer, path, complete=True):
+def settled_late_links(path):
+    """The ``late_link`` records of a current ledger at ``path``, else none.
+
+    A missing, malformed or outdated ledger settles no late link, as
+    :func:`apply_settled` reports.
+    """
+    if path is None:
+        return set()
+    records, bar, _error = read_settled(path)
+    return records["late_link"] if bar >= CLOSENESS_BAR else set()
+
+
+def apply_settled(backfill_rows, hub_footer, path, complete=True,
+                  late_links=()):
     """Omit the rows a settled ledger records; return them and ``settled``.
 
     A ``backfill_candidates`` row or a ``hub_footer`` item is omitted when
@@ -2783,9 +2805,12 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
     rows themselves were then not computed. A ledger judged under an older
     closeness bar is ``outdated``: it settles nothing, and ``stale`` lists
     all its records. ``bar`` is the revision the closeout writes.
+    ``late_links`` holds the ``settle_key`` of every late link found; a
+    matching ``late_link`` record settles a link left in place, and
+    :func:`settled_late_links` applies the same test to ``problems``.
     """
     settled = {"path": path, "backfill_suppressed": 0,
-               "hub_footer_suppressed": 0,
+               "hub_footer_suppressed": 0, "late_link_suppressed": 0,
                "stale": {kind: [] for kind in SETTLED_FIELDS},
                "bar": CLOSENESS_BAR, "outdated": False, "error": None}
     if path is None:
@@ -2820,6 +2845,8 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True):
         if open_rows:
             kept.append(dict(open_rows[0], settle_keys=[
                 row["settle_key"] for row in open_rows]))
+    for key in late_links:
+        settled["late_link_suppressed"] += _is_settled("late_link", key)
     hubs = []
     for row in hub_footer:
         items = [(entry, key)
@@ -5648,7 +5675,20 @@ def scan(wiki, images=None, vault=None, settled=None):
                                spelled_surfaces=(_title_surf | _base_surf
                                                  | _organism_common_surf))
                 if alias_inventory_complete else [])
-    for _sl, _target, _matched, _surface, _line in sorted(_late_links):
+    # A late link Task 2 left in place is settled by its ledger record until
+    # the sentence of the earlier mention changes; `late_links` lists the
+    # unsettled ones with the record a closeout stores.
+    _late_settled = settled_late_links(settled)
+    _late_keys, late_link_rows = [], []
+    for _sl, _target, _matched, _surface, _line, _context in sorted(_late_links):
+        _settle_key = {"entry": _sl, "target": _entry_link_target(entries[_target]),
+                       "surface": _surface, "context": _context}
+        _late_keys.append(_settle_key)
+        if tuple(_settle_key[f] for f in SETTLED_FIELDS["late_link"]) in _late_settled:
+            continue
+        late_link_rows.append({"slug": _sl, "target": _settle_key["target"],
+                               "surface": _surface, "line": _line,
+                               "settle_key": _settle_key})
         _target_title = entries[_target].get("title") or _target
         problems.current_path = (entries[_sl]["path_key"]
                                  if fold_name(_sl) in ambiguous_files else "")
@@ -6393,7 +6433,8 @@ def scan(wiki, images=None, vault=None, settled=None):
             "settle_key": {"entry": s, "target": _target, "surface": f,
                            "context": context}})
     _backfill_rows, hub_footer, _settled = apply_settled(
-        _backfill_rows, hub_footer, settled, alias_inventory_complete)
+        _backfill_rows, hub_footer, settled, alias_inventory_complete,
+        late_links=_late_keys)
     def _public_problem(row):
         slug_value, item, message, path = row
         result = {"slug": slug_value, "item": item, "message": message}
@@ -6443,8 +6484,11 @@ def scan(wiki, images=None, vault=None, settled=None):
         "backfill_candidates": _backfill_rows,
         # Report-only; Task 2 judges each listed footer item; no write authority.
         "hub_footer": hub_footer,
+        # Each unsettled item10/late-link finding with the ledger record a
+        # closeout stores when Task 2 leaves that link in place.
+        "late_links": late_link_rows,
         # The --settled ledger's effect, and the closeness-bar revision the
-        # closeout writes; it never suppresses `problems`.
+        # closeout writes; of `problems`, it suppresses only late links.
         "settled": _settled,
         # Item 19's forward-check input: a floor, not an exhaustive rival set.
         "card_rivals": card_rivals,
@@ -13803,8 +13847,8 @@ def run_self_test():
         check("a missing ledger is empty; each row carries its settle key",
               (res0["settled"], _bf_key, _hub_key),
               ({"path": _ledger, "backfill_suppressed": 0,
-                "hub_footer_suppressed": 0,
-                "stale": {"backfill": [], "hub_footer": []},
+                "hub_footer_suppressed": 0, "late_link_suppressed": 0,
+                "stale": {"backfill": [], "hub_footer": [], "late_link": []},
                 "bar": CLOSENESS_BAR, "outdated": False, "error": None},
                {"entry": "settle-reader", "target": "hub-term",
                 "surface": "hub term",
@@ -13855,7 +13899,7 @@ def run_self_test():
             json.dump({"version": 2, "backfill": [_bf_key]}, fh)
         check("an outdated ledger is all stale even when rows are unknown",
               apply_settled([], [], _ledger, complete=False)[2]["stale"],
-              {"backfill": [_bf_key], "hub_footer": []})
+              {"backfill": [_bf_key], "hub_footer": [], "late_link": []})
         with open(_ledger, "w", encoding="utf-8") as fh:
             json.dump({"version": 2, "bar": CLOSENESS_BAR,
                        "backfill": [_bf_key, _gone],
@@ -14030,7 +14074,56 @@ def run_self_test():
             json.dump({"version": 2, "backfill": [_three["settle_key"]]}, fh)
         check("an alias-inventory gap still drops an outdated ledger's records",
               scan(_gap_hub, settled=_later_ledger)["settled"]["stale"],
-              {"backfill": [_three["settle_key"]], "hub_footer": []})
+              {"backfill": [_three["settle_key"]], "hub_footer": [],
+               "late_link": []})
+        # A late link Task 2 left in place is settled by its record until the
+        # earlier mention's sentence changes.
+        _late_wiki = os.path.join(tmp, "v-late-settled")
+        _st_write(_late_wiki, "training-set.md", _st_entry(
+            "Training set", "A **training set** is a worked example."))
+        _late_prose = ("**Late settled** fits a model on a training set "
+                       "first. It then reuses the [[training-set|training "
+                       "set]].")
+        _st_write(_late_wiki, "late-settled.md",
+                  _st_entry("Late settled", _late_prose))
+        _late_ledger = os.path.join(tmp, "late-settled.json")
+        _late0 = scan(_late_wiki, settled=_late_ledger)
+        _late_key = _late0["late_links"][0]["settle_key"]
+        check("an unsettled late link is a finding with its ledger record",
+              ("item10/late-link" in _st_keys(_late0, "late-settled"),
+               [(row["slug"], row["target"], row["surface"], row["line"])
+                for row in _late0["late_links"]], _late_key),
+              (True, [("late-settled", "training-set", "training set", 1)],
+               {"entry": "late-settled", "target": "training-set",
+                "surface": "training set",
+                "context": settle_context("**Late settled** fits a model on "
+                                          "a training set first.")}))
+        with open(_late_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "bar": CLOSENESS_BAR,
+                       "late_link": [_late_key]}, fh)
+        _late1 = scan(_late_wiki, settled=_late_ledger)
+        check("a recorded late link is settled and not stale",
+              ("item10/late-link" in _st_keys(_late1, "late-settled"),
+               _late1["late_links"],
+               _late1["settled"]["late_link_suppressed"],
+               _late1["settled"]["stale"]["late_link"]),
+              (False, [], 1, []))
+        _st_write(_late_wiki, "late-settled.md", _st_entry(
+            "Late settled", _late_prose.replace("first", "at the start")))
+        _late2 = scan(_late_wiki, settled=_late_ledger)
+        check("editing the earlier mention's sentence reopens the late link",
+              ("item10/late-link" in _st_keys(_late2, "late-settled"),
+               _late2["settled"]["late_link_suppressed"],
+               _late2["settled"]["stale"]["late_link"]),
+              (True, 0, [_late_key]))
+        with open(_late_ledger, "w", encoding="utf-8") as fh:
+            json.dump({"version": 2, "late_link": [_late_key]}, fh)
+        _st_write(_late_wiki, "late-settled.md",
+                  _st_entry("Late settled", _late_prose))
+        check("an outdated ledger settles no late link",
+              "item10/late-link" in _st_keys(
+                  scan(_late_wiki, settled=_late_ledger), "late-settled"),
+              True)
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
