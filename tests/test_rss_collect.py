@@ -418,6 +418,19 @@ class RSSCollectionTests(unittest.TestCase):
         self.assertTrue((self.vault / old['assets'][0]['path']).is_file())
         self.assertEqual(rss.context(self.vault, FIRST)['items'][0]['assets'], old['assets'])
 
+    def test_new_revision_with_unchanged_attachment_reuses_existing_file(self):
+        link = '<a href="https://example.com/report.pdf">Report</a>'
+        fetch = Fetch(body(item(text='<p>First.</p>' + link)), body(item(text='<p>Updated.</p>' + link)))
+        rss.collect(self.vault, fetch=fetch, asset_fetch=self.asset_fetch)
+        old = rss.context(self.vault, FIRST)['items'][0]
+        self.clock.return_value = LATER
+        rss.collect(self.vault, fetch=fetch, asset_fetch=self.asset_fetch)
+        new = rss.context(self.vault, LATER)['items'][0]
+        self.assertNotEqual(old['assets'][0]['asset_key'], new['assets'][0]['asset_key'])
+        self.assertEqual(old['assets'][0]['path'], new['assets'][0]['path'])
+        self.assertEqual(len(list((self.vault / 'Sources' / 'PDFs').glob('rss-*'))), 1)
+        self.assertEqual(rss.context(self.vault, FIRST)['items'][0]['assets'], old['assets'])
+
     def test_images_and_pdfs_are_local_in_latest_note_and_cutoff_checked(self):
         text = '<p>Thesis.</p><img src="https://example.com/figure.png" alt="Growth"><a href="https://example.com/report.pdf">Report</a>'
         self.collect(Fetch(body(item(text=text))))
