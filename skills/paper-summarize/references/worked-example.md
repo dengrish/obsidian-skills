@@ -82,7 +82,7 @@ The trial was randomised, double-blind and placebo-controlled, at 14 hospitals i
 **The primary outcome.** Recurrence within 8 weeks occurred in 8.2% of the transplant arm (9 of 110) against 45.0% on placebo (49 of 109). That is an absolute reduction of 36.8 percentage points (95% CI 25.9 to 47.7). The risk ratio was 0.18 (95% CI 0.09 to 0.36).<sup>[[Doe_GutMicrobiome_2025.pdf#page=5|5]]</sup> In adults with at least two prior recurrences who have finished vancomycin, encapsulated transplant reduces recurrence against placebo.
 
 ![[Doe_GutMicrobiome_2025_fig_2.png]]
-*The two arms separated within a fortnight and stayed apart to week 8. Curves show time to first recurrence in 219 previously treated adults, transplant versus placebo, with numbers still at risk below each week.*
+*The two arms separated within a fortnight and stayed apart to week 8. Curves show time to first recurrence in 219 adults with at least two prior recurrences, transplant versus placebo, with numbers at risk below each week.*
 
 **Harms.** Abdominal cramping in the first 48 hours was reported by 27 of 110 on transplant and 11 of 109 on placebo. One patient in the transplant arm developed *Escherichia coli* bacteraemia within 7 days, adjudicated as possibly treatment-related. There were no deaths in either arm within 8 weeks.<sup>[[Doe_GutMicrobiome_2025.pdf#page=6|6]]</sup>
 
@@ -126,8 +126,8 @@ The authors conclude that encapsulated transplant should be offered after a seco
 - The title page supplies only `2025`, so the note pads month/day to `01` and
   the report records that choice. The DOI is included because the fictional
   document prints it; neither date nor URL requires outside lookup.
-- The short author list follows the eleven-person byline rule. Preregistration
-  remains methodological information.
+- The short author list follows the more-than-eight-authors rule.
+  Preregistration remains methodological information.
 - Availability names restricted data access and missing code separately.
 
 ## Illustrative lint and verification
@@ -149,7 +149,7 @@ finder and read their pages. A few example needles are:
 ```bash
 python3 '<skill>/scripts/paper_text.py' '<vault>/Sources/PDFs/Doe_GutMicrobiome_2025.pdf' \
     --find '9 of 110' --find '49 of 109' --find '0.18' \
-    --find 'at least two prior recurrences' --find 'Clostridioides difficile'
+    --find 'at least two laboratory-confirmed' --find 'Clostridioides difficile'
 ```
 
 Suppose a draft said donor strains persisted for **12 weeks**. The source facts

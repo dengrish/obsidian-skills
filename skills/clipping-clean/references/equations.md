@@ -73,10 +73,8 @@ it. Common cases:
 - *Currency with inflation annotations* — Gwern's
   `$6.29 <sup>$5</sup> <sub>2020</sub> m` means "$6.29m (≈$5 in 2020 dollars)",
   not an equation. The giveaway is a `$` in the base and/or the superscript and
-  a year in the subscript. Render it as readable prose (e.g. `$6.29m` with the
-  inflation note in parentheses, or keep Gwern's compact `$6.29 ($5 in 2020) m`
-  form) — never `$…$` math. Escape each currency `$` as `\$`
-  (`\$6.29m (\$5 in 2020)`) under the currency rule.
+  a year in the subscript. Render it as readable prose, never `$…$` math,
+  escaping each currency `$` under the currency rule: `\$6.29m (\$5 in 2020)`.
 - *Ordinal suffixes* — `100 <sup>th</sup>` → `100th`; `1⁄100 <sup>th</sup>` →
   `1/100th`.
 - *Date ranges / years* — `2004 <sup>–</sup> 2010` → `2004–2010` (the dash got

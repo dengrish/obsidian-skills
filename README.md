@@ -65,7 +65,7 @@ source links without downloading or transcribing them.
 Figure extraction supplies images to paper-summarize and wiki-build; each runs
 figure-extract on a source PDF whose figures are missing.
 Both paper-summarize and wiki-build read the **original PDF**. The summary
-is a finished reading note; builder may use it only under its
+is a finished reading note; wiki-build may use it only under its
 [verified missing-PDF fallback](skills/wiki-build/references/source-cases.md#resolve-a-markdown-source).
 A cleaned clipping is itself the source and can be used directly. wiki-build
 never cites a raw `Inbox/` file; clipping-clean or pdf-organize handles it
@@ -108,8 +108,8 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
    entries into its owner, aligns notation, merges duplicate entries that name
    one entity, splits an entry that defines several subjects, retitles
    ambiguous bare titles and creates a missing entry only from a vault
-   document the entries using its term already cite. Each new or merged entry
-   is marked unread.
+   document the entries using its term already cite, never from research.
+   Each new or merged entry is marked unread.
 3. **Task 2** adds and prunes links, including links to the new entries.
 4. **Task 3** rebuilds `parents:` and the MOCs.
 
@@ -123,18 +123,9 @@ options instead of applied, and deleting an entry still needs an explicit
 request. Enriching an existing entry with new-source evidence still belongs
 to wiki-build.
 
-**Flag issues for the next lint.** Every Wiki entry has an `issues` property
-after `read`, blank as `issues: ""`; the next wiki-lint run adds it to older
-entries. When you notice a problem while reviewing a note, describe it there
-on one line; several issues may share the line. The next wiki-lint run treats
-each issue as your request for that note: it fixes the issue, or checks it and
-explains in the report why it does not hold, then removes the resolved issues
-and unchecks `read` so you review the note again. An issue it cannot act on,
-such as one needing a deletion or a source the entry does not cite, stays in
-the field, and the report says why. In Obsidian, set the
-`issues` property's type to Text, or to List if you prefer one issue per item.
-The [field's rules](shared/CONVENTIONS.md#2d-issues--the-users-issue-inbox)
-own the details.
+**Flag issues for the next lint** in an entry's `issues` property, as the
+[knowledge README](plugins/knowledge/README.md#flagging-issues-in-a-note)
+describes.
 
 [wiki-add](skills/wiki-add/SKILL.md) is the create-only research route for
 topics queued in `add-to-wiki.md` or a backlog the user selects, or named
@@ -144,9 +135,6 @@ and nested open tasks instead of processing them. It leaves every existing
 entry unchanged and checks off only queued topics it created or found already
 present; enriching an existing entry from a new source remains wiki-build's
 job, and deepening it from the sources it already cites is wiki-lint's.
-wiki-lint also creates a missing entry its own run establishes, only from a
-vault document the entries using its term already cite and never from
-research, and links and places it in the same run.
 
 stock-research analyzes ideas in feed-collect’s saved X notes and RSS articles for long-only
 buying opportunities in liquid U.S.-listed stocks over a 3–12 month momentum
@@ -505,7 +493,6 @@ written as generated output. `--check` verifies both loose trees and archives
 without changing them. Tests exercise isolated extracted packages so neither can
 silently import from the repository or the other plugin.
 
-Each plugin starts at **1.0.0** under its new identity and advances independently.
 Before distributing a runtime change, bump every affected plugin's authored
 version and validate the changes. Commit the authored inputs first, then run
 `python3 tools/build_plugin.py`, validate the generated distributions, and

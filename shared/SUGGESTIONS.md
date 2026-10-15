@@ -37,14 +37,13 @@ Snapshot the log with the first command below, then read it. Reuse one stable
 ID per problem within each log; match the underlying issue before allocating
 a new ID. Update an existing
 item's evidence and reporting skills when new observations warrant it;
-increment recurrence at most once per logical run, even across rescans,
+increment the **Seen** count at most once per logical run, even across rescans,
 retries, or delegated checks. Use one run timestamp in `YYYY-MM-DD HH:MM`
 form. A coordinating agent passes that timestamp and the already-counted
 log/issue IDs to invoked skills; when none was inherited, use the run's start
 time. Combine parallel subtasks' findings before updating the same log. Keep
 the first timestamp and update latest only on a new occurrence. `Reported by`
-names the observing skill or skills, or `plugin review` for a
-source-development review.
+names the observing skill or skills.
 
 A skill log has this form, substituting its actual issue data. It has no H1
 title: Obsidian already shows the filename as the note's title.
@@ -92,8 +91,7 @@ python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
 
 The manifest lists each log written, as
 `[{"path": "Reviews/<current-skill>-suggestions.md", "draft": "<absolute draft path>"}]`.
-`Reviews/` must have a unique, readable real directory owner. `--owned-dir
-Reviews` refuses the logs when `Reviews/` is a symlink, is not a directory, is
+`--owned-dir Reviews` refuses the logs when `Reviews/` is a symlink, is not a directory, is
 unreadable, or has a case/Unicode variant on disk, such as `reviews/`;
 `snapshot` and `publish` also refuse a leaf symlink or a non-regular occupant.
 When `Reviews/` is absent, add `--create-dir Reviews` to `publish`; it refuses
@@ -122,8 +120,8 @@ in its research records.
 
 A skill may update its own log and the log of the skill that produced or
 governs an output it actually consumed in this run. Establish the producer
-from the run's handoff record, a valid legacy provenance footer, or a producer
-record in the owning skill's private state. Notes otherwise carry no producer
+from this run's own skill invocations, a valid legacy provenance footer, or a
+producer record in the owning skill's private state. Notes otherwise carry no producer
 record: attribute a recurring output pattern, or one serious well-evidenced
 defect, to the skill whose instructions govern that output, and say in
 **Evidence** that attribution is by governing rule. A file's folder alone establishes neither.

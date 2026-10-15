@@ -40,9 +40,9 @@ in an isolated environment and a passing `shared/scripts/check_parsers.py`, as
 the runtime guide describes.
 Install this whole package so its relative skill and helper paths stay intact.
 
-Use the vault already selected for the task. Sources and reading notes retain
-their `Inbox/`, `Articles/` and `Sources/` routes; entries remain in `Wiki/`
-and generated navigation stays in `MOCs/`. When a skill renames a file, such
+Use the vault already selected for the task. Sources and reading notes live in
+`Inbox/`, `Articles/` and `Sources/`, entries in `Wiki/` and generated
+navigation in `MOCs/`. When a skill renames a file, such
 as pdf-organize filing a PDF or clipping-clean reprocessing a clipping under a
 new name, it repairs every link to that file in the same run, as Obsidian
 does, Obsidian Canvas boards included. This

@@ -10,14 +10,9 @@ owner, a wrong title the [retitle triggers](#retitle-an-entry) cover, the
 invalid alias or the missing concept, or proves
 [step 2](#establish-evidence-and-complete-scope)'s boundary for a merge or
 split; Task 1b's [merge and split rules](../SKILL.md#task-1b--content-repair)
-name what never activates one and where a close call goes. A deletion runs
-only under [Delete an entry](#delete-an-entry); a merge's removal of the
-merged-away file is part of the merge, not a deletion. The ordinary run's
-definition, or the request, is the whole authorization.
-A pure retitle or semantic-invalid alias removal keeps its own protocol below
-([retitle](#retitle-an-entry), [alias removal](#remove-a-semantic-invalid-alias));
-never disguise either as a split or merge to avoid its
-complete-reference-rewrite gate.
+name what never activates one and where a close call goes. A merge's removal
+of the merged-away file is part of the merge, not a deletion. The ordinary
+run's definition, or the request, is the whole authorization.
 
 A correction confined to one existing entry and supported only by sources it
 already cites uses [source-backed correction](source-backed-corrections.md), not
@@ -72,9 +67,7 @@ the entries using it cite.
    Canvas board, a file card's path takes the destination's vault path and
    a text card's link is rewritten as in a note; every other byte of the
    board stays, and a board that is not valid JSON but may cite the name is
-   a dependency this protocol cannot write. The ordinary run's or the
-   request's authorization covers these rewrites, with no additional
-   approval. Notes in vault-root `Investments/` remain outside this repair
+   a dependency this protocol cannot write. Notes in vault-root `Investments/` remain outside this repair
    scope, including through linked-folder aliases.
    If one references an identity being retired, preserve that record and retain
    the referenced old entry; report the unresolved dependency. Any other
@@ -89,14 +82,14 @@ the entries using it cite.
   canonical owner. Leave enough concise relationship prose and wikilinks for
   orientation, without duplicating the full explanation across the results.
   Every note a split creates gets today's `created:` and `updated:` dates and
-  `read: false`. An ordinary run's split keeps the original entry as the owner
+  `read: false`. A split keeps the original entry as the owner
   of one subject: the one its title names, or, when the title names several
   (`Precision and recall`) or none, the one with the fullest treatment, then
   the alphabetically first resulting slug. When the retained original's title
   does not name exactly that one subject, the same Task 1b retitles it to the
   subject's canonical title under [Retitle an entry](#retitle-an-entry) after
   the split publishes. Retiring the original outright is a deletion and runs
-  only on an explicit request. A retained original keeps `created:` and follows
+  only on an [explicit request](../SKILL.md#explicit-requests). A retained original keeps `created:` and follows
   the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset) for
   `updated:` and `read:`: a pure trim keeps `read:`, and a rewritten
@@ -146,7 +139,7 @@ the entries using it cite.
   for that entry plus the one-clause reason or key value the
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
   allows, linked to the owner; the trim drops the rest of the owner's
-  reasoning and keeps a source verdict only in the owner, but never drops a fact that entry's core
+  reasoning and keeps a source's own judgment, such as its recommendation, only in the owner, but never drops a fact that entry's core
   facets need. Otherwise move the fullest version into the owner, verified
   against the cited sources of the entry that holds it or of the owner (new
   information they do not give is
@@ -216,11 +209,9 @@ filesystem transaction, so order prevents a disappearing target:
    card counts as accounted for once it is quoted in the report, because the
    survivor's primary card tests the same
    entity; so does an extra card removed under the
-   [card set](flashcards.md#card-set) rule. Step 2 has already rewritten each
-   link or embed to a removed card's block ID, the merged-away primary card's
-   included, as a plain link to the survivor, keeping any label. Only such a
-   reference in a note the rewrite scope excludes, such as an `Investments/`
-   note, is an unresolved inbound reference that retains the old entry.
+   [card set](flashcards.md#card-set) rule. A block-ID reference step 2 could
+   not rewrite, such as one in an `Investments/` note, is an unresolved
+   inbound reference that retains the old entry.
    An unreadable, unreachable or ambiguous source is a reason to retain the
    content it may support, never evidence that it is disposable. New
    information, a claim its cited sources, every one read, do not give and
@@ -258,8 +249,8 @@ Task 1b runs this protocol when all of these hold:
 - the qualified, conceptual or other-form title is determinate;
 - and the destination slug is free.
 
-Otherwise it reports the case with its blocker. For an existing entry, test
-(a) must actually fire, its encyclopedia landing checked as a disambiguation
+Otherwise it reports the case with its blocker. For an existing title
+outside test (c)'s corpus, test (a) must actually fire, its encyclopedia landing checked as a disambiguation
 page or another sense; the unchecked-landing default governs new titles
 only, so doubt alone is reported. A request that explicitly authorizes a
 retitle also activates this protocol.
@@ -360,15 +351,12 @@ retains the alias until it can be repaired. Delete the alias only after
 verifying that no ambiguous owner, inbound alias-target link or such
 mislabelled link remains. The removal advances `updated:` on the entry whose
 `aliases:` list it edits and keeps that entry's `read:`, unless it resolves a
-[user issue](../SKILL.md#user-issues);
-an otherwise unchanged entry whose only change is a
-rewritten link keeps its dates and `read:` under the
-[shared date rule](../../../shared/CONVENTIONS.md#2a-wiki-entry--wikimd).
+[user issue](../SKILL.md#user-issues).
 
 ## Create a missing entry
 
-Task 1b creates a missing entry only for a concept that a vault document the
-entries using the term already cite teaches, with a stable identity that
+Task 1b creates a missing entry only for a concept taught by a vault document
+that the entries using the term already cite, with a stable identity that
 passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities),
 when a [user issue](../SKILL.md#user-issues) asks for its entry, when an
 open note-content item names it, or when it is a load-bearing term:
@@ -395,9 +383,12 @@ It extracts no other topic from the evidence.
    links the term to it, or retargets its dangling links there; an occupied
    or ambiguous slug is reported.
 2. Cite that teaching document at the page that teaches the term: never
-   research the term on the web or in a vault document no entry cites.
+   research the term on the web or in a vault document the using entries do
+   not cite. Cite a PDF once
+   [§1a's check](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
+   proves its basename unique.
    Citing an already cited document leaves wiki-build's coverage unchanged;
-   the rule that an uncited source counts as unbuilt governs deepening an
+   the [rule](source-backed-corrections.md) that an uncited source counts as unbuilt governs deepening an
    existing entry, not a new entry's source.
 3. Draft it from step 2's evidence, adding beyond it only the clarification
    [5(h)](../../wiki-build/references/writing.md#prose-principles) admits,
@@ -471,24 +462,22 @@ as blocked by those entries.
    [dangler hand-off](#dangling-link-hand-off)'s step 3 glosses a dangling
    one. An
    `Investments/` reference or an ambiguous reference blocks the deletion. A
-   link or embed to the entry's card block ID blocks it too unless the request
-   names a successor, which it then targets as a plain link keeping any label;
-   so does any transclusion of the entry or one of its sections (`![[old]]`,
-   `![[old#Section]]`), which has no visible label to keep, and with a named
-   successor it too becomes a plain link to the successor. A link retargeted
+   link or embed to the entry's card block ID, or a transclusion of the entry
+   or one of its sections (`![[old]]`, `![[old#Section]]`), which has no
+   visible label to keep, blocks it too unless the request names a successor;
+   with one, it becomes a plain link to the successor, keeping any label. A link retargeted
    to a successor drops a heading or block anchor the successor does not
    have, keeping its label. `parents:` values and links in Task 3's generated
    MOCs are left for step 5 and do not block the removal, despite
    [publish step 3](#publish-in-dependency-order). The exception is a
    deletion that leaves the entry's discipline with no member, as deleting
-   its last root does: Task 3 then
+   its root does: Task 3 then
    [preserves that MOC as inactive](hierarchy.md#build-or-maintain-the-moc-files)
    and never re-derives it. So that MOC's link is retargeted or unlinked like
    any other inbound link, and the report names the now-inactive MOC, whose
    removal needs its own explicit request. A link in any other `MOCs/` file
    or a legacy vault-root MOC is also retargeted or unlinked like any other
-   inbound link. A note whose only change is a rewritten link keeps its
-   dates and `read:`.
+   inbound link.
 3. Quote the entry's card, with its attachments, and any non-blank `issues:`
    text in the report.
 4. Re-scan, then run `publish_files.py remove` against step 1's record. A

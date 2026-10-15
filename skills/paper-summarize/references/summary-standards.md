@@ -82,22 +82,17 @@ Do not invent one merely to complete a two-sentence pattern.
 | Faecal transplant likely reduced recurrence of *C. difficile* infection from 45% to 8% within eight weeks in previously-treated adults with at least two prior recurrences, against placebo, in a 219-patient double-blind trial. | In adults with at least two prior recurrences, the transplant cut recurrence within eight weeks from 45% on placebo to 8%. The 219-patient trial was randomised and double-blind. |
 | eUniRep likely raises the rate of better-than-wild-type designs well above a one-hot sequence encoding given as few as 24 assayed mutants, in avGFP and TEM-1 β-lactamase. | In avGFP and TEM-1 β-lactamase, 24 measured mutants were enough to design variants that beat wild type on fluorescence or ampicillin resistance. About one design in ten did so; the same pipeline without pre-training gave almost none. |
 
-Keep a needed limit immediately beside the claim it qualifies; a modal verb
-alone does not explain a design constraint. Callout bullets, headings and
-captions can be read alone, so each carries the scope of the claim it makes and
-any qualification only that claim needs, such as its comparator. A body
-sentence cannot repair an overstated heading. A caveat that bounds every claim
-is document-level: single runs, a short horizon, a use the document proposes
+A modal verb alone does not explain a design constraint. Callout bullets,
+headings and captions can be read alone, so each carries the scope of the claim
+it makes and any qualification only that claim needs, such as its comparator.
+A body sentence cannot repair an overstated heading. A caveat that bounds every
+claim is document-level: single runs, a short horizon, a use the document proposes
 but never tests, or a rung limit every claim shares (one cohort, an animal or
 cell study, a pilot or a simulation). Explain it once, in Limitations, whose
 heading may name it; one callout bullet may state it (bullet 1 for a rung
 limit, otherwise the chief-caveat bullet). Elsewhere, word each claim within
 that boundary ("in male C57BL/6 mice", "was associated with", "within 8
-weeks") instead of restating the caveat. Rung 1 needs no separate limitation
-beyond its scope.
-
-Verify scope clauses as claims in their own right. Fluent wording does not
-repair an omitted necessary qualification.
+weeks") instead of restating the caveat.
 
 ## Naming the size of a number
 
@@ -199,10 +194,9 @@ limitations that would change how a reader acts on or cites the finding;
    and ethics remain outside the note's scope.
 
 Merge related limitations, fold repeated author caveats into the relevant
-bullet, and omit categories that do not apply. Put a caveat about one number
-beside that number, not again in Limitations. State a document-level constraint
-once, as [where the qualification goes](#where-the-qualification-goes) sets
-out; avoid generic “more research is needed” filler.
+bullet, and omit categories that do not apply. State a document-level
+constraint once, as
+[where the qualification goes](#where-the-qualification-goes) sets out; avoid generic “more research is needed” filler.
 
 For an argument/synthesis note, instead consider its declared scope and source
 selection, premises not supported by its supplied evidence, counterarguments it

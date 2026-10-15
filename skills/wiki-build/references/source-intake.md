@@ -163,9 +163,8 @@ Matching ignores case and Unicode normalization; a wrong folder qualification
 never confirms a file. The lookup decides coverage as follows:
 
 - **Covered:** only a verified-paths match with `identity_confirmed: true`
-  and complete inventories establishes coverage; unresolved candidates, a
-  legacy query without `--vault` (basename candidates only) and a body
-  example mentioning `[[Foo.pdf]]` never do. A problem on an entry that is
+  and complete inventories establishes coverage; unresolved candidates and a
+  body example mentioning `[[Foo.pdf]]` never do. A problem on an entry that is
   neither a match nor a candidate for this source does not undo a confirmed
   match: a folder run still skips the source and reports the problem.
 - **Uncertain:** source problems, a problem on a matching or candidate
@@ -203,8 +202,8 @@ deepens.
 Read the complete source, mapping headings first for long documents ([named-entity
 exception](../SKILL.md#1-read-the-source)). Track
 the canonical on-disk name and the **physical PDF page introducing each
-entity**. Read PDFs with available tools (`pdftotext -layout`, PyMuPDF),
-inspecting rendered pages when useful;
+entity**. Read PDFs with `pdftotext -layout` or, once the parser check
+passes, PyMuPDF, inspecting rendered pages when useful;
 renderings support comprehension only, and figures follow the
 [media rules](media.md). Read Markdown directly.
 

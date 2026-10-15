@@ -43,9 +43,9 @@ signatures, usually together:
     carries the same stray one-tab indent and a lost bullet, stranding the
     wrapped prose.)
 
-**Renormalize to the real logical structure:** one indent step (a single tab,
-or 4 spaces) per genuine level of nesting, one marker per item, and any
-continuation paragraph of an item indented to that item's text column (restore
+**Renormalize to the real logical structure:** one tab per genuine level of
+nesting, one marker per item, and any continuation paragraph of an item
+indented to that item's text column (restore
 its bullet if it was meant to be a sub-item, or leave it as an indented plain
 paragraph if it's prose belonging to the item). When the "list" is really a
 dialogue or a Q&A that nesting only obscures, prefer the simplest faithful
@@ -57,15 +57,15 @@ shape over reproducing the source's broken depth. The three real Gwern shapes:
   at that same one-tab depth. Keep that nesting only when the source nests the
   answer; when Q and A are peer turns, `dedent` then levels them as in the
   single-tab split below.
-- *Stacked dialogue* — `> - - - **Speaker A:** …` / `⟶⟶⟶⟶- **Speaker B:** …`
+- *Stacked dialogue* — `> - - - **Speaker A:** …` / `> ⟶⟶⟶⟶- **Speaker B:** …`
   (triple marker, four-tab depth, inside a blockquote) becomes a flat
   one-level list of speaker turns: `> - **Speaker A:** …` /
   `> - **Speaker B:** …`, with a speaker's trailing continuation sentence kept
   on/under their own turn rather than stranded at a random depth.
 - *Single-tab split* — the on-disk `> - **Q:**` (flush) / `> ⟶- **A:**` (one
-  tab): Q and A are turns in one exchange, not a question with a nested
-  answer, so the answer and its continuation lines move back to the flush
-  depth. The `> - **Lukas Biewald:**` / `> ⟶- **Wojciech Zaremba**:` /
+  tab): when the source shows Q and A as peer turns, the answer and its
+  continuation lines move back to the flush depth. The
+  `> - **Lukas Biewald:**` / `> ⟶- **Wojciech Zaremba**:` /
   `> ⟶<continuation>` / `> ⟶- **L Biewald**:` dialogue is the same shape.
 
 ## Detect candidates
@@ -83,8 +83,6 @@ python3 '<skill>/scripts/body_checks.py' sweep '<draft>'
 python3 '<skill>/scripts/body_checks.py' siblings '<draft>'
 ```
 
-- **Stacked markers are candidates.** Preserve genuine nested lists and repair
-  only confirmed clipping damage.
 - **Deep indentation is only a *candidate*.** A *legitimately* nested list
   also indents its sub-sub-items two tabs. A deep-tab line is damage only when
   the indent is **orphaned**: there's no shallower list item directly above it

@@ -21,12 +21,9 @@ selection, script paths, Python dependencies, and host tools. Use
 `scripts/organize.py` for checks, renames, and splits; do not recreate its
 filesystem or link-repair logic in shell snippets. `canonical`, `check` and
 `rename` need only Python's standard library, so a rename-only run on a host
-that can view PDF pages installs nothing. Read pages for naming with the
-host's PDF viewing tools, or with the
-[step-2 text fallback](#2-read-enough-to-choose-a-stable-name) when the host
-has none. Before the first `pages` or `split` command, or any other step that
-parses a PDF or image with this environment, set up the environment from
-`<plugin>/requirements.txt` and run
+that can view PDF pages installs nothing. Before the first `pages` or
+`split` command, or any other step that parses a PDF or image with this
+environment, set up the environment from `<plugin>/requirements.txt` and run
 `python3 '<plugin>/shared/scripts/check_parsers.py'` with it under the
 [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows).
 While it fails, run no such step and split nothing.
@@ -39,22 +36,14 @@ PDF with no stated deliverable needs routing clarification, not an automatic
 chain of all these skills.
 
 - For a vault-wide request, enumerate only `Inbox/` and `Sources/PDFs/`,
-  recursively; do not discover candidates in other vault folders. Never
-  select notes in `Wiki/`, `Articles/`, or the vault root, or figures in
-  `Sources/Images/`, as independent rename targets. Derived files may follow
-  their source through the guarded rename below.
+  recursively; do not discover candidates in other vault folders.
 - Skip [feed-owned attachments](../../shared/CONVENTIONS.md#1c-feed-owned-attachments)
   in every sweep, even under `Sources/PDFs/` (`canonical` reports
   `feed-owned, skipped`); their paths belong to the collector's receipts.
   `check` and `rename` refuse even a named one.
-- A PDF in `Inbox/` is filed in `Sources/PDFs/`. A PDF in another vault
-  folder is filed there only when the request is to organize or file it; a
-  request only for a better name renames it where it stands. A PDF already
-  under `Sources/PDFs/` is renamed where it stands.
-- Outside the vault, rename in place with **no `--vault` or `--dest`** and
-  report that vault-wide checks did not run. `rename` never imports it; to
-  bring it into the vault, copy it into `Inbox/` with the user's approval and
-  file that copy.
+- Outside the vault, rename in place with **no `--vault` or `--dest`**.
+  `rename` never imports it; to bring it into the vault, copy it into
+  `Inbox/` with the user's approval and file that copy.
 - Leave non-PDF input files untouched and report them separately: Markdown
   captures in `Inbox/` belong to `clipping-clean`; other file types have no
   filing skill here. An inbox-wide request also runs clipping-clean over
@@ -86,7 +75,7 @@ always gets the step-5 book test:
 | Not canonical, in `Sources/PDFs/` | Rename it where it stands | After renaming |
 | Canonical, in `Sources/PDFs/`, including an unsplit book | Skip it as already canonical | Only when the request asks to split books, or a hand-off asks for one of its chapters |
 | In another vault folder the request names | File it as from `Inbox/` when asked to organize or file it; otherwise rename it in place | After renaming or filing |
-| Outside the vault | Rename it in place, with no `--vault` or `--dest`, unless step 2 confirms a canonical name | After renaming; a canonical one only when the request asks to split books |
+| Outside the vault | Rename it in place unless step 2 confirms a canonical name | After renaming; a canonical one only when the request asks to split books |
 
 ### 1. Check the input, filename, and location
 
@@ -109,15 +98,11 @@ exits 1 when any of them is not canonical.
 
 `canonical` checks the shape only: outside `Sources/PDFs/`, keep a canonical
 name only when step 2 finds its author, title and year match the document,
-and otherwise name it like a non-canonical PDF. When another source's files
-occupy that stem, step 3's
-[target-stem rule](#3-check-references-and-prepare-the-complete-rename-plan)
-files it under a distinguishing name instead. An explicit request to correct
-a canonical name uses the normal guarded workflow. A chapter in its book
-folder keeps the [`<book core>_NN_Name` form](references/book-splitting.md#3-choose-chapter-names-once):
+and otherwise name it like a non-canonical PDF. An explicit request to
+correct a canonical name uses the normal guarded workflow. A chapter in its
+book folder keeps the [`<book core>_NN_Name` form](references/book-splitting.md#3-choose-chapter-names-once):
 a correction changes only its chapter name, or its number within its
-neighbours' order, and the helper blocks any other name. A skipped rename
-never skips the book test that step 5 requires.
+neighbours' order, and the helper blocks any other name.
 
 ### 2. Read enough to choose a stable name
 
@@ -244,13 +229,12 @@ edition, bytes):
     name: re-plan the PDF now under a distinguishing abbreviated title, as
     for a proposed name taken (never `_2` for a book), and file it. Report
     the natural name it could not take and its occupants.
-  - *Another source's images under the PDF's current stem* block it as
-    unowned crops. Once the label test shows they are not its figure-extract
-    crops, re-plan: pass `--foreign-image '<name>'` for each in that
-    re-plan, and they keep their names.
+- **Current stem shared.** Another source's images under the PDF's current
+  stem block it as unowned crops. Once the label test shows they are not its
+  figure-extract crops, re-plan: pass `--foreign-image '<name>'` for each in
+  that re-plan, and they keep their names.
 
-Never delete or move either copy; the redundant one is the user's to
-remove. Other blockers need their actual cause resolved.
+Other blockers need their actual cause resolved.
 
 ### 4. Apply, then verify the whole family
 
@@ -301,9 +285,7 @@ it, not the wording of a hand-off from another skill:
 Read
 [book splitting](references/book-splitting.md) before choosing boundaries or
 writing chapters; it also governs names, collisions and existing chapter
-sets. Its `pages` and `split` commands parse the PDF, so the parser check
-from setup must pass first. A rename blocked in step 3 must be resolved
-before a dependent split.
+sets. A rename blocked in step 3 must be resolved before a dependent split.
 
 ### 6. Report outcomes and remaining work
 

@@ -28,8 +28,8 @@ embedded attachment, or an `<old_slug>_fig*` file the old note does not embed
 or embeds under two spellings); resolve them under the
 [body-source rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
 A body can contain both old embeds and new remote images; download only
-the remote images, starting after the highest occupied number, even if they
-appear earlier in document order.
+the remote images, starting after the highest `<slug>_fig_<N>` number in the draft or
+`Sources/Images/`, even if they appear earlier in document order.
 
 A note renamed outside this workflow, which `dedup_index.py` lists under
 `stem_mismatch`, is re-stemmed only on request, by
@@ -43,13 +43,11 @@ X/Twitter status URL is Web Clipper's form of an embedded video or post, which
 Obsidian renders: keep it unchanged and never stage it. Fresh notes start at 1.
 Use argument lists or
 [shared quoting rules](../../../shared/INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text)
-for source-controlled URLs and names. Give every `stage` call its own new or
-empty child under `<scratch>` (the helper refuses a populated one), and place
-each file from the `path` its stage result returned. Use the `stage` and
+for source-controlled URLs and names. Use the `stage` and
 `place` commands in SKILL.md steps
 [3](../SKILL.md#3-clean-the-body-and-prepare-images) and
 [6](../SKILL.md#6-publish-safely); on a reprocess or audit recovery, `--start`
-is one past the highest occupied number.
+is one past the highest `<slug>_fig_<N>` number in the draft or `Sources/Images/`.
 
 For a very large data URI that cannot safely fit in one shell argument, write
 it as one UTF-8 line in a scratch file and pass `--urls-file '<scratch>/urls'`;
@@ -59,9 +57,6 @@ that call's URLs in the file, in source order. Resolve a protocol-relative
 (`//cdn.example/image.png`), root-relative (`/images/a.png`) or relative
 (`images/a.png`) source against the verified capture page URL before passing
 it; the helper refuses a URL with no scheme rather than guessing.
-
-The helper permits HTTP(S) and data URIs and enforces public-address pinning,
-scheme and redirect checks, byte-sniffed formats and exclusive publication.
 
 `stage` writes only to the selected scratch directory outside the vault;
 `place` runs only after the reviewed note is safely public. The owner note must
@@ -80,8 +75,7 @@ and there is no proxy fallback.
 
 Keep downloads sequential. Do not resize a large figure merely to reduce size;
 if it exceeds the chosen cap, use the failure path below. Data URIs share that
-cap, deadline and counter. Scheme restrictions and redirect checks are not
-optional flags.
+cap, deadline and counter.
 
 Use the returned filename and extension. The helper refuses non-image bytes
 (even when served as `image/png`), active or external SVG content and an SVG
@@ -99,12 +93,7 @@ the check fails or conversion is unavailable, use the failure placeholder.
 
 An occupied `<slug>_fig_<N>.*` slot is refused across extensions; existing
 attachments are never replaced, and a format change takes a new number, so no
-number carries extension twins. Renames enforce the same rule. Embed-shaped
-strings in frontmatter, comments, escaped text or code do not establish
-ownership. Every `--owner-note` operation, including a non-overwrite `place`
-and each rename phase, refuses a note whose only origin is a legacy scalar
-`source:`; migrate it first as in
-[reprocessing](duplicates-and-reprocessing.md#reprocessing-an-existing-note).
+number carries extension twins.
 
 ## Captions and embeds
 
@@ -115,8 +104,9 @@ image. Preserve its wording and links.
 
 A paragraph continuing the article's argument is body text, even directly below
 an image. Be especially careful with a hero image: a scene-setting or
-second-person opening is often the lede. When ambiguous, keep it as body prose
-and flag the decision; do not silently demote it into a caption.
+second-person opening is often the lede. When the saved markup's figcaption
+does not settle it, keep it as body prose and flag the decision; do not
+silently demote it into a caption.
 
 For a confirmed caption:
 
@@ -132,10 +122,8 @@ For a confirmed caption:
 *Figure 1. Mechanism of daraxonrasib binding to KRAS G12D.*
 ```
 
-This structural caption styling is an exception to preserving source emphasis
-in the body. Unlike a newly written paper-summary caption, a clipping caption
-retains the source's figure label. For recovered images with no source caption,
-use only the [audit's fallback chain](completeness-audit.md#recover-missing-images).
+A clipping caption keeps the source's figure label. For recovered images with
+no source caption, use only the [audit's fallback chain](completeness-audit.md#recover-missing-images).
 
 ## Failures and readability
 

@@ -11,11 +11,9 @@ scan and its verdicts are in [Select the captures](../SKILL.md#1-select-the-capt
 
 ## Reprocessing an existing note
 
-An eligible clipping's first current `sources:` item is a web URL, and the note
-is not a marked [research extract](../SKILL.md#1-select-the-captures-and-check-ownership). Read legacy
-`source:` only when `sources:` is absent; malformed or ambiguous current
-metadata cannot establish ownership through a stale value. A PDF origin belongs
-to `paper-summarize`.
+Only a note this skill owns under the
+[ownership rule](../SKILL.md#1-select-the-captures-and-check-ownership) is
+eligible.
 
 Naming a file already in `Articles/` for reprocessing authorizes that owned
 rewrite. Naming a raw capture that matches another note requires an explicit
@@ -31,9 +29,9 @@ restores missing attachments of a matching owned note from its raw (as under
 changed-slug handoff by [its procedure](#finish-a-pending-changed-slug-handoff).
 It reports, and does not restore, a missing attachment the raw cannot supply
 (an audit recovery, a converted GIF or a serialized SVG), and every missing
-attachment of a note whose only origin is a legacy `source:`: `place` refuses
-that note, and restoring attachments never migrates its origin; only
-[finishing a pending handoff](#finish-a-pending-changed-slug-handoff) does. It
+attachment of a note whose only origin is a legacy `source:` (`place` refuses
+that note); a resume migrates that origin only when finishing a pending
+handoff. It
 restores the old note's images in a pending handoff only as
 that procedure directs, because finalize may already have retired them. Every
 other match stays a
@@ -49,13 +47,12 @@ python3 '<plugin>/shared/scripts/publish_files.py' snapshot --vault '<vault>' \
 
 Once a changed slug is settled, record `'Articles/<new_slug>.md'` in the same
 file; it must record `absent`. These JSON records are the expected versions
-through publication and cleanup; never re-record them at commit time. The old
+through publication and cleanup. The old
 note is recorded afresh only after an approved rewrite before publication (a
 legacy-origin migration or a missing-attachment placeholder), before a
 [late slot-conflict](images.md#failures-and-readability) rewrite, or when
 finishing a pending handoff. The new note and its handoff file get fresh
-records right after step 4 creates them. Exclude this one note from its own
-dedup scan.
+records right after step 4 creates them.
 
 **Legacy origin.** Every `fetch_images.py` command that takes `--owner-note`
 refuses a note whose only origin is a legacy scalar `source:`. That includes a
@@ -105,7 +102,7 @@ exact attachment before step 4 of the
 [replacement](#publish-an-approved-replacement), after any legacy-origin
 migration. Either restore it with
 `fetch_images.py place` (old slug, `--owner-note` the old note), or first
-publish an approved same-slug rewrite of the old note that replaces that embed
+publish a same-slug rewrite of the old note that replaces that embed
 with the `<!-- missing attachment: … -->` placeholder, then record the old note
 afresh with `snapshot --replace` and re-read it. An `<old_slug>_fig*` file that
 the old note does not embed as a filename-only embed, or embeds under two case
@@ -121,13 +118,6 @@ Apply the [frontmatter rules](metadata-verification.md#frontmatter-for-the-polis
 to decide which fields regenerate and which preserve user state. In particular,
 an unknown or absent review state is not permission to supply `false`; report
 that state and any metadata conflicts as required there.
-
-Retain existing figure numbers. An unchanged slug leaves existing attachments
-alone; new images continue after the highest occupied number. A changed slug
-maps each existing attachment by replacing only the slug. `publish-note`
-refuses the old note's image blockers before publication (step 4), and
-`rename --phase prepare --dry-run` reviews the full plan after the new note is
-public (step 5). Nothing changes files the original note uses before then.
 
 ## Settle a slug before writing images
 
@@ -295,11 +285,10 @@ original note remains intact until successful publication.
 
    Repair refuses to run until prepare has published the new names. It
    recomputes prepare's dependency inventory over every visible Markdown note
-   outside the old owner, never editing either owner, including Wiki entries,
-   MOCs, `Reviews/` logs, `Inbox/` raws and notes under `Articles/` and
-   `Investments/`. A
-   note reached through a vault folder link is repaired like any other. A
-   dated `Investments/*-stock-research.md` or `*-market-research.md` record
+   outside the old owner, including Wiki entries, MOCs, `Reviews/` logs,
+   `Inbox/` raws and notes under `Articles/` and `Investments/`, and never
+   edits either owner. A note reached through a vault folder link is
+   repaired like any other. A dated `Investments/*-stock-research.md` or `*-market-research.md` record
    is immutable; repair reports it `blocked`. In each other dependent note it
    rewrites only the parsed wikilinks, embeds, Markdown inline and
    reference-style links, and HTML `src`/`href` values that resolve to the
@@ -393,11 +382,8 @@ original note remains intact until successful publication.
    Report a mixed state rather than hiding it.
 
 If the filesystem cannot provide safe publication, stop and report the refusal.
-Read back the published note and verify its embeds. Report note and attachment
-renames, each note the live repair marked `rewritten` with its old → new
-references, every remaining blocker with its reason and any `recovery` path,
-and the dependency re-probe result; do not modify unrelated notes or
-claim a failed rename completed.
+Add each remaining blocker's reason and the dependency re-probe result to the
+[report](../SKILL.md#7-report); never claim a failed rename completed.
 
 ### Finish a pending changed-slug handoff
 

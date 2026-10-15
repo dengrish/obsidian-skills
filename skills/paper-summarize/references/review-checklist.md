@@ -53,9 +53,8 @@ table image, and cite that page; a power of $e$ matches a printed exp, and
 $L$, $\log L(\theta)$ or a renamed index matches a printed non-norm $\ell$.
 
 For OCR or unavailable text search, use the [page-reading fallback](edge-cases.md#unreadable-text-and-helper-failures)
-and record that method explicitly. OCR misses are checked against page images;
-a corrected OCR token is not permission to change the original PDF. If neither
-text nor pages can establish a claim, it cannot remain in a published note.
+and record that method explicitly. If neither text nor pages can establish a
+claim, it cannot remain in a published note.
 
 ## Check meaning and balance
 
@@ -135,9 +134,10 @@ Walk the callout, headings, body and captions with their supporting pages open:
   final note uses that exact stem or, on an authorized rewrite, the existing
   owned note's recorded spelling. Citations target this PDF and lie within its
   physical page count.
-- [ ] Creation date follows the paper-note rule. A rewrite preserves the user's
-  review state and unrelated metadata; a strict-format conflict is reported with
-  the original retained, never solved by discarding properties.
+- [ ] Creation date follows [note format](note-format.md#frontmatter). A
+  rewrite preserves the user's review state and unrelated metadata; a
+  strict-format conflict is reported with the original retained, never solved
+  by discarding properties.
 - [ ] The description is factual, and the six headings alone tell this
   document's story in the selected mode without overclaiming. Sentence case
   preserves technical names such as `p53` and `mRNA`; generic labels or Title
@@ -149,10 +149,9 @@ Walk the callout, headings, body and captions with their supporting pages open:
   ([note format](note-format.md#body-content)). “Not stated” marks a relevant
   category with no disclosure; inapplicable labels are omitted, not filled with
   boilerplate.
-- [ ] Every embed is an inventoried file under this PDF's stem, or a split
-  book's chapter stem, and has been opened to confirm identity and
-  readability. A valid filename is not proof of the image contents; a wrong
-  crop this run wrote returns to [intake's figure
+- [ ] Every embed has been opened to confirm identity and readability; a valid
+  filename is not proof of the image contents. A wrong crop this run wrote
+  returns to [intake's figure
   preparation](../SKILL.md#prepare-the-figure-inventory), and a wrong
   pre-existing crop is skipped and reported. No duplicate composite/panel
   illustrates the same claim.
@@ -176,11 +175,10 @@ Always distinguish source verification from lint:
   reading established the claims without the finder.
 - `Verification: incomplete — <reason>; draft not published` when the source
   could not be checked. A slow or difficult paper is not a reason to skip it.
-- `Lint: clean`, or `Lint: N violations fixed; rerun clean`. If it could not run,
+- `Lint:` the final run's result, `clean` or `no violations; M advisories
+  reviewed`, preceded by `N violations fixed;` when there were any, and each
+  retained advisory exception with its clarity reason. If lint could not run,
   report `Lint: SKIPPED — <reason>; draft not published`.
-- When advisories remain, report `Lint: no violations; N advisories reviewed`
-  and identify each retained exception
-  with its clarity reason. Do not report an unreviewed advisory as clean lint.
 
 Only a source-verified draft with no lint violations and reviewed advisories
 reaches [guarded publication](../SKILL.md#6-publish-the-verified-linted-note).

@@ -27,14 +27,11 @@ Seek an accessible alternative when needed; do not bypass access controls or
 invent missing content.
 
 Track which source and section or page supports each claim, with its units,
-conditions and attribution. Write under the builder's
-[prose principles](../../wiki-build/references/writing.md#prose-principles)
-and [editorial reread](../../wiki-build/references/writing.md#editorial-reread).
-The reread's term audit treats a result that no accurate reason supports as a
-conflict between sources. To settle one here, standard references (the
-original paper, official documentation, a standard textbook or an
-encyclopedia article) count as evidence, inspected like any other source.
-Do not add unrelated claims to justify another source or image.
+conditions and attribution. To settle a conflict the builder's
+[term audit](../../wiki-build/references/writing.md#editorial-reread) raises,
+standard references (the original paper, official documentation, a standard
+textbook or an encyclopedia article) count as evidence, inspected like any
+other source. Do not add unrelated claims to justify another source or image.
 
 ## Reuse before acquiring
 
@@ -109,9 +106,6 @@ continue with already-cited sources or web evidence, never another copy of
 that document; when neither suffices, leave the topic pending with that route.
 An incomplete coverage result proves nothing: report it and do not cite that
 source.
-
-Report the search terms, the hits, and whether each was reused, rejected or
-unbuilt.
 
 ### Check ownership of a candidate source
 
@@ -190,15 +184,12 @@ revision, a documentation release) only when the entry relies on that
 version, even where the canonical link omits the version. Otherwise cite the
 unversioned address that serves the same content: cite
 `https://arxiv.org/abs/1707.06347v2` as `https://arxiv.org/abs/1707.06347`.
-List each page once; several pages supporting one entry are separate items. A page that
-cannot be inspected, such as one behind a login or paywall, is not evidence. A
-URL item is for a web page read as a page, such as a paper's abstract or HTML
-page; a document read as a PDF follows [New PDFs](#new-pdfs) and is cited by
-its filed name and page instead, and a document the vault already holds is
+List each page once; several pages supporting one entry are separate items.
+A URL item is for a web page read as a page, such as a paper's abstract or
+HTML page; a document read as a PDF follows [New PDFs](#new-pdfs) and is cited
+by its filed name and page instead, and a document the vault already holds is
 never cited by URL: reuse its file under the
 [local-source rules](#find-local-sources-first) or route it as they say.
-Report each cited URL, the date it was read and the sections that supported
-the entry.
 
 ## New PDFs
 
@@ -255,10 +246,12 @@ Otherwise choose a distinguishing name under pdf-organize's
 [collision rule](../../pdf-organize/SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
 (never `_2` for a book: choose other evidence or defer), confirm it with
 `python3 '<plugin>/shared/scripts/naming.py' canonical '<Name>.pdf'`, and
-repeat all four commands. Then list the PDF in
-`<scratch>/pdf-manifest-<n>.json` as
-`[{"path": "Sources/PDFs/<Name>.pdf", "draft": "<absolute scratch PDF path>"}]`
-and publish it:
+repeat all four commands.
+
+Once the name is free, list the PDF in `<scratch>/pdf-manifest-<n>.json` as
+`[{"path": "Sources/PDFs/<Name>.pdf", "draft": "<absolute scratch PDF path>"}]`,
+create each missing level of `Sources/PDFs/` with a plain `mkdir` (never
+`-p`, never over an occupant) and report it, then publish:
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
@@ -266,11 +259,8 @@ python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
     --manifest '<scratch>/pdf-manifest-<n>.json'
 ```
 
-It creates the file exclusively and reads it back. Create only the missing
-folders this write needs: when `Sources/` or `Sources/PDFs/` is absent, create
-each missing level with a plain `mkdir` (never `-p`, never over an occupant)
-immediately before `publish`, and report it. On a failed write, preserve and
-report any path it names. If no published entry ends up citing it, report
+It creates the file exclusively and reads it back. On a failed write, preserve
+and report any path it names. If no published entry ends up citing it, report
 `<source> was filed for <topic> but is not yet built: run wiki-build on it`.
 
 ## Citation gate and forms

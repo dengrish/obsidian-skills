@@ -16,14 +16,13 @@ format](note-format.md) owns the complete note shape and body modes.
 
 Only files that are already in `Sources/Images/` under this PDF's stem or, for a split book, under its chapters' stems. The selected PDF's `--json` scan row lists them in `figures[].file` and, for a split book, `chapter_figures[].file`; nothing else is embeddable.
 
-- **Never invent a filename.** An embed of a file that does not exist renders in Obsidian as ordinary text — no broken-image marker, no error, nothing. It is the most silently-wrong thing this skill can write.
-- **Extraction and crop repair happen only at [intake's figure preparation](../SKILL.md#prepare-the-figure-inventory).** Follow `figure-extract` there; do not implement another cropper or rename images inside this skill (`CONVENTIONS.md` §8b). An unresolved extraction gap is reported; carry the supported claim in prose.
+**Never invent a filename.** An embed of a file that does not exist renders in Obsidian as ordinary text — no broken-image marker, no error, nothing. It is the most silently-wrong thing this skill can write.
 
 **Labels are the caption's figure numbers, not sequence numbers.** `..._fig_3.png` is the paper's Figure 3. `..._fig_1-2.png` is Figure 1.2 with the dot written as a dash. `..._fig_S1.png` is a supplementary figure, and `Supplementary Figure 1`, `Suppl. Fig. 1`, `Supp. Figure 1` and `Extended Data Figure 1` all land there by default (`CONVENTIONS.md` §8b). A leftover `_fig_S<N>` of an Extended Data switch (`CONVENTIONS.md` §8b) is not a figure: never embed or count it, and report it for figure-extract.
 
 The scan identifies legacy panel files with `panel_of`; use the [panel rules](#panels) below when those files appear. A file with `variant_of` (for example `_fig_1-38-transparent`) is another rendering of its base figure, not another figure: inspect both, embed at most one, and count the pair as one figure when reporting unused figures. Files flagged `duplicate_label` both claim one figure number (for example `.png` beside `.webp`). Embed neither on a guess: ask which is current, or carry the claim in prose and report the ambiguity.
 
-The label selects the file but does not appear in the prose or caption. Place the picture beneath the claim it supports instead of introducing a second figure-number reference.
+The label selects the file; it never appears in the prose or caption.
 
 
 ## Which ones to carry
@@ -36,15 +35,13 @@ Take the figures that **are** the main contribution:
 - the comparison that makes the contribution mean something;
 - the one image a specialist would point to as the core observation.
 
-Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schematics, maps of where the samples came from, and any figure whose content is a table. **Unless the method is itself the contribution** — for a paper whose result is a technique, the schematic *is* the finding, and it goes in the third section under the claim about what the technique does. Even a method schematic belongs in that contribution section; `note_lint.py` calls this positional slot `Results` and checks its placement.
+Skip: study-flow and CONSORT diagrams, apparatus photographs, architecture schematics, maps of where the samples came from, and any figure whose content is a table. **Unless the method is itself the contribution** — for a paper whose result is a technique, the schematic *is* the finding, and it goes in the third section under the claim about what the technique does.
 
 **The tiebreak, when several look equally central**, is how often the body text
 refers to each one: use the `--cites` counts from
 [figure preparation](../SKILL.md#prepare-the-figure-inventory), which already
 used the crops' `--ed-prefix`. Each count includes the figure's own caption, so
 read the counts as a ranking, not a measurement.
-
-Use the counts only to break a tie between substantively relevant figures, not to replace reading them.
 
 **A supplementary figure can outrank a main one.** Papers routinely put the honest version of a result — the per-subject data, the sensitivity analysis, the failure cases — in the supplement. If that is the figure a reader needs, carry it and say in the caption that it is supplementary.
 
@@ -61,7 +58,7 @@ The shape, exactly:
 
 ```
 ![[Doe_GutMicrobiome_2025_fig_2.png]]
-*The two arms separated within a fortnight and stayed apart to week 8. Curves show time to first recurrence in 219 previously treated adults, transplant versus placebo, with numbers still at risk below each week.*
+*The two arms separated within a fortnight and stayed apart to week 8. Curves show time to first recurrence in 219 adults with at least two prior recurrences, transplant versus placebo, with numbers at risk below each week.*
 ```
 
 - A **bare wikilink embed** — Obsidian resolves it by basename anywhere in the vault, which is safe here because `pdf-organize` guarantees the stem is unique (`CONVENTIONS.md` §1a).
@@ -75,12 +72,12 @@ The shape, exactly:
 
 - **Fails:** *Kaplan–Meier curves for the two arms.* (says what it is, not what it shows)
 - **Fails:** *Survival.* (a label, not a caption)
-- **Fails:** *Figure 2 — The two arms separated inside the first fortnight…* (right message, but the number is banned — see below)
+- **Fails:** *Figure 2 — The two arms separated inside the first fortnight…* (right message, but the number is banned)
 - **Holds:** the example above leads with the difference and then identifies population, comparator and display.
 
 **The caption must stand alone.** A reader who scrolls the note reading only figures and captions should come away with the document's argument. That means the caption carries its own scope clause and key numbers, even where the paragraph above already has them.
 
-**The four claim rules apply inside a caption too** ([summary standards](summary-standards.md#the-four-claim-rules-in-full)). A caption is where a hedge most often goes missing, because captions are written last and read as neutral description. "Treatment worked" under a figure is the same overstatement it would be in a sentence.
+**[Summary standards](summary-standards.md) apply inside a caption too.** A caption is where a hedge most often goes missing, because captions are written last and read as neutral description. "Treatment worked" under a figure is the same overstatement it would be in a sentence.
 
 **Write it from the figure, not from the source's caption.** The published caption is written for someone who has read the surrounding document; it names panels and variables and assumes that context. Read what the figure actually shows, then say that. Where the published caption defines something the note needs — units, what an error bar is, what n is — take that and put it in the second sentence.
 
@@ -97,7 +94,7 @@ The extractor writes whole figures. Existing vaults can also contain legacy pane
 
 **Never both.** A composite and a panel of it under one claim is the same picture twice, and the panel is inside the plate directly above it.
 
-**Panels do not inflate the unused-figure count.** An unplaced panel is **not** an unused figure: placing the composite discharges every panel under it, placing any panel discharges the composite, and the report's "figures available but not used" count is over composites only. A paper whose 4 figures yielded 27 files has 4 exhibits, not 27.
+**Panels do not inflate the unused-figure count.** An unplaced panel is **not** an unused figure: placing the composite discharges every panel under it, placing any panel discharges the composite, and the report's unused-figure count is over whole figures only. A paper whose 4 figures yielded 27 files has 4 exhibits, not 27.
 
 
 ## When a needed figure is missing
@@ -105,7 +102,8 @@ The extractor writes whole figures. Existing vaults can also contain legacy pane
 If a needed figure is missing, or a crop this run extracted is wrong, return to
 [intake's figure preparation](../SKILL.md#prepare-the-figure-inventory) for
 that PDF. Skip a wrong pre-existing crop and report it; never overwrite, adopt
-or repair it here. Do not make a new extraction path inside drafting. If repair
+or repair it here. Never implement another cropper or rename images here
+(`CONVENTIONS.md` §8b). If repair
 fails, report the extractor's actual diagnostics: a missing caption or output,
 a scan limitation or a failed extraction.
 
@@ -113,8 +111,7 @@ A table is not an extracted figure: rebuild it below when it carries the result.
 For another unavailable exhibit, carry only the claim supported by the source
 in prose with its page citation. Never substitute a nearby figure, invent an
 embed or point at the missing figure's number. The report names the gap and any
-follow-up extraction needed. Publication still requires source verification and
-clean lint; missing media does not waive those gates.
+follow-up extraction needed.
 
 ## Rebuilt tables
 
@@ -139,10 +136,8 @@ The shape, exactly, and it mirrors the figure shape:
 - **No table number**, in the caption or anywhere else.
 - **Values verbatim.** Copy the digits the source printed. Do not round, rescale, convert units, or recompute an average from the subset of rows kept: a recomputed number is one the [verification finder](review-checklist.md#locate-the-claims) cannot locate, and the source never made that claim. Bolding the row or cell the claim is about is fine — that is emphasis, not arithmetic.
 - **Trim to what the claim needs, and say so in the caption.** A 28-row benchmark may be reduced to four group averages only if the source already prints those averages; never compute them for the note. A 12-column table may retain the three columns compared. Disclose each omission so the subset cannot look complete: *"Four reported task-group averages; individual subtask rows are omitted."* An untrimmed table needs no "as published" or completeness statement.
-- **Keep the paper's orientation** — systems in columns if that is how the paper set them, rows if not. Transposing is a silent re-presentation, and two tables under two orientations read as two notes.
-- **Four tables at most, one or two preferred.** Across both forms, aim for no
-  more than about five total figure embeds plus rebuilt tables. That combined
-  number is a brevity target rather than permission to exceed either form's
-  separate four-item cap; use fewer whenever prose carries the result clearly.
+- **Keep the paper's orientation** — systems in columns if that is how the paper set them, rows if not. Transposing is a silent re-presentation.
+- **Four tables at most, one or two preferred**, and about five figure embeds
+  plus tables in all; use fewer whenever prose carries the result.
 
 **Where a trim would change the reading, do not trim — cut the table.** If the rows a trim would drop are the ones that disagree with the claim, keeping only the agreeing rows is not a summary, and no caption clause repairs it. Report the comparison in prose with both directions named, or rebuild the whole thing.

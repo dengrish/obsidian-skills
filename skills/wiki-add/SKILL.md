@@ -33,7 +33,7 @@ off the queued ones.
   shared suggestion-log maintenance at closeout; a preview/no-apply request
   authorizes none of those vault writes.
 - **Never** run wiki-lint or a whole-Wiki `lint_entry.py` pass (builder step
-  7.9); §4's private review tree is not one.
+  7.9); step 4's private review tree is not one.
 
 **Setup:** below, `<builder>` is the sibling `<plugin>/skills/wiki-build`.
 Read [runtime setup](../../shared/RUNTIME.md) once per task. Treat topic
@@ -66,22 +66,19 @@ tasks come back in `report_only` and are never processed. Nested lines are
 context for resolving their parent item, never extra requests; each nested
 open task is also reported, so the report can ask the user to move it to the
 top level. An unindented line reported as continuing the request above is
-part of that request's text. Report each `report_only` line with its line
-and reason. An
-`unclosed frontmatter, fence or comment` report is a valid result: process the
-returned items, but report the queue as incompletely scanned, never as empty
-or fully processed. A missing, crashing or malformed helper result blocks
+part of that request's text. An `unclosed frontmatter, fence or comment`
+report is a valid result: process the returned items, but report the queue as
+incompletely scanned, never as empty or fully processed. A missing, crashing or malformed helper result blocks
 dependent writes; never replace the parser or guarded completion with a
 text-search checkbox edit.
 
 **Order.** Take pending items one at a time, in file or request order, through
-steps 2–5 and their §6 completion; report and close out at the end. An entry
-published earlier in this run counts as existing for later items. When the
-builder's atomicity test splits a request into distinct topics, such as
+steps 2–5 and their step-6 completion; report and close out at the end. An
+entry published earlier in this run counts as existing for later items. When
+the builder's atomicity test splits a request into distinct topics, such as
 `Precision and recall`, each part is a request; `Bias–variance trade-off`
-stays one. An item with unclear intent stays pending: continue with the other
-items and ask about it in the report. A topic whose request names a vault
-source document belongs to wiki-build: report that route and do not build it.
+stays one. A topic whose request names a vault source document belongs to
+wiki-build: report that route and do not build it.
 
 ## 2. Resolve identity without edits
 
@@ -89,9 +86,7 @@ Turn each request line into a canonical title and same-entity alias forms
 under the builder's [title](../wiki-build/references/writing.md#title) and
 [alias](../wiki-build/references/writing.md#aliases) rules. A trailing
 parenthesized acronym of the preceding name is the same entity's other form,
-never a disambiguator; the title rule picks which form is the title
-(`Direct preference optimization` with alias `dpo`, but `GAN`: only the
-builder's listed acronyms override a full form with textbook usage). A
+never a disambiguator; the title rule picks which form is the title. A
 parenthesized field such as `(ML)` is a disambiguation hint, never an alias.
 
 Write the title, each alias form and the other pending candidates' titles to
@@ -160,7 +155,7 @@ matches that request's `absent` record.
    [special titles](../wiki-build/references/special-titles.md) and
    [tag calibration](../wiki-build/references/calibration.md) references when
    their [reading-plan](../wiki-build/SKILL.md#what-to-read-and-when) triggers
-   apply. A missing discipline (`Wiki/<discipline>.md`) takes the builder's
+   apply. A requested discipline (`Wiki/<discipline>.md`) takes the builder's
    [root form](../wiki-build/references/writing.md#tags).
 2. **Read the neighbors.** Before drafting, read the entries that link to or
    mention the topic, and its nearest siblings: the draft links an
@@ -192,9 +187,10 @@ matches that request's `absent` record.
    [the source-reference contract](../../shared/CONVENTIONS.md#7-source-references);
    never create a note just to cite it. Link under
    [conventions §9](../../shared/CONVENTIONS.md#wiki-add--inside-new-requested-entries-only)
-   and the builder's relevance and display rules: only to existing entries,
-   including ones this run already published; a requested entry published
-   later stays plain text. Never backfill existing notes or create
+   and the builder's
+   [wikilink rules](../wiki-build/references/writing.md#3-wikilinks-and-naming):
+   only to existing entries, including ones this run already published; a
+   requested entry published later stays plain text. Never backfill existing notes or create
    prerequisite topics: a prerequisite with no entry is glossed in one clause
    on first use. It is a missing-entry candidate for closeout when it deserves
    its own entry under the builder's
@@ -216,7 +212,7 @@ matches that request's `absent` record.
    Omit `--images` when the image folder is absent. Repair only the new draft. Skip the missed-entity audit (sub-step 5 sets
    missing-entry candidates), merges, the ownership handoff and the orphan
    audit's create-the-entry branch.
-   Existing notes are read-only context: only the neighbor's side of an
+   Existing notes are read-only context: the neighbor's side of an
    overlap or conflict becomes a note-content proposal for closeout (a copy
    the new entry should own, or a neighbor claim the research contradicts),
    and step 7's report-only findings on existing entries in the overlay block
@@ -240,17 +236,15 @@ python3 '<plugin>/shared/scripts/publish_files.py' verify --vault '<vault>' \
 ```
 
 A newly arrived same-entity owner makes the item an existing-topic outcome
-(leave the draft unpublished); any other new occupant or alias owner means
-rebuilding the draft and taking it back through §4 sub-steps 4–6 (with the
-next numbered files and review tree when its slug changes), or leaving the
-item pending, without changing the occupant. A preview/no-apply run stops
-here and reports the reviewed draft.
+(leave the draft unpublished); any other new occupant, alias owner or vault
+copy of a cited URL means rebuilding the draft and taking it back through
+step 4's sub-steps 4–6 (with the next numbered files and review tree when
+its slug changes), or leaving the item pending, without changing the
+occupant. A preview/no-apply run stops here and reports the reviewed draft.
 
-**Publish (builder step 7.8).** A PDF this run acquired, and any figures
-figure-extract wrote for it, were already filed under
-[New PDFs](references/research.md#new-pdfs). Rerun `review_tree.py` if the
-draft changed since its last run, then publish the Wiki entry, adding
-`--create-dir Wiki` only when Wiki is absent:
+**Publish (builder step 7.8).** Rerun `review_tree.py` if the draft changed
+since its last run, then publish the Wiki entry, adding `--create-dir Wiki`
+only when Wiki is absent:
 
 ```bash
 python3 '<plugin>/shared/scripts/publish_files.py' publish --vault '<vault>' \
@@ -269,7 +263,7 @@ entry back as its reviewed draft. Lint only this entry:
 python3 '<builder>/scripts/lint_entry.py' '<vault>/Wiki/<slug>.md'
 ```
 
-Each finding must be one §4's review resolved under the
+Each finding must be one the step-4 review resolved under the
 [lint dispositions](../wiki-build/references/review.md#lint-dispositions).
 Then rerun the step-2 probes with the same `candidates.json`: this entry must
 be the only owner of its title and alias forms, and every other match one the
@@ -296,7 +290,7 @@ entry quality, so decide those first. Check off a multi-topic line only when
 every part was created or exists (pass one as `--entry` and name the others
 in the report). After each successful completion, rescan to the next numbered
 snapshot and take from it the next pending item not yet attempted. After a
-stale-snapshot rejection, reread and match the still-pending request; never
+stale-snapshot rejection, rescan and match the still-pending request; never
 replay an old ID against changed queue text. If an entry was published but
 checkpointing failed, retain it and report that state.
 
@@ -317,7 +311,8 @@ about it. Do not describe a preview as applied. Report:
   folders, and figure and image decisions;
 - recovery paths of a partial publication or failed PDF filing, and an entry
   published without its checkpoint;
-- the scan's `report_only` lines, and a queue scanned incompletely;
+- the scan's `report_only` lines with their line and reason, and a queue
+  scanned incompletely;
 - plain-text mentions of later entries, missing-entry candidates, and
   validation with review-only
   [lint dispositions](../wiki-build/references/review.md#lint-dispositions).
@@ -329,6 +324,6 @@ existing entries — run it to connect and file them.*
 At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
 `Reviews/wiki-add-suggestions.md`, the logs of producers whose outputs this run
 consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`, which
-receives §4 note-content proposals and missing-entry candidates (as
+receives step-4 note-content proposals and missing-entry candidates (as
 `[missing-<slug>] Missing entry: <Title>`) for wiki-lint's next ordinary run
 to work through; search it for open items naming an entry this run created.

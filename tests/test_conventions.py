@@ -6242,7 +6242,9 @@ SELFTEST_MIN_CASES = {
     # 2026-10-10 (knowledge 1.30.0): an external SVG DOCTYPE and an http(s)
     # hyperlink are inert, a javascript: hyperlink is refused, and an
     # unpadded base64 data: URI decodes.
-    "skills/clipping-clean/scripts/fetch_images.py": 694,
+    # 2026-10-14 (knowledge 1.36.0): an occupied-slot refusal points at the
+    # late slot-conflict placeholder, never at another figure number.
+    "skills/clipping-clean/scripts/fetch_images.py": 695,
     "skills/clipping-clean/scripts/lottie_to_gif.py": 42,
     # 2026-10-06 (knowledge 1.22.0): --title drops modal verbs and "not".
     # 2026-10-06 (knowledge 1.22.0): an all-capitals CAN stays an acronym, and
@@ -6475,7 +6477,9 @@ SELFTEST_MIN_CASES = {
     # context.
     # 2026-10-11 (knowledge 1.32.0): after a blank line, a line indented less
     # than the item's content is reported, never filed as its context.
-    "skills/wiki-add/scripts/backlog.py": 66,
+    # 2026-10-14 (knowledge 1.36.0): visible text after a comment that opens
+    # a line is reported or kept as context, never dropped.
+    "skills/wiki-add/scripts/backlog.py": 67,
     # 2026-10-06 (knowledge 1.22.0): plain notes, issues text and a repeated
     # candidate title.
     # 2026-10-06 (knowledge 1.22.0): a frontmatter only the Flashcards
@@ -7669,10 +7673,15 @@ def check_equation_policy(rep, conv):
          "silent-unread-math gap the 2026-08-20 review closed"),
         (eq_path, eq, r"Include an equation only when it makes the concept easier to understand",
          "equation policy no longer gates mathematics on explanatory value"),
-        (eq_path, eq, r"A useful standard equation may be added even when the source supplies none",
+        # 2026-10-14 (knowledge 1.36.0): a useful standard equation for a
+        # calculation the sources teach is added, not merely permitted.
+        (eq_path, eq, r"A useful standard equation is added even when the source supplies none",
          "equation policy incorrectly makes source typesetting a prerequisite"),
-        (qc_path, qc, r"simple verbal rule such as hard voting can remain prose-only",
-         "wiki-lint no longer guards against forcing formalism onto simple concepts"),
+        # 2026-10-14 (knowledge 1.36.0): equations §1's explanatory-value
+        # test alone keeps a simple rule such as hard voting in prose;
+        # wiki-lint applies it rather than a looser restatement of its own.
+        (eq_path, eq, r"Hard voting needs \"choose the class with the most votes\", not an argmax",
+         "equation policy no longer guards against forcing formalism onto simple concepts"),
         (eq_path, eq, r"equation_coverage\.py",
          "equations.md no longer identifies the conservative shared "
          "equation-coverage candidate floor"),
@@ -7912,7 +7921,7 @@ def check_moc_placement(rep, conv):
 #: closeness-bar section (whitespace collapsed), per scan_vault.py
 #: CLOSENESS_BAR revision; see check_link_rules.
 CLOSENESS_BAR_TEXT = {
-    2: "d1259fc768b741be6f323dc269a9473096b3c056",
+    2: "68b722e0f975bf3b29f19ec58c810d4786e2c656",
 }
 
 
@@ -7941,6 +7950,17 @@ def check_link_rules(rep, conv):
     else:
         rep.ok(check, "§6 qualifies parents and body links alike",
                rel(CONVENTIONS))
+    # 2026-10-14 (knowledge 1.36.0): every skill proves a PDF basename
+    # unique before writing a bare link or citation, whatever its provenance.
+    if not _phrase_re("a bare PDF link or citation must first confirm the "
+                      "basename resolves to exactly one file").search(conv):
+        rep.fail(check, "CONVENTIONS.md §1a no longer requires proving a PDF "
+                        "basename unique before writing a bare link or "
+                        "citation to it", rel(CONVENTIONS))
+    if _phrase_re("for a PDF of unknown provenance", re.I).search(conv):
+        rep.fail(check, "CONVENTIONS.md §1a again limits the basename "
+                        "uniqueness check to a PDF of unknown provenance",
+                 rel(CONVENTIONS))
     wb = os.path.join(SKILLS_DIR, "wiki-build", "references", "writing.md")
     try:
         wtext = read(wb)
@@ -8099,13 +8119,19 @@ def check_physical_page(rep, conv):
                  rel(CONVENTIONS))
     # 2026-10-09 (knowledge 1.27.0): "one form" means one representation of
     # a document, and its different physical pages may each be cited.
+    # 2026-10-14 (knowledge 1.36.0): several pages are not two
+    # representations; writers still cite the introducing page once.
     for phrase in ("is cited in one representation, never two",
-                   "Different physical pages of that representation may "
-                   "each be cited"):
+                   "Different physical pages of that representation do not "
+                   "count as two representations"):
         if not _phrase_re(phrase).search(conv):
             rep.fail(check, "CONVENTIONS.md §7 no longer states %r -- a "
                             "reader can take one citation form for one page "
                             "anchor" % phrase, rel(CONVENTIONS))
+    if _phrase_re("of that representation may each be cited").search(conv):
+        rep.fail(check, "CONVENTIONS.md §7 again invites citing every page "
+                        "used; an entry cites the introducing page once",
+                 rel(CONVENTIONS))
     stated = 0
     for skill, path, text in walk_skill_files():
         low = text
@@ -9258,8 +9284,6 @@ def check_refactor_protocol(rep, _conv):
         (refactors, "when a [user issue](../SKILL.md#user-issues) asks for "
          "its entry", "no longer creates the missing entry a user issue "
          "asks for"),
-        (CONVENTIONS, "a user issue (§2d) asking for the concept's entry",
-         "§9 no longer counts a user issue as a missing-entry trigger"),
     )
     stale = (
         ("(three uses, or an open note-content item)",
@@ -9441,13 +9465,12 @@ def check_dangler_hand_off(rep, _conv):
         (skill, "A link Task 2 left for a missing root the run did not "
          "create is dropped now", "no longer drops a held root link at "
          "closeout"),
-        (CONVENTIONS, "Task 1b first glosses each dangling term whose "
-         "concept has no entry and whose sentence needs its meaning",
-         "no longer glosses only a dangling term whose concept has no "
-         "entry before wiki-lint drops the link"),
-        (CONVENTIONS, "a link to a missing discipline root that Task 3 "
-         "creates is held for that root", "no longer holds a link to a "
-         "missing root for Task 3"),
+        # 2026-10-14 (knowledge 1.36.0): §6 links the dangler protocol
+        # instead of restating it.
+        (CONVENTIONS, "[dangler protocol](../skills/wiki-lint/references/"
+         "link-hygiene.md#dangling-links-target-missing) settles each "
+         "dangling link", "§6 no longer hands dangling links to wiki-lint's "
+         "dangler protocol"),
         # 2026-10-07 (knowledge 1.24.0): a dangler whose concept already has
         # an entry is retargeted to it, never glossed and dropped.
         (refactors, "gets no entry and no gloss; Task 2 retargets its links "
@@ -9456,9 +9479,6 @@ def check_dangler_hand_off(rep, _conv):
         (hygiene, "a target whose concept already has one entry is matched "
          "to it", "no longer points a dangler at the existing entry for its "
          "concept"),
-        (CONVENTIONS, "points a dangler whose concept already has an entry "
-         "at that entry", "no longer retargets a dangler to the existing "
-         "entry for its concept"),
     )
     stale = (
         ("A same-entity owner means the term needs a link",
@@ -9496,8 +9516,9 @@ def check_missing_entry_sources(rep, _conv):
     refactors = os.path.join(refs, "refactors.md")
     readme = os.path.join(ROOT, "README.md")
     pins = (
-        (refactors, "Task 1b creates a missing entry only for a concept that "
-         "a vault document the entries using the term already cite teaches",
+        (refactors, "Task 1b creates a missing entry only for a concept "
+         "taught by a vault document that the entries using the term already "
+         "cite",
          "no longer limits a missing entry to a vault document the using "
          "entries already cite"),
         (refactors, "including one no cited document teaches, gets no entry",
@@ -9507,34 +9528,38 @@ def check_missing_entry_sources(rep, _conv):
          "no longer keeps the 5(h) definition in the using entries of a "
          "term that gets no entry"),
         (refactors, "never research the term on the web or in a vault "
-         "document no entry cites", "no longer forbids researching a "
-         "missing entry"),
+         "document the using entries do not cite", "no longer forbids "
+         "researching a missing entry"),
         (os.path.join(lint_dir, "SKILL.md"), "**Missing entries, only from "
-         "vault documents already cited", "Task 1b step 5 no longer limits "
-         "a missing entry to a cited vault document"),
+         "vault documents the using entries cite", "Task 1b step 5 no longer "
+         "limits a missing entry to a cited vault document"),
         (os.path.join(refs, "backlogs.md"), "such as a term no cited "
          "document teaches", "the run report no longer lists a term no "
          "cited document teaches as a missing-entry candidate"),
-        (CONVENTIONS, "wiki-lint never researches a missing entry on the "
-         "web or in an uncited document", "§9 no longer forbids researching "
-         "a missing entry"),
+        (CONVENTIONS, "the entries using the term already cite, never from "
+         "web research", "§9 no longer forbids researching a missing entry"),
         # 2026-10-11 (knowledge 1.32.0): the entry is drafted from that
         # document alone; consolidation may still carry moved citations.
-        (CONVENTIONS, "is drafted from only that document, cited at the "
-         "page that teaches the term", "§9 no longer drafts a missing entry "
-         "from its teaching document alone"),
+        (CONVENTIONS, "wiki-lint drafts the entry only from a vault document",
+         "§9 no longer drafts a missing entry from its teaching document "
+         "alone"),
+        (refactors, "Cite that teaching document at the page that teaches "
+         "the term", "no longer cites a missing entry's teaching document "
+         "at the page that teaches the term"),
         # 2026-10-10 (knowledge 1.31.0): a cited URL page is a document too
         # (§7), so only a cited vault document may teach a missing entry.
-        (CONVENTIONS, "tests on a vault document the entries using",
+        (CONVENTIONS, "only from a vault document the entries using the term",
          "§9 no longer limits a missing entry's source to a vault document, "
          "so a cited URL page could teach one"),
         # 2026-10-11 (knowledge 1.32.0): that document is an exception to
         # the uncited-source blocker, so no second blocker catches it.
         (CONVENTIONS, "nor, for a missing entry it asks for, a vault document "
-         "an entry using its term cites), any other source for that missing "
-         "entry", "§2d no longer "
+         "an entry using its term cites;", "§2d no longer "
          "applies the missing-entry source test to a user issue, so it "
          "blocks an entry another using entry's vault document teaches"),
+        (CONVENTIONS, "needs any other source for a missing entry it asks "
+         "for", "§2d no longer blocks a missing entry asked for from any "
+         "other source"),
         (CONVENTIONS, "wiki-lint's missing entries never take this route",
          "the research route no longer excludes wiki-lint's missing entries"),
         (readme, "never from research", "the root README no longer states "
@@ -9756,8 +9781,11 @@ WRITING_RULE_PINS = (
         "can be explained simply",
         "This rule orders displays, not the opener: the plain-words idea "
         "precedes the general form",
-        "A comparison of two costs gives the practical takeaway and one "
-        "sentence of intuition",
+        "State a complexity, iteration bound or cost comparison by its "
+        "practical takeaway",
+        # 2026-10-14 (knowledge 1.36.0): a complexity's one-sentence reason
+        # falls back to a sound standard intuition when the source gives none.
+        "from the source's intuition, else a sound standard one",
         "state the takeaway and omit the bound",
         "give a derivation only when it fits in one or two sentences",
         "a ratio or average the opening sentence already defines in words "
@@ -9819,7 +9847,7 @@ WRITING_RULE_PINS = (
         # 2026-10-11 (knowledge 1.34.0): any edit gets the whole-note reread.
         "After any deletion, move, insertion or rewrite, reread the whole "
         "note against its pre-edit text",
-        "wiki-lint's Task 1b does this once per changed entry",
+        "wiki-lint does this once per changed entry",
         "Nothing may point at a deleted passage",
         "name, relationship, direction, number, unit, count, scope or "
         "preference",
@@ -9952,7 +9980,7 @@ WRITING_RULE_PINS = (
     (("wiki-add", "SKILL.md"), (
         # 2026-10-10 (knowledge 1.30.0): wiki-add takes the builder's root
         # form, whose writing.md pins above guard it, instead of a copy.
-        "A missing discipline (`Wiki/<discipline>.md`) takes the builder's",
+        "A requested discipline (`Wiki/<discipline>.md`) takes the builder's",
     )),
     (("wiki-add", "references", "research.md"), (
         "Take every claim the entry makes from the sources it cites; beyond "
@@ -10079,6 +10107,16 @@ WRITING_RULE_PINS = (
     )),
     (("wiki-lint", "references", "qc-items.md"), (
         "such as a library's default tolerance",
+        # 2026-10-14 (knowledge 1.36.0): Task 1b keeps one of a composite and
+        # its own panel, and settles a cross-domain display label from the
+        # cited source before rewording it.
+        "| `item12/panel-composite` | Task 1b keeps the one embed "
+        "[media](../../wiki-build/references/media.md#images) allows and "
+        "removes the other with its caption. |",
+        "Task 1b adds the word's italic introduction to the target when its "
+        "cited source gives the target that name, and otherwise rewords the "
+        "label to a claimed form",
+        "a cross-domain label, or one naming another entity, goes to Task 1b",
     )),
     # A note thin only because its chapter is unbuilt waits for that build.
     (("wiki-lint", "references", "backlogs.md"), (
@@ -10247,8 +10285,9 @@ WRITING_RULE_PINS = (
         # 2026-10-11 (knowledge 1.34.0): the rest of a sentence any removal
         # trims stays unless it only repeats or fills, a caveat's removal
         # included, and the equation rules decide what they protect.
-        "a removal keeps the rest of its sentence unless it only repeats or "
-        "fills, and one that would overload is split",
+        "a removal keeps the rest of its sentence unless that rest only "
+        "repeats or fills, and an insertion that would overload its sentence "
+        "gets its own sentence",
         "What the equation rules require changes only under them",
         # 2026-10-10 (knowledge 1.30.0): only a sentence the user's request
         # or `issues:` names as the user's own edit escapes trimming.
@@ -10316,7 +10355,7 @@ WRITING_RULE_PINS = (
         "named as the [scope check]",
         "Keep each fact before its first use, and reread the passage",
         "lint_entry.py' --baseline '<copy>'",
-        "where `<copy>` is step 1's snapshot",
+        "where `<copy>` is step 1's private copy",
         "The correction must introduce no new lint finding beyond the "
         "cut-join rows the deletion list checked",
     )),
@@ -10329,8 +10368,9 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "hierarchy.md"), (
         "it never adds a branch or method no cited page gives",
     )),
-    (("wiki-lint", "references", "backlogs.md"), (
-        "a discipline root's [overview page]",
+    (("wiki-lint", "SKILL.md"), (
+        "discipline root's [form](references/hierarchy.md#establish-"
+        "discipline-roots), which follows its own source rule",
     )),
     (("wiki-lint", "references", "flashcards.md"), (
         "or new information 5(h) excludes",
@@ -10344,19 +10384,20 @@ WRITING_RULE_PINS = (
         "members",
     )),
     (("wiki-lint", "SKILL.md"), (
-        "The run keeps a private copy of each entry under `<scratch>` before "
+        "keep a private copy of each entry under `<scratch>` before "
         "its first edit",
-        "once on the whole of every entry the run changed, against that copy",
+        "once on the whole of every entry the run changed, against its "
+        "first private copy",
         "a fix this final reread makes gets only its passage reread",
-        "row absent from Step 0's scan is this run's own copy",
+        "row absent from `wiki-scan-1.json` is this run's own copy",
         # 2026-10-11 (knowledge 1.34.0): a run that skips Task 1b still gets
         # the final reread and its cut-join candidates.
-        "Once Task 1 and any Task 1b repairs are done, it runs the builder's",
+        "Once Task 1 and any Task 1b repairs are done, run the builder's",
         # 2026-10-10 (knowledge 1.30.0): an entry the post-refresh
         # consolidation changes is reread whole; a row pairing an entry with
         # its own retitle destination is no own copy.
         "when that changes an entry, rereads that whole entry against its "
-        "copy and re-runs Step 0 once more",
+        "copy and refreshes the scan once more",
         "unless it pairs an entry with its own retitle destination",
         "property with its justification, or exhibit into its owner",
     )),
@@ -10479,7 +10520,7 @@ WRITING_RULE_PINS = (
         "Nest at most one level",
         "never a bold lead word",
         "inside a numbered step, that explanation stays in the step",
-        "An algorithm or procedure the document introduces may take a "
+        "An algorithm or procedure the document introduces may put its "
         "[numbered list](#prose-and-key-messages)",
         "[per-item bullets or a numbered list](#prose-and-key-messages)",
         # 2026-10-07 (knowledge 1.23.0): shared notation precedes the list.
@@ -10817,8 +10858,8 @@ WRITING_RULE_PINS = (
         # is made to the text they remove, so which copy of a repeat stays
         # never depends on a reason a repair just added.
         "For an edit to an existing entry, run `lint_entry.py --baseline "
-        "'<pre-edit copy>' '<draft>'` (in wiki-build, the published entry) "
-        "and review the cut-join candidates it flags "
+        "'<pre-edit copy>' '<draft>'` (in wiki-build, the pre-edit copy is "
+        "the published entry) and review the cut-join candidates it flags "
         "(`9-cut-join-candidate`)",
         "The reread finds these named prose defects anywhere in the note, "
         "each a concrete defect, never a wording preference, and settles "
@@ -10953,8 +10994,18 @@ WRITING_RULE_PINS = (
         "an item given a role it lacks, an example the definition excludes",
         # Only a note the run may edit loses the caveat; a wiki-build
         # neighbor follows conflict handling.
-        "deleting in each note the run may edit a caveat [principle "
+        "deleting, in each note the run may edit, a caveat [principle "
         "3](#prose-principles) leaves out",
+        # 2026-10-14 (knowledge 1.36.0): a build keeps a source's caveat only
+        # when its omission would mislead and never adds one, as wiki-lint
+        # never does; a pre-existing mixed entry loses another subject's
+        # material only to the ownership handoff (merge.md still removes
+        # carried-over hedges).
+        "Keep a caveat only when leaving it out would mislead",
+        "beyond the [ownership "
+        "handoff](review.md#overlapownership-audit-this-runs-entries-and-"
+        "their-relevant-neighbors), wiki-build never moves or deletes its "
+        "other subjects' material",
         "whose *generally* covers only a brief dip",
         "precision rises\"), never a word principle 3 keeps",
         # A scope is named only outside the entry's ordinary case, so the
@@ -11132,6 +11183,24 @@ WRITING_RULE_PINS = (
         "each relation the passage states between two claims",
         "restore a dropped relation",
     )),
+    # 2026-10-14 (knowledge 1.36.0): publication waits for the rerun review
+    # tree to meet step 7.1's stop condition; a named entity whose entry
+    # already cites a named source is re-merged; a merge adds the aliases its
+    # merged body introduces; a merge rewrites the primary card, never the
+    # first, into the definition card; each unsettled conflict is its own
+    # suggestion-log item.
+    (("wiki-build", "SKILL.md"), (
+        "publish only when it meets step 7.1's stop condition",
+        "a named entity whose entry already cites a named source is still "
+        "re-merged, as under rerun intent",
+    )),
+    (("wiki-build", "references", "merge.md"), (
+        "aliases the new source or the merged body introduces",
+        "When the primary card is not a definition card, rewrite it into one",
+        "logging the conflict in `Reviews/wiki-notes-suggestions.md` as its "
+        "own item",
+        "as its own item, naming both passages and the evidence",
+    )),
     # 2026-10-14 (knowledge 1.35.1): a late link's row lists every unsettled
     # earlier mention; Task 2 judges them all, moves the link to the first
     # eligible one and leaves it only when none is, and the closeout then
@@ -11149,10 +11218,32 @@ WRITING_RULE_PINS = (
         "and so does a new sentence holding an occurrence that row would list",
         "Of the `problems` findings, the ledger suppresses only "
         "`item10/late-link`.",
+        # 2026-10-14 (knowledge 1.36.0): the closeout settles only the hub
+        # items and late links the run judged, never an out-of-scope row.
         "each candidate this run rejected, the `settle_key` of every "
-        "`hub_footer` item it kept, and every `settle_keys` record of each "
-        "`late_links` row whose link it left in place",
+        "`hub_footer` item it judged and kept, and every `settle_keys` "
+        "record of each `late_links` row it judged and left in place",
         "`backfill`, `hub_footer`, `late_link` and each record's fields",
+        # 2026-10-14 (knowledge 1.36.0): a ledger missing one of its lists
+        # reads it as empty, as the scanner does; a thin footer always gains
+        # the neighbors that clear the bar.
+        "a missing list is empty, and any other shape is malformed",
+        "A footer with fewer than three links gains the neighbors",
+    )),
+    # 2026-10-14 (knowledge 1.36.0): a requested split keeps its original
+    # entry too, and retiring it needs an explicit request; an apply run
+    # creates an absent image folder and a missing discipline root.
+    (("wiki-lint", "references", "refactors.md"), (
+        "A split keeps the original entry as the owner",
+        "Retiring the original outright is a deletion and runs only on an "
+        "[explicit request](../SKILL.md#explicit-requests)",
+    )),
+    (("wiki-lint", "SKILL.md"), (
+        "a split keeps the original entry",
+        "An apply-capable run creates a genuinely absent",
+    )),
+    (("wiki-lint", "references", "hierarchy.md"), (
+        "When a root is missing, Task 3 creates it as a narrow prerequisite",
     )),
     (("wiki-lint", "references", "scanner.md"), (
         "A `backfill_candidates` or `late_links` row whose `settle_key` "
@@ -11173,6 +11264,12 @@ WRITING_RULE_PINS = (
 WRITING_RULE_RETIRED = (
     "Default to no example",
     "narrowing its own wording",
+    # 2026-10-14 (knowledge 1.36.0): every split keeps its original entry, a
+    # thin footer gains its qualifying neighbors, and Task 3 creates a
+    # missing root.
+    "ordinary run's split keeps",
+    "may gain neighbors",
+    "Task 3 may create that narrow prerequisite",
     "wiki-build on an unprocessed source",
     "overview-chapter-only citation",
     # 2026-10-06 (knowledge 1.22.0): an uncited vault source is unbuilt and
@@ -11462,6 +11559,19 @@ WRITING_RULE_RETIRED = (
     "the `settle_key` of every `late_links` row whose link it left in place",
     "A late link whose `settle_key` matches a record has neither",
     "and so does a new sentence that mentions the target",
+    # 2026-10-14 (knowledge 1.36.0): a useful standard equation is added, not
+    # optional, and each unsettled conflict is its own suggestion-log item.
+    "standard equation may be added even when",
+    "under the `[conflicting-claims]` item",
+    # 2026-10-14 (knowledge 1.36.0): a build never adds a caveat, and the
+    # leave-out check has no untestable other-textbook counterfactual;
+    # principle 6 names the source recaps and scaffolding it removes.
+    "Add a caveat only when",
+    "had the subject come from another textbook",
+    # 2026-10-14 (knowledge 1.36.0): Task 1b settles a composite beside its
+    # own panel, and a cross-domain display label, instead of either waiting.
+    "Preserve a composite and lowercase-suffixed panel",
+    "reword the label to a claimed form, or let Task 1b",
 )
 
 
@@ -11799,8 +11909,9 @@ PDF_ORGANIZE_PINS = (
         # never adopted.
         "it stays that tool's file and is never adopted",
         # 2026-10-08 (knowledge 1.24.0): nor is a deck's `_fig_1`.
-        "unrecorded crop, even a `_fig_1`, beside one with an uppercase "
-        "panel letter",
+        "when any unrecorded crop of the stem has an uppercase panel letter",
+        "every unrecorded crop of that stem, even a `_fig_1`, is another "
+        "tool's",
         # 2026-10-10 (knowledge 1.30.0): an explicit --overwrite keeps a
         # pending S crop, as the batch does.
         "an S crop listed in `.figure-ed-pending.txt` is refused until its "
@@ -11954,7 +12065,10 @@ CLIPPING_METADATA_PINS = (
         "to whoever argues it",
         "the interviewee or quoted subject",
         "From whichever value is used, remove a trailing separator",
-        "A difference that is only a site-name suffix is not a correction.",
+        # 2026-10-14 (knowledge 1.36.0): a retained raw title loses the
+        # suffix too, and its removal is not reported as a correction.
+        "Strip that suffix from a retained raw title too; removing it is not "
+        "a reported correction.",
     )),
     (("clipping-clean", "references", "review-checklist.md"), (
         "to whoever argues it",

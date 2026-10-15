@@ -14350,9 +14350,10 @@ def main(argv=None):
     ap.add_argument("--settled", metavar="FILE",
                     help="the settled-decisions ledger "
                          "(<vault>/Reviews/.wiki-lint-settled.json): omit the "
-                         "backfill_candidates occurrences and hub_footer "
-                         "items it records (a settled occurrence yields to "
-                         "the target's next sentence); a missing file is an "
+                         "backfill_candidates and late_links occurrences and "
+                         "hub_footer items it records (a settled occurrence "
+                         "yields to the target's next sentence); a missing "
+                         "file is an "
                          "empty ledger, one judged under an older closeness "
                          "bar settles nothing (settled.outdated), and an "
                          "unreadable or malformed one suppresses nothing and "

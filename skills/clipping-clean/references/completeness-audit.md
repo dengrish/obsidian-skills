@@ -14,17 +14,14 @@ the user's captured prose with fetched text.
 ## Fetch and declare the audit scope
 
 Reuse the page markup saved during [metadata verification](metadata-verification.md#verify-against-the-captured-url).
-Refetch it only when missing, with a permitted static fetch using a browser
-User-Agent, following [host tool rules](../../../shared/RUNTIME.md#use-the-hosts-available-tools).
-The one file serves both jobs: `source` inventories its media and
-`source --text` lists its visible text.
+Refetch it the same way only when missing. The one file serves both jobs:
+`source` inventories its media and `source --text` lists its visible text.
 
 Upgrade once to an available browser when the static page is suspiciously
-sparse: roughly fewer than 15 paragraphs, under 10 KB of article body after
-head/scripts/styles, no images despite a figure-rich subject, or far less prose
-than the page's declared word count. A Cloudflare challenge is a failed fetch,
-not an article. These are signals to inspect further, not proof of missing
-content.
+sparse: markedly less article text than the capture or the page's declared
+word count, or no images despite a figure-rich subject. A Cloudflare challenge
+is a failed fetch, not an article. These are signals to inspect further, not
+proof of missing content.
 
 Follow the browser tool's permitted inspection surface. Use rendered DOM or
 visible content if that is what it provides; do not assume it permits raw HTML
@@ -81,8 +78,8 @@ not assumed.
 
 Match against the draft before recovering anything. Fresh-run source URLs are
 strong evidence. On a reprocess the old embeds have no URLs: use caption/alt,
-position and counts, and recover only a figure confidently absent. If existing
-embeds already equal or exceed the page's figure count, recover nothing. When
+position and counts, recover only a figure confidently absent, and recover
+nothing when the old embeds already equal or exceed the page's figure count. When
 uncertain, assume an existing counterpart rather than duplicating a figure.
 Keep an existing converted-GIF embed and still-valid placeholder at its location.
 
@@ -102,8 +99,8 @@ this audit must not recover the poster first and mark the animation done.
 For a confidently missing figure with a downloadable image URL and no Lottie,
 stage it into a new child directory through
 [the guarded image pipeline](images.md#download-and-publish). Continue after
-the highest occupied figure number; filenames identify assets, not display
-order. Insert the embed beside its source caption or neighboring sentence. If
+the highest `<slug>_fig_<N>` number in the draft or `Sources/Images/`; filenames
+identify assets, not display order. Insert the embed beside its source caption or neighboring sentence. If
 placement is uncertain, use the most-related paragraph and report it as
 approximate.
 
@@ -130,7 +127,7 @@ a missing caption.
 Keep equivalent existing `<!-- source has … -->` placeholders on reprocessing;
 do not duplicate or silently remove them.
 
-- An **inert, self-contained inline SVG** may be serialized as a standalone
+- An **inert, self-contained inline SVG** is serialized as a standalone
   SVG document to a unique scratch file outside the vault. Its root `<svg>`
   must carry `xmlns="http://www.w3.org/2000/svg"`, plus
   `xmlns:xlink="http://www.w3.org/1999/xlink"` when it uses `xlink:`
@@ -143,12 +140,12 @@ do not duplicate or silently remove them.
   on external CSS/fonts/JavaScript or definitions outside the serialized SVG,
   do not save a broken diagram. The helper also refuses active SVG content,
   external resource references, DTD internal subsets and a root without the
-  SVG namespace before publication. Leave
+  SVG namespace before publication. If it is not saved, leave
   `<!-- source has an inline SVG diagram here, not capturable as a static file;
-  view at <source> -->` and report it.
+  view at <capture URL> -->` and report it.
 - For video, canvas and interactive widgets without a faithful asset, leave
   `<!-- source has an animation/interactive figure here, not captured; view at
-  <source> -->` with a short description. Never pass a random still off as the
+  <capture URL> -->` with a short description. Never pass a random still off as the
   original media. Lottie already follows its own chain; do not add a second
   placeholder for it here.
 
@@ -166,8 +163,8 @@ runs with a heading or opening words and a location the user can find. Do not
 auto-insert large blocks: the capture may intentionally omit them.
 
 Ignore removed navigation/ads/share chrome and small extraction artifacts.
-Respect known intentional omissions from a prior review; mention them at most
-briefly instead of repeatedly treating them as new gaps. Update only the scratch
+Respect omissions the user has called intentional; mention them at most
+briefly instead of treating them as new gaps. Update only the scratch
 draft: recovered embeds/placeholders and any confirmed hidden-text removal. Then
 run the [review checklist](review-checklist.md) on the completed result. Report
 all recoveries, gaps and uncertain placements.

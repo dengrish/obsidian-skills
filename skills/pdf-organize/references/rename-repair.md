@@ -32,8 +32,7 @@ Resolve each blocker at its cause, then re-plan:
 - **Investment records.** Records in vault-root `Investments/` stay
   unchanged, including when reached through a linked-folder alias. If one has
   a live dependency that the rename would change, the helper blocks the
-  entire rename: keep the source's current name and location. The rename's
-  reference repair never makes these historical records editable. Unrelated
+  entire rename: keep the source's current name and location. Unrelated
   records and literal examples do not block.
 - **Source note.** An `Articles/` note follows only when its origin
   identifies this PDF:
@@ -66,9 +65,10 @@ Resolve each blocker at its cause, then re-plan:
     stem of the PDF it is named after, such as a chapter of a split book
     (the blocker prints one command per PDF), with
     `python3 '<plugin>/skills/figure-extract/scripts/batch_extract.py' --src '<current PDF>' --out '<vault>/Sources/Images' --adopt-legacy '<current stem>:<label>'`
-    (repeat the option per figure; the PDF needs no `--allow-unorganized`
-    for this), then re-plan the rename. Under the target stem it is this
-    PDF's own file, handled as
+    (repeat the option per figure, in the parser-checked environment from
+    [setup](../SKILL.md#setup-and-scope); the PDF needs no
+    `--allow-unorganized`), then re-plan the rename. Under the target stem it
+    is this PDF's own file, handled as
     [SKILL step 3](../SKILL.md#3-check-references-and-prepare-the-complete-rename-plan)
     says.
   - *Another tool's crop of this PDF* matches a figure on these pages, as
@@ -111,8 +111,8 @@ Resolve each blocker at its cause, then re-plan:
   `Sources/PDFs/download.pdf`. When the file changes folder (filing, or a
   renamed chapter folder), that path becomes its new vault path. Any other
   name in plain text, such as a download's bare `main.pdf`, can be ordinary
-  prose: it is not a reference and stays unchanged. All other issue text stays unchanged. Never
-  replace this with whole-body substring matching.
+  prose: it is not a reference and stays unchanged. Never replace this with
+  whole-body substring matching.
 - **Canvas boards.** In an Obsidian `.canvas` board, a file card or a group
   background holds the file's full vault path, so it follows every move,
   including filing under the same basename. A text card is Markdown and is
