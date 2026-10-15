@@ -86,12 +86,6 @@ make rollback look complete. If the filesystem cannot provide the required
 link or move semantics, leave the staged draft and stop with the distinct
 capability error above.
 
-Repository Python helpers use `shared/scripts/atomic_move.py` for exclusive
-moves, new-file publication, expected-file replacement, and conditional
-removal. Its `set_private_mode` helper preserves staged permissions through the
-open file descriptor. Reuse those primitives instead of maintaining a
-workflow-local copy.
-
 ### Call the shared Python API
 
 `atomic_move.py` is a Python import library, not a publication command. Its
@@ -127,8 +121,9 @@ expected = snapshot(target) if os.path.lexists(target) else None
 ```
 
 Once the reviewed bytes have been copied to `staged` in a unique private
-`stage_dir` on the target filesystem, flushed, and given `expected.mode` for a
-replacement, publish with the matching programmatic call:
+`stage_dir` on the target filesystem, flushed, and given `expected.mode` with
+`atomic_move.set_private_mode` for a replacement, publish with the matching
+programmatic call:
 
 ```python
 if expected is None:

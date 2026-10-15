@@ -273,9 +273,8 @@ def parse_queue(data):
             marker_line[1] + marker_line[2]))
         if hidden and not began_in_comment and not visible[0].strip():
             # A comment that opens the line starts its own block, which ends
-            # the item's text.
+            # the item's text; visible text after it is still reported.
             lazy = False
-            continue
         if hidden and not clean.strip():
             continue
         # Otherwise text beside a comment is plain text: never a request,
@@ -752,6 +751,14 @@ def run_self_tests():
                   b"- [ ] A\n<!-- x\ny --> trailing\nProse\n")],
               [([("A", [])], [(3, stray_text)]),
                ([("A", [])], [(3, stray_text), (4, stray_text)])])
+        check("visible text after a line-opening comment is never dropped",
+              [shape(queue) for queue in (
+                  b"- [ ] A\n%% later %% Particle filter\n",
+                  b"<!-- c --> - [ ] Topic\n",
+                  b"- [ ] A\n  %% c %% nested\n")],
+              [([("A", [])], [(2, stray_text)]),
+               ([], [(1, stray_text)]),
+               ([("A", ["   nested"])], [])])
 
         unclosed = "unclosed frontmatter, fence or comment"
         comment_items, comment_reports, _ = parse_queue(b"- [ ] A\n<!--\n- [ ] B\n- [ ] C\n")

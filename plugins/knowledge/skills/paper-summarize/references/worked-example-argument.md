@@ -13,7 +13,7 @@ reading](edge-cases.md#reading-non-empirical-arguments) own the rules. The
 
 ## The input
 
-The user asks to "summarize chapter 3 of this book" and names
+The user names
 `Sources/PDFs/Moreau_UrbanCommons_2023/Moreau_UrbanCommons_2023_03_WhyFencesFail.pdf`,
 12 physical pages; naming selects a chapter that a folder sweep would skip.
 Page 1 gives the title and the byline, Hélène Moreau. The footer prints
@@ -23,7 +23,7 @@ By physical page:
 - **2:** the familiar claim that an open resource is overused unless it is sold or publicly run.
 - **3:** the thesis, *nested commons governance*: user-written rules inside municipal law, which can overrule them.
 - **4:** 14 published case studies from nine European cities, chosen by Moreau with no stated search rule; each served at most a few hundred users.
-- **6–8:** three features shared by the rules that lasted; rules lasted over five years in 11 of the 14 cases, by the case authors' accounts; each lapsed case lacked a feature.
+- **6–8:** three features shared by the rules that lasted (users wrote the rules, users monitored use, sanctions rose from a warning to exclusion); rules lasted over five years in 11 of the 14 cases, by the case authors' accounts; each lapsed case lacked a feature.
 - **9:** the open question of a city-wide resource, such as a bike-share fleet.
 - **10:** advice to city officials to lease rule-making rights for fixed, revocable terms rather than sell or run the resource.
 - **11–12:** a table of the cases and their published sources.

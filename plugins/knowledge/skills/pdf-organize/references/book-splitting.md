@@ -22,10 +22,6 @@ authoritative. Never re-abbreviate or extend an existing set: the helper
 refuses any split while a chapter of this book exists, and an existing set is
 not permission to overwrite or delete it.
 
-Keep chapters in the shared source tree so recursive consumers find them;
-`figure-extract`, `paper-summarize`, and `wiki-build` own how they treat a
-book beside its chapters.
-
 ## 2. Find and verify chapter boundaries
 
 Use two passes, preferring a table of contents:
@@ -120,8 +116,7 @@ identity. Use `organize.py canonical` or the
 rather than recreating the naming grammar.
 
 Each resulting filename becomes the exact source stem for figures and note
-references. It must be unique both in its destination and throughout the
-vault, including case variants; the split helper checks this before writing.
+references.
 
 ## 4. Build the complete chapter list and split
 
@@ -216,6 +211,3 @@ checking. This skill does not extract or delete figures.
 - **Already a single chapter or an existing split:** leave the chapter set
   intact; a chapter may be renamed through the normal guard within its
   `<book core>_NN_Name` form, not split again.
-- **Parser check fails (including missing or outdated `pypdf`):** follow
-  runtime dependency guidance, and run neither `pages` nor `split` in that
-  interpreter. The stdlib rename helper remains available.

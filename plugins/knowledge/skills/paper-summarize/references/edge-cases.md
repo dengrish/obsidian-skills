@@ -92,16 +92,12 @@ familiar-looking word as proof.
 | 5 | Unreadable/corrupt or zero-page PDF; stop this note and report the need for a readable source. |
 | 6 | Encrypted/password-protected PDF; decrypt to a unique scratch directory outside the vault, preserve the organized source unchanged, and rerun the reader on the scratch copy. If a figure tool will use that copy, retain the source's exact basename inside the unique directory. |
 
-Do not place an OCR copy beside the original in `Sources/PDFs/`: that creates a
-second source identity with no matching figures. Keep the original PDF
-unchanged. Verify OCR digits against page images; a failed needle may be OCR
-damage, not proof that the source lacks the claim. Correct from the page or cut
-an unsupported claim, never soften it into vague prose.
+Verify OCR digits against page images; a failed needle may be OCR damage, not
+proof that the source lacks the claim. Correct from the page or cut an
+unsupported claim, never soften it into vague prose.
 
-If source-page reading is impossible, leave the summary unpublished. If only the
-finder is unavailable but the pages are readable, record direct page
-verification explicitly. Lint remains a separate required gate; its absence is
-not waived by a readable PDF or an available checklist.
+If only the finder is unavailable but the pages are readable, record direct
+page verification explicitly.
 
 ## Byline and duplicate-document cases
 
@@ -112,26 +108,20 @@ in the finding's scope, not an invented byline.
 
 Two different stems can contain the same paper: the scan checks stem identity,
 not content. If reading reveals matching title/results, summarize one,
-preferring the filed canonical PDF that already has figures or a note; skip the
-other and report both filenames. Do not create two summaries merely because
-both scans said `new`, and do not delete either PDF. Organization of source
-files belongs to `pdf-organize`; a suffix used for distinct papers must not be
-treated as proof these contents are distinct.
+preferring a filed canonical PDF that already has figures or a note and
+breaking a tie by path order; skip the other and report both filenames. Do not
+create two summaries merely because both scans said `new`, and do not delete
+either PDF. A `_2`-style disambiguator does not prove the contents differ.
 
 ## External PDFs
 
-A PDF outside the vault is usable only as a readable copy, such as a decrypted
-scratch copy, of the one vault PDF with its basename. The scan checks only the
-name, so confirm the same document: identical bytes, a matching page count and
-first-page text, or the user's word. Otherwise stop and report both paths.
-
-When no vault PDF has its basename,
-[intake](../SKILL.md#1-select-and-inventory-the-work) owns the Inbox copy rule;
-the external original stays in place.
+The scan checks only an external PDF's name, so confirm it is the same document
+as the vault PDF with its basename: identical bytes, a matching page count and
+first-page text, or the user's word.
 
 ## Folders kept outside the PDF tree
 
 For selected folders deliberately kept outside `Sources/PDFs/`, repeat the
 folder scan with `--src '<selected folder>'`, the same notes/images paths and
-any naming exception. When the tree is absent for that reason, scan only those
-inputs. Combine their rows with the tree's by PDF path.
+any deliberate `--allow-unorganized`. When the tree is absent for that reason,
+scan only those inputs. Combine their rows with the tree's by PDF path.

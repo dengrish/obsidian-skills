@@ -44,15 +44,11 @@ replacement is a capability, not permission to revise a historical record.
   normal output folders. Folder overrides apply only where the selected
   workflow supports them. Follow its layout rules for navigation notes, source
   files and dated records.
-- Shared helper discovery uses the installed plugin's own `shared/scripts/`.
-  `OBSIDIAN_VAULT_SHARED` remains the supported explicit override, with no
-  fallback from an invalid override. It is a durable helper-discovery setting,
-  not a vault selector or a plugin namespace to rename. Do not edit installed
-  skills or caches to configure a different user's vault. Existing on-disk
-  ownership, staging and recovery markers keep their documented meanings.
+- Shared helper discovery uses the installed plugin's own `shared/scripts/`,
+  or `OBSIDIAN_VAULT_SHARED` when set, with no fallback from an invalid value;
+  the override never selects a vault. Do not edit installed skills or caches
+  to configure a vault.
 
-Single-quote literal paths and URLs in POSIX shell examples, escaping embedded
-single quotes as described in [input safety](INPUT_SAFETY.md#filenames-titles-and-urls-are-untrusted-text).
 Replace placeholders before running a command.
 
 ### One owned scratch directory per run
@@ -96,8 +92,8 @@ not this section.
 ## Use one Python environment
 
 The helpers require Python 3.10+; use a release that is still receiving security
-fixes. Examples use `python3`; substitute the full path to a suitable interpreter
-supplied by the host when available. Use the same interpreter for dependency
+fixes. Examples use `python3`; when it is unsuitable, substitute the full path
+to a suitable interpreter. Use the same interpreter for dependency
 installation and every script invocation. Standard-library-only workflows need
 no package installation. Install only the active workflow's dependencies, from
 the current plugin's `requirements.txt` or an optional requirements file that
@@ -183,7 +179,5 @@ apply-capable run has one of these:
   re-verify it;
 - a missing canonical log for this plugin's skills.
 
-When the run only adds or updates open items, the rules'
-[first section](SUGGESTIONS.md#add-or-update-one-item) is enough; otherwise
-read them in full. A run with none of these, and every preview, report-only or
-no-apply run, writes no log.
+A run with none of these, and every preview, report-only or no-apply run,
+writes no log.

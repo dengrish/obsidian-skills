@@ -44,10 +44,8 @@ text is not an acceptable substitute. Detect the toolchain before installing:
 
 Create a fresh child directory under the active run's `<scratch>` for each
 conversion; `<figure-scratch>` below means that child's absolute path. Fetch and publication use
-`fetch_images.py`; the renderer writes only scratch files. It uses a fixed
-renderer-library URL but refuses animation-supplied network requests and
-JavaScript expressions. External image/font dependencies take the fallback,
-not an unguarded network fetch.
+`fetch_images.py`; the renderer writes only scratch files. An animation with
+expressions or external image/font assets takes the fallback.
 
 1. Fetch through the transport guards. `fetch` accepts only a Lottie JSON object
    or a dotLottie ZIP containing bounded animation JSON; an HTML response,
@@ -62,10 +60,8 @@ not an unguarded network fetch.
 
    Use the returned local `path`. A nonzero exit means the source could not be
    fetched; report its `error` and take the fallback.
-2. [Render the GIF](#render-the-gif) from that local source. Give each run a
-   new output pathname; the renderer creates it exclusively and refuses an
-   occupant left by another run. Inspect the output: a blank-image detector
-   cannot prove every label is correct.
+2. [Render the GIF](#render-the-gif) from that local source. Inspect the
+   output: a blank-image detector cannot prove every label is correct.
 3. Keep the verified GIF at its scratch path and put its planned
    `<slug>_fig_<N>.gif` embed in the reviewed draft. After
    [publication](../SKILL.md#6-publish-safely) has safely published that note,

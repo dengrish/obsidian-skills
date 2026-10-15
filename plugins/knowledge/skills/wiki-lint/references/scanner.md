@@ -12,24 +12,24 @@ The scanner is `scripts/scan_vault.py`, a read-only stdlib Python helper. Its JS
 python3 '<skill>/scripts/scan_vault.py' WIKI [--vault DIR] [--images DIR] [--settled FILE] [--out FILE] [--indent N] [--test]
 ```
 
-- `WIKI` — the vault's **`Wiki/` folder**, not the vault root and not one of its subfolders. The scanner walks entries only inside this folder, under the name its parent folder lists for it, so a case variant such as `wiki` on a case-folding host still reads as `Wiki`. Suggestion logs and unrelated root notes are never linted or listed inside a MOC.
+- `WIKI` — the vault's **`Wiki/` folder**, not the vault root and not one of its subfolders. The scanner walks entries only inside this folder, under the name its parent folder lists for it, so a case variant such as `wiki` on a case-folding host still reads as `Wiki`.
 - `--vault DIR` — the selected vault root for qualified entry links, parent resolution, backfill targets, and MOC diagnostics. `WIKI` must lie inside it. The two are compared by folder identity, so a symlink alias or another Unicode spelling of the vault is read in `WIKI`'s own spelling. Pass it even when a read-only run omits `--images`.
-- `--images DIR` — the vault's flat **`Sources/Images/`** folder. With it, every supported local image embed in every entry is checked to name a file that is really there, emitted as `item12/missing-image`. **Pass it on every apply-capable run.** For a preview/report-only run with a genuinely absent default image folder, omit this argument while retaining `--vault`, and report the image checks as unavailable under [Step 0](../SKILL.md#step-0--inventory-the-vault). Without the argument that check silently does not run, and an entry embedding a figure that is not on disk scans clean. Image identity is matched on the **basename**, case- and normalization-folded on every host, so a path-qualified `![[Sources/Images/X.png]]`, a unique case/normalization variant, a legacy nested file, and a direct file of a symlinked subfolder are not reported as missing; producers still write and references should use the exact on-disk spelling. An embed whose file sits elsewhere in a known vault (a root from `--vault`, `--images` or an `.obsidian` ancestor), such as a pasted image in `Attachments/`, renders in Obsidian. It is reported as `item12/image-outside-folder`, not as missing. A file found only under a dot-folder such as `.trash/` is still missing. Embeds shown inside fenced, indented, or inline code are skipped: listing syntax is not a rendered embed. See the `image_folder_findings` row for folder, collision, and unreadable-inventory findings.
-- `--settled FILE` — the [settled-decisions ledger](link-hygiene.md#settled-decisions), `<vault>/Reviews/.wiki-lint-settled.json` (a `{"version": 2, "bar": N, "backfill": [...], "hub_footer": [...], "late_link": [...]}` object of `settle_key` records). A `hub_footer` item whose `settle_keys` entry matches a ledger record is omitted (a hub target left with no item goes too). A `backfill_candidates` or `late_links` row whose `settle_key` matches one yields to the target's next eligible occurrence in another sentence of the entry (an earlier mention, for a late link), under that sentence's key; the row, with a late link's `item10/late-link` finding, is omitted only when every such occurrence is settled. A ledger whose `bar` is older than the scanner's closeness-bar revision, or that has none, settles nothing. `settled` reports the effect. A missing file is an empty ledger; an unreadable or malformed one suppresses nothing and is reported in `settled.error`. The scanner never writes the ledger.
-- `--out FILE` — write the JSON to `FILE` instead of stdout. Use this on any real vault with a filename unique to the run, since a fixed shared temporary name can supply another vault's results, and read the file in slices (filter by `item`, by slug, by key) rather than pulling the whole object into context.
+- `--images DIR` — the vault's flat **`Sources/Images/`** folder. With it, every `![[…]]` image embed is checked against the files there and elsewhere in a known vault (a root from `--vault`, `--images` or an `.obsidian` ancestor), as `item12/missing-image` or `item12/image-outside-folder`; without it that check silently does not run. **Pass it on every apply-capable run**; [Step 0](../SKILL.md#step-0--inventory-the-vault) says when a report-only run omits it. Embeds match by basename, case- and normalization-folded, so a path-qualified embed, a case variant, a legacy nested file or a direct file of a symlinked subfolder is not reported as missing; producers write the exact on-disk spelling. Embeds inside code are skipped. Folder-level findings are in [`image_folder_findings`](#image_folder_findings).
+- `--settled FILE` — the [settled-decisions ledger](link-hygiene.md#settled-decisions) of `settle_key` records, `<vault>/Reviews/.wiki-lint-settled.json`; a missing file is an empty ledger. A `backfill_candidates` or `late_links` row whose `settle_key` matches one yields to the target's next eligible occurrence in another sentence of the entry (for a late link, a later mention still before the link), under that sentence's key; the row, with a late link's `item10/late-link` finding, is omitted only when every such occurrence is settled. A matching [`hub_footer`](#hub_footer) item is omitted. A ledger whose `bar` is older than the scanner's closeness-bar revision, or that has none, settles nothing. `settled` reports the effect. The scanner never writes the ledger.
+- `--out FILE` — write the JSON to `FILE` instead of stdout, the run's own file as [Step 0](../SKILL.md#step-0--inventory-the-vault) names it.
 - `--indent N` — JSON indent, default `2`; `--indent 0` emits one compact line.
 - `--test` — runs the scanner's built-in self-test and exits; it is not a vault scan.
 - Exit status `2` with a usage error if `WIKI` is not a directory or looks like a vault root (it is the `--vault` directory, or holds `.obsidian/` or a `Wiki/` folder and is not the `Wiki` folder directly inside `--vault`), `WIKI` is not inside the selected vault or lies inside a folder named `Wiki` below it, or a supplied `--vault` or `--images` path is not a directory. Exit status `1` with an explicit error if a Wiki directory cannot be walked or its identity cannot be established: no worklists are produced and a requested output file is left untouched. That incomplete inventory cannot establish missing names, aliases, or complete MOC coverage. Individual unreadable leaf files instead remain known occupants and receive `item0`. Other failures are genuine crashes worth recording as execution friction in the [run report](backlogs.md#run-report). Any nonzero exit, missing helper, malformed JSON, or incomplete output blocks every dependent write; never reuse an earlier report as the failed scan's result.
 
-The body and section readers ignore hidden HTML/Obsidian comments and escaped wikilink examples while retaining source line positions. A commented template heading is not an extra Flashcards section, and a commented link neither triggers pruning nor suppresses a later visible backfill candidate. Delimiters inside code stay literal. This read-only body view does not alter the separate flashcard parser or its protected scheduling attachments.
+The body and section readers ignore hidden HTML/Obsidian comments and escaped wikilink examples while retaining source line positions. A commented template heading is not an extra Flashcards section, and a commented link neither triggers pruning nor suppresses a later visible backfill candidate. Delimiters inside code stay literal.
 
 An unreadable leaf or unsupported/ambiguous alias metadata can hide an alias owner even when every filename is known. The affected path's existing QC message says **“Alias inventory is incomplete”**. Local QC and direct-filename checks continue, but the scan suppresses dangling-link findings, alias-dependent canonicalization and duplicate/self-link removal, alias-addition candidates, and all backfill candidates. Bare parent targets requiring alias resolution remain `unparsed`. Preserve these unresolved links; safely correct the metadata/readability under its normal scope, then rescan to restore ordinary work. A readable note with definitively no frontmatter, or unrelated field-value QC with fully parsed aliases, does not create this uncertainty.
 
 Aliases and backfill surface ownership include every parsed physical file, even when several files share one portable basename. An alias belonging to any such file stays `item10/ambiguous`, and an alias parent stays `ambiguous`, until filename ownership is resolved. It cannot become a dangling-link removal, an arbitrary canonical rewrite, or a backfill destination. Unrelated aliases and qualified direct-file checks continue normally.
 
-The scanner **never writes to the vault.** It reads Markdown files recursively inside `Wiki/` and prints; the executing agent applies every authorized fix, MOC, `parents:` value, and log append in the same autonomous run. It follows a symlinked subfolder of `Wiki/`, but not one that points back into the `Wiki/` tree, whose real folder already holds those files.
+The scanner follows a symlinked subfolder of `Wiki/`, but not one that points back into the `Wiki/` tree, whose real folder already holds those files.
 
-It also lists the names of the vault's other Markdown notes, outside `Wiki/`, `MOCs/` and dot-folders. It follows a symlinked folder, as Obsidian indexes it, but not one that points back into the vault. Item 10 uses that list to tell a link to a real vault note from a dangler, and to keep a `Wiki/` path that a same-named note needs. Only a vault root from `--vault`, `--images` or an `.obsidian` ancestor is listed. With the parent-folder fallback, which may be any folder, no note is known. Then, or when a vault folder cannot be read, item 10 keeps every link's path and drops only an explicit `.md` suffix.
+It also lists the names of the vault's other Markdown notes, outside `Wiki/`, `MOCs/` and dot-folders. It follows a symlinked folder, as Obsidian indexes it, but not one that points back into the vault. Item 10 uses that list to tell a link to a real vault note from a dangler, and to keep a `Wiki/` path that a same-named note needs. Notes are listed only when the vault root comes from `--vault`, `--images` or an `.obsidian` ancestor; with the parent-folder fallback, which may be any folder, none is known. Then, or when a vault folder cannot be read, item 10 keeps every link's path and drops only an explicit `.md` suffix.
 
 ## Output contract
 
@@ -37,21 +37,21 @@ One JSON object with these keys.
 
 | key | type | contents |
 | --- | --- | --- |
-| `run_timestamp` | string | `YYYY-MM-DD HH:MM` at scan time. Use the initial value for suggestion-item `Seen` timestamps unless a coordinating run supplied its own; rescans and invoked skills do not count as additional runs. |
+| `run_timestamp` | string | `YYYY-MM-DD HH:MM` at scan time. |
 | `wiki_path` | string | absolute path actually scanned (confirms an overridden path took effect) |
 | `vault_root` | string | selected root used for qualified entry links, parent resolution, backfill targets, and canonical/legacy MOC diagnostics: explicit `--vault` when supplied; otherwise inferred from a supplied `Sources/Images` path, the nearest `.obsidian` ancestor, or the parent of `wiki_path`, in that order. The CLI reports it in `WIKI`'s own spelling when `--vault` names the same folder another way |
-| `inventory` | object | `entries` is the count and `slugs` is the sorted list of entry filenames without `.md`. The resolution model contributes at most one parsed owner for a portable basename collision; every parseable physical file still receives local QC. |
+| `inventory` | object | `entries` is the number of entry slugs and `slugs` their sorted list (filenames without `.md`); a basename several files share counts once, and each of those files still gets its own QC findings. |
 | `discipline_tags` | object | Observed discipline-enum slug → integer entry count, including `misc`. Counts include recognized values in an invalid mixed list alongside its `item8` finding; they do not establish valid misc membership. |
 | `off_enum_tags` | object | malformed / off-enum tag slug → the entries carrying it. Every one of these is an item-8 finding too; this key groups them by bad slug so a vault-wide pattern is visible at a glance. |
 | `untagged_entries` | array | Repair worklist of entries with a provably blank `tags:` key or empty list. These receive `item8` and have no implied misc membership. Inspect the note and assign its one specific discipline tag, or `"#misc"` alone, before placement. Missing, scalar/null, duplicate-key, malformed, or structurally unparseable frontmatter cannot establish a genuine blank and remains separately reported; unrelated field-value QC does not itself block this worklist. |
-| `problems` | array | `{"slug", "item", "message"}`, sorted. When several physical files share one portable basename, file-specific findings add the Wiki-relative `"path"` (including `.md`) so each body can be repaired without choosing by walk order; ordinary rows retain the historical three fields. The deterministic violations. See *Item keys* below. |
-| `problem_tally` | array | per item: `{"item", "entries", "pct_of_entries", "issues"}`, ranked by entries affected. `entries` counts affected files, including unreadable `item0` files; `pct_of_entries` is the one-decimal percentage of parsed entries touched, the recurrence evidence a wiki-build proposal cites. |
+| `problems` | array | `{"slug", "item", "message"}`, sorted: the deterministic violations (see *Item keys* below). When several physical files share one portable basename, file-specific findings add the Wiki-relative `"path"` (including `.md`) so each body can be repaired without choosing by walk order. |
+| `problem_tally` | array | per item: `{"item", "entries", "pct_of_entries", "issues"}`, ranked by entries affected. `entries` counts affected slugs, unreadable `item0` files included; `pct_of_entries` is the one-decimal percentage of parsed entries touched, the recurrence evidence a wiki-build proposal cites. |
 | `user_issues` | array | `{"slug", "form", "issues"}` for every entry whose `issues:` value is non-blank: the user's own requests for that entry ([details](#user_issues)). |
 | `collision_candidates` | array | `{"a", "b", "probe", "detail"}`: two slugs the item-5 probes matched, a merge candidate rather than a decision ([details](#collision_candidates)). |
 | `rename_candidates` | array | `{"slug", "new_slug", "inbound_links", "target_exists"}`: entries whose filename ≠ `slug(title)` ([details](#rename_candidates)). When several physical files share one portable basename, each row adds the Wiki-relative `"path"` (including `.md`), as `problems` does. |
 | `backfill_candidates` | array | `{"slug", "target", "surface", "bare_noun_alias", "organism_common_name", "discipline_root", "base_term", "line", "settle_key", "settle_keys"}`: a bare-text mention of another entry in `slug`'s prose, Task 2's backfill worklist ([details](#backfill_candidates)). |
 | `hub_footer` | array | `{"target", "footers", "entries", "settle_keys"}`: a heavily shared Related-footer target, report-only input to Task 2 ([details](#hub_footer)). |
-| `late_links` | array | `{"slug", "target", "surface", "line", "settle_key", "settle_keys"}`: each unsettled `item10/late-link` finding, with the surface, body line and [settled-ledger](link-hygiene.md#settled-decisions) record of its first unsettled earlier plain mention. `settle_keys` lists that record and those of the later unsettled ones, in text order, all of which the closeout stores when Task 2 leaves the link in place. `context` is the SHA-1 of the mention's sentence, with links read as their labels. |
+| `late_links` | array | `{"slug", "target", "surface", "line", "settle_key", "settle_keys"}`: each unsettled `item10/late-link` finding, with the surface, body line and [settled-ledger](link-hygiene.md#settled-decisions) record of its first unsettled earlier plain mention. `settle_keys` lists that record and those of the later unsettled ones, in text order, all of which the closeout stores when Task 2 leaves the link in place. |
 | `settled` | object | The `--settled` ledger's effect: `path` (the ledger read, `null` without `--settled`), `backfill_suppressed`, `hub_footer_suppressed` and `late_link_suppressed` (how many backfill occurrences, hub items and late-link mentions its records settled), `stale` (`{"backfill": [...], "hub_footer": [...], "late_link": [...]}`, the ledger records in its own shape that matched no current row, which the closeout drops; empty while alias ownership is incomplete, unless the ledger is outdated), `bar` (the revision of the closeness bar this scanner applies, which the closeout writes), `outdated` (`true` when the ledger was judged under an older bar or records none: it then settles nothing, and `stale` lists all its records) and `error` (`null`, or why an unreadable or malformed ledger suppressed nothing). Of the `problems` findings, the ledger suppresses only a settled `item10/late-link`. |
 | `card_rivals` | array | `{"slug", "cue", "rivals"}` for each entry whose primary cue has a rival: `cue` is line 1 of its first card that carries the primary answer, else of its first card, and `rivals` lists, sorted, the other entries with a cue that are its Related-footer targets or share one of its resolved parents other than a discipline root. A basename shared by several files takes no part. It is input to item 19's forward check, a floor rather than an exhaustive rival set, and authorizes no edit. |
 | `neighbors` | object | Slug → `{"links", "backlinks", "parents", "children", "siblings", "same_source"}`: sorted lists of the entries its body or Related footer links, the entries linking to it, its resolved parents and the entries naming it as a resolved parent (a discipline root takes no part), the entries sharing one of its resolved parents other than a discipline root, and the entries citing one of its source pages (the same PDF page or URL). Empty lists, and entries with none, are left out; a basename shared by several files takes no part. Input to item 9's comparison in a narrowed run or for an unplaced entry, and to a repair's neighbor reread; it authorizes no edit. |
@@ -92,24 +92,16 @@ pair only when the evidence verifies one entity under alternate names.
   `detail` is the shared identifier for `exact`, and the two colliding
   identifiers joined by `~` for every other probe. Unordered pairs are
   de-duplicated per probe.
-- The `word-order-singular` probe sorts the tokens *after* singularising
-  each one, which is what catches `weight-tying` against `tying-weights` — a
-  pair a raw token sort misses on `weights` ≠ `weight`.
-- The `stem-morphology` probe is create-time probe (f), using the shared
-  light-stem key, and is emitted only when an earlier, more specific probe has
-  not already covered the pair.
-- The `base-term` probe pairs an entry whose slug or alias, singular or
-  plural, equals a parenthetical title's base term with that qualified entry
-  (`outlier` beside `outlier-statistics`), again only when an earlier probe
-  has not covered the pair: a bare entry or alias that equals a qualified
-  entry's base term is a duplicate or naming candidate, unlike the
-  qualifier-versus-other-base pairs the omitted token-superset probe would
-  flood on.
-- wiki-build's create-time probe (g), token-superset, is deliberately **not**
-  mirrored in this vault-wide sweep — qualified-vs-base pairs
-  (`feature-machine-learning` beside `machine-learning`) are exactly what the
-  disambiguation rules produce on purpose, so a whole-vault pass would flood
-  on legitimate pairs; its absence from this probe list is by design.
+- The `word-order-singular` probe sorts the tokens after singularizing each
+  (`weight-tying` ~ `tying-weights`).
+- The `stem-morphology` probe uses the shared light-stem key, and the
+  `base-term` probe pairs an entry whose slug or alias, singular or plural,
+  equals a parenthetical title's base term with that qualified entry
+  (`outlier` beside `outlier-statistics`); each is emitted only when an
+  earlier probe has not covered the pair.
+- A qualified entry is never paired with the entry its qualifier names
+  (`feature-machine-learning` beside `machine-learning`): the disambiguation
+  rules produce such pairs on purpose.
 
 ### `rename_candidates`
 
@@ -171,8 +163,8 @@ size` is no mention of Training set. `item10/late-link` matches the same way.
   broader head `fly`. It is a locally valid display label, never an
   instruction to add a global alias, and still needs the ordinary
   identity/closeness judgment.
-- **`bare_noun_alias: true`** marks the other single lowercase aliases of
-  qualified destinations, which remain candidates; batch-review them under the
+- **`bare_noun_alias: true`** marks a one-word lowercase alias of a
+  qualified destination, which remains a candidate; batch-review them under the
   closeness bar rather than treating the flag as an automatic decision.
 - **`discipline_root: true`** marks a target that is a Wiki discipline root;
   the closeness bar accepts one only where the passage discusses the field
@@ -197,7 +189,8 @@ size` is no mention of Training set. `item10/late-link` matches the same way.
 - **`settle_key`** is `{"entry", "target", "surface", "context"}`, the
   [settled-ledger](link-hygiene.md#settled-decisions) record that settles a
   rejection, where `context` is the SHA-1 hex digest of the
-  whitespace-collapsed sentence holding the proposed occurrence; the
+  whitespace-collapsed sentence holding the proposed occurrence, its links
+  read as their labels; the
   [`--settled`](#cli) option says what a matching record does. Two mentions
   in one sentence are one occurrence.
 - **`settle_keys`** lists the row's own `settle_key`, then the key of each
@@ -240,7 +233,8 @@ authorize moving/renaming/deleting user files. The flat-folder and
 publish-only-finished-files rules come from `CONVENTIONS.md` §8.
 
 - One record per nested directory/file, recognizable temporary/staging
-  artifact, unreadable path, or portable basename collision. The `kind` is
+  artifact, unreadable path, dangling symlink or non-regular file
+  (`unusable-file`), or portable basename collision. The `kind` is
   `nested-directory`, `nested-file`, `temporary-artifact`, `unreadable`,
   `unusable-file`, or `portable-name-collision`.
 - A collision also carries `paths` with every case/NFC-equivalent owner;
@@ -291,8 +285,7 @@ QC findings do not exclude an otherwise valid misc tag.
 - `entries` counts entries in the scan. `placement_gaps` records
   missing discipline or misc coverage. `unresolved_parents` records `missing`, `ambiguous`,
   `unparsed`, `unreadable`, `legacy-moc`, or `unexpected-moc` targets.
-  An `unexpected-moc` target is a file the MOC inventory reports as
-  `unexpected-moc`. No MOC, canonical or legacy, can supply a conceptual parent. `parent_state_findings`
+  No MOC, canonical or legacy, can supply a conceptual parent. `parent_state_findings`
   reports `moc-parent` for forbidden MOC ancestors, `missing-discipline-root`
   for active groups without a valid Wiki root, `root-parent-mismatch` for roots
   with populated parents, and `misc-parent-mismatch` for misc members not
@@ -314,9 +307,7 @@ QC findings do not exclude an otherwise valid misc tag.
   (`MOCs/<group>-moc`), `entries`, and
   `state`: `missing`, `empty`, `readable`, or `unreadable`. Unreadable records
   carry `error`; unsafe directory or leaf ownership must not be mistaken for
-  a missing file ready for creation. The state describes the file, not an
-  owned region; recognized discipline and misc MOCs are generated as whole notes.
-  A valid legacy provenance footer is excluded when deciding whether the outline is
+  a missing file ready for creation. A valid legacy provenance footer is excluded when deciding whether the outline is
   `empty`, so a footer-only misc note remains an empty navigation list.
 - `legacy_moc_states` inventories recognized legacy vault-root MOCs
   (`<vault>/<discipline>-moc.md` for a specific discipline, never
@@ -358,12 +349,6 @@ QC findings do not exclude an otherwise valid misc tag.
   frontmatter are malformed outline lines. Task 3 regeneration emits only the
   outline and never adds or carries forward a footer
   ([hierarchy](hierarchy.md#build-or-maintain-the-moc-files)).
-- Every generated entry target uses its full extensionless vault-relative
-  path, such as `Wiki/methods/k-means`. Parents, including a discipline root
-  (`[[machine-learning]]`, `[[misc]]`), use the bare slug and keep the actual
-  Wiki path only when a basename is shared, as it is beside a previous-layout
-  MOC. The roots themselves have `[]`. File-state
-  inspection and tree parsing use the same guarded snapshot.
 - Exact union comparison requires every required group MOC to be readable/empty and
   structurally parseable, with a usable entry placement in each. An unsafe
   occurrence below an unresolved/wrong-discipline ancestor blocks
@@ -373,11 +358,7 @@ QC findings do not exclude an otherwise valid misc tag.
 The actions for these fields and the completion postcondition are in
 [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion).
 
-A real MOC filename owner outranks a Wiki alias with that spelling. Only a
-recognized, readable canonical MOC (discipline or misc) receives `item10/case` to
-qualify a bare target as `MOCs/<discipline>-moc` or `MOCs/misc-moc`, preserving its anchor and label.
-An unknown MOC name receives `item10/moc` on bare and explicit navigation
-links; preserve it without automatic qualification. When a real Wiki file
+A real MOC filename owner outranks a Wiki alias with that spelling. When a real Wiki file
 and MOC share the basename, including an unknown MOC name,
 `item10/ambiguous` preserves the bare link for ownership resolution. Valid
 MOC navigation in entry prose or Related is excluded from entry duplicate
@@ -385,7 +366,7 @@ and label checks.
 
 ### Item keys in `problems`
 
-`item1` … `item19` map to the builder's [numbered checklist](../../wiki-build/references/quality-checklist.md). There is no `item20`; existing `importance:` is preserved and not flagged. The complete repair/report routing is in [QC finding actions](qc-items.md#finding-actions), rather than a second action list here.
+`item1` … `item19` map to the builder's [numbered checklist](../../wiki-build/references/quality-checklist.md). Legacy `importance:` is preserved and not flagged. The complete repair/report routing is in [QC finding actions](qc-items.md#finding-actions), rather than a second action list here.
 
 | Key | Detected condition |
 | --- | --- |
@@ -397,9 +378,9 @@ and label checks.
 | `item2/read-type` | A recognizable boolean answer in another spelling, such as quoted `"false"`, `yes`/`no`, or `0`/`1`. |
 | `item2/read-unknown` | No recognizable boolean meaning, including arbitrary strings and lists. |
 | `item2/issues-missing` | No `issues:` key, the user's issue inbox. Every blank spelling is present and conforming. |
-| `item2/issues-malformed` | `issues:` is neither blank, one string nor a list of strings: a mapping, a nested list, a list item that is not one string, a literal or folded block scalar, a value that starts on the line after its key, a string or flow list continued on another line, a value followed by list items, a duplicate `issues:` key, a value or list item with an unquoted `#` at its start or after a space or tab (a YAML comment that cuts its text off), or text that is not valid one-line YAML, such as a plain `issues: a: b`, an unclosed quote or an unreadable flow list. The message names the shape. It is the only finding on the value's lines, which never become `item1` rows or an alias-inventory gap. |
+| `item2/issues-malformed` | `issues:` is neither blank, one string nor a list of strings: a mapping, a nested list, a list item that is not one string, a literal or folded block scalar, a scalar that starts on the line after its key, a string or flow list continued on another line, a value followed by list items, a duplicate `issues:` key, a value or list item with an unquoted `#` at its start or after a space or tab (a YAML comment that cuts its text off), or text that is not valid one-line YAML, such as a plain `issues: a: b`, an unclosed quote or an unreadable flow list. The message names the shape. It is the only finding on the value's lines, which never become `item1` rows or an alias-inventory gap. |
 | `item2/parents-null` | A present but valueless bare `parents:` key where the canonical empty list is `parents: []`. |
-| `item2/parents-form` | `parents:` is scalar, populated flow form, contains a noncanonical/non-wikilink item, or repeats a target. lint_entry reports it as `2-parents-form`, as it does a MOC parent (`moc-parent`) and a discipline root with parents (`root-parent-mismatch`), except a target spelled by case, alias or an unneeded `Wiki/` path, or one target repeated in two spellings: those need the vault inventory, so only the scan reports them. |
+| `item2/parents-form` | `parents:` is scalar, populated flow form, contains a noncanonical/non-wikilink item, or repeats a target. lint_entry reports it, a MOC parent and a discipline root with parents all as `2-parents-form`; a target spelled by case, alias or an unneeded `Wiki/` path, or one target repeated in two spellings, needs the vault inventory, so only the scan reports it. |
 | `item2/obsidian-key` | A valid Obsidian-owned appearance/publish key, not a schema violation. |
 | `item2/provenance` | Malformed, duplicate or misplaced legacy skill-provenance metadata. Missing footers are not defects or evidence of a particular producer. |
 | `item3` | A date is missing, not `YYYY-MM-DD`, or not a valid calendar date. |
@@ -410,7 +391,7 @@ and label checks.
 | `item6` | A code-identifier title, an API-surface failure string, fenced code, or backticked identifiers in a non-`Software` entry. |
 | `item7` | Description missing, longer than 110 characters, more than one conservatively detected sentence, non-plain-text, missing its initial capital or final period, or clearly starting with another subject ([details](#item7)). |
 | `item7/hedge-candidate` | Advisory: the description carries a frequency hedge, with the same words and exclusions as `item19/hedge-candidate`. A review candidate, never an order; lint_entry reports it as `7-hedge-candidate`. |
-| `item8` | Wiki tags are blank/empty, missing, malformed, off-enum, noncanonical, duplicated, name more than one discipline, or combine `#misc` with a specific discipline. The rule is exactly one quoted enum value in block form, with `#misc` as the sole fallback. Genuine blanks remain in `untagged_entries` for evidence-based repair, not automatic misc placement. |
+| `item8` | Wiki tags are blank/empty, malformed, off-enum, noncanonical, duplicated, name more than one discipline, or combine `#misc` with a specific discipline. The rule is exactly one quoted enum value in block form, with `#misc` as the sole fallback. Genuine blanks remain in `untagged_entries` for evidence-based repair, not automatic misc placement. |
 | `item9` | Blank space after frontmatter, a non-prose opener, non-ATX Setext heading, wrong-level or marked-up body heading, a body heading that repeats the title (delete it, never demote it), or a missing/malformed Person/Event opener date. Date spelling uses the complete grammar in the builder's rare-types guide, and a full `YYYY-MM-DD` must be a possible calendar date; factual correctness remains source-dependent. Sentence case and whether a heading earns a section are checked by the executing agent. |
 | `item9/imperative-link` | A narrow navigation-only cue (`see`, `see also`, `refer to`, `consult`, or `for details see`), with or without a colon, points directly at a wikilink in prose. Listings, figure/table material, and captions are excluded. Ordinary prose such as “to see how…” is not matched. |
 | `item9/duplicate-sentence` | A long sentence has the same normalized word sequence in more than one entry after link and presentation syntax are normalized. Listings, display equations, lead-ins ending in a colon, tables, captions, images, Related footers, and flashcards are excluded; inline code and inline math retain their identifiers and operators in the comparison key. Short/common sentences stay below the floor. This is an ownership candidate rather than proof that either copy is wrong; Task 1b consolidates it into the owner. Paraphrased copies stay invisible to it; the fuzzy [`overlap_candidates`](#output-contract) list covers them. |
@@ -446,7 +427,7 @@ and label checks.
 | `item12/duplicate-embed-candidate` | One local image file, matched by its folded basename, is embedded in two or more entries; each entry's row names the others. Embeds inside listings do not count. A review-only candidate: a family-level exhibit can belong to the family's entry. |
 | `item13` | A schema key, stray `---`, or standalone digit line in body prose after listings are masked. The one canonical Flashcards separator is excluded. |
 | `item14` | An exact source-meta blacklist phrase outside code/listings. `authors of` an existing entry, `the source of …`, finance's `book value`/`book-to-market`, and the technical compounds `source code/domain/language/sentence/sequence/node/vertex/distribution/task/signal/term` are excluded; bare words such as “later” and “above” do not trigger it. |
-| `item16` | Missing or mismatched opener emphasis, unenumerated bold, emphasis wrapped around wikilink/math/code, or a bare known bracket token/common literal extension in running prose. The opener is the first prose paragraph, so a leading heading or display block never takes the title slot. One exact exception permits outer bold around a pure inline-math title in its first opener slot (`**$R^{+}$**`); the same wrapping anywhere else remains a finding. The conservative code-shape scan excludes listings, math, link/embed syntax, tables, headings, captions, URLs, domains, decimals, and filename-attached extensions. |
+| `item16` | Missing or mismatched opener emphasis, unenumerated bold, emphasis wrapped around wikilink/math/code, or an unbackticked known bracket token or common file extension (`[CLS]`, `.csv`) in running prose. The opener is the first prose paragraph, so a leading heading or display block never takes the title slot. One exact exception permits outer bold around a pure inline-math title in its first opener slot (`**$\boldsymbol{R}^{+}$**`); the same wrapping anywhere else remains a finding. The conservative code-shape scan excludes listings, math, link/embed syntax, tables, headings, captions, URLs, domains, decimals, and filename-attached extensions. |
 | `item17/alias-candidate` | The shared builder/linter detector found an opener-bound or synonym-cued name for this subject that is absent from `aliases:` after mechanical equivalence exclusions. A word from the builder's cross-domain corpus is never a candidate. Same-entity and collision safety remain judgment. |
 | `item18` | Empty or own-slug alias, alias duplication/collision/noncanonical form, display-label markup, a body-prose label with no plausible target surface, or a body-prose label that exactly names a different existing canonical entry or unique alias. A Related-footer label is checked here only for markup; its wording is item 11's canonical-title check. A body label that is a cross-domain-corpus word the target introduces in italics (`[[label-machine-learning|target]]`) has a surface. Listings and parsed tables are masked. The competing-owner case is review-only; ambiguous ownership stays silent. |
 | `item18/partial-label` | A body-prose label made only of the target title's modifiers, omitting its head word (`[[greedy-algorithm|greedy]]`, `[[bias-variance-trade-off|bias/variance]]`). An inflected or derived head, an alias, and a term the target defines in italics pass; the Related footer is item 11's canonical-title check instead. |
@@ -462,10 +443,7 @@ A case variant, alias, ambiguous owner, or unparsed file is not a genuinely miss
 
 #### `item7`
 
-- **Form.** Description missing, longer than 110 characters, more than one
-  conservatively detected sentence, non-plain-text, missing its initial
-  capital where the canonical running form does not start lowercase, missing
-  its final period, or clearly starting with another subject.
+- **Initial capital.** Required unless the canonical running form starts lowercase.
 - **Plain text** excludes LaTeX/dollar signs, Obsidian and Markdown
   links/images, reference links/definitions, emphasis, strikethrough,
   backticks, HTML/entities, tags, highlights, comments, footnotes, and block
@@ -485,10 +463,6 @@ A case variant, alias, ambiguous owner, or unparsed file is not a genuinely miss
 - **Subject.** The conservative subject check permits an article and
   first-letter case carve-out; complex grammatical heads and tense still need
   agent judgment.
-- **Hedge candidate.** `item7/hedge-candidate` flags a frequency hedge
-  (usually, often, typically and the rest of item 19's list) in the
-  description. It is advisory: the caveat review decides whether the plain
-  claim holds for the ordinary case.
 
 #### `item19`
 
@@ -531,20 +505,14 @@ A case variant, alias, ambiguous owner, or unparsed file is not a genuinely miss
 
 ## Deterministic scanner and autonomous semantic pass
 
-The scanner mechanizes deterministic conditions and emits detections;
-[QC finding actions](qc-items.md#finding-actions) owns repair permission and
-the full per-item rule. The output contract and item-key table above are its
-complete mechanical coverage. The executing agent completes every other check
-in [QC items](qc-items.md) (semantic type and home, prose, equation value and
-notation, alias identity, card clarity, link closeness, hierarchy shape, and
-all source-dependent facts) automatically in the same run, and applies the
-resulting repairs. That includes Task 1b's source-backed and cross-entry
-repairs: duplicated explanations, conflicting claims, notation across sibling
-entries, synonym-duplicate entries (merges), entries that fail the atomicity
-test (splits), cross-domain titles, discipline-root form and missing entries.
+The output contract and item-key table above are the scanner's complete
+mechanical coverage; [QC finding actions](qc-items.md#finding-actions) owns
+repair permission. The executing agent completes every other check in
+[QC items](qc-items.md), Task 1b's source-backed and cross-entry repairs
+included, in the same run and applies the repairs.
 No user or other human must review the notes or sign off for an ordinary run
 to complete.
 
 ## Before you call a finding a false positive
 
-Several checks are deliberately loose or noisy; the reasons are code comments in `scripts/scan_vault.py` and, for the per-entry floors shared with wiki-build's `lint_entry.py` (items 5, 6, 13, 14, 16 and 18, item 7's description subject, item 9's acronym expansion, list indentation, list mismatches, register candidates and navigation-only links, the table and image lines items 9 and 10 skip, item 12's literal dollars and raw ℓ and μm, item 17's single-word alias hint, and item 19's card set, line-3 primary answer, primary-card choice and Spaced Repetition markers), in the plugin's `shared/scripts/entry_checks.py`, `equation_coverage.py` (the item-12 equation floors and the card-equation candidate) and `entry_structure.py` (hedge, brevity and praise hints). Read the comment before tightening a check or overriding a flag wholesale. The **item-18 display-label subset/superset test** must keep accepting the cross-domain bare-term links wiki-build mandates; never "fix" such a finding by adding the bare term as an alias, which creates the silent collision wiki-build prevents. The **item-16b bullet term-anchor pattern** must keep accepting wiki-build's canonical definition bullet (`- **True positives** (TP) — …`). `item12/remote-image` is report-only under [QC finding actions](qc-items.md#finding-actions) because the ordinary item-12 repair would destroy an embed wiki-build mandates; never re-file it as fixable. A check that fires often on **real** issues is working; only a genuine, recurring **false** positive justifies a narrowing proposal under the [proposal process](backlogs.md#proposal-scope).
+Several checks are deliberately loose or noisy; the reasons are code comments in `scripts/scan_vault.py` and, for the per-entry floors shared with wiki-build's `lint_entry.py`, in the plugin's `shared/scripts/` (`entry_checks.py`, `equation_coverage.py` and `entry_structure.py`). Read the comment before tightening a check or overriding a flag wholesale. The **item-18 display-label subset/superset test** must keep accepting the cross-domain bare-term links wiki-build mandates; never "fix" such a finding by adding the bare term as an alias, which creates the silent collision wiki-build prevents. The **item-16 unenumerated-bold check** must keep accepting wiki-build's canonical definition bullet (`- **True positives** (TP) — …`). `item12/remote-image` is report-only under [QC finding actions](qc-items.md#finding-actions) because the ordinary item-12 repair would destroy an embed wiki-build mandates; never re-file it as fixable. A check that fires often on **real** issues is working; only a genuine, recurring **false** positive justifies a narrowing proposal under the [proposal process](backlogs.md#proposal-scope).

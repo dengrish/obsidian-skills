@@ -40,7 +40,7 @@ read: false
 - **Format:** `Paper` for a standalone article, preprint or publication notice;
   `Book` for a book or chapter; `Report` for a technical report, white paper,
   standard or thesis.
-  A formal abstract resolves an otherwise ambiguous Paper/Report choice;
+  A formal abstract makes an otherwise ambiguous Paper/Report choice `Paper`;
   a heading-search miss does not prove there is no abstract.
 - **Sources:** first the double-quoted bare PDF wikilink. A second double-quoted
   URL is optional, only from this document's own DOI/arXiv identifier as printed
@@ -81,14 +81,12 @@ read: false
   reprint's original year, in the body. Take a byline or date the chapter does
   not print from the parent book's printed one and report it. The parent book
   is the whole-book PDF whose core stem is the chapter's book stem, anywhere
-  under `Sources/PDFs/`. Without that PDF, write `author: []`, and use the
-  chapter stem's year as the book's edition year (`<year>-01-01`); report where
-  each value came from. A chapter with a dated stem never uses
+  under `Sources/PDFs/`. Without that PDF, write `author: []` for a missing
+  byline and the chapter stem's year (`<year>-01-01`) for a missing date;
+  report where each value came from. A chapter with a dated stem never uses
   `published: null`.
 - **Created:** on creation, the date the note is written. Preserve it on an
   authorized rewrite unless correcting that field is specifically in scope.
-  Clippings instead preserve their capture date; do not import that producer's
-  rule here.
 - **Description:** one factual sentence, at most 110 characters. Keep the main
   subject and contribution, preferring specifics over filler. This field alone may
   compress the full scope clause to fit; the callout must state it in full.
@@ -96,10 +94,10 @@ read: false
   [CONVENTIONS §3](../../../shared/CONVENTIONS.md#3-the-discipline-tag-enum),
   as a block list of double-quoted `#` values, or `tags: []` when none applies.
   `"#misc"` is the Wiki-only fallback, never a source-note tag.
-- **Read:** bare `false` on creation; preserve the existing value on an approved
-  rewrite, including an absent/unknown state. Report the latter; do not create
-  `false` or force a boolean on an existing note to satisfy lint. A resulting
-  format conflict leaves the original intact and the draft unpublished.
+- **Read:** bare `false` on creation; preserve the existing boolean on an
+  approved rewrite. An absent or non-boolean value fails lint: leave the
+  original intact, keep the draft unpublished and report it; never write a
+  boolean to pass lint.
 
 The fixed schema describes generated notes, not permission to discard user
 metadata. Preserve unrelated fields on an existing note. If that conflicts with
@@ -110,13 +108,10 @@ list items. Indented continuations under a scalar are not additional metadata.
 
 ## Section roles and headings
 
-Every note has six ordered section **positions**. The empirical body mode uses
-the six canonical roles below. The other modes in [Choose the body
-mode](#choose-the-body-mode) give those positions document-appropriate meanings
-without changing the lintable structure. The canonical names are linter slot
-identifiers for non-empirical notes, not instructions to call an argument a
-method or a recommendation a result. Headings are short statements about this
-document, never role labels:
+Every note has six ordered section **positions**, named below by their
+empirical roles; the other [body modes](#choose-the-body-mode) give the same
+positions other meanings. Headings are short statements about this document,
+never role labels:
 
 <!-- canonical:summary-note:roles -->
 ```
@@ -238,7 +233,7 @@ to reconstruct.
   Notice notes say exactly what changed without restating withdrawn claims as
   findings. A secondary contribution earns at most a sentence when it changes
   the main contribution's reading. An algorithm or procedure the document
-  introduces may take a [numbered list](#prose-and-key-messages) here, under
+  introduces may put its [numbered list](#prose-and-key-messages) here, under
   the sentence that introduces it. Put every exhibit here, beneath its supporting
   claim; cite load-bearing numbers. The cap is **2,400 characters of prose**,
   excluding embeds, captions, tables and citation markup; a link counts as its
@@ -293,8 +288,8 @@ replaces explanation: each item keeps its why.
   process, takes a numbered list. It needs three or more discrete steps, where
   order matters and a reader may follow the steps or refer to one of them.
   Introduce the list with one prose sentence. Notation and conditions that
-  hold for every step go in the prose before the list, which ends with the
-  introducing sentence. Each item is one step, in the same grammatical form
+  hold for every step go in the prose before the list; the introducing
+  sentence comes last. Each item is one step, in the same grammatical form
   across the list, and keeps its reason (what the step achieves or why), plus
   any display equation and that display's explanation. A loop ends with a
   "Repeat from step N until …" item, which counts as one of the steps. What
@@ -310,7 +305,7 @@ stage, each opened by its stage name when the document names the stages, and
 otherwise by its actor and verb (cGAS binds DNA; cGAMP activates STING), in the
 same form across the list. Parallel facts by period or age window stay bullets,
 each opened by its period. A prose section never holds a list alone, and a list
-counts toward the section's length limits.
+counts toward the section's character limits, except Methods' numbered steps.
 
 Number a list with sequential markers (`1.`, `2.`, `3.`). Indent a display, an
 extra paragraph or a nested list inside a step to the item's text column: 3
@@ -435,10 +430,8 @@ full stop without a space:
 
 The display text is digits only and equals the target page; the target uses
 this note's own bare `sources:` PDF filename, with no folder or relative path.
-A matching basename alone cannot verify a path-qualified citation. Cite load-bearing basis/approach, main-contribution,
-harms/null, limitation and availability passages as applicable, not every
-sentence. Pages come from the recorded claim set and are independently checked
-against the source before publication.
+Cite load-bearing basis/approach, main-contribution, harms/null, limitation and
+availability passages as applicable, not every sentence.
 Citations appear only in body prose, never frontmatter, callout or captions.
 There is no footnote syntax, numbered reference list or trailing bibliography.
 
@@ -497,7 +490,7 @@ For an argument/synthesis note, the six body positions can read like this:
 
 <scope, premises and evidence base in prose>
 
-## Every event carries identity time and provenance
+## Every event carries identity, time and provenance
 
 <main requirements, support and any selected exhibit>
 
@@ -555,8 +548,3 @@ sentence that introduces them.
 Every embed/table has its italic caption on the next line. No figure or table
 number appears in the prose or captions. End after Availability with a single
 newline.
-
-After drafting, follow [workflow step 4](../SKILL.md#4-lint-the-complete-draft)
-for the lint command, mode and image arguments, naming exceptions and advisory
-handling, then the [verification checklist](review-checklist.md). Clean format
-lint does not establish that the document's claims or selected body mode are correct.

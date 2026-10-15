@@ -4,8 +4,6 @@ Scope: which API identifiers may appear in an entry, and what a `Software` entry
 
 ---
 
-API identifiers never become entries of their own. In a non-`Software` entry they do not appear — not as content and not as a pointer. **The cap is zero.** In a `Software` entry they are eligible only when they explain the artifact's own scope or cross-cutting design; permission is not a reason to retain an identifier.
-
 ## `Software`: explain the artifact, not its reference manual
 
 A `Software` entry covers the artifact's scope, design choices and place in the broader landscape, as far as its cited sources teach them ([principle 5(h)](writing.md#prose-principles)). It may name an interface, protocol, lifecycle, composition rule, addressing convention, file format, or command shape when that detail is needed to understand how the artifact is organized or what distinguishes it. A representative API object may make such a convention concrete. Another class or method that merely instantiates the convention adds no new understanding and is omitted.
@@ -14,7 +12,7 @@ Do not turn the entry into a catalog of algorithm-specific classes, functions, p
 
 **The step-2 substance gate still applies.** A source that uses a library to teach another concept, or merely enumerates the library objects used to implement that concept, does not thereby teach the `Software` entity. Reject that create/merge contribution, do not append the source, and leave an already-explained interface convention unchanged. A source earns a `Software` contribution when it substantively explains the artifact's scope, architecture, interface contract, design tradeoff, or artifact-wide capability or limitation.
 
-A version-specific behavior claim needs a durable source that establishes that version: the active source, or a vault source that a Wiki entry already cites (a confirmed [prior-coverage](source-intake.md#check-prior-coverage) match), such as the project's versioned documentation or release notes, cited in `sources:` only when it contributes substantively. A source no entry cites, an `Inbox/` capture included, is unbuilt: do not cite it, and report `<source> also covers <claim>: run wiki-build on it` (after `clipping-clean` for a capture). wiki-add may instead cite the versioned documentation page it inspected by its URL (§7). A floating “latest” page does not establish an older version's behavior. Otherwise omit the claim and report it rather than leaving a documentation URL in the entry's prose.
+A version-specific behavior claim needs a durable source that establishes that version: the active source, or a vault source that a Wiki entry already cites (a confirmed [prior-coverage](source-intake.md#check-prior-coverage) match), such as the project's versioned documentation or release notes, cited in `sources:` only when it contributes substantively. A source no entry cites, an `Inbox/` capture included, is unbuilt: do not cite it, and report `<source> also covers <claim>: run wiki-build on it` (after `clipping-clean` for a capture). wiki-add may instead cite the versioned documentation page it inspected by its URL. A floating “latest” page does not establish an older version's behavior. Otherwise omit the claim and report it rather than leaving a documentation URL in the entry's prose.
 
 ## The rule: API identifiers live only in `Software` entries
 
@@ -26,13 +24,12 @@ A version-specific behavior claim needs a durable source that establishes that v
 - **No standalone paragraph** whose primary content is the library's API surface. The diagnostic: if a paragraph were retitled "How to use this in [Library]," it does not belong in a non-Software entry; do not move it wholesale into the Software note either.
 - **Language literals in code form** (`True`, `False`, `None`, backticked numbers) belong only in a `Software` entry whose subject the representation explains (the `Python` entry on `None`). Elsewhere use prose or math: *true*/*false* for truth values, zero/one or $0$/$1$ under prose principle 8 when the binary value is the point, "none" or "null" for absence. A `Causal mask` entry writes "a square boolean matrix with true above the main diagonal and false on and below it", not `True` and `False`; a conceptual `Boolean type` comparison stays in plain prose or math.
 
-## Mechanical pre-finalize scan (this is the binding check)
+## Mechanical scan of a non-`Software` entry (the binding check)
 
 `lint_entry.py` reports most of these shapes as `6-api-surface` (backticked spans and fenced code as errors, framings as warnings). Resolve every hit with the author test below, and search the body by hand for the phrasings listed here, because the helper does not check all of them:
 
-- **Any backticked span** other than the two non-identifier shapes above is a violation.
 - `"In PyTorch"` / `"In TensorFlow"` / `"In NumPy"` / `"In Hugging Face"` / `"In [Library]"` as a sentence opener almost always introduces how-to content, as in *"In PyTorch a causal mask can be built with `torch.triu`, and an `is_causal` flag enables…"*: an opener, a "built with" form and kwarg documentation in one sentence.
-- `"[Library] implements"` / `"[Library] provides"` / `"[Library] exposes"` / `"[Library] offers"` — these verbs invite the model to describe *what* the library object does: how-to content, and under the zero cap the identifier it introduces is itself a violation.
+- `"[Library] implements"` / `"[Library] provides"` / `"[Library] exposes"` / `"[Library] offers"` — these verbs invite the model to describe *what* the library object does: how-to content, and in a non-`Software` entry the identifier it introduces is itself a violation.
 - `"flag enables"` / `"flag controls"` / `"argument controls"` / `"argument enables"` / `"kwarg"` / `"defaults to"` — explicit kwarg/default-value documentation, forbidden anywhere outside Software entries.
 
 For each match, the default is to **delete the sentence**, or, for an identifier folded into a parenthetical, the parenthetical. Keep a conceptual claim stripped of its API detail only when the source supports it independently of the named artifact. Library-specific behavior keeps a plain library attribution or goes entirely; never promote an implementation's behavior into a property of the underlying concept. A link such as `[[pytorch|PyTorch]]` still lets the reader reach the Software entry without the omitted identifier.

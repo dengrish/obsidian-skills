@@ -2745,8 +2745,8 @@ def _refuse_existing(attachments, slug, index, overwrite, extension=None,
 
     No clipping-clean workflow replaces an existing attachment
     (references/images.md: existing attachments are never replaced, and a
-    format change takes a new number), so the refusal points only at the next
-    free number. The low-level replacement capability is kept as defence in
+    format change takes a new number), so the refusal points only at the late
+    slot-conflict placeholder. The low-level replacement capability is kept as defence in
     depth, behind both explicit `--overwrite` and positive evidence from the
     exact clipping note that embeds the occupied filename.
     """
@@ -2784,8 +2784,8 @@ def _refuse_existing(attachments, slug, index, overwrite, extension=None,
         raise ValueError(
             f"{os.path.basename(hit[0])} already exists in the attachments "
             "folder — refusing to overwrite it. Existing attachments are never "
-            "replaced: leave it in place and use the next free figure number "
-            "(--start for stage, --index for place).")
+            "replaced: leave it in place and replace that embed with the "
+            "failure placeholder (images.md, late slot conflict).")
 
 
 def _fetch_to_path(url, tmp, timeout, max_bytes, max_seconds, allow_private,
@@ -6749,11 +6749,17 @@ continues here`
               (False, True))
         # images.md: existing attachments are never replaced. The refusal an
         # agent reads mid-reprocess must not steer it to --overwrite.
-        check("the occupied-slot refusal points only at the next free number",
+        check("the occupied-slot refusal points at the late slot-conflict "
+              "placeholder",
               ("--overwrite" in (res["error"] or ""),
-               "next free figure number" in (res["error"] or ""),
+               "late slot conflict" in (res["error"] or "")),
+              (False, True))
+        # `place` runs only against a published note that embeds this number,
+        # so another index is refused: the refusal must not suggest one.
+        check("...and never steers place to another figure number",
+              ("next free figure number" in (res["error"] or ""),
                "--index for place" in (res["error"] or "")),
-              (False, True, True))
+              (False, False))
         check("...and the file that was there is untouched",
               open(os.path.join(att, "Teslo_Cancer_2026_fig_20.gif"),
                    "rb").read(), gif)
@@ -8773,7 +8779,8 @@ continues here`
               True)
         check("the canonical replacement protocol explains exact positive "
               "clipping ownership",
-              "first current `sources:` item is a web url" in reprocess_words and
+              "[ownership rule](../skill.md#1-select-the-captures-and-check-"
+              "ownership)" in reprocess_words and
               "every old image and mapped destination to be an exact rendered"
               in reprocess_words and
               "--owner-note" in reprocess_words, True)
@@ -8790,7 +8797,8 @@ continues here`
         check("a legacy source: is migrated before any --owner-note command",
               ("**legacy origin.**" in reprocess_words
                and "one-item `sources:` list" in reprocess_words
-               and "migrate it first as in" in images_words), True)
+               and "migrate it before any such command" in reprocess_words),
+              True)
         check("a created new note is recorded at once, and only it is "
               "withdrawn after a prepare refusal",
               ("--replace 'articles/<new_slug>.md'" in reprocess_words
@@ -8818,8 +8826,7 @@ continues here`
               "spelling and takes a same-name rewrite",
               ("only by case or unicode normalization is still correct: keep "
                "its spelling and its images' names" in reprocess_words
-               and "differs only by case or unicode normalization is not a "
-                   "change" in " ".join(skill_md.split()).casefold()
+               and "refuses a case/unicode-only slug change" in reprocess_words
                and "respelled" not in reprocess_words), True)
         # publish-note and prepare require the old note's origin, so an
         # overwrite from an m./AMP or other URL-variant capture keeps it.
@@ -8851,7 +8858,7 @@ continues here`
                 if not all(flag in c for flag in (
                     "--vault", "--snapshots", "--draft", "--owner-note",
                     "--new-owner-note", "--old-slug", "--new-slug"))],
-               "rename --phase publish-note" in skill_md),
+               "never publish through a private driver" in reprocess_words),
               (True, [], True))
 
         # `Sources/PDFs/` is recursive by contract (a split book lives in

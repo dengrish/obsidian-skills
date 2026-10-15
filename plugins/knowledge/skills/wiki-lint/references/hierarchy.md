@@ -11,7 +11,7 @@ comments, H1, frontmatter, or separate prose sections.
 Every active discipline has a Wiki root entry at `Wiki/<discipline-slug>.md`.
 The root has `parents: []`; all other parents resolve to broader Wiki entries,
 never to MOCs. A MOC displays the root and its descendants as a generated
-outline. `#misc` uses `Wiki/misc` with one level of title-sorted members.
+outline.
 
 ## Scope closure
 
@@ -46,7 +46,7 @@ valid tag is placed under it even when its home is a reported close call.
 
 Reuse the canonical Wiki entry for each active tag, checking filename, identity,
 and tag ownership rather than treating a same-named MOC or alias as the root.
-When a root is missing, Task 3 may create that narrow prerequisite using
+When a root is missing, Task 3 creates it as a narrow prerequisite under the
 builder's entry rules. It writes the root, misc aside, from one reliable
 overview of the field that gives its definition, method of inquiry and main
 branches, such
@@ -126,8 +126,9 @@ the rules below, and report the result or its blocker.
 - Use an existing broader entry as a linked category only when one of these
   relationships holds; an entry goes under the most specific existing entry
   its opener names as its kind or method (random forest, "trained via
-  bagging", under Bagging). Otherwise use an unlinked category, and skip it
-  when deriving parents. An unlinked category groups siblings along one axis
+  bagging", under Bagging). Otherwise place it in an unlinked category, which
+  deriving parents skips, when it shares an axis with a sibling, else directly
+  under the root. An unlinked category groups siblings along one axis
   and is named for it (`By incrementality`: batch and online learning). Keep
   named instances such as datasets apart from the concepts they illustrate.
 - Order siblings and categories so each follows those it relies on;
@@ -203,8 +204,8 @@ A discipline MOC is a nested bullet list, for example:
 ```
 
 For discipline trees, use two spaces per level. Each bullet is either a piped
-entry link or an unlinked category term, with no trailing descriptions, inline
-comments, H1, or frontmatter. A link label is the canonical title in its plain
+entry link or an unlinked category term, with no trailing description or
+comment. A link label is the canonical title in its plain
 display form. A discipline MOC drops a trailing title parenthetical that
 repeats its own discipline's name but retains a finer qualifier:
 `[[Wiki/clustering-machine-learning|Clustering]]` is suitable in the
@@ -217,15 +218,12 @@ slug.
 ownership from a guarded snapshot; act on its records under
 [read diagnostics](#read-diagnostics-and-verify-completion) rather than
 re-inspecting the folder. An unsafe or unreadable state blocks its connected
-closure, which stays untouched. Pass `--create-dir MOCs` to `publish` when
-every `moc_file_states` record is `missing` and `moc_inventory_findings` holds
-no directory finding (`unsafe-directory`, `ambiguous-directory` or
-`noncanonical-directory`), which is how an absent `MOCs/` looks (an empty
-folder looks the same, and a `legacy-location` record can accompany either):
-`publish` refuses a missing folder without the flag and ignores it when the
-folder exists. A recognized legacy vault-root
+closure, which stays untouched. Pass `--create-dir MOCs` to `publish` unless
+`moc_inventory_findings` holds a directory finding (`unsafe-directory`,
+`ambiguous-directory` or `noncanonical-directory`): `publish` refuses a
+missing folder without the flag and ignores it when the folder exists. A recognized legacy vault-root
 MOC (`<vault>/<discipline>-moc.md`, a `legacy-location` record) stays in
-place: report its ownership conflict, and never silently create a second MOC
+place: report its ownership conflict, and never create a second MOC
 or move that note during routine lint. It shares the canonical basename, so
 bare links to that name stay ambiguous.
 
@@ -317,9 +315,7 @@ actions.
 - `moc_file_states`: missing or empty active files can be initialized, and
   readable recognized files can be regenerated completely. `unreadable`,
   including unsafe filesystem ownership, blocks the connected closure.
-- `moc_consistency_findings` cover the whole file. Regeneration emits only the
-  outline; no comment, footer, prose, heading, or frontmatter delimits a
-  separately owned region.
+- `moc_consistency_findings` cover the whole file.
 - `self_parented` and `parent_cycles` identify edges to recompute from the
   derived hierarchy. Their absence alone does not prove complete placement.
 - Outside the previous-layout migration above, Task 3 never rewrites entry

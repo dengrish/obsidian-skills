@@ -26,8 +26,7 @@ or under the [input-safety rules](../../shared/INPUT_SAFETY.md).
 
 - A named `.md` selects that file. A request to process clippings selects every
   `.md` under `Inbox/`, recursively (skipping dot-prefixed folders), in
-  alphabetical order, one at a time. Include linked folders; a directory cycle
-  or unreadable subtree makes the inventory incomplete and stops publication.
+  alphabetical order, one at a time. Include linked folders.
 - A bare URL or pasted link is not a capture. Ask the user to clip it into
   `Inbox/` with Web Clipper or to name the saved capture. Never write a raw
   capture yourself or publish fetched page text as a cleaned clipping.
@@ -35,15 +34,15 @@ or under the [input-safety rules](../../shared/INPUT_SAFETY.md).
   changed slug's link repair respells their links to the renamed note and its
   images. This skill processes only `.md` captures. An inbox-wide request
   also runs `pdf-organize` to name and file the PDFs; a clippings-only request
-  names any PDFs and leaves them. Send a PDF to `paper-summarize` (reading note) or `figure-extract`
-  (figures) only when the user asked for that deliverable. Name unsupported
+  reports any PDFs and leaves them. Send a PDF to `paper-summarize` (reading note) or `figure-extract`
+  (figures) only when the user asked for that deliverable. Report unsupported
   files and leave them.
 - An explicitly named `Articles/` note may be reprocessed only when this skill
   owns it under the ownership rule below. Read
   [reprocessing](references/duplicates-and-reprocessing.md#reprocessing-an-existing-note)
   before preparing an approved rewrite.
 
-Before scanning, confirm that the resolved vault anchor and the selected
+Before scanning, confirm that `<vault>` and the selected
 `Inbox/` or named input exist. Never create a missing input path or a guessed
 vault directory: that turns a path error into an apparently empty inventory.
 Then create any absent `Articles/` and `Sources/Images/` (and their parent
@@ -52,9 +51,9 @@ empty private directory in place of an absent `Articles/`.
 
 `Articles/` is the complete URL dedup index, shared with PDF reading notes.
 Ownership comes from **the first current `sources:` item**; use legacy
-`source:` only when `sources:` is absent. Empty, malformed or duplicate current
-origin fields do not establish ownership through a stale fallback. This is the
-[source-note boundary](../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document),
+`source:` only when `sources:` is absent. A present but empty, malformed or
+duplicated `sources:` key establishes no ownership, not even through `source:`.
+This is the [source-note boundary](../../shared/CONVENTIONS.md#2b-source-note--a-note-about-a-document),
 not a guess from a filename or `format`. A web URL makes the note this skill's,
 except a legacy research extract (below); a PDF wikilink makes it
 `paper-summarize`'s, so leave that note alone.
@@ -78,7 +77,7 @@ attachment work.
 | Verdict | Action |
 |---|---|
 | `new` | Continue, unless `variant_matches` lists a path: read it, and when it is the [same article](references/duplicates-and-reprocessing.md#settle-a-slug-before-writing-images), act as for a `duplicate` (a note) or `duplicate-of-earlier-input` (a capture). |
-| `duplicate` | Ordinary batch: skip and keep the raw. Named file: name the existing note and get the user's explicit overwrite-or-skip decision before changing it, honoring one already given. Explicit reprocess intent supplies that decision only for a note this skill owns; [reprocessing](references/duplicates-and-reprocessing.md#reprocessing-an-existing-note) covers it and resume. Always skip a `research_extracts` match and report its path. |
+| `duplicate` | Ordinary batch: skip and keep the raw. Named file: name the existing note and get the user's explicit overwrite-or-skip decision before changing it, honoring one already given. Explicit reprocess intent supplies that decision only for a note this skill owns; [reprocessing](references/duplicates-and-reprocessing.md#reprocessing-an-existing-note) covers that case and resuming an interrupted run. Always skip a `research_extracts` match and report its path. |
 | `duplicate-of-earlier-input` | This is a pending capture, not a published owner. Skip only after the earlier capture publishes successfully. If it fails or is deferred, recheck the later capture against the current Articles index and process it when still new. |
 | `no-source` | Recover a labeled origin or skip, under the rules below. |
 
@@ -98,8 +97,9 @@ Report `unindexable` notes and existing URL `collisions`; do not repair, merge
 or delete them as part of the scan. Also report `stem_mismatch` notes, whose
 figure embeds still carry an old stem; re-stem one only on request, following
 [the re-stem procedure](references/duplicates-and-reprocessing.md#re-stem-a-renamed-notes-images).
-A same-URL pair left by a pending changed-slug handoff is reported as such; a
-resume, a request to finish it or a reprocess of either note finishes it
+A `collisions` pair is a pending changed-slug handoff when
+`Articles/.<stem>.handoff.json` exists for either note's stem; report it as
+such; a resume, a request to finish it or a reprocess of either note finishes it
 ([procedure](references/duplicates-and-reprocessing.md#finish-a-pending-changed-slug-handoff)).
 `non_url_sources` normally identifies healthy PDF reading notes, not missing
 clipping metadata. A URL incorrectly wrapped in `[[…]]` is an anomaly to report.
@@ -207,11 +207,7 @@ checks. If the helper cannot run, leave the
 [failure placeholder](references/images.md#failures-and-readability) and report
 the missing image.
 
-On reprocessing, retain existing embeds and figure numbers; new downloads start
-after the highest occupied number. For a changed slug, replace only the old slug
-in the **draft** embeds, keeping each figure tail and extension. Live
-attachments change only in the guarded prepare → repair → finalize handoff
-after both old and new owner notes are public.
+On reprocessing, follow [existing embeds on a reprocess](references/images.md#existing-embeds-on-a-reprocess).
 
 ## 4. Assemble the complete draft
 
@@ -278,22 +274,15 @@ reconstruct its rules from memory.
 ## 6. Publish safely
 
 Publish only the completed, audited and reviewed bytes to `Articles/<slug>.md`.
-Recheck the destination immediately before publication. A collision discovered
-now returns to the naming decision; it is not permission to overwrite or rename
-foreign figures.
+A collision discovered at publication returns to the naming decision; it is
+not permission to overwrite or rename foreign figures.
 
 **For an authorized rewrite or changed slug**, read and execute
 [the complete replacement procedure](references/duplicates-and-reprocessing.md#publish-an-approved-replacement).
-A changed slug publishes its note with the shipped
-`rename --phase publish-note` writer, never a private driver. A slug that
-differs only by case or Unicode normalization is not a change: the note and its
-images keep their spelling and take a same-name rewrite. A changed slug
-repairs every link to the old note and its images in the same run, Obsidian
-Canvas cards included, as Obsidian does on a rename; the reprocess request authorizes that repair, so never ask
-separately or hand it to another skill. Retain the unchanged original until
-publication succeeds, and keep both resolving versions while any note the
-repair could not rewrite remains a blocker. Do not apply the new-note sequence
-below to a reprocess.
+A changed slug repairs every link to the old note and its images in the same
+run, Obsidian Canvas cards included, as Obsidian does on a rename; the
+reprocess request authorizes that repair, so never ask separately or hand it to
+another skill. Do not apply the new-note sequence below to a reprocess.
 
 **For a new note**, publish the reviewed scratch draft against the step-2
 record with the shared `publish_files.py`. It creates the note exclusively, so
@@ -331,9 +320,9 @@ cleanup.
 
 ## 7. Report
 
-For a batch, lead with processed, already-processed, and failed counts. Give
-paths and details for new output, failures and anomalies; collapse ordinary
-skips to a count and filenames. Report:
+For a batch, lead with processed, already-processed, skipped and failed
+counts. Give paths and details for new output, failures and anomalies;
+collapse ordinary skips to a count and filenames. Report:
 
 - Metadata corrections, unverified fields, chosen format/tags, undated notes,
   and captures skipped for lack of a usable title.

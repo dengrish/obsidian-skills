@@ -18,10 +18,11 @@ description: >
 Read [shared/RUNTIME.md](../../shared/RUNTIME.md) once per task for vault
 selection, script paths, Python dependencies, and host tools. Use one
 interpreter with the plugin's `requirements.txt` installed for all commands.
-Before extracting, run `python3 '<plugin>/shared/scripts/check_parsers.py'`
-with that interpreter under the
+Before running any of this skill's scripts, run
+`python3 '<plugin>/shared/scripts/check_parsers.py'` with that interpreter
+under the
 [parser-check rule](../../shared/RUNTIME.md#only-for-pdf-and-image-workflows);
-while it fails, extract nothing. The shipped scripts are the implementation;
+while it fails, run none of them. The shipped scripts are the implementation;
 do not copy their caption detection or crop logic into a separate script.
 
 The deliverable is **whole-figure PNGs**, not PDF renames, summaries, or wiki
@@ -62,8 +63,8 @@ rule is [conventions §1a](../../shared/CONVENTIONS.md#1a-source-file-names-and-
 Folder sweeps skip [feed-owned attachments](../../shared/CONVENTIONS.md#1c-feed-owned-attachments)
 and list them without failing the run. If the user names one, keep its name,
 use the `--allow-unorganized` exception, and report it. Never rename a
-collector-owned file or treat its photo attachments as extractor-owned
-figures.
+feed-owned file or treat the collector's photo attachments as
+extractor-owned figures.
 
 **External PDFs.** With the vault's canonical `Sources/Images/` as `--out`,
 an external PDF is refused unless it is a
@@ -146,8 +147,8 @@ distinct). A PDF that already has `_fig_ED<N>` crops, recorded or not, stays
 in the ED namespace by itself (the batch prints `Using --ed-prefix ED`);
 adopt an unrecorded one only after comparing it with its page. Pass
 `--ed-prefix ED` explicitly only for a single PDF with no `<stem>_fig*` crop
-yet whose captions (the `raw` column of `auto_fig_bbox.py`) number Extended
-Data figures separately. Switch a PDF that already has crops only when its
+yet whose captions (the `raw` column of `auto_fig_bbox.py`) include an
+`Extended Data Fig…` caption. Switch a PDF that already has crops only when its
 summary prints an `--ed-prefix ED` rerun or the user asks, following
 [Extended Data and Supplementary figures](references/review-and-repair.md#extended-data-and-supplementary-figures);
 in a vault, the switch relinks notes and canvases in the same run, as a

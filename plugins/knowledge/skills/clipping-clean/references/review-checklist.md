@@ -55,9 +55,9 @@ Read the results as follows:
 
 Compare the ordered heading outline and coarse counts of lists, quotes, links,
 images, tables and code blocks. Use the fetched source when available; when its
-fetch failed, compare against the original capture and report the live-source
-limit. The note-side outline and counts come from `outline`; the source-side
-outline and counts come from `source` on the saved markup:
+fetch failed, compare against `outline` of the original capture and report the
+live-source limit. The note-side outline and counts come from `outline`; the
+source-side outline and counts come from `source` on the saved markup:
 
 ```bash
 python3 '<skill>/scripts/body_checks.py' outline '<path to the completed scratch .md>'
@@ -85,21 +85,17 @@ suggested detector; do not edit an installed plugin during clipping processing.
   and [clipping metadata rules](metadata-verification.md#frontmatter-for-the-polished-note).
   Unrelated user fields were preserved rather than stripped to enforce a
   generated schema; conflicting or uninterpretable values were reported.
-- [ ] First current `sources:` item establishes web ownership; legacy `source:`
-  is used only when current `sources:` is absent. This is not a PDF summary.
-  The output has its one preserved capture URL (an overwrite keeps the existing
-  note's origin), no substituted canonical URL.
+- [ ] The output has its one preserved capture URL (an overwrite keeps the
+  existing note's origin), no substituted canonical URL.
 - [ ] Corrected title, byline and publication date match their evidence. Every
   `author:` value is a human byline supported by the capture or usable source;
   capture-only values remain explicitly unverified against an unavailable live
   page. Publication names, editorial
   desks and social accounts are omitted rather than credited as people. The
   filename's optional author segment agrees with the first retained human
-  author. Unverified values and padded dates are reported. Every published note
-  has an evidence-backed title. A missing publication year is represented only
-  by `published: null` plus the `nd` filename segment; a capture missing its
-  title was retained raw and skipped rather than receiving an invented identity.
-  Meaningful Unicode remains.
+  author. Unverified values and padded dates are reported. A missing
+  publication year is represented only by `published: null` plus the `nd`
+  filename segment. Meaningful Unicode remains.
 - [ ] Description is factual and at most 110 characters, and attributes an
   argued thesis, forecast or recommendation to whoever argues it
   ([rule](../SKILL.md#4-assemble-the-complete-draft); the interviewee or
@@ -178,7 +174,7 @@ suggested detector; do not edit an installed plugin during clipping processing.
   placeholder. A static poster is not presented as an animation.
 - [ ] A reprocessed draft keeps the old note's block IDs byte-for-byte. Each
   block ID or linked heading it cannot match is reported with the notes that
-  link it ([body source](duplicates-and-reprocessing.md#reprocessing-an-existing-note)).
+  link it ([block-ID rule](duplicates-and-reprocessing.md#reprocessing-an-existing-note)).
 - [ ] Converted GIFs were visually inspected, including the middle frame and
   labels. A bad render gets a draft poster embed at a fresh number or a source
   placeholder. Preserve any existing GIF; never replace its bytes with another
@@ -190,7 +186,7 @@ Fix confirmed mechanical damage **in the draft**. Existing-image renames stay
 in the reviewed publication plan. Flag unresolved judgment calls and missing
 source content for the user; do not silently invent an answer.
 
-Log every fix/flag and any inability to complete a required check. Once the
+Report every fix/flag and any inability to complete a required check. Once the
 review is complete, return to [publication](../SKILL.md#6-publish-safely),
 then read back the published note and verify its final embeds before reporting
 completion.
