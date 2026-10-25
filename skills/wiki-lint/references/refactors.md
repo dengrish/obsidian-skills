@@ -82,7 +82,10 @@ the entries using it cite.
   canonical owner. Leave enough concise relationship prose and wikilinks for
   orientation, without duplicating the full explanation across the results.
   Every note a split creates gets today's `created:` and `updated:` dates and
-  `read: false`. A split keeps the original entry as the owner
+  `read: false`. Each result's card line 3 names the aliases that result
+  keeps, except a spelling variant
+  ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
+  A split keeps the original entry as the owner
   of one subject: the one its title names, or, when the title names several
   (`Precision and recall`) or none, the one with the fullest treatment, then
   the alphabetically first resulting slug. When the retained original's title
@@ -106,7 +109,10 @@ the entries using it cite.
   user-owned appearance fields, integrate nonduplicate claims, and union only valid source
   contributions, each document in one representation
   ([merge rule 1](../../wiki-build/references/merge.md#frontmatter-and-related-footer)),
-  and same-entity aliases. The survivor gets today's
+  and same-entity aliases, naming the survivor's aliases except a spelling
+  variant on its card's line 3
+  ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
+  The survivor gets today's
   `updated:` and `read: false`, whatever any merged entry's prior `read:`,
   in place of the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset),
@@ -279,7 +285,10 @@ retitle also activates this protocol.
    when the [alias rule](../../wiki-build/references/writing.md#aliases)
    admits it. A bare cross-domain old slug
    never stays, since the bare term is never an alias, and a proven wrong or
-   misleading name is not retained merely to make old links resolve.
+   misleading name is not retained merely to make old links resolve. Card
+   line 3 takes the new title and names the resulting aliases except a
+   spelling variant
+   ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
 3. Inventory the references to the old filename and its aliases under
    [step 3 above](#establish-evidence-and-complete-scope), whose write scope
    applies: inbound links in `Wiki/`, `MOCs/`, `parents:`, other vault
@@ -349,9 +358,11 @@ names a different entity, publishing
 [in dependency order](#publish-in-dependency-order). A blocked dependency
 retains the alias until it can be repaired. Delete the alias only after
 verifying that no ambiguous owner, inbound alias-target link or such
-mislabelled link remains. The removal advances `updated:` on the entry whose
-`aliases:` list it edits and keeps that entry's `read:`, unless it resolves a
-[user issue](../SKILL.md#user-issues).
+mislabelled link remains. The same edit updates that entry's card line 3 to
+match ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)),
+keeping every attachment in place. The removal advances `updated:` on the
+entry whose `aliases:` list it edits and keeps that entry's `read:`, unless
+it resolves a [user issue](../SKILL.md#user-issues).
 
 ## Create a missing entry
 

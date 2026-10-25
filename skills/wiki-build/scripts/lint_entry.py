@@ -223,8 +223,10 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               period-ended sentence with inline LaTeX as its
                               only markup; line 2 exactly `??` (or the user's
                               `!!`); the primary card's line 3 the canonical
-                              title (base term, math skeleton; optional
-                              opener-established, alias-bound counterpart);
+                              title (base term, math skeleton), then, when
+                              the entry has aliases, one parenthetical naming
+                              every alias but a spelling variant, in
+                              `aliases:` order (name i slugs to alias i);
                               no `::` or `:::` on line 1 or 3 outside a
                               backtick span, which the plugin reads as a
                               card of its own.
@@ -253,8 +255,8 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               short; agent reviews
   19  19-flashcard-leak       normalized answer-surface search of card line 1
                               (math included) for that card's own answer and
-                              counterpart; entry aliases join the search only
-                              for the primary card
+                              the names in its parenthetical; entry aliases
+                              join the search only for the primary card
   19  19-sr-marker           the Spaced Repetition single-line separator
                               `::` (or `:::`) outside a backtick span or a
                               column-0 fence, anywhere before the Flashcards
@@ -505,7 +507,6 @@ from entry_checks import (  # noqa: E402
     SHARED_MUTATIONS,
     SHARED_QUIET,
     SOURCE_REFERENCE_FORMS,
-    acronym_counterpart,
     acronym_expansion_missing,
     api_surface_findings,
     bare_common_noun_slug,
@@ -517,14 +518,18 @@ from entry_checks import (  # noqa: E402
     description_subject_findings,
     display_label_links,
     emphasis_span_findings,
+    flashcard_answer_text,
     flashcard_line3_fault,
     flashcard_primary_answer,
     flashcard_set_faults,
     image_embed_lines,
     is_discipline_root,
+    is_spelling_variant,
     kept_card_label,
     label_drops_head,
     label_shares_surface,
+    line3_names,
+    line3_names_alias,
     line3_parts,
     list_indent_findings,
     list_mismatch_findings,
@@ -1502,15 +1507,20 @@ def _check_alias_completeness(fm, sections, findings, filename):
         # wiki-lint's scanner adds the same hint to its alias candidate.
         hint = ("; " + BARE_WORD_ALIAS_HINT
                 if bare_word_alias_candidate(cslug, title, cand) else "")
+        # The scanner's candidate names the same line-3 consequence.
+        line3 = ("naming it on card line 3 in the same edit (item 19)"
+                 if line3_names_alias(title, aliases, cslug) else
+                 "leaving it off card line 3 as a spelling variant (item 19)")
         findings.append(_f(
             "17-alias-completeness", "warning",
             "the body introduces %r (%s) as a name for the subject, but "
             "aliases: does not carry %r -- add it if it names this same "
-            "entity; a cross-domain bare term, an acronym that spells an "
+            "entity, %s; a "
+            "cross-domain bare term, an acronym that spells an "
             "ordinary English word, an organism common name unsafe as a "
             "global alias or a wrong-entity name stays out; review-only: a "
             "recorded decision that it stays out resolves it (checklist "
-            "item 17)%s" % (cand, where, cslug, hint),
+            "item 17)%s" % (cand, where, cslug, line3, hint),
             {"candidate": cand, "where": where, "expected_alias": cslug,
              "review_only": True}))
 
@@ -1950,7 +1960,7 @@ def _check_acronym_expansion(fm, sections, findings):
     recorded decision that the title is a name resolves it, and a run never
     invents an expansion to silence it.
     """
-    title, _aliases, opener, _type = _primary_answer_inputs(fm, sections)
+    title, _aliases, opener = _primary_answer_inputs(fm, sections)
     if acronym_expansion_missing(title, opener):
         term = base_term(title) if has_parenthetical(title) else title
         findings.append(_f(
@@ -2317,27 +2327,32 @@ def _check_bold_opener(fm, sections, findings):
 
 
 def _primary_answer_inputs(fm, sections):
-    """``(title, aliases, opener, type)`` for the shared item-19 contract.
+    """``(title, aliases, opener)`` for item 9's acronym check and the
+    item-19 answer.
 
-    Only a list ``aliases:`` field can bind a counterpart; a malformed scalar
-    keeps its own item-18 finding. The opener is the first prose paragraph:
-    a masked leading comment is blank, and a leading heading is skipped.
+    Only a list ``aliases:`` field gives card line 3 its aliases; a
+    malformed scalar keeps its own item-18 finding. The opener is the first
+    prose paragraph: a masked leading comment is blank, and a leading
+    heading is skipped.
     """
     alias_field = fm.get("aliases")
     aliases = (alias_field.values
                if alias_field is not None and alias_field.is_list else [])
     opener = first_prose_paragraph("\n".join(sections["prose_lines"]))
-    return fm.scalar("title") or "", aliases, opener, fm.scalar("type") or ""
+    return fm.scalar("title") or "", aliases, opener
 
 
 def _flashcard_primary_answer(fm, sections):
-    """The entry's own ``(term, counterpart)``: ``flashcard_primary_answer``."""
-    return flashcard_primary_answer(*_primary_answer_inputs(fm, sections))
+    """The entry's own ``(term, aliases)``: ``flashcard_primary_answer``."""
+    title, aliases, _opener = _primary_answer_inputs(fm, sections)
+    return flashcard_primary_answer(title, aliases)
 
 
 def _flashcard_line3_fault(line3, fm, sections):
     """The shared line-3 contract fault for this entry, or ``None``."""
-    return flashcard_line3_fault(line3, *_primary_answer_inputs(fm, sections))
+    title, aliases, _opener = _primary_answer_inputs(fm, sections)
+    return flashcard_line3_fault(line3, title, aliases,
+                                 "\n".join(sections["prose_lines"]))
 
 
 #: The frontmatter errors the scanner's ``parse_fm`` also collects (its
@@ -2479,8 +2494,9 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # is preserved, never converted. The primary card's line 3 is the
     # canonical title: the base term for a parenthetical-disambiguated title,
     # the meaning-preserving plain form for a symbol title (line 3 is plain
-    # text, so `$k$-fold` can only ever appear there as `k-fold`), plus the
-    # entry's own opener-established, alias-bound counterpart.
+    # text, so `$k$-fold` can only ever appear there as `k-fold`), then a
+    # name for every alias but a spelling variant, in `aliases:` order, in
+    # one parenthetical.
     title = fm.scalar("title")
     line3_checks, brevity, hedges, praise, equations = [], [], [], [], []
     for card_no, card in enumerate(cards, 1):
@@ -2638,19 +2654,19 @@ def _check_flashcards_present(fm, sections, findings, filename,
     # With several cards, only the primary card is held to the line-3
     # contract: an extra card is removed, never repointed to the entry's
     # answer (the scanner makes the same choice through entry_checks).
-    term, counterpart = _flashcard_primary_answer(fm, sections)
+    term, aliases = _flashcard_primary_answer(fm, sections)
+    prose = "\n".join(sections["prose_lines"])
     faults, no_primary = primary_line3_faults(
-        len(line3_checks), line3_checks, term, counterpart)
+        len(line3_checks), line3_checks, term, aliases, prose)
     if no_primary and not root:
         findings.append(_f(
             "19-flashcards", "error", no_primary,
-            {"expected_line3": term + (" (%s)" % counterpart
-                                       if counterpart else "")}))
+            {"expected_line3": flashcard_answer_text(term, aliases, prose)}))
     for card_no, line3, fault in faults:
         findings.append(_f(
             "19-flashcards", "error",
-            "flashcard %d line 3 is %r -- %s" % (card_no, line3[:40], fault),
-            {"card": card_no, "line3": line3[:60], "title": title}))
+            "flashcard %d line 3 is %r -- %s" % (card_no, line3, fault),
+            {"card": card_no, "line3": line3, "title": title}))
 
 
 def _check_flashcard_leak(fm, sections, findings, extras=frozenset()):
@@ -2662,20 +2678,22 @@ def _check_flashcard_leak(fm, sections, findings, extras=frozenset()):
     # The shared normalizer folds Unicode punctuation, slash/dash variants,
     # and whitespace, so an answer cannot evade the leak floor by changing
     # ``bias/variance`` to ``bias – variance``. The two tools must agree.
-    expected_term, _counterpart = _flashcard_primary_answer(fm, sections)
+    expected_term, _aliases = _flashcard_primary_answer(fm, sections)
     aliases = [alias for alias in fm.values("aliases") if alias]
     for card_no, card in _cards(sections):
         line1 = card[0]
-        term_main, paren = line3_parts(card[2] if len(card) >= 3 else "")
-        paren_is_discipline = False
-        if paren:
+        line3 = card[2] if len(card) >= 3 else ""
+        term_main, _paren = line3_parts(line3)
+        raw_needles = [("answer", term_main)]
+        # Each name in the answer's parenthetical is a needle; a discipline
+        # disambiguator written there ("Model (machine learning)") is not.
+        for name in line3_names(line3):
             try:
-                paren_is_discipline = slug_stem(paren) in TAG_ENUM
+                if slug_stem(name) in TAG_ENUM:
+                    continue
             except SlugError:
                 pass
-        raw_needles = [("answer", term_main)]
-        if paren and not paren_is_discipline:
-            raw_needles.append(("answer counterpart", paren))
+            raw_needles.append(("answer alias", name))
         if expected_term and term_main == expected_term:
             raw_needles.extend(("alias", alias) for alias in aliases)
 
@@ -3652,7 +3670,7 @@ def _st_good():
         'The plot tracing the trade-off between two error rates as a decision '
         'threshold moves.\n'
         '??\n'
-        'ROC curve\n')
+        'ROC curve (AUROC)\n')
 
 
 def _st_precision():
@@ -3753,8 +3771,28 @@ def run_self_test():
     def items(text, filename="roc-curve.md"):
         return _st_items(lint_text(text, filename))
 
+    def aliased(alias_lines, answer):
+        """The clean fixture with ``alias_lines`` for its alias and ``answer``
+        as card line 3, which names the aliases."""
+        return mutate('  - "auroc"', alias_lines).replace(
+            "??\nROC curve (AUROC)\n", "??\n%s\n" % answer)
+
+    def unaliased(field):
+        """The clean fixture with ``field`` for its aliases field, which gives
+        no list alias, so card line 3 is the term alone."""
+        return mutate('aliases:\n  - "auroc"\n', field).replace(
+            "??\nROC curve (AUROC)\n", "??\nROC curve\n")
+
     def retitled(title, alias, description, opener, card_term, type_="Concept"):
-        """A schema-clean variant for title/alias binding regressions."""
+        """A schema-clean variant for title/alias binding regressions.
+
+        Card line 3 lists every alias but a spelling variant, so a
+        ``card_term`` without a final parenthetical gets any other alias
+        read as words.
+        """
+        if (line3_parts(card_term)[1] is None
+                and not is_spelling_variant(alias, card_term)):
+            card_term += " (%s)" % alias.replace("-", " ")
         return (good.replace('title: "ROC curve"', 'title: "%s"' % title)
                     .replace('type: Concept', 'type: %s' % type_)
                     .replace('  - "auroc"', '  - "%s"' % alias)
@@ -3765,7 +3803,7 @@ def run_self_test():
                     .replace(
                         'A **ROC curve** plots the trade-off between two error '
                         'rates as a decision threshold moves.', opener)
-                    .replace('\nROC curve\n', '\n%s\n' % card_term))
+                    .replace('\nROC curve (AUROC)\n', '\n%s\n' % card_term))
 
     check("the clean fixture produces NO finding at any severity",
           items(good), [])
@@ -3953,10 +3991,11 @@ def run_self_test():
          + '<!--SR:\n!2026-09-20,30,250\n\n!2026-09-21,31,250\n-->\n'),
         ("same-line plus block ID",
          review_base.replace(
-             '\nROC curve\n',
-             '\nROC curve <!--SR:!2026-09-20,30,250--> ^roc-card\n')),
+             '\nROC curve (AUROC)\n',
+             '\nROC curve (AUROC) <!--SR:!2026-09-20,30,250--> ^roc-card\n')),
         ("next-line plus term block ID",
-         review_base.replace('\nROC curve\n', '\nROC curve ^roc-card\n')
+         review_base.replace('\nROC curve (AUROC)\n',
+                             '\nROC curve (AUROC) ^roc-card\n')
          .rstrip('\n') + '\n<!--SR:!2026-09-20,30,250-->\n'),
         ("metadata callout plus block ID",
          review_base.rstrip('\n') + '\n'
@@ -4067,8 +4106,8 @@ def run_self_test():
            for joined, marker in (('Q::A\n', '::'),
                                   ('Why?\n?\nBecause.\n', '?'))],
           [[('error', True)]] * 2)
-    broken = lint_text(review_base.replace('\n!!\nROC curve\n',
-                                           '\n!!\n\nROC curve\n'),
+    broken = lint_text(review_base.replace('\n!!\nROC curve (AUROC)\n',
+                                           '\n!!\n\nROC curve (AUROC)\n'),
                        'roc-curve.md')['findings']
     check("a blank inside a card still breaks it",
           [(f['evidence'].get('card'), f['evidence'].get('report_only'))
@@ -4077,7 +4116,7 @@ def run_self_test():
     check("a blank inside the primary card breaks it before a full block too",
           [[(f['evidence'].get('card'), f['evidence'].get('report_only'))
             for f in lint_text(review_base.replace(
-                '\n!!\nROC curve\n', '\n!!\n\nROC curve\n') + '\n' + after,
+                '\n!!\nROC curve (AUROC)\n', '\n!!\n\nROC curve (AUROC)\n') + '\n' + after,
                 'roc-curve.md')['findings']
             if 'is malformed' in f['message'] or 'block' in f['evidence']]
            for after in (why_card, 'My note.\nIt goes on.\nAsk about it.\n')],
@@ -4111,7 +4150,8 @@ def run_self_test():
 
     for alias, surface in (("covariate", "covariates"), ("hypothesis", "hypotheses")):
         alias_text = mutate('"auroc"', json.dumps(alias)).replace(
-            "\n**Related:**", "\nIt is also called *%s*.\n\n**Related:**" % surface)
+            "\n**Related:**", "\nIt is also called *%s*.\n\n**Related:**" % surface
+        ).replace("??\nROC curve (AUROC)\n", "??\nROC curve (%s)\n" % alias)
         check("a plural of an existing alias is not a missing alias: %s" % surface,
               items(alias_text), [])
     check("a genuinely different introduced name is still flagged",
@@ -4390,14 +4430,13 @@ def run_self_test():
           items(mutate("read: false", 'read: "false"')), ["2-quoting"])
     check("a single-quoted list item",
           items(mutate('  - "auroc"', "  - 'auroc'")), ["2-quoting"])
+    # A field that gives no list aliases leaves card line 3 the term alone.
     check("a scalar aliases field is rejected even when its value is a valid slug",
-          items(mutate('aliases:\n  - "auroc"\n', 'aliases: "auroc"\n')),
-          ["18-alias-form"])
+          items(unaliased('aliases: "auroc"\n')), ["18-alias-form"])
     check("a bare aliases key is not an empty list",
-          items(mutate('aliases:\n  - "auroc"\n', 'aliases:\n')),
-          ["18-alias-form"])
+          items(unaliased('aliases:\n')), ["18-alias-form"])
     check("an explicitly empty flow aliases list has list shape",
-          items(mutate('aliases:\n  - "auroc"\n', 'aliases: []\n')), [])
+          items(unaliased('aliases: []\n')), [])
     check("an UNQUOTED #tag, which YAML reads as a comment",
           items(mutate('  - "#statistics"', "  - #statistics")),
           ["1-valid-yaml", "2-quoting", "8-tags"])
@@ -4575,7 +4614,7 @@ def run_self_test():
                 .replace("A **ROC curve** plots", "**k-nearest neighbors** plots")
                 .replace('description: "A ROC curve plots',
                          'description: "k-nearest neighbors plots')
-                .replace("ROC curve\n", "k-nearest neighbors\n"),
+                .replace("ROC curve (AUROC)\n", "k-nearest neighbors (AUROC)\n"),
                 "k-nearest-neighbors.md"),
           [])
     check("a mathematical title's plain form is its description subject",
@@ -4583,7 +4622,7 @@ def run_self_test():
                 .replace("A **ROC curve** plots", "A **k-fold** plots")
                 .replace('description: "A ROC curve plots',
                          'description: "k-fold plots')
-                .replace("ROC curve\n", "k-fold\n"), "k-fold.md"),
+                .replace("ROC curve (AUROC)\n", "k-fold (AUROC)\n"), "k-fold.md"),
           [])
     check("a first-letter case difference still names the canonical subject",
           description_has_entity_subject("ArXiv stores preprints.", "arXiv"), True)
@@ -4715,7 +4754,7 @@ def run_self_test():
           items(mutate('title: "ROC curve"', 'title: "$k$-fold"')
                 .replace("A **ROC curve** plots", "A **k-fold** plots")
                 .replace("A ROC curve plots", "k-fold plots")
-                .replace("ROC curve\n", "k-fold\n"), "k-fold.md"), [])
+                .replace("ROC curve (AUROC)\n", "k-fold (AUROC)\n"), "k-fold.md"), [])
 
     work_title = retitled(
         "Hamlet", "tragedy-of-hamlet", "Hamlet is a tragedy by Shakespeare.",
@@ -4809,7 +4848,8 @@ def run_self_test():
     check("a LaTeX star remains semantic in the description, opener, and card",
           items(symbol_star, "a-star-search.md"), [])
     check("the former lossy A-search card spelling is rejected",
-          items(symbol_star.replace("??\nA-star search\n", "??\nA search\n"),
+          items(symbol_star.replace("??\nA-star search (astar)\n",
+                                    "??\nA search (astar)\n"),
                 "a-star-search.md"),
           ["19-flashcards"])
     check("LaTeX A-star notation cannot hide a flashcard answer leak",
@@ -4889,15 +4929,15 @@ def run_self_test():
     check("a entry with NO ## Flashcards section",
           items(mutate("\n---\n\n## Flashcards\n\nThe plot tracing the "
                        "trade-off between two error rates as a decision "
-                       "threshold moves.\n??\nROC curve\n", "")),
+                       "threshold moves.\n??\nROC curve (AUROC)\n", "")),
           ["19-flashcards"])
     check("a ## Flashcards section with no card",
           items(mutate("The plot tracing the trade-off between two error rates "
-                       "as a decision threshold moves.\n??\nROC curve\n", "")),
+                       "as a decision threshold moves.\n??\nROC curve (AUROC)\n", "")),
           ["19-flashcards"])
     second_card = mutate(
-        "??\nROC curve\n",
-        "??\nROC curve\n\nAnother notion, stated briefly.\n??\nSecond idea\n")
+        "??\nROC curve (AUROC)\n",
+        "??\nROC curve (AUROC)\n\nAnother notion, stated briefly.\n??\nSecond idea\n")
     check("a ## Flashcards section with a SECOND card is a fixable error, "
           "never report-only",
           (items(second_card),
@@ -4919,21 +4959,21 @@ def run_self_test():
            items(mutate("## Flashcards\n\nThe plot", "## Flashcards\nThe plot"))),
           (["19-flashcards"], ["19-flashcards"]))
     simplified = [f["message"] for f in lint_text(
-        mutate("??\nROC curve\n", "?\nROC curve\n"),
+        mutate("??\nROC curve (AUROC)\n", "?\nROC curve (AUROC)\n"),
         "roc-curve.md")["findings"]]
     check("the only card simplified to `?` gets one line-2 finding asking "
           "for `??`, never a line-3 contract finding",
           (len(simplified), "line 2 is '?'" in simplified[0],
            any("line 3" in m for m in simplified)),
           (1, True, False))
-    triple = lint_text(mutate("??\nROC curve\n", "???\nROC curve\n"),
+    triple = lint_text(mutate("??\nROC curve (AUROC)\n", "???\nROC curve (AUROC)\n"),
                        "roc-curve.md")["findings"]
     check("a line 2 that is no separator names both valid values",
           [(f["item"], all(sep in f["message"] for sep in ("`??`", "`!!`")),
             "`?`" in f["message"]) for f in triple],
           [("19-flashcards", True, False)])
     check("a user-disabled `!!` card is preserved, not a line-2 finding",
-          items(mutate("??\nROC curve\n", "!!\nROC curve\n")), [])
+          items(mutate("??\nROC curve (AUROC)\n", "!!\nROC curve (AUROC)\n")), [])
     check("card line 1 must be one sentence",
           items(mutate(
               "The plot tracing the trade-off between two error rates as a "
@@ -4988,32 +5028,53 @@ def run_self_test():
            )],
           [["19-flashcards"]] * 14)
     check("card line 3 that is not the canonical title",
-          items(mutate("??\nROC curve\n", "??\nThe ROC\n")), ["19-flashcards"])
+          items(mutate("??\nROC curve (AUROC)\n", "??\nThe ROC\n")), ["19-flashcards"])
+    check("line 3 without the entry's alias breaks the answer contract",
+          items(mutate("??\nROC curve (AUROC)\n", "??\nROC curve\n")),
+          ["19-flashcards"])
+    check("an entry without aliases appends nothing to the term",
+          [items(mutate('aliases:\n  - "auroc"\n', "").replace(
+              "??\nROC curve (AUROC)\n", "??\n%s\n" % answer))
+           for answer in ("ROC curve", "ROC curve (AUROC)")],
+          [[], ["19-flashcards"]])
     bound_card = mutate('  - "auroc"', '  - "rc"')
     bound_card = bound_card.replace("A **ROC curve** plots", "A **ROC curve** (RC) plots")
-    check("...but the exact title plus its established acronym counterpart is fine",
-          items(bound_card.replace("??\nROC curve\n", "??\nROC curve (RC)\n")), [])
-    check("compound-derived and shared-tail acronyms remain valid counterparts",
-          [acronym_counterpart(short, long) for short, long in (
-              ("ATP", "adenosine triphosphate"),
-              ("DNA", "deoxyribonucleic acid"),
-              ("RNA", "ribonucleic acid"),
-              ("MLOps", "ML operations"),
-              ("OOB evaluation", "out-of-bag evaluation"),
-          )], [True, True, True, True, True])
-    check("an established counterpart is required on line 3",
-          items(bound_card), ["19-flashcards"])
-    check("an arbitrary line-3 parenthetical is not a counterpart",
-          items(mutate("??\nROC curve\n", "??\nROC curve (RC)\n")),
+    check("the term plus the alias's name, which slugs to it, is fine",
+          items(bound_card.replace("??\nROC curve (AUROC)\n", "??\nROC curve (RC)\n")), [])
+    check("a name that is no alias breaks the contract",
+          items(mutate("??\nROC curve (AUROC)\n", "??\nROC curve (AUROC, RC)\n")),
           ["19-flashcards"])
     scalar_bound_card = bound_card.replace(
-        'aliases:\n  - "rc"\n', 'aliases: "rc"\n').replace(
-        "??\nROC curve\n", "??\nROC curve (RC)\n")
-    check("a malformed scalar alias cannot establish a card counterpart",
-          items(scalar_bound_card), ["18-alias-form", "19-flashcards"])
+        'aliases:\n  - "rc"\n', 'aliases: "rc"\n')
+    check("a malformed scalar alias field gives line 3 no alias to name",
+          [items(scalar_bound_card.replace(
+              "??\nROC curve (AUROC)\n", "??\n%s\n" % answer))
+           for answer in ("ROC curve (RC)", "ROC curve")],
+          [["18-alias-form", "19-flashcards"], ["18-alias-form"]])
     check("line 3 preserves the canonical title's casing",
-          items(mutate("??\nROC curve\n", "??\nroc curve\n")),
+          items(mutate("??\nROC curve (AUROC)\n", "??\nroc curve (AUROC)\n")),
           ["19-flashcards"])
+    several = mutate(
+        '  - "auroc"', '  - "receiver-operating-characteristic-curve"\n'
+        '  - "auroc"')
+    check("several aliases are named in `aliases:` order; another order "
+          "breaks the contract",
+          [items(several.replace("??\nROC curve (AUROC)\n", "??\n%s\n" % answer))
+           for answer in (
+               "ROC curve (receiver operating characteristic curve, AUROC)",
+               "ROC curve (AUROC, receiver operating characteristic curve)",
+               "ROC curve (AUROC)")],
+          [[], ["19-flashcards"], ["19-flashcards"]])
+    introduced = several.replace(
+        "decision threshold moves.\n\n**Related:**",
+        "decision threshold moves. It is also called the *receiver "
+        "operating characteristic curve*.\n\n**Related:**", 1).replace(
+        "??\nROC curve (AUROC)\n", "??\nROC curve\n")
+    check("the expected answer names each alias as the body introduces it",
+          [f["message"].endswith(
+              '"ROC curve (receiver operating characteristic curve, auroc)"')
+           for f in lint_text(introduced, "roc-curve.md")["findings"]
+           if f["item"] == "19-flashcards"], [True])
     singular_alias = good.replace('title: "ROC curve"', 'title: "Archaea"')
     singular_alias = singular_alias.replace('  - "auroc"', '  - "archaeon"')
     singular_alias = singular_alias.replace(
@@ -5022,21 +5083,20 @@ def run_self_test():
     singular_alias = singular_alias.replace(
         'A **ROC curve** plots the trade-off between two error rates as a decision threshold moves.',
         '**Archaea** (singular, *archaeon*) is a domain of single-celled organisms.')
-    singular_alias = singular_alias.replace('\nROC curve\n', '\nArchaea\n')
-    check("a singular synonym in an annotated opener parenthetical is not a card counterpart",
-          items(singular_alias, "archaea.md"), ["18-alias-form"])
-    check("appending that singular synonym to line 3 is rejected",
-          items(singular_alias.replace("??\nArchaea\n",
-                                       "??\nArchaea (archaeon)\n"),
-                "archaea.md"), ["18-alias-form", "19-flashcards"])
+    singular_alias = singular_alias.replace('\nROC curve (AUROC)\n', '\nArchaea (archaeon)\n')
+    check("a singular-form alias, which item 18 reports, is still named on "
+          "line 3 while it stays",
+          [items(text, "archaea.md") for text in (
+              singular_alias, singular_alias.replace(
+                  "??\nArchaea (archaeon)\n", "??\nArchaea\n"))],
+          [["18-alias-form"], ["18-alias-form", "19-flashcards"]])
     short_for_card = retitled(
         "AdaBoost", "adaptive-boosting",
         "AdaBoost reweights mistakes before fitting each new predictor.",
         "**AdaBoost** (short for *adaptive boosting*) reweights mistakes "
         "before fitting each new predictor.",
         "AdaBoost (adaptive boosting)")
-    check("a short-for expansion in the opener establishes the alias-bound "
-          "flashcard counterpart",
+    check("a short-for expansion is named on line 3 like any other alias",
           items(short_for_card, "adaboost.md"), [])
     aka_card = retitled(
         "PCA", "principal-component-analysis",
@@ -5044,73 +5104,114 @@ def run_self_test():
         "**PCA** (a.k.a. *principal component analysis*) projects data onto "
         "its directions of greatest variance.",
         "PCA (principal component analysis)")
-    check("an a.k.a. lead-in is stripped from the opener counterpart, as in "
-          "the scanner",
+    check("an acronym title's full form is named on line 3, as in the "
+          "scanner",
           [f["item"] for f in lint_text(aka_card, "pca.md")["findings"]
            if f["item"] == "19-flashcards"], [])
     originally_called = retitled(
         "Boosting", "hypothesis-boosting",
         "Boosting combines weak learners into a strong learner.",
         "**Boosting** (originally called *hypothesis boosting*) combines weak "
-        "learners into a strong learner.", "Boosting")
-    check("an originally-called synonym is an alias but not a required card "
-          "counterpart",
-          items(originally_called, "boosting.md"), [])
-    check("an originally-called synonym cannot be appended to card line 3 as "
-          "an opener-established counterpart",
-          items(originally_called.replace(
-              "??\nBoosting\n", "??\nBoosting (hypothesis boosting)\n"),
-              "boosting.md"), ["19-flashcards"])
+        "learners into a strong learner.", "Boosting (hypothesis boosting)")
+    check("an originally-called synonym is an alias, so line 3 names it",
+          [items(text, "boosting.md") for text in (
+              originally_called, originally_called.replace(
+                  "??\nBoosting (hypothesis boosting)\n", "??\nBoosting\n"))],
+          [[], ["19-flashcards"]])
     scientific_card = retitled(
         "Saccharomyces cerevisiae", "s-cerevisiae",
         "Saccharomyces cerevisiae is a model budding yeast.",
         "***Saccharomyces cerevisiae*** (*S. cerevisiae*) is a model budding "
         "yeast.", "Saccharomyces cerevisiae (S. cerevisiae)",
         type_="Organism")
-    check("a canonical triple-emphasis Organism opener establishes its direct "
-          "italic scientific-abbreviation counterpart",
-          items(scientific_card, "saccharomyces-cerevisiae.md"), [])
+    check("a scientific abbreviation is named with its capital and period, "
+          "without its italics",
+          [items(text, "saccharomyces-cerevisiae.md") for text in (
+              scientific_card, scientific_card.replace(
+                  "(S. cerevisiae)\n", "(*S. cerevisiae*)\n"))],
+          [[], ["19-flashcards"]])
     knn_card = retitled(
         "k-nearest neighbors", "knn",
         "k-nearest neighbors predicts from nearby observations.",
         "The **k-nearest neighbors** algorithm (KNN) predicts from nearby "
         "observations.", "k-nearest neighbors (KNN)")
-    check("the documented intervening algorithm noun preserves an opener "
-          "acronym binding",
+    check("a mathematical title's plain form takes its alias's name",
           items(knn_card, "k-nearest-neighbors.md"), [])
     pseudonym_card = retitled(
         "Mark Twain", "samuel-clemens", "Mark Twain was an American author.",
-        "**Mark Twain** (Samuel Clemens) was an American author.", "Mark Twain")
-    check("a pseudonym parenthetical is an alias but not an acronym counterpart",
-          items(pseudonym_card, "mark-twain.md"), [])
-    later_bold_card = retitled(
-        "Counterpart scope", "pca",
-        "Counterpart scope limits opener-bound flashcard answers.",
-        "**Counterpart scope** uses **Principal component analysis** (PCA).",
-        "Counterpart scope")
-    check("a later bold term cannot donate its parenthetical to the title card",
-          [f["item"] for f in lint_text(
-              later_bold_card, "counterpart-scope.md")["findings"]
-           if f["item"] == "19-flashcards"], [])
-    counterpart_after_opener = bound_card.replace(
-        "A **ROC curve** (RC) plots the trade-off between two error rates as "
-        "a decision threshold moves.",
-        "A **ROC curve** plots the trade-off between two error rates as a "
-        "decision threshold moves.\n   \nLater, **ROC curve** (RC) is used "
-        "as an abbreviation example.")
-    check("a counterpart introduced after a whitespace-only paragraph break "
-          "does not alter the title card",
-          [f["item"] for f in lint_text(
-              counterpart_after_opener, "roc-curve.md")["findings"]
-           if f["item"] == "19-flashcards"], [])
+        "**Mark Twain** (Samuel Clemens) was an American author.",
+        "Mark Twain (Samuel Clemens)")
+    check("a pseudonym alias is named on line 3 too",
+          [items(text, "mark-twain.md") for text in (
+              pseudonym_card, pseudonym_card.replace(
+                  "??\nMark Twain (Samuel Clemens)\n", "??\nMark Twain\n"))],
+          [[], ["19-flashcards"]])
+    scatter_card = retitled(
+        "Scatter plot", "scatterplot",
+        "Scatter plot shows paired values as points.",
+        "A **scatter plot** shows paired values as points.", "Scatter plot")
+    scatter_named = scatter_card.replace(
+        "??\nScatter plot\n", "??\nScatter plot (scatterplot)\n")
+    check("a spelling-variant alias stays off line 3, and naming it is a "
+          "finding that suggests the line without it",
+          ([items(text, "scatter-plot.md")
+            for text in (scatter_card, scatter_named)],
+           [f["message"] for f in lint_text(
+               scatter_named, "scatter-plot.md")["findings"]
+            if f["item"] == "19-flashcards"]),
+          ([[], ["19-flashcards"]],
+           ["flashcard 1 line 3 is 'Scatter plot (scatterplot)' -- "
+            + flashcard_line3_fault("Scatter plot (scatterplot)",
+                                    "Scatter plot", ["scatterplot"])]))
+    check("a spelling variant left off line 3 is still an answer line 1 "
+          "must not leak",
+          items(scatter_card.replace("The plot tracing",
+                                     "The scatterplot tracing"),
+                "scatter-plot.md"), ["19-flashcard-leak"])
+    np_card = retitled(
+        "NP-completeness", "np-complete",
+        "NP-completeness is the property of the hardest problems in NP.",
+        "**NP-completeness** is the property of the hardest problems in NP.",
+        "NP-completeness")
+    respiration_card = retitled(
+        "Cellular respiration", "cell-respiration",
+        "Cellular respiration releases energy from nutrients.",
+        "**Cellular respiration** releases energy from nutrients.",
+        "Cellular respiration")
+    check("a -ness variant stays off line 3; a close name that is no "
+          "variant stays on it",
+          [items(np_card, "np-completeness.md"),
+           items(respiration_card, "cellular-respiration.md"),
+           items(respiration_card.replace(
+               "??\nCellular respiration (cell respiration)\n",
+               "??\nCellular respiration\n"), "cellular-respiration.md")],
+          [[], [], ["19-flashcards"]])
+    check("a same-line schedule and block ID after the answer are no part "
+          "of it",
+          [items(mutate("??\nROC curve (AUROC)\n",
+                        "??\n%s <!--SR:!2026-09-20,30,250--> ^roc-card\n"
+                        % answer)) for answer in (
+               "ROC curve (AUROC)", "ROC curve")],
+          [[], ["19-flashcards"]])
+    near_miss = mutate("## Flashcards\n\n", "## Flashcards\n\n" + (
+        "Why does the curve bend?\n?\nBecause rates trade off.\n\n")).replace(
+        "??\nROC curve (AUROC)\n", "??\nROC curve\n")
+    check("a near-miss primary card missing its alias is kept and repaired; "
+          "the question card is the extra",
+          sorted({(f["evidence"].get("card"), f["evidence"].get("extra_card"),
+                   "the aliases are missing" in f["message"])
+                  for f in lint_text(near_miss, "roc-curve.md")["findings"]
+                  if f["item"] == "19-flashcards" and f["evidence"].get("card")},
+                 key=str),
+          [(1, True, False), (2, None, True)])
     check("an unrelated noun phrase and later parenthetical do not bind to "
           "the bolded title",
           bool(BOLD_PAREN_RE.search(
               "**ROC curve** compares a classifier (RC) across thresholds.")),
           False)
     import introduced_aliases as _alias_module
-    check("item 17 reads the opener parenthetical and its lead-ins with the "
-          "shared item-19 patterns",
+    check("item 17 reads the opener parenthetical and its lead-ins with "
+          "entry_checks' shared patterns",
           [_alias_module._BOLD_PAREN_RE is BOLD_PAREN_RE,
            _alias_module._PAREN_LEADIN_RE is PAREN_LEADIN_RE],
           [True, True])
@@ -5118,36 +5219,50 @@ def run_self_test():
           [f["message"] for text in (
               mutate('description: "A ROC curve plots',
                      'description: "This method plots'),
-              mutate("??\nROC curve\n", "??\nroc curve\n"),
-              mutate("??\nROC curve\n", "??\nROC curve (RC)\n"))
+              mutate("??\nROC curve (AUROC)\n", "??\nroc curve\n"),
+              mutate("??\nROC curve (AUROC)\n", "??\nROC curve (RC)\n"))
            for f in lint_text(text, "roc-curve.md")["findings"]
            if f["item"] in ("7-description", "19-flashcards")],
           [description_subject_findings("This method plots.",
                                         "ROC curve")[0]["message"],
            "flashcard 1 line 3 is 'roc curve' -- " + flashcard_line3_fault(
-               "roc curve", "ROC curve", ["auroc"], ""),
+               "roc curve", "ROC curve", ["auroc"]),
            "flashcard 1 line 3 is 'ROC curve (RC)' -- " + flashcard_line3_fault(
-               "ROC curve (RC)", "ROC curve", ["auroc"], "")])
+               "ROC curve (RC)", "ROC curve", ["auroc"])])
     check("card line 1 leaking the title",
           items(mutate("The plot tracing the trade-off",
                        "The ROC curve traces the trade-off")),
           ["19-flashcard-leak"])
     check("card line 1 leaking an ALIAS, de-hyphenated",
-          items(mutate('  - "auroc"', '  - "area-under-the-curve"')
+          items(aliased('  - "area-under-the-curve"',
+                        "ROC curve (area under the curve)")
                 .replace("The plot tracing",
                          "The area under the curve, tracing")),
           ["19-flashcard-leak"])
     check("card line 1 leaking an alias in its HYPHENATED spelling",
-          items(mutate('  - "auroc"', '  - "lloyd-algorithm"')
+          items(aliased('  - "lloyd-algorithm"', "ROC curve (Lloyd algorithm)")
                 .replace("The plot tracing",
                          "The lloyd-algorithm plot tracing")),
           ["19-flashcard-leak"])
     check("slash and Unicode-dash variants cannot hide an alias leak",
-          items(mutate('  - "auroc"',
-                       '  - "bias-variance-trade-off"')
+          items(aliased('  - "bias-variance-trade-off"',
+                        "ROC curve (bias-variance trade-off)")
                 .replace("The plot tracing",
                          "The bias/variance trade–off curve tracing")),
           ["19-flashcard-leak"])
+    check("each name in a card's parenthetical is a leak needle; a "
+          "discipline disambiguator written there is not",
+          [[(f["evidence"].get("card"), f["evidence"].get("kind"))
+            for f in lint_text(mutate(
+                "??\nROC curve (AUROC)\n",
+                "??\nROC curve (AUROC)\n\n%s\n??\n%s\n" % (cue, answer)),
+                "roc-curve.md")["findings"]
+            if f["item"] == "19-flashcard-leak"]
+           for cue, answer in (
+               ("The DF idea, stated once.", "Gamma (delta function, DF)"),
+               ("A machine learning idea, stated once.",
+                "Gamma (machine learning)"))],
+          [[(2, "answer alias")], []])
     check("a leak inside $...$ is still a leak",
           items(mutate("The plot tracing", "The $\\text{ROC curve}$ tracing")),
           ["19-flashcard-leak"])
@@ -5168,14 +5283,15 @@ def run_self_test():
                "A $\\boldsymbol{k}$-nearest neighbors method tracing")],
           [["19-flashcard-leak"]] * 2)
     math_alias_card = math_answer_card.replace(
-        '  - "nearest-neighbor-rule"', '  - "knn"')
+        '  - "nearest-neighbor-rule"', '  - "knn"').replace(
+        "(nearest neighbor rule)\n", "(KNN)\n")
     check("a math-title primary card still gets the entry aliases",
           items(math_alias_card.replace(
               "The plot tracing", "A KNN method tracing"),
               "k-nearest-neighbors.md"), ["19-flashcard-leak"])
     secondary_names_primary = mutate(
-        "??\nROC curve\n",
-        "??\nROC curve\n\nA ROC curve can illustrate this separate notion.\n"
+        "??\nROC curve (AUROC)\n",
+        "??\nROC curve (AUROC)\n\nA ROC curve can illustrate this separate notion.\n"
         "??\nSecond idea\n")
     check("an extra card may name the primary while its own answer "
           "remains leak-free",
@@ -5190,13 +5306,13 @@ def run_self_test():
     extra_card = "\n\nAnother idea stated.\n??\nGamma\n"
     check("an extra card beside the primary card draws no line-3 fault: it "
           "is removed, never repointed",
-          card_findings(mutate("??\nROC curve\n", "??\nROC curve\n" + extra_card)),
+          card_findings(mutate("??\nROC curve (AUROC)\n", "??\nROC curve (AUROC)\n" + extra_card)),
           [])
     check("with no primary card, one finding asks for it without naming an "
           "extra card's answer as wrong",
           [f["message"].startswith("no card carries the primary answer "
-                                   '"ROC curve"')
-           for f in card_findings(mutate("??\nROC curve\n",
+                                   '"ROC curve (auroc)"')
+           for f in card_findings(mutate("??\nROC curve (AUROC)\n",
                                          "??\nAlpha\n" + extra_card))],
           [True])
     check("with no definition card, the first card is rewritten into it and "
@@ -5204,24 +5320,24 @@ def run_self_test():
           [f["message"].endswith(
               "rewrite the first card into the definition card, keeping its "
               "attachments, and remove every other card")
-           for f in card_findings(mutate("??\nROC curve\n",
+           for f in card_findings(mutate("??\nROC curve (AUROC)\n",
                                          "??\nAlpha\n" + extra_card))],
           [True])
     check("a punctuation-variant primary card is the scanner's near miss",
           [f["evidence"]["card"] for f in card_findings(
               mutate('title: "ROC curve"', 'title: "ROC-curve"')
-              .replace("\nROC curve\n", "\nROC–curve\n" + extra_card, 1))],
+              .replace("\nROC curve (AUROC)\n", "\nROC–curve\n" + extra_card, 1))],
           [1])
     check("a near-miss primary card gets its own line-3 fault",
           [(f["evidence"]["card"], "canonical casing" in f["message"])
-           for f in card_findings(mutate("??\nROC curve\n",
+           for f in card_findings(mutate("??\nROC curve (AUROC)\n",
                                          "??\nroc curve\n" + extra_card))],
           [(1, True)])
     check("a short title is not leaked by a mid-word substring",
           items(mutate('title: "ROC curve"', 'title: "C"')
                 .replace("A **ROC curve** plots", "A **C** creates")
                 .replace("A ROC curve plots", "C creates")
-                .replace("ROC curve\n??", "C\n??").replace("\nROC curve\n", "\nC\n"),
+                .replace("ROC curve\n??", "C\n??").replace("\nROC curve (AUROC)\n", "\nC (AUROC)\n"),
                 "c.md"), [])
     check("a long title is not leaked inside a different word",
           items(mutate('title: "ROC curve"', 'title: "Variance"')
@@ -5229,7 +5345,7 @@ def run_self_test():
                 .replace("A ROC curve plots", "Variance describes")
                 .replace("The plot tracing", "A covariance plot tracing")
                 .replace("ROC curve\n??", "Variance\n??")
-                .replace("\nROC curve\n", "\nVariance\n"),
+                .replace("\nROC curve (AUROC)\n", "\nVariance (AUROC)\n"),
                 "variance.md"), [])
 
     # -- item 19: one card; a further card is an extra card to remove -------
@@ -5238,8 +5354,8 @@ def run_self_test():
            "are missed.\n")
 
     def with_cards(*extra):
-        return mutate("??\nROC curve\n",
-                      "??\nROC curve\n" + "".join("\n" + c for c in extra))
+        return mutate("??\nROC curve (AUROC)\n",
+                      "??\nROC curve (AUROC)\n" + "".join("\n" + c for c in extra))
 
     check("a question card is an extra card to remove whose own line-1 and "
           "line-2 findings name it; none is report-only",
@@ -5261,7 +5377,7 @@ def run_self_test():
            any("line 2 is '?'" in m for m in extra_messages)),
           ([True, True], False, True))
     simplified_pair = with_cards(why).replace(
-        "??\nROC curve\n", "?\nROC curve\n", 1)
+        "??\nROC curve (AUROC)\n", "?\nROC curve (AUROC)\n", 1)
     check("a primary card simplified to ? beside an extra ? card: only the "
           "primary's line 2 needs its ?? back",
           [(f["evidence"].get("card"), f["evidence"].get("extra_card"),
@@ -5317,7 +5433,7 @@ def run_self_test():
           [(2, None, None), (None, True, 2)])
     two_questions = lint_text(mutate(
         "The plot tracing the trade-off between two error rates as a "
-        "decision threshold moves.\n??\nROC curve\n",
+        "decision threshold moves.\n??\nROC curve (AUROC)\n",
         why + "\nWhy does lowering it raise recall?\n?\n"
         "More instances are predicted positive.\n"), "roc-curve.md")[
             "findings"]
@@ -5589,7 +5705,7 @@ def run_self_test():
                 .replace("The plot tracing the trade-off between two error "
                          "rates as a decision threshold moves.",
                          "The square root of the variance.")
-                .replace("\nROC curve\n", "\nStandard deviation\n"))
+                .replace("\nROC curve (AUROC)\n", "\nStandard deviation\n"))
         root_report = lint_path(root_tmp)
         check("folder mode keeps the root exemption and its Related labels",
               (root_report["summary"]["files"],
@@ -5671,7 +5787,8 @@ def run_self_test():
            items(dated_person.replace("(1815–1852)", "(fl. since 2020)"),
                  "ada-lovelace.md"),
            items(dated_event, "trinity-test.md")), ([], [], []))
-    check("a date before an acronym expansion keeps the card counterpart",
+    check("an Event dated before its acronym expansion names the expansion "
+          "on line 3",
           items(retitled(
               "ILSVRC", "imagenet-large-scale-visual-recognition-challenge",
               "ILSVRC was an annual image-classification competition.",
@@ -6042,12 +6159,12 @@ def run_self_test():
           ["10-duplicate-wikilink"])
     # A 1- or 2-line card is malformed, not silently clean.
     check("a card missing its term line is a malformed-card error",
-          items(mutate("threshold moves.\n??\nROC curve\n",
+          items(mutate("threshold moves.\n??\nROC curve (AUROC)\n",
                        "threshold moves.\n??\n")),
           ["19-flashcards"])
     joined_cards = mutate(
-        "threshold moves.\n??\nROC curve\n",
-        "One identifying statement.\n??\nROC curve\n"
+        "threshold moves.\n??\nROC curve (AUROC)\n",
+        "One identifying statement.\n??\nROC curve (AUROC)\n"
         "A second definition.\n??\nSecond term\n")
     check("a second card joined without a blank line is an extra card to "
           "remove",
@@ -6057,8 +6174,8 @@ def run_self_test():
               if finding["item"] == "19-flashcards"),
           True)
     ordinary_line4_comment = mutate(
-        "threshold moves.\n??\nROC curve\n",
-        "threshold moves.\n??\nROC curve\n<!--ordinary comment-->\n")
+        "threshold moves.\n??\nROC curve (AUROC)\n",
+        "threshold moves.\n??\nROC curve (AUROC)\n<!--ordinary comment-->\n")
     check("a non-SR line-four HTML comment is malformed visible content",
           "visible lines" in " ".join(
               finding["message"] for finding in
@@ -6087,8 +6204,7 @@ def run_self_test():
           ["18-alias-duplicate", "18-alias-form"])
     # A comma-delimited empty element is invalid YAML, not an empty list.
     check("a degenerate flow list is a YAML validity finding",
-          items(mutate('aliases:\n  - "auroc"\n', "aliases: [,]\n")),
-          ["1-valid-yaml"])
+          items(unaliased("aliases: [,]\n")), ["1-valid-yaml"])
 
     # -- item 17: the introduced-alias completeness scan --------------------
     check("an opener acronym parenthetical missing from aliases: is flagged",
@@ -6104,7 +6220,9 @@ def run_self_test():
                        '  - "auroc"\n  - "operating-characteristic"')
                 .replace("A **ROC curve** plots the trade-off",
                          "A **ROC curve**, also called the *operating "
-                         "characteristic*, plots the trade-off")),
+                         "characteristic*, plots the trade-off")
+                .replace("??\nROC curve (AUROC)\n",
+                         "??\nROC curve (AUROC, operating characteristic)\n")),
           [])
     check("an alias candidate the alias rule keeps out (an acronym that is an "
           "ordinary word, an unsafe organism common name) is review-only",
@@ -6196,23 +6314,53 @@ def run_self_test():
     # -- item 18: alias form, and alias collisions in FOLDER scope ----------
     check("an alias that is not itself in slug form is a WARNING",
           [(f["item"], f["severity"])
-           for f in lint_text(mutate('  - "auroc"',
-                                     '  - "receiver operating characteristic"'),
-                              "roc-curve.md")["findings"]],
+           for f in lint_text(aliased(
+               '  - "receiver operating characteristic"',
+               "ROC curve (receiver operating characteristic)"),
+               "roc-curve.md")["findings"]],
           [("18-alias-form", "warning")])
     check("an empty alias item is rejected",
-          items(mutate('  - "auroc"', '  - ""')),
+          items(aliased('  - ""', "ROC curve")),
           ["18-alias-form"])
-    check("an alias equal to the entry's own slug is rejected",
-          items(mutate('  - "auroc"', '  - "roc-curve"')),
-          ["18-alias-form"])
-    check("a singular/plural-only alias of the canonical slug is rejected",
-          items(mutate('  - "auroc"', '  - "roc-curves"')),
-          ["18-alias-form"])
+    check("an alias equal to the entry's own slug is rejected, and line 3 "
+          "does not name it",
+          [items(aliased('  - "roc-curve"', answer))
+           for answer in ("ROC curve", "ROC curve (ROC curve)")],
+          [["18-alias-form"], ["18-alias-form", "19-flashcards"]])
+    check("the item-17 candidate asks to name an added alias on card line "
+          "3, and to leave a spelling variant off it",
+          [[f["message"].split(" -- ")[1].split("; ")[0]
+            for f in lint_text(mutate(
+                "A **ROC curve** plots the trade-off",
+                "A **ROC curve**, also called the *%s*, plots the trade-off"
+                % name), "roc-curve.md")["findings"]
+            if f["item"] == "17-alias-completeness"]
+           for name in ("operating characteristic", "ROCcurve")],
+          [["add it if it names this same entity, naming it on card line 3 "
+            "in the same edit (item 19)"],
+           ["add it if it names this same entity, leaving it off card line 3 "
+            "as a spelling variant (item 19)"]])
+    tlu_order = aliased(
+        '  - "tlu"\n  - "linear-threshold-unit"\n  - "ltu"',
+        "ROC curve (LTU, linear threshold unit, TLU)")
+    check("a line-3 finding quotes the whole line 3, however long",
+          [(f["message"].startswith(
+              "flashcard 1 line 3 is 'ROC curve (LTU, linear threshold unit, "
+              "TLU)' -- "), f["evidence"]["line3"])
+           for f in lint_text(tlu_order, "roc-curve.md")["findings"]
+           if f["item"] == "19-flashcards"],
+          [(True, "ROC curve (LTU, linear threshold unit, TLU)")])
+    check("a singular/plural-only alias of the canonical slug is rejected, "
+          "and line 3 leaves it out as a spelling variant",
+          [items(aliased('  - "roc-curves"', answer))
+           for answer in ("ROC curve", "ROC curve (ROC curves)")],
+          [["18-alias-form"], ["18-alias-form", "19-flashcards"]])
     check("a bare cross-domain word or phrase alias is an ERROR",
           [[(f["item"], f["severity"])
-            for f in lint_text(mutate('  - "auroc"', '  - "%s"' % alias),
-                               "roc-curve.md")["findings"]]
+            for f in lint_text(aliased(
+                '  - "%s"' % alias,
+                "ROC curve (%s)" % alias.replace("-", " ")),
+                "roc-curve.md")["findings"]]
            for alias in ("entropy", "tree-of-life", "entropies", "targets")],
           [[("18-alias-form", "error")]] * 4)
 
@@ -6348,9 +6496,7 @@ def run_self_test():
     check("an acronym title without its expansion is item 9's warning",
           [(f["item"], f["severity"], f["evidence"]) for f in lint_text(
               mnist.replace(" (Modified National Institute of Standards and "
-                            "Technology) is", " is", 1)
-              .replace("MNIST (Modified National Institute of Standards and "
-                       "Technology)\n", "MNIST\n"), "mnist.md")["findings"]],
+                            "Technology) is", " is", 1), "mnist.md")["findings"]],
           [("9-acronym-expansion", "warning",
             {"title": "MNIST", "review_only": True})])
     check("item 9's acronym floor leaves a mixed-case or multiword title alone",
@@ -6628,7 +6774,8 @@ def run_self_test():
                         .replace(
                             "A **ROC curve** plots the trade-off between two error "
                             "rates as a decision threshold moves.", body)
-                        .replace("\nROC curve\n", "\n%s\n" % title))
+                        .replace("\nROC curve (AUROC)\n", "\n%s (%s)\n"
+                                 % (title, alias.replace("-", " "))))
 
         put("roc-curve.md", good)
         put("precision.md", precision)
@@ -6639,7 +6786,8 @@ def run_self_test():
                          '  - "AUROC"\n  - "unique-sensitivity"')
                 .replace("A ROC curve plots", "Sensitivity measures")
                 .replace("A **ROC curve** plots", "**Sensitivity** plots")
-                .replace("\nROC curve\n", "\nSensitivity\n"))
+                .replace("\nROC curve (AUROC)\n",
+                         "\nSensitivity (AUROC, unique sensitivity)\n"))
         # an entry listing the SAME alias twice: its own per-entry fault,
         # never a folder-scope collision with itself
         put("sub/dupalias.md",
@@ -6647,7 +6795,7 @@ def run_self_test():
                 .replace('  - "auroc"', '  - "dupme"\n  - "dupme"')
                 .replace("A ROC curve plots", "Dupalias names")
                 .replace("A **ROC curve** plots", "**Dupalias** plots")
-                .replace("\nROC curve\n", "\nDupalias\n"))
+                .replace("\nROC curve (AUROC)\n", "\nDupalias (dupme)\n"))
         put("sub/reader.md",
             good.replace('title: "ROC curve"', 'title: "Reader"')
                 .replace('  - "auroc"', '  - "reader-alias"')
@@ -6658,7 +6806,7 @@ def run_self_test():
                     "**Reader** compares [[sub/sensitivity.md|Sensitivity]] "
                     "with [[unique-sensitivity|Sensitivity]] as two spellings "
                     "of one destination.")
-                .replace("\nROC curve\n", "\nReader\n"))
+                .replace("\nROC curve (AUROC)\n", "\nReader (reader alias)\n"))
         put("foo.md", named_good(
             "Foo", "foo-root", "Foo is the root ambiguous basename fixture.",
             "**Foo** is the root ambiguous basename fixture."))
@@ -6818,7 +6966,7 @@ def run_self_test():
                                                     'title: "Bom"')
                   .replace("A ROC curve plots", "Bom records")
                   .replace("A **ROC curve** plots", "**Bom** plots")
-                  .replace("\nROC curve\n", "\nBom\n"))
+                  .replace("\nROC curve (AUROC)\n", "\nBom (AUROC)\n"))
         check("a BOM does not defeat the parser (and skip all 13 checks)",
               _st_items(lint_file(bom)), [])
         binary = put("binary.md", b'---\ntitle: "Caf\xe9"\n---\nbody\n')

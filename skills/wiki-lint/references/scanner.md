@@ -475,9 +475,12 @@ A case variant, alias, ambiguous owner, or unparsed file is not a genuinely miss
   further card is an extra card to remove.
 - **Lines 1 and 3.** Plain line 3, and no `::` or `:::` on card line 1 or 3
   outside a backtick span, which the plugin reads as a card of its own.
-- **Primary answer.** The canonical title's plain form or base term plus any
-  opener-established, alias-bound
-  [counterpart](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer).
+- **Primary answer.** The canonical title's plain form or base term, then,
+  when the entry has an alias that is no spelling variant, one parenthetical
+  naming every such alias in `aliases:` order, each name slugging to its
+  alias and the counts matching (a self-alias or a repeated alias adds no
+  name); a name for a spelling variant is a finding
+  ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
   With several cards, when none carries it and no single card nearly does, one
   finding asks to rewrite the first card into the definition card, keeping its
   attachments, and remove the rest.
@@ -500,8 +503,9 @@ A case variant, alias, ambiguous owner, or unparsed file is not a genuinely miss
   the card's removal resolves it, except that content after its line 3 that is
   not a recognized attachment stays and keeps its own finding.
 - **Agent checks.** On the primary card, the executing agent checks semantic
-  reconstruction, missing mathematical operations, off-rule line-1 math and an
-  alias pair the opener should have bound.
+  reconstruction, missing mathematical operations, off-rule line-1 math and
+  whether each line-3 name takes the form and casing the body introduces it
+  in (`PCA`, not `pca`), which the slug test cannot see.
 
 ## Deterministic scanner and autonomous semantic pass
 

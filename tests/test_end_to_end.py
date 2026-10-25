@@ -3381,7 +3381,7 @@ The **geometric mean** of positive inputs is the root of their product.
 
 For positive inputs, the root of their product with degree equal to their count.
 !!
-Geometric mean <!--SR:!2026-09-05,7,250--> ^saved-card
+Geometric mean (geometric average) <!--SR:!2026-09-05,7,250--> ^saved-card
 ''', encoding="utf-8")
         original_entry = existing.read_bytes()
         original_source = source.read_bytes()
@@ -3655,7 +3655,7 @@ A compact definition used only to exercise the shared contract.
             card="Archaea")
         write_entry(
             "hard-wrap-acronym", "Hard wrap acronym",
-            "**Hard wrap acronym**\n(HWA) binds its counterpart across a hard wrap.",
+            "**Hard wrap acronym**\n(HWA) introduces its acronym across a hard wrap.",
             aliases=("hwa",), card="Hard wrap acronym (HWA)")
         write_entry(
             "adaboost", "AdaBoost",
@@ -3671,7 +3671,53 @@ A compact definition used only to exercise the shared contract.
             "historical-synonym", "Historical synonym",
             "**Historical synonym** (originally called *former name*) is a "
             "worked example.", aliases=("former-name",),
-            card="Historical synonym")
+            card="Historical synonym (former name)")
+        # Card line 3 names every alias in `aliases:` order, as the body
+        # introduces it, a same-line schedule after the answer included.
+        write_entry(
+            "threshold-logic-unit", "Threshold logic unit",
+            "A **threshold logic unit** (TLU), also called a *linear threshold "
+            "unit* (LTU), is a synthetic alignment fixture.",
+            aliases=("tlu", "linear-threshold-unit", "ltu"),
+            card="Threshold logic unit (TLU, linear threshold unit, LTU)")
+        write_entry(
+            "escherichia-coli", "Escherichia coli",
+            "***Escherichia coli*** (*E. coli*) is a model bacterium.",
+            aliases=("e-coli",), type_="Organism",
+            card="Escherichia coli (E. coli) <!--SR:!2026-10-01,3,250--> "
+                 "^coli-card")
+        write_entry(
+            "alias-order", "Alias order",
+            "**Alias order** (AO), also called the *order of aliases*, is a "
+            "synthetic alignment fixture.",
+            aliases=("order-of-aliases", "ao"),
+            card="Alias order (AO, order of aliases)")
+        # Card line 3 leaves out a spelling variant of the title or of a
+        # name already on it; a close name that is no variant stays.
+        write_entry(
+            "scatter-plot", "Scatter plot",
+            "A **scatter plot** is a synthetic alignment fixture.",
+            aliases=("scatterplot",), card="Scatter plot")
+        write_entry(
+            "lambdarank", "LambdaRank",
+            "**LambdaRank** is a synthetic alignment fixture.",
+            aliases=("lambda-rank",), card="LambdaRank")
+        write_entry(
+            "multilayer-network", "Multilayer network",
+            "A **multilayer network**, also called a *stacked network*, is a "
+            "synthetic alignment fixture.",
+            aliases=("stacked-network", "stackednetwork"),
+            card="Multilayer network (stacked network)")
+        write_entry(
+            "cellular-respiration", "Cellular respiration",
+            "**Cellular respiration**, also called *cell respiration*, is a "
+            "synthetic alignment fixture.",
+            aliases=("cell-respiration",),
+            card="Cellular respiration (cell respiration)")
+        write_entry(
+            "np-hardness", "NP-hardness",
+            "**NP-hardness** is a synthetic alignment fixture.",
+            aliases=("np-hard",), card="NP-hardness (NP-hard)")
         write_entry(
             "introduced-alias", "Introduced alias",
             "**Introduced alias** — which many people call *alternate name* — "
@@ -3739,14 +3785,14 @@ A compact definition used only to exercise the shared contract.
                 "sources:\n", "aliases:\nsources:\n", 1),
             encoding="utf-8")
         write_entry(
-            "missing-counterpart-acronym", "Missing counterpart acronym",
-            "**Missing counterpart acronym** (MCA) binds its acronym in the opener.",
-            aliases=("mca",), card="Missing counterpart acronym")
+            "missing-alias-acronym", "Missing alias acronym",
+            "**Missing alias acronym** (MAA) introduces its acronym in the opener.",
+            aliases=("maa",), card="Missing alias acronym")
         write_entry(
             "synonym-parenthetical", "Synonym parenthetical",
             "**Synonym parenthetical** has a synonym alias without an opener binding.",
             aliases=("alternate-name",),
-            card="Synonym parenthetical (alternate-name)")
+            card="Synonym parenthetical (alternate name)")
         write_entry(
             "wrong-title-case", "Wrong title case",
             "**Wrong title case** is a case-sensitive answer fixture.",
@@ -3872,7 +3918,10 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes", "atp"):
+                     "canonical-code-shapes", "atp", "threshold-logic-unit",
+                     "escherichia-coli", "synonym-parenthetical",
+                     "scatter-plot", "lambdarank", "multilayer-network",
+                     "cellular-respiration"):
             self.assertEqual(lint_items[slug], set(), slug)
         for slug, item in (("mnist", "9-acronym-expansion"),
                            ("tree-of-life", "5-bare-common-noun")):
@@ -3882,12 +3931,26 @@ A compact definition used only to exercise the shared contract.
                 finding["item"] == "18-alias-form"
                 and "bare cross-domain term" in finding["message"]
                 for finding in lint_findings[slug]), (slug, lint_findings[slug]))
-        for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
-                     "synonym-parenthetical", "wrong-title-case",
-                     "singular-parenthetical"):
+        for slug in ("scalar-alias", "blank-alias", "missing-alias-acronym",
+                     "alias-order", "wrong-title-case", "np-hardness"):
             expected = ("18-alias-form" if slug in ("scalar-alias", "blank-alias")
                         else "19-flashcards")
             self.assertIn(expected, lint_items[slug], slug)
+        variant_text = ('the parenthetical names the spelling variant '
+                        '"NP-hard"; line 3 leaves out a spelling variant, so '
+                        'it is the term alone: "NP-hardness"')
+        self.assertTrue(any(variant_text in finding["message"]
+                            for finding in lint_findings["np-hardness"]),
+                        lint_findings["np-hardness"])
+        # A singular-form alias stays item 18's to judge; line 3 names it.
+        self.assertNotIn("19-flashcards", lint_items["singular-parenthetical"])
+        order_text = ("the parenthetical lists the aliases out of `aliases:` "
+                      'order; line 3 names every alias once, in `aliases:` '
+                      'order and without markup: "Alias order (order of '
+                      'aliases, AO)"')
+        self.assertTrue(any(order_text in finding["message"]
+                            for finding in lint_findings["alias-order"]),
+                        lint_findings["alias-order"])
         self.assertIn("17-alias-completeness", lint_items["introduced-alias"])
         self.assertIn("7-description", lint_items["two-sentence-description"])
         self.assertIn("1-valid-yaml", lint_items["malformed-flow-list"])
@@ -3960,19 +4023,28 @@ A compact definition used only to exercise the shared contract.
                      "x-1-2-transform", "r-plus",
                      "archaea", "hard-wrap-acronym", "adaboost",
                      "saccharomyces-cerevisiae", "historical-synonym",
-                     "canonical-code-shapes", "atp"):
+                     "canonical-code-shapes", "atp", "threshold-logic-unit",
+                     "escherichia-coli", "synonym-parenthetical",
+                     "scatter-plot", "lambdarank", "multilayer-network",
+                     "cellular-respiration"):
             self.assertEqual(scan_items.get(slug, set()), set(), slug)
         self.assertIn("item9/acronym-expansion", scan_items.get("mnist", set()))
         self.assertTrue(any(
             problem["slug"] == "tree-of-life" and problem["item"] == "item5"
             and "bare-slug" in problem["message"]
             for problem in scan["problems"]), scan_items.get("tree-of-life"))
-        for slug in ("scalar-alias", "blank-alias", "missing-counterpart-acronym",
-                     "synonym-parenthetical", "wrong-title-case",
-                     "singular-parenthetical"):
+        for slug in ("scalar-alias", "blank-alias", "missing-alias-acronym",
+                     "alias-order", "wrong-title-case", "np-hardness"):
             expected = ("item18" if slug in ("scalar-alias", "blank-alias")
                         else "item19")
             self.assertIn(expected, scan_items.get(slug, set()), scan_items.get(slug))
+        self.assertTrue(any(
+            problem["slug"] == "np-hardness" and variant_text in problem["message"]
+            for problem in scan["problems"]), scan_items.get("np-hardness"))
+        self.assertNotIn("item19", scan_items.get("singular-parenthetical", set()))
+        self.assertTrue(any(
+            problem["slug"] == "alias-order" and order_text in problem["message"]
+            for problem in scan["problems"]), scan_items.get("alias-order"))
         self.assertNotIn("item17/alias-candidate",
                          scan_items.get("introduced-alias", set()))
         self.assertIn("item7", scan_items.get("two-sentence-description", set()))

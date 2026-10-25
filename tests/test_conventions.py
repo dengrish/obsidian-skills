@@ -6090,7 +6090,18 @@ SELFTEST_MIN_CASES = {
     # 2026-10-11 (knowledge 1.32.0): a numbered list of fewer than three
     # steps, presentation lines, a navigation cue with a colon, literal
     # dollars by the inline-math delimiter rule, and any raw ℓ or μm.
-    "shared/scripts/entry_checks.py": 148,
+    # 2026-10-24 (knowledge 1.37.0): card line 3 names every alias in
+    # `aliases:` order; the opener-counterpart cases went with that rule,
+    # and the alias-order, extra-name, slug-match, schedule, suggested-name
+    # and near-miss cases replace them; a term match outranks an alias
+    # match, the markup line 3 refuses, the suggested names' casing, Greek
+    # and accented initials, parentheses and readings, and the self-alias.
+    # 2026-10-25 (knowledge 1.37.0): line 3 leaves out a spelling variant:
+    # the spelling key, variants and close non-variants, the split of named
+    # aliases and variants, lines without and with a variant, the answer
+    # text and a variant term's near miss; a variant of the term's slug
+    # through a letter the slug transliterates (β-lactamase).
+    "shared/scripts/entry_checks.py": 166,
     # 2026-10-02: the cases for the removed prose-calculation cues
     # (averaged probability, majority vote, regression average) went with
     # them; the new cue and denominator cases still raise the floor net.
@@ -6541,7 +6552,14 @@ SELFTEST_MIN_CASES = {
     # paragraph; none without a baseline, for an unchanged copy, for a
     # pure insertion or for a move, and none for an opening "Also called"
     # or "Either ... or".
-    "skills/wiki-build/scripts/lint_entry.py": 562,
+    # 2026-10-24 (knowledge 1.37.0): card line 3 names every alias; the
+    # opener-counterpart cases became alias-naming ones, plus a leak through
+    # a name in a card's parenthetical, the whole line 3 in its finding and
+    # the item-17 candidate's line-3 clause.
+    # 2026-10-25 (knowledge 1.37.0): a spelling-variant alias stays off line
+    # 3, naming it is a finding, it still leaks from line 1, and a -ness
+    # variant and a close non-variant.
+    "skills/wiki-build/scripts/lint_entry.py": 568,
     # 2026-10-06 (knowledge 1.22.0): a trimmed neighbor's counted faults.
     # 2026-10-06 (knowledge 1.22.0): `path` links that drop an unneeded
     # `.md` or path, and keep one another vault file needs.
@@ -6555,7 +6573,9 @@ SELFTEST_MIN_CASES = {
     # the vault renders and is not missing.
     # 2026-10-11 (knowledge 1.32.0): a manifest path at or under an
     # unmirrored path is refused.
-    "skills/wiki-build/scripts/review_tree.py": 54,
+    # 2026-10-25 (knowledge 1.37.0): a staged card leaves a spelling-variant
+    # alias off line 3, and naming it is an item-19 finding.
+    "skills/wiki-build/scripts/review_tree.py": 55,
     # 2026-10-06 (knowledge 1.22.0): plain-note identity and issues-line errors.
     # 2026-10-06 (knowledge 1.22.0): a symlinked folder back into the wiki.
     # 2026-10-06 (knowledge 1.22.0): a frontmatter only the Flashcards
@@ -6660,7 +6680,14 @@ SELFTEST_MIN_CASES = {
     # the records of its earlier mentions' sentences, reached through a
     # surface or its label, so a settled one never hides another; an
     # outdated ledger settles none.
-    "skills/wiki-lint/scripts/scan_vault.py": 812,
+    # 2026-10-24 (knowledge 1.37.0): card line 3 names every alias; the
+    # opener-counterpart cases became alias-naming ones, plus a leak through
+    # a name in a card's parenthetical, the whole line 3 in its finding and
+    # the item-17 candidate's line-3 clause.
+    # 2026-10-25 (knowledge 1.37.0): line 3 leaves out a spelling variant:
+    # variants left out, a close non-variant kept, a variant named, a
+    # variant's leak and the item-17 candidate's variant clause.
+    "skills/wiki-lint/scripts/scan_vault.py": 821,
 }
 
 
@@ -9797,6 +9824,24 @@ WRITING_RULE_PINS = (
         "Do not name them in the cue",
         "**hemoglobin** is the protein that carries",
     )),
+    # 2026-10-24 (knowledge 1.37.0): card line 3 names every alias in
+    # `aliases:` order, each as the body introduces it, and an alias change
+    # updates line 3 in the same edit.
+    # 2026-10-25 (knowledge 1.37.0): except a spelling variant of the title
+    # or of a name already on the line, which line 3 leaves out.
+    (("wiki-build", "references", "flashcards-and-emphasis.md"), (
+        "the name of every alias except a spelling variant follows in one "
+        "pair of parentheses, in `aliases:` order",
+        "A **spelling variant** differs from the title or from a name "
+        "already on the line only in case, spacing, hyphens, punctuation or "
+        "diacritics, or by a plural ending (-s, -es) or a -ness ending",
+        "When every alias is a spelling variant, line 3 is the title alone",
+        "A spelling variant stays in `aliases:`, where it resolves links, "
+        "and line 1 still must not leak it",
+        "Each alias is written as a name, not a slug",
+        "Every alias added, removed or reordered, and every retitle, updates "
+        "line 3 to match in the same edit",
+    )),
     (("wiki-build", "references", "media.md"), (
         "Describe what the exhibit shows and what to notice in it",
         "Never restate the sentence it follows",
@@ -11290,6 +11335,12 @@ WRITING_RULE_RETIRED = (
     "Bullets are parallel, not sequential",
     "Use the literature's frequent, distinctive form",
     "Append one counterpart in parentheses only when",
+    # 2026-10-24 (knowledge 1.37.0): card line 3 names every alias in
+    # `aliases:` order, so no opener binding selects a required counterpart.
+    "plus any required counterpart",
+    "Nothing else goes in parentheses: not a spelling variant",
+    "opener-established, alias-bound",
+    "line-3 counterpart",
     # 2026-10-06 (knowledge 1.22.0): a merged duplicate keeps the title
     # rule's form, not the literature's most frequent one.
     "usually the literature's most common form",

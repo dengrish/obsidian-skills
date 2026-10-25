@@ -707,8 +707,8 @@ cited source or as a 5(h) clarification:
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.
-  Item 17's alias gates and item 19's line-3 counterpart follow in the same
-  edit.
+  Item 17's alias gates follow in the same edit, and an alias they add
+  joins card line 3 under item 19 unless it is a spelling variant.
 
 Preserve the named-work exception: “the GPT-3 paper”
 and “the authors of SGDR” identify wiki entities; bare “the paper” and “the
@@ -762,7 +762,9 @@ admits without a source and hands any other to Task 1b, which adds it only
 when a cited source uses it and otherwise removes its introduction as new
 information. Either adds a slug only after the
 same-entity, own-slug, cross-domain, Organism common-name, and whole-vault
-collision gates. A word from the builder's
+collision gates, and names each added alias except a spelling variant on card
+line 3 in the same edit ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
+A word from the builder's
 [cross-domain corpus](../../wiki-build/references/special-titles.md#cross-domain-term-disambiguation)
 never becomes an alias, so the scanner does not propose one; its italic
 introduction stays in the body. An existing alias the
@@ -808,7 +810,11 @@ has a Flashcards section after the Related footer and separator, holding its
 one `??` definition card. Repair a variant heading in place rather than adding
 a section. Repair a missing or empty section by writing the card from the
 entry's already-established main claim, with `??` and the canonical primary
-answer, and itemize the addition. Lint never adds a second card.
+answer (the title and every alias except a spelling variant), and itemize the
+addition. When an existing line 3 breaks the answer contract, such as by
+omitting an alias that is no spelling variant, naming a non-alias or a
+spelling variant, or listing the aliases out of order, Task 1 rewrites it,
+keeping every attachment in place. Lint never adds a second card.
 
 ## Coding content in non-Software entries (item 6)
 

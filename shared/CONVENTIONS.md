@@ -958,7 +958,7 @@ shorter title rather than crashing the write.
 **Consequences worth knowing without opening the script:** the slug derives from
 the **full** title including any parenthetical (`Feature (machine learning)` →
 `feature-machine-learning.md`), while the **base term** (`Feature`) is what the
-body opener, the description subject and the flashcard answer use. `C`, `C++`,
+body opener, the description subject and the flashcard answer's term use. `C`, `C++`,
 `C#` and `C*` produce four distinct slugs, not one.
 
 **Depended on by:** wiki-build (names every entry; `scripts/find_collisions.py`
@@ -974,7 +974,12 @@ would turn correctly named entries into false rename candidates.
 
 Every `aliases:` item is slug-form, because aliases *are* alternative slugs: a
 future candidate that slugs to one of them resolves to this entry. An alias that
-slugs identically to the filename is redundant — omit it.
+slugs identically to the filename is redundant — omit it. Flashcard line 3
+names every alias except a spelling variant, each name slugging to its
+alias, in list order
+([answer](../skills/wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)),
+so an alias added, removed or reordered updates that line to match in the
+same edit.
 
 **A semantic-invalid alias or a wrong title is a vault-wide repair, not a
 local cleanup.** Removing an alias can redirect every inbound wikilink that

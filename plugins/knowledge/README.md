@@ -74,7 +74,10 @@ the details.
 Wiki entries end with a flashcard for the Spaced Repetition community plugin
 (`obsidian-spaced-repetition`), which you install and configure in the vault
 yourself. Each entry has one reversed definition card, separated by `??` and
-reviewed in both directions; a discipline root may have none. Keep the
+reviewed in both directions; a discipline root may have none. Its answer is
+the entry's title, followed in parentheses by every alias except a spelling
+variant (Scatter plot leaves out `scatterplot`); an alias change updates the
+answer to match, and the card keeps its review schedule. Keep the
 plugin's multi-line reversed separator at `??` and its multi-line end marker
 empty. Keep cloze conversion off (no highlight, bold or curly-bracket
 conversion and no cloze patterns): the plugin reads the whole note, so it

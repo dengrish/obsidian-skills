@@ -22,6 +22,7 @@ import argparse
 import os
 import re
 import sys
+import unicodedata
 
 # Keep sibling imports working when a harness loads this file directly by path
 # rather than running it as a script (where Python supplies this path).
@@ -34,7 +35,6 @@ from entry_structure import (  # noqa: E402
     BOLD_TEXT,
     SOURCE_REFERENCE_FORMS,
     _BOLD_OUTER_RE,
-    acronym_initial_forms,
     description_subject_forms,
     first_letter_ci_equal,
     first_prose_paragraph_lines,
@@ -59,8 +59,6 @@ from markdown_tables import (  # noqa: E402
 from organism_names import (  # noqa: E402
     bound_common_names,
     first_sentence,
-    organism_title_classification,
-    scientific_abbreviation_matches,
 )
 from naming import chapter_book_stem, core_stem  # noqa: E402
 from plurals import pluralize, singular_forms, singular_keys  # noqa: E402
@@ -82,8 +80,8 @@ __all__ = [
     "SHARED_QUIET",
     "SR_INLINE_SEPARATORS",
     "SOURCE_REFERENCE_FORMS",
-    "acronym_counterpart",
     "acronym_expansion_missing",
+    "alias_answer_names",
     "api_surface_findings",
     "bare_common_noun_slug",
     "bare_word_alias_candidate",
@@ -95,14 +93,19 @@ __all__ = [
     "description_subject_findings",
     "display_label_links",
     "emphasis_span_findings",
+    "flashcard_answer_text",
     "flashcard_line3_fault",
     "flashcard_primary_answer",
     "flashcard_set_faults",
     "image_embed_lines",
     "is_discipline_root",
+    "is_spelling_variant",
     "kept_card_label",
     "label_drops_head",
     "label_shares_surface",
+    "line3_aliases",
+    "line3_names",
+    "line3_names_alias",
     "line3_parts",
     "list_indent_findings",
     "list_mismatch_findings",
@@ -1563,15 +1566,114 @@ EXTRA_CARD_PREFIX = ("extra card %d (remove this extra card; it needs no "
                      "other repair): ")
 
 
-def _near_primary(rows, term, counterpart):
-    """The rows whose line-3 term normalizes to the primary answer."""
-    keys = {normalized_answer_surface(value)
-            for value in (term, counterpart) if value} - {""}
-    return [row for row in rows if normalized_answer_surface(
-        re.sub(r" \([^()\n]+\)$", "", row[1].strip())) in keys]
+def _alias_key(value):
+    """The identity a line-3 name and an alias compare by: the portable form
+    of its shared slug, or None when it has none."""
+    try:
+        return portable_identity(slug_stem(value or ""))
+    except SlugError:
+        return None
 
 
-def primary_card_label(rows, term, counterpart):
+#: The Unicode form a spelling key decomposes text into, so that each
+#: diacritic becomes a combining mark the key drops. It is named rather than
+#: written inline because tests/test_conventions.py reads an inline NFKD call
+#: as a fingerprint of a second slug implementation, which this comparison
+#: key is not: it keeps no separators and never names a file.
+_SPELLING_FORM = "NFKD"
+
+#: The endings by which a spelling variant may also differ: a plural (-s,
+#: -es) or a -ness noun.
+_VARIANT_ENDINGS = ("s", "es", "ness")
+
+
+def _spelling_key(value):
+    """``value`` decomposed, its combining marks dropped, case-folded and
+    reduced to its letters and digits: ``Scatter plot``, ``scatterplot`` and
+    ``scatter-plot`` give ``scatterplot``, and ``Lévy`` gives ``levy``."""
+    text = unicodedata.normalize(_SPELLING_FORM, value or "")
+    text = "".join(char for char in text if not unicodedata.combining(char))
+    return "".join(char for char in text.casefold() if char.isalnum())
+
+
+def is_spelling_variant(name, other):
+    """Item 19: whether ``name`` and ``other`` are spelling variants.
+
+    They are when their spelling keys (``_spelling_key``) are equal, so they
+    differ only in case, spacing, hyphens, punctuation or diacritics, or when
+    one key is the other plus ``s``, ``es`` or ``ness``: ``scatterplot`` and
+    ``Scatter plot``, ``Lambda Rank`` and ``LambdaRank``, ``NP-complete`` and
+    ``NP-completeness``. ``cell respiration`` and ``Cellular respiration``
+    are not, nor are ``randomized search`` and ``Random search``. A name
+    without a letter or digit is no one's variant. lint_entry, the scanner
+    and review_tree reach this one test through the line-3 helpers below.
+    """
+    key, other_key = _spelling_key(name), _spelling_key(other)
+    if not key or not other_key:
+        return False
+    short, long_ = sorted((key, other_key), key=len)
+    return long_ == short or any(long_ == short + ending
+                                 for ending in _VARIANT_ENDINGS)
+
+
+def line3_aliases(term, aliases=()):
+    """Item 19: ``(named, variants)``, the aliases card line 3 names and the
+    spelling variants it leaves out, each in ``aliases:`` order.
+
+    Each alias in turn is a spelling variant when it is one of ``term``, the
+    answer's title term, of the term's shared slug or of an alias already
+    named (``is_spelling_variant``); every other alias is named. The slug
+    form matters for a letter the slug transliterates rather than
+    decomposes: ``betalactamase`` is a variant of ``β-lactamase`` through
+    its slug ``beta-lactamase``. ``aliases`` are distinct aliases, as
+    ``flashcard_primary_answer`` returns them. A variant stays a valid alias
+    and part of the answer line 1 must not leak; only line 3 omits it.
+    """
+    try:
+        term_slug = slug_stem(term or "")
+    except SlugError:
+        term_slug = ""
+    named, variants = [], []
+    for alias in aliases or ():
+        if any(is_spelling_variant(alias, other)
+               for other in [term or "", term_slug] + named):
+            variants.append(alias)
+        else:
+            named.append(alias)
+    return tuple(named), tuple(variants)
+
+
+def line3_names_alias(title, aliases, alias):
+    """Item 19: whether card line 3 names ``alias`` once it joins
+    ``aliases``; false for a spelling variant (``line3_aliases``). Item 17's
+    alias candidate says which, in lint_entry and the scanner alike."""
+    term, listed = flashcard_primary_answer(
+        title, tuple(aliases or ()) + (alias,))
+    key = _alias_key(alias)
+    return key is not None and key in {
+        _alias_key(named) for named in line3_aliases(term, listed)[0]}
+
+
+def _near_primary(rows, term, aliases):
+    """The rows whose line-3 term, any final parenthetical dropped, is the
+    primary term apart from case and punctuation; only when no row is, the
+    rows whose term slugs to an alias."""
+    term_key = normalized_answer_surface(term or "")
+    alias_keys = {_alias_key(alias) for alias in aliases or () if alias}
+    alias_keys.discard(None)
+    by_term, by_alias = [], []
+    for row in rows:
+        stem = re.sub(r" \([^()\n]+\)$", "", row[1].strip())
+        if not stem:
+            continue
+        if term_key and normalized_answer_surface(stem) == term_key:
+            by_term.append(row)
+        elif _alias_key(stem) in alias_keys:
+            by_alias.append(row)
+    return by_term or by_alias
+
+
+def primary_card_label(rows, term, aliases=()):
     """Item 19: the label of the entry's primary card, or None.
 
     ``rows`` have ``primary_line3_faults``' shape. One row is the primary
@@ -1588,51 +1690,55 @@ def primary_card_label(rows, term, counterpart):
     passing = next((row[0] for row in rows if not row[2]), None)
     if passing is not None:
         return passing
-    near = _near_primary(rows, term, counterpart)
+    near = _near_primary(rows, term, aliases)
     return near[0][0] if len(near) == 1 else None
 
 
-def kept_card_label(rows, term, counterpart):
+def kept_card_label(rows, term, aliases=()):
     """Item 19: the card a run keeps: the primary card, else, when the entry
     has a primary answer, the first card, which the run rewrites into the
     definition card."""
-    label = primary_card_label(rows, term, counterpart)
+    label = primary_card_label(rows, term, aliases)
     return rows[0][0] if label is None and term and rows else label
 
 
-def primary_line3_faults(card_count, rows, term, counterpart):
+def primary_line3_faults(card_count, rows, term, aliases=(), prose=""):
     """Item 19: the line-3 faults to report, plus any missing-primary message.
 
     ``rows`` are ``(card_label, line3, fault_or_None)`` for each card with a
-    line 3; ``term`` and ``counterpart`` are the entry's primary answer. With
-    one card every fault is reported. With several cards, a passing card is
-    the primary one and the extra cards, which are removed, draw no line-3
-    fault; otherwise the one card whose line-3 term normalizes to the primary
-    answer is reported, or the message asks to rewrite the first card into
-    the definition card and remove the rest.
+    line 3; ``term`` and ``aliases`` are the entry's primary answer
+    (``flashcard_primary_answer``), and ``prose``, the body, names the
+    aliases in the message (``flashcard_answer_text``). With one card every
+    fault is reported. With
+    several cards, a passing card is the primary one and the extra cards,
+    which are removed, draw no line-3 fault; otherwise the one card whose
+    line-3 term is the primary term apart from case, punctuation or a final
+    parenthetical (else, when no card's is, the one whose term is an alias)
+    is reported, or the message asks to rewrite the first card into the
+    definition card and remove the rest.
     """
     faults = [row for row in rows if row[2]]
     if card_count <= 1 or not faults:
         return faults, None
     if len(faults) < len(rows):
         return [], None
-    near = _near_primary(faults, term, counterpart)
+    near = _near_primary(faults, term, aliases)
     if len(near) == 1:
         return near, None
     if not term:
         return [], None
-    answer = term + (" (%s)" % counterpart if counterpart else "")
     return [], ('no card carries the primary answer "%s"; rewrite the first '
                 "card into the definition card, keeping its attachments, and "
-                "remove every other card" % answer)
+                "remove every other card"
+                % flashcard_answer_text(term, aliases, prose))
 
 
 #: The opener's direct parenthetical after the bold title, past any leading
 #: date parenthetical: ``**Principal component analysis** (PCA)``,
 #: ``**ILSVRC** (2010–2017) (ImageNet Large Scale ...)``. Only the literal noun
 #: ``algorithm`` may intervene; a general word window would attach unrelated
-#: later parentheticals to the title. introduced_aliases.py reads the same
-#: slot as item-17 alias evidence.
+#: later parentheticals to the title. introduced_aliases.py reads this slot
+#: as item-17 alias evidence.
 BOLD_PAREN_RE = re.compile(
     r"(?<!\*)\*\*(?P<bold>" + BOLD_TEXT + r")"
     r"\*\*(?!\*)(?:\s+algorithm)?\s*"
@@ -1649,163 +1755,195 @@ PAREN_LEADIN_RE = re.compile(
     r"also\s+known\s+as|known\s+as)|singular|plural|abbreviated|"
     r"formerly|n[ée]e|or|a\.k\.a\.?)[\s,:]+", re.IGNORECASE)
 
-_SHORT_FOR_PAREN_RE = re.compile(r"^short\s+for[\s,:]+", re.IGNORECASE)
-
-#: A direct italic scientific abbreviation can be the title's own established
-#: counterpart: ``***Saccharomyces cerevisiae*** (*S. cerevisiae*)``. This is
-#: deliberately narrower than "any italic parenthetical", so an annotated
-#: synonym does not become a card counterpart merely because it is also listed
-#: in aliases.
-_SCI_ABBREV_RE = re.compile(
-    r"^[A-Z]\.\s*[a-z][A-Za-z.-]*(?:\s+[a-z][A-Za-z.-]*)*$")
-
 _LINE3_RE = re.compile(r"(?P<term>.*?)(?: \((?P<paren>[^()\n]+)\))?")
 
+#: Markup the names on card line 3 never take: a wikilink, code, LaTeX,
+#: bold, italic, a highlight, a strikethrough, HTML, or underscore emphasis.
+#: A lone ``*`` is part of a name (``A*``), and so is an intraword
+#: underscore (``n_estimators``).
+_LINE3_MARKUP_RE = re.compile(
+    r"\[\[|`|\$|\*\*|\*\w[^*\n]*\*|==|~~|<[A-Za-z/][^>\n]*>"
+    r"|(?<![A-Za-z0-9])_{1,2}[^_\s][^_\n]*_{1,2}(?![A-Za-z0-9])")
 
-def acronym_counterpart(term, candidate):
-    """Whether the pair has an acronym/full-form relationship.
 
-    The check is deliberately structural. It rejects arbitrary alternate
-    names such as Mark Twain/Samuel Clemens while admitting canonical shapes
-    such as PCA, CART, Lasso, MLOps, OOB and t-SNE.
+def _strip_line3_markup(name):
+    """``name`` with the markup ``_LINE3_MARKUP_RE`` finds removed, its words
+    and casing kept."""
+    name = re.sub(r"\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]", r"\1", name)
+    name = re.sub(r"<[A-Za-z/][^>\n]*>", "", name)
+    name = re.sub(r"(?<![A-Za-z0-9])_{1,2}([^_\s][^_\n]*?)_{1,2}"
+                  r"(?![A-Za-z0-9])", r"\1", name)
+    return re.sub(r"[*`$]|==|~~", "", name).strip()
+
+
+#: A name card line 3 cannot hold: a parenthesis or the ", " that separates
+#: its names.
+_UNLISTABLE_NAME_RE = re.compile(r"[()]|, ")
+
+#: The vowels; an alias word with none of them is read as initials when the
+#: body never spells it (``_alias_reading``).
+_VOWELS = frozenset("aeiouy")
+
+#: ``_lead_key``'s cache, one slug per character.
+_LEAD_KEYS = {}
+
+
+def _lead_key(char):
+    """The first letter of ``char``'s slug ("α" gives "a", "É" gives "e"),
+    or "" when it has none."""
+    if char not in _LEAD_KEYS:
+        _LEAD_KEYS[char] = (_alias_key(char) or "")[:1]
+    return _LEAD_KEYS[char]
+
+
+#: An emphasized span or a parenthetical, where the body introduces a name:
+#: ``*offline learning*``, ``(PCA)``, ``(*E. coli*)``, ``(short for *X*)``.
+_NAME_SPAN_RE = re.compile(r"\*{1,3}([^*\n]+?)\*{1,3}|\(([^()\n]+)\)")
+
+
+def _introduced_name(alias, prose):
+    """The name the body gives ``alias``, without markup, else None.
+
+    An emphasized span or a parenthetical whose name slugs to the alias
+    comes first (an *also called* or *short for* name, the opener's acronym
+    or full form, an italic introduction), then the first run of words that
+    does. A name with a parenthesis or a ", " never counts, since card line
+    3 cannot list it. The name keeps the body's casing, except that a run
+    opening a sentence counts only when no other does, and then drops the
+    capital of a first word that is otherwise lowercase when the body also
+    writes that word in lowercase, so a proper noun keeps its capital.
     """
-    term_words = re.findall(r"[A-Za-z0-9]+", term or "")
-    cand_words = re.findall(r"[A-Za-z0-9]+", candidate or "")
-    if not term_words or not cand_words:
-        return False
-
-    def compact_forms(value, words):
-        forms = set()
-        first = re.sub(r"[^A-Za-z0-9]", "", words[0])
-        if len(first) >= 2:
-            forms.add(first.casefold())
-        uppers = "".join(ch for ch in value if ch.isupper())
-        if len(uppers) >= 2:
-            forms.add(uppers.casefold())
-        whole = re.sub(r"[^A-Za-z0-9]", "", value)
-        if len(words) == 1 and len(whole) >= 2:
-            forms.add(whole.casefold())
-        return forms
-
-    def related(short, long):
-        if len(short) < 2 or len(long) < len(short):
-            return False
-        if short == long or long.startswith(short):
-            return True
-        it = iter(long)
-        return all(ch in it for ch in short)
-
-    def acronym_tokens(value):
-        """Compact tokens that visibly behave as abbreviations.
-
-        Initials alone miss established forms whose letters come from a
-        compound or morpheme (ATP, DNA, RNA, MLOps) and a short token carried
-        beside a shared tail (OOB evaluation). Requiring at least two written
-        capitals keeps ordinary title-cased names and pseudonyms out.
-        """
-        out = set()
-        for token in re.findall(r"[A-Za-z0-9]+", value or ""):
-            compact = re.sub(r"[^A-Za-z0-9]", "", token)
-            if (2 <= len(compact) <= 10
-                    and sum(1 for ch in token if ch.isupper()) >= 2):
-                out.add(compact.casefold())
-        return out
-
-    def lexical_compact(value):
-        return re.sub(r"[^A-Za-z0-9]", "", value or "").casefold()
-
-    term_compact = compact_forms(term, term_words)
-    cand_compact = compact_forms(candidate, cand_words)
-    initial_match = (
-        any(related(short, initials)
-            for short in cand_compact
-            for initials in acronym_initial_forms(term))
-        or any(related(short, initials)
-               for short in term_compact
-               for initials in acronym_initial_forms(candidate))
-    )
-    if initial_match:
-        return True
-    term_text, candidate_text = lexical_compact(term), lexical_compact(candidate)
-    return (
-        any(related(short, candidate_text) for short in acronym_tokens(term))
-        or any(related(short, term_text) for short in acronym_tokens(candidate))
-    )
+    key = _alias_key(alias)
+    if key is None:
+        return None
+    plain = re.sub(r"\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]", r"\1", prose or "")
+    for match in _NAME_SPAN_RE.finditer(plain):
+        text = PAREN_LEADIN_RE.sub("", match.group(1) or match.group(2))
+        for part in re.split(r"[,;]\s+|\s+or\s+", text):
+            name = part.replace("*", "").strip(" .,;:")
+            if (name and not _UNLISTABLE_NAME_RE.search(name)
+                    and _alias_key(name) == key):
+                return name
+    bare = plain.replace("*", "")
+    words = list(re.finditer(r"\S+", bare))
+    first = key[:1]
+    longest = len(key.split("-")) + 2
+    initial = None
+    for start in range(len(words)):
+        # A run whose first letter slugs to another letter cannot slug to
+        # the alias; skipping it keeps the search cheap.
+        head = words[start].group().lstrip("\"'“‘([{")
+        if not head or _lead_key(head[:1]) != first:
+            continue
+        opens = (start == 0
+                 or "\n" in bare[words[start - 1].end():words[start].start()]
+                 or words[start - 1].group().endswith((".", "!", "?", ":")))
+        for end in range(start, min(start + longest, len(words))):
+            name = bare[words[start].start():words[end].end()]
+            name = name.lstrip("\"'“‘([{").rstrip("\"'”’)]},.;:!?")
+            if _UNLISTABLE_NAME_RE.search(name) or _alias_key(name) != key:
+                continue
+            if not opens:
+                return name
+            initial = initial or name
+    if initial:
+        head = initial.split()[0]
+        lower = head[:1].lower() + head[1:]
+        if (head[1:] == head[1:].lower() and lower != head
+                and re.search(r"(?<![^\W\d_])%s(?![^\W\d_])" % re.escape(lower),
+                              bare)):
+            initial = lower + initial[len(head):]
+    return initial
 
 
-def _clean_paren_name(raw):
-    """The name inside an opener parenthetical, lead-in and markup stripped."""
-    value = " ".join((raw or "").split())
-    value = PAREN_LEADIN_RE.sub("", value)
-    return value.replace("*", "").replace("_", "").strip()
+def _alias_reading(alias, prose=""):
+    """An alias the body never spells out, read as words.
 
-
-def _card_counterpart(raw, term, organism_parts):
-    """The cleaned parenthetical when it is a direct counterpart, else None.
-
-    Three classes qualify: a ``short for`` expansion, an acronym/full-form
-    pair, and, for a title proven scientific (``organism_parts``), its direct
-    italic one-letter-genus abbreviation. An annotated parenthetical such as
-    ``(singular, *archaeon*)`` or ``(originally called *X*)`` is item-17
-    alias evidence, not the title's direct binding, so it never belongs on
-    card line 3.
+    A word takes the casing an all-capital or one-letter token of the body
+    gives it (NFL, R); a vowelless word of two or more characters is read as
+    initials and capitalized (ML, GD, R2); and a one-letter word keeps its
+    hyphen (p-norm, R-squared).
     """
-    value = " ".join((raw or "").split())
-    cleaned = _clean_paren_name(value)
-    short_for = bool(_SHORT_FOR_PAREN_RE.match(value))
-    scientific_abbreviation = bool(
-        organism_parts
-        and scientific_abbreviation_matches(cleaned, organism_parts[0])
-        and re.fullmatch(r"\*[^*\n]+\*", value.strip())
-        and _SCI_ABBREV_RE.fullmatch(cleaned))
-    if short_for or scientific_abbreviation or acronym_counterpart(term, cleaned):
-        return cleaned
-    return None
+    words = []
+    for part in (alias or "").split("-"):
+        if not part:
+            continue
+        word = part
+        for match in re.finditer(
+                r"(?<![A-Za-z0-9])%s(?![A-Za-z0-9])" % re.escape(part),
+                prose or "", re.IGNORECASE):
+            token = match.group()
+            if token != part and (token.isupper() or len(token) == 1):
+                word = token
+                break
+        else:
+            if (len(part) >= 2 and any(ch.isalpha() for ch in part)
+                    and not set(part.lower()) & _VOWELS):
+                word = part.upper()
+        words.append(word)
+    name = words[0] if words else ""
+    for before, word in zip(words, words[1:]):
+        single = any(len(w) == 1 and w.isalpha() for w in (before, word))
+        name += ("-" if single else " ") + word
+    return name
 
 
-def flashcard_primary_answer(title, aliases, opener, entry_type=""):
-    """Item 19: the entry's own primary answer, ``(term, counterpart)``.
+def alias_answer_names(aliases, prose="", names=()):
+    """Item 19: a line-3 name for each alias, in order.
+
+    A name card line 3 already gives (``names``) is kept when it slugs to the
+    alias, without its markup; otherwise the name the body introduces
+    (``prose``), else the alias read as words (``_alias_reading``).
+    Suggestions for a fault message only: the contract itself is the slug
+    test in ``flashcard_line3_fault``.
+    """
+    given = {}
+    for name in names or ():
+        name = (name or "").strip()
+        if _LINE3_MARKUP_RE.search(name):
+            # The markup goes; the name's words and casing stay.
+            name = _strip_line3_markup(name)
+        if name and _alias_key(name) is not None:
+            given.setdefault(_alias_key(name), name)
+    return [given.get(_alias_key(alias)) or _introduced_name(alias, prose)
+            or _alias_reading(alias, prose) for alias in aliases or ()]
+
+
+def flashcard_answer_text(term, aliases=(), prose="", names=()):
+    """Item 19: the primary answer as card line 3 writes it.
+
+    ``term`` alone, or ``term (name, name)`` with a name for every alias but
+    a spelling variant (``line3_aliases``), in order; arguments after
+    ``aliases`` are ``alias_answer_names``'.
+    """
+    listed = alias_answer_names(line3_aliases(term, aliases)[0], prose, names)
+    return (term or "") + (" (%s)" % ", ".join(listed) if listed else "")
+
+
+def flashcard_primary_answer(title, aliases=()):
+    """Item 19: the entry's own primary answer, ``(term, aliases)``.
 
     The term has one exact plain-text spelling: ``title`` verbatim, its base
     term for a disambiguation parenthetical, or its mathematical plain form
-    for a symbol title. An opener parenthetical directly after the bold title
-    becomes the required counterpart only when it is a direct counterpart
-    (see ``_card_counterpart``) and its slug is in ``aliases``: that separates
-    an opener-established binding from a date or explanatory aside without
-    inferring counterpart semantics from an alias list that can also hold
-    synonyms. An Organism's scientific abbreviation counts only when
-    ``organism_title_classification`` proves the title scientific.
-    ``aliases`` are the entry's list aliases (a malformed scalar field binds
-    nothing); ``opener`` is its opening paragraph, hard wraps allowed.
+    for a symbol title. Card line 3 follows it with a name for every alias
+    but a spelling variant (``line3_aliases``), in ``aliases:`` order.
+    ``aliases`` are the entry's list aliases (a malformed scalar field gives
+    none); a blank item, one with no slug, one with the entry's own slug
+    (item 18's redundant self-alias), or one with an earlier alias's slug
+    adds nothing. The aliases returned keep their spelling variants, which
+    still identify a near-miss card (``primary_card_label``).
     """
     title = title or ""
     term = base_term(title) if has_parenthetical(title) else title
     term = title_display_form(term)
-    aliases = [alias for alias in aliases or () if alias]
-    alias_keys = {portable_identity(alias) for alias in aliases}
-    opening = " ".join(line.strip() for line in (opener or "").splitlines())
-    organism_parts = None
-    if entry_type == "Organism":
-        status, parts = organism_title_classification(term, aliases, opening)
-        organism_parts = parts if status == "scientific" else None
-    for match in BOLD_PAREN_RE.finditer(opening):
-        visible, _style, _italic = bold_parts(match)
-        # Identity is compared in plain form, so a Greek title bolded as
-        # LaTeX or spelled out still binds its counterpart.
-        if not first_letter_ci_equal(math_title_plain_text(visible),
-                                     math_title_plain_text(term)):
-            continue
-        candidate = _card_counterpart(match.group("paren"), term,
-                                      organism_parts)
-        if candidate is None:
-            continue
-        try:
-            candidate_key = portable_identity(slug_stem(candidate))
-        except SlugError:
-            continue
-        if candidate_key in alias_keys:
-            return term, candidate
-    return term, None
+    listed = []
+    seen = {key for key in (_alias_key(title),) if key}
+    for alias in aliases or ():
+        key = _alias_key(alias) if alias else None
+        if key and key not in seen:
+            seen.add(key)
+            listed.append(alias)
+    return term, tuple(listed)
 
 
 def line3_parts(line3):
@@ -1816,26 +1954,89 @@ def line3_parts(line3):
             else (line3, None))
 
 
-def flashcard_line3_fault(line3, title, aliases, opener, entry_type=""):
+def line3_names(line3):
+    """The names card line 3's final parenthetical lists, split on ", "."""
+    paren = line3_parts(line3)[1]
+    return paren.split(", ") if paren is not None else []
+
+
+def _quoted(values):
+    return ", ".join('"%s"' % value for value in values)
+
+
+def flashcard_line3_fault(line3, title, aliases=(), prose=""):
     """Item 19: why card line 3 breaks the primary-answer contract, or None.
 
-    Line 3 is exactly the primary term plus, when the opener establishes
-    one, `` (counterpart)``; any other parenthetical is refused. Arguments
-    after ``line3`` are ``flashcard_primary_answer``'s.
+    Line 3 is exactly the primary term, followed, when the entry has an
+    alias that is no spelling variant (``line3_aliases``), by one final
+    parenthetical naming every such alias in ``aliases:`` order, separated
+    by ``", "``: the names left after the variants, in order, slug to those
+    aliases, item by item, and the counts match. A name that slugs to a
+    spelling variant is a fault of its own. The names take no markup. An
+    entry without aliases, or whose aliases are all spelling variants,
+    appends nothing. ``prose`` is the body, read only to suggest each
+    alias's name in the message (``alias_answer_names``).
     """
-    expected_term, required = flashcard_primary_answer(
-        title, aliases, opener, entry_type)
-    term, counterpart = line3_parts(line3)
-    if expected_term and term != expected_term:
-        return ('the term must be exactly "%s" (same canonical casing)'
-                % expected_term)
-    if counterpart is not None and required is None:
-        return ('the parenthetical "%s" is not an opener-established, '
-                "alias-bound counterpart of the title" % counterpart)
-    if required is not None and counterpart != required:
-        return ("the established counterpart must appear exactly as (%s)"
-                % required)
-    return None
+    term, listed = flashcard_primary_answer(title, aliases)
+    wanted, variants = line3_aliases(term, listed)
+    got_term, paren = line3_parts(line3)
+    if term and got_term != term:
+        fault = 'the term must be exactly "%s" (same canonical casing)' % term
+        if wanted:
+            fault += '; the answer is "%s"' % flashcard_answer_text(
+                term, wanted, prose, line3_names(line3))
+        return fault
+    if paren is None and not wanted:
+        return None
+    if not listed:
+        return ('the parenthetical "%s" names no alias; an entry without '
+                "aliases appends nothing to the term" % paren)
+    names = line3_names(line3)
+    if paren is None:
+        reason = "the aliases are missing"
+    elif _LINE3_MARKUP_RE.search(paren):
+        reason = "the parenthetical takes no markup, LaTeX included"
+    else:
+        keys = [_alias_key(name) if name and name == name.strip() else None
+                for name in names]
+        wanted_keys = [_alias_key(alias) for alias in wanted]
+        variant_keys = {_alias_key(alias) for alias in variants}
+        named_variants = [name for name, key in zip(names, keys)
+                          if key is not None and key in variant_keys]
+        rest = [(name, key) for name, key in zip(names, keys)
+                if key is None or key not in variant_keys]
+        rest_keys = [key for _name, key in rest]
+        if rest_keys == wanted_keys and not named_variants:
+            return None
+        extra = [name for name, key in rest
+                 if key is None or key not in wanted_keys]
+        missing = [alias for alias, key in zip(wanted, wanted_keys)
+                   if key not in rest_keys]
+        if extra:
+            reason = ("the parenthetical names %s, %s" % (
+                _quoted(extra),
+                "not an alias" if len(extra) == 1 else "which are not aliases"))
+        elif named_variants:
+            reason = "the parenthetical names the spelling variant%s %s" % (
+                "s" if len(named_variants) > 1 else "",
+                _quoted(named_variants))
+        elif missing:
+            reason = "the parenthetical omits the alias%s %s" % (
+                "es" if len(missing) > 1 else "", _quoted(missing))
+        elif len(rest_keys) != len(wanted_keys):
+            reason = "the parenthetical names an alias more than once"
+        else:
+            reason = "the parenthetical lists the aliases out of `aliases:` order"
+    if not variants:
+        rule = ("line 3 names every alias once, in `aliases:` order and "
+                "without markup")
+    elif wanted:
+        rule = ("line 3 names every alias except a spelling variant once, in "
+                "`aliases:` order and without markup")
+    else:
+        rule = "line 3 leaves out a spelling variant, so it is the term alone"
+    return '%s; %s: "%s"' % (
+        reason, rule, flashcard_answer_text(term, wanted, prose, names))
 
 
 #: The Spaced Repetition plugin's default single-line card separators in the
@@ -3099,11 +3300,48 @@ def run_self_test(verbose=False):
     missing = primary_line3_faults(
         2, [("card 1", "Underfitting", "fault"),
             ("card 2", "Overfitting", "fault")],
-        "Recall", "TPR")
+        "Recall", ("true-positive-rate", "tpr"),
+        "The **recall**, also called the *true positive rate* (TPR), is a "
+        "share.")
     check("with no near miss, ask for the primary card, naming its answer",
           (missing[0], missing[1].startswith(
-              'no card carries the primary answer "Recall (TPR)"; ')),
+              'no card carries the primary answer "Recall (true positive '
+              'rate, TPR)"; ')),
           ([], True))
+    check("an alias the body never names is read as words in the message",
+          primary_line3_faults(
+              2, [("card 1", "Underfitting", "fault"),
+                  ("card 2", "Overfitting", "fault")],
+              "Batch learning", ("offline-learning",))[1].startswith(
+              'no card carries the primary answer "Batch learning (offline '
+              'learning)"; '), True)
+    batch = ("Batch learning", ("offline-learning",))
+    check("the near miss: a line-3 term that is the primary term apart from "
+          "case, punctuation or a final parenthetical, or slugs to an alias",
+          [primary_line3_faults(2, rows, *batch)[0] for rows in (
+              [("card 1", "Overfitting", "fault"),
+               ("card 2", "batch-learning (online learning)", "fault")],
+              [("card 1", "Offline learning", "fault"),
+               ("card 2", "Overfitting", "fault")],
+              [("card 1", "Online learning", "fault"),
+               ("card 2", "Overfitting", "fault")])],
+          [[("card 2", "batch-learning (online learning)", "fault")],
+           [("card 1", "Offline learning", "fault")], []])
+    check("the near miss is the primary card the run keeps and repairs",
+          [kept_card_label(rows, *batch) for rows in (
+              [("card 1", "Why?", "fault"),
+               ("card 2", "Batch learning", "fault")],
+              [("card 1", "Why?", "fault"),
+               ("card 2", "Batch learning", "fault"),
+               ("card 3", "Batch learning (offline learning)", None)])],
+          ["card 2", "card 3"])
+    term_and_alias = [("card 1", "Offline learning", "f"),
+                      ("card 2", "Batch learning", "f")]
+    check("a card whose term is the primary term beats one whose term is an "
+          "alias",
+          (primary_line3_faults(2, term_and_alias, *batch)[0],
+           kept_card_label(term_and_alias, *batch)),
+          ([("card 2", "Batch learning", "f")], "card 2"))
     check("with no definition card, rewrite the first card into it, keeping "
           "its attachments, and remove the rest",
           (missing[1].endswith(
@@ -3370,117 +3608,314 @@ def run_self_test(verbose=False):
           [False] * 10)
 
     # item 19: the primary answer on card line 3 (one copy for both tools)
-    check("acronym/full-form pairs, including compound and shared-tail forms",
-          [acronym_counterpart(short, long) for short, long in (
-              ("ATP", "adenosine triphosphate"),
-              ("DNA", "deoxyribonucleic acid"),
-              ("MLOps", "ML operations"),
-              ("OOB evaluation", "out-of-bag evaluation"),
-              ("Principal component analysis", "PCA"),
-              ("t-distributed stochastic neighbor embedding", "t-SNE"))],
-          [True] * 6)
-    check("pseudonyms and unrelated names are not acronym counterparts",
-          [acronym_counterpart(a, b) for a, b in (
-              ("Mark Twain", "Samuel Clemens"), ("Saccharomyces cerevisiae",
-                                                 "S. cerevisiae"),
-              ("", "PCA"), ("PCA", ""))],
-          [False, False, False, False])
-    pca = ("Principal component analysis", ["pca"],
-           "**Principal component analysis** (PCA) projects data.")
-    check("an opener acronym whose slug is an alias is the counterpart",
-          flashcard_primary_answer(*pca), ("Principal component analysis", "PCA"))
-    check("without the alias the opener acronym binds nothing",
-          flashcard_primary_answer(pca[0], ["principal-components"], pca[2]),
-          ("Principal component analysis", None))
-    check("the term is the base term or plain form; no opener, no counterpart",
-          [flashcard_primary_answer(title, [], "")
-           for title in ("Feature (machine learning)", "$k$-fold", "", None)],
-          [("Feature", None), ("k-fold", None), ("", None), ("", None)])
-    check("a hard-wrapped opener, a date before the acronym and the "
-          "`algorithm` noun keep the binding",
-          [flashcard_primary_answer(title, aliases, opener)[1]
-           for title, aliases, opener in (
-               ("Principal component analysis", ["pca"],
-                "**Principal component\nanalysis** (PCA) projects data."),
-               ("ILSVRC",
-                ["imagenet-large-scale-visual-recognition-challenge"],
-                "**ILSVRC** (2010–2017) (ImageNet Large Scale Visual "
-                "Recognition Challenge) ranked models."),
-               ("k-nearest neighbors", ["knn"],
-                "The **k-nearest neighbors** algorithm (KNN) predicts."))],
-          ["PCA", "ImageNet Large Scale Visual Recognition Challenge", "KNN"])
-    check("short-for binds; a.k.a. is stripped; an annotated synonym or a "
-          "later bold term does not bind",
-          [flashcard_primary_answer(title, aliases, opener)[1]
-           for title, aliases, opener in (
-               ("AdaBoost", ["adaptive-boosting"],
-                "**AdaBoost** (short for *adaptive boosting*) reweights."),
-               ("PCA", ["principal-component-analysis"],
-                "**PCA** (a.k.a. *principal component analysis*) projects."),
-               ("Boosting", ["hypothesis-boosting"],
-                "**Boosting** (originally called *hypothesis boosting*) "
-                "combines weak learners."),
-               ("Bacteria", ["bacterium"],
-                "**Bacteria** (singular, *bacterium*) is a domain."),
-               ("Counterpart scope", ["pca"],
-                "**Counterpart scope** uses **Principal component analysis** "
-                "(PCA)."))],
-          ["adaptive boosting", "principal component analysis",
-           None, None, None])
-    yeast = ("Saccharomyces cerevisiae", ["s-cerevisiae"],
-             "***Saccharomyces cerevisiae*** (*S. cerevisiae*) is a yeast.")
-    check("a scientific Organism title binds its italic genus abbreviation",
-          flashcard_primary_answer(*yeast, "Organism"),
-          ("Saccharomyces cerevisiae", "S. cerevisiae"))
-    check("the abbreviation binds only an Organism, in italics, with its alias",
-          [flashcard_primary_answer(*args)[1] for args in (
-              yeast + ("Concept",),
-              (yeast[0], yeast[1], yeast[2].replace("(*S. cerevisiae*)",
-                                                    "(S. cerevisiae)"),
-               "Organism"),
-              (yeast[0], [], yeast[2], "Organism"))],
-          [None, None, None])
-    check("the Organism counterpart rule is the scientific classification, "
-          "not a Latin-looking title",
-          [_card_counterpart("*S. cerevisiae*", "Saccharomyces cerevisiae",
-                             parts)
-           for parts in (None, ("Saccharomyces cerevisiae", ""))],
-          [None, "S. cerevisiae"])
+    check("the term is the base term or plain form; the aliases follow in "
+          "order, a blank item, a self-alias or a repeated slug dropped",
+          [flashcard_primary_answer(title, aliases) for title, aliases in (
+              ("Feature (machine learning)", []), ("$k$-fold", None),
+              ("", None), (None, None),
+              ("Recall (machine learning)",
+               ["true-positive-rate", "", "tpr", "TPR"]),
+              ("Gradient descent", ["gradient-descent", "gd"]),
+              ("$k$-nearest neighbors", ["knn", "k-nearest-neighbors"]))],
+          [("Feature", ()), ("k-fold", ()), ("", ()), ("", ()),
+           ("Recall", ("true-positive-rate", "tpr")),
+           ("Gradient descent", ("gd",)), ("k-nearest neighbors", ("knn",))])
     check("line 3 splits one final spaced parenthetical",
           [line3_parts(line) for line in (
               " PCA (principal component analysis) ", "ROC curve",
               "ROC curve(RC)", "A (b) (c)", "", None)],
           [("PCA", "principal component analysis"), ("ROC curve", None),
            ("ROC curve(RC)", None), ("A (b)", "c"), ("", None), ("", None)])
-    check("line-3 contract: one message per fault, None when met",
-          [flashcard_line3_fault(line, *pca) for line in (
-              "Principal component analysis (PCA)",
-              "principal component analysis (PCA)",
-              "Principal component analysis",
-              "Principal component analysis (pca)")] +
-          [flashcard_line3_fault(line, "ROC curve", ["auroc"],
-                                 "A **ROC curve** plots rates.")
-           for line in ("ROC curve", "ROC curve (RC)")],
-          [None,
-           'the term must be exactly "Principal component analysis" (same '
-           "canonical casing)",
-           "the established counterpart must appear exactly as (PCA)",
-           "the established counterpart must appear exactly as (PCA)",
-           None,
-           'the parenthetical "RC" is not an opener-established, alias-bound '
-           "counterpart of the title"])
+    check("the parenthetical's names split on a comma and a space",
+          [line3_names(line) for line in (
+              "Recall (true positive rate, TPR)", "ROC curve",
+              "Threshold logic unit (TLU, linear threshold unit, LTU)",
+              "A (b,c)")],
+          [["true positive rate", "TPR"], [],
+           ["TLU", "linear threshold unit", "LTU"], ["b,c"]])
+    recall = ("Recall (machine learning)", ["true-positive-rate", "tpr"])
+    recall_prose = ("The **recall**, also called the *true positive rate* "
+                    "(TPR), is the share of positives found.")
+    check("every alias named once, in `aliases:` order, meets the contract; "
+          "an entry without aliases appends nothing",
+          [flashcard_line3_fault(line, title, aliases)
+           for line, title, aliases in (
+               ("Batch learning (offline learning)", "Batch learning",
+                ["offline-learning"]),
+               ("Principal component analysis (PCA)",
+                "Principal component analysis", ["pca"]),
+               ("Recall (true positive rate, TPR)",) + recall,
+               ("Threshold logic unit (TLU, linear threshold unit, LTU)",
+                "Threshold logic unit",
+                ["tlu", "linear-threshold-unit", "ltu"]),
+               ("Arabidopsis thaliana (Arabidopsis, wall cress)",
+                "Arabidopsis thaliana", ["arabidopsis", "wall-cress"]),
+               ("k-nearest neighbors (KNN)", "$k$-nearest neighbors",
+                ["knn"]),
+               ("Backpropagation (backprop)", "Backpropagation",
+                ["backprop"]),
+               ("ROC curve", "ROC curve", []))],
+          [None] * 8)
+    check("a name meets its alias by the shared slug rule, its case and "
+          "punctuation kept",
+          [flashcard_line3_fault(line, title, aliases)
+           for line, title, aliases in (
+               ("Escherichia coli (E. coli)", "Escherichia coli",
+                ["e-coli"]),
+               ("Pearson correlation coefficient (Pearson's r)",
+                "Pearson correlation coefficient", ["pearsons-r"]),
+               ("Coefficient of determination (R²)",
+                "Coefficient of determination", ["r2"]),
+               ("Coefficient of determination (R2)",
+                "Coefficient of determination", ["r2"]),
+               ("C (C++)", "C", ["c-plus-plus"]))],
+          [None] * 5)
     hdbscan_full = ("Hierarchical Density-Based Spatial Clustering of "
                     "Applications with Noise")
     hdbscan = ("HDBSCAN", ["hierarchical-density-based-spatial-clustering-of-"
-                           "applications-with-noise"],
-               "**HDBSCAN** (%s) clusters points." % hdbscan_full)
-    check("an expansion over 60 characters binds, and line 3 must carry it",
-          [flashcard_primary_answer(*hdbscan)[1]] +
+                           "applications-with-noise"])
+    check("an expansion over 60 characters is a name like any other",
           [flashcard_line3_fault(line, *hdbscan)
            for line in ("HDBSCAN (%s)" % hdbscan_full, "HDBSCAN")],
-          [hdbscan_full, None,
-           "the established counterpart must appear exactly as (%s)"
-           % hdbscan_full])
+          [None, 'the aliases are missing; line 3 names every alias once, '
+           'in `aliases:` order and without markup: "HDBSCAN (hierarchical '
+           'density based spatial clustering of applications with noise)"'])
+    rule = ('; line 3 names every alias once, in `aliases:` order and '
+            'without markup: "Recall (true positive rate, TPR)"')
+    check("line-3 contract: a missing alias, an extra name, a wrong order, a "
+          "repeat, a missing parenthetical, markup and the term's casing "
+          "each get one message",
+          [flashcard_line3_fault(line, *recall, prose=recall_prose)
+           for line in (
+               "Recall (true positive rate)",
+               "Recall (true positive rate, TPR, sensitivity)",
+               "Recall (TPR, true positive rate)",
+               "Recall (true positive rate, TPR, TPR)",
+               "Recall",
+               "Recall (*true positive rate*, TPR)",
+               "Recall (true positive rate,TPR)",
+               "recall (true positive rate, TPR)")],
+          ['the parenthetical omits the alias "tpr"' + rule,
+           'the parenthetical names "sensitivity", not an alias' + rule,
+           "the parenthetical lists the aliases out of `aliases:` order"
+           + rule,
+           "the parenthetical names an alias more than once" + rule,
+           "the aliases are missing" + rule,
+           "the parenthetical takes no markup, LaTeX included" + rule,
+           'the parenthetical names "true positive rate,TPR", not an alias'
+           + rule,
+           'the term must be exactly "Recall" (same canonical casing); the '
+           'answer is "Recall (true positive rate, TPR)"'])
+    check("a wrong term without aliases names only the term",
+          flashcard_line3_fault("roc curve", "ROC curve", []),
+          'the term must be exactly "ROC curve" (same canonical casing)')
+    batch_fault = ("the parenthetical takes no markup, LaTeX included; line 3 "
+                   "names every alias once, in `aliases:` order and without "
+                   'markup: "Batch learning (offline learning)"')
+    check("underscore emphasis, a highlight, a strikethrough and HTML are "
+          "markup too; an intraword underscore is not",
+          [flashcard_line3_fault("Batch learning (%s)" % name,
+                                 "Batch learning", ["offline-learning"])
+           for name in ("_offline learning_", "__offline learning__",
+                        "==offline learning==", "~~offline learning~~",
+                        "<i>offline learning</i>")] +
+          [flashcard_line3_fault("Model (n_estimators)", "Model",
+                                 ["n-estimators"])],
+          [batch_fault] * 5 + [None])
+    check("an entry without aliases refuses any parenthetical",
+          [flashcard_line3_fault(line, "ROC curve", [])
+           for line in ("ROC curve (RC)", "ROC curve (AUROC, RC)")],
+          ['the parenthetical "RC" names no alias; an entry without aliases '
+           "appends nothing to the term",
+           'the parenthetical "AUROC, RC" names no alias; an entry without '
+           "aliases appends nothing to the term"])
+    from entry_structure import parse_flashcard_blocks
+    scheduled = [parse_flashcard_blocks(
+        "The mode that trains on all data at once.\n??\n%s "
+        "<!--SR:!2026-10-01,3,250--> ^batch-card\n" % answer)[0][2]
+        for answer in ("Batch learning (offline learning)", "Batch learning")]
+    check("a same-line schedule and block ID after the answer are no part "
+          "of it",
+          [flashcard_line3_fault(line, "Batch learning", ["offline-learning"])
+           is None for line in scheduled], [True, False])
+    check("suggested names: line 3's own, else the body's with its casing, "
+          "else the alias read as words",
+          alias_answer_names(
+              ["offline-learning", "tpr", "pearsons-r", "e-coli",
+               "intercept-term", "a-star"],
+              "**Batch learning**, also called *offline learning*, fits all "
+              "data. Its recall (TPR) matters, and Pearson's r measures it, as "
+              "in ***E. coli*** studies.", ["A*", "*E. coli*"]),
+          ["offline learning", "TPR", "Pearson's r", "E. coli",
+           "intercept term", "A*"])
+    check("a mid-sentence use of a name wins over a sentence-initial one, "
+          "which drops a capital the sentence gave a word the body also "
+          "writes in lowercase",
+          [alias_answer_names([alias], prose) for alias, prose in (
+              ("data-snooping",
+               "Data snooping misleads. It is called data snooping too."),
+              ("data-snooping", "Data snooping misleads. It reuses data."),
+              ("mnist", "MNIST holds digits."))],
+          [["data snooping"], ["data snooping"], ["MNIST"]])
+    check("a sentence-initial proper noun or possessive keeps its capital",
+          [alias_answer_names([alias], prose)[0] for alias, prose in (
+              ("samuel-clemens",
+               "Mark Twain wrote. Samuel Clemens was his name."),
+              ("pearsons-r", "It is a coefficient. Pearson's r measures it."),
+              ("tikhonov-regularization",
+               "Tikhonov regularization is a penalty on the weights."),
+              ("gaussian-distribution",
+               "Gaussian distribution is another name for it."))],
+          ["Samuel Clemens", "Pearson's r", "Tikhonov regularization",
+           "Gaussian distribution"])
+    check("a name opening with a Greek or accented letter is found",
+          [alias_answer_names([alias], prose)[0] for alias, prose in (
+              ("alpha-helix", "An α-helix is a coil."),
+              ("ecole-normale", "It studied at the École normale in Paris."))],
+          ["α-helix", "École normale"])
+    check("a name with a parenthesis is never suggested, since line 3 "
+          "cannot list it",
+          [(name, "(" in name, _alias_key(name)) for name in alias_answer_names(
+              ["su-2"], "The special unitary group SU(2) acts.")],
+          [("SU 2", False, "su-2")])
+    check("an alias the body never spells out is read as words: initials "
+          "capitalized, a body capital kept, a one-letter word hyphenated",
+          [alias_answer_names([alias], prose)[0] for alias, prose in (
+              ("ml-operations", "**MLOps** runs models in production."),
+              ("nfl-theorem",
+               "The **no free lunch theorem** (NFL) bounds every learner."),
+              ("stochastic-gd", "It samples one instance per step."),
+              ("p-norm", "The **Lp norm** raises each entry to $p$."),
+              ("r-squared", "It is written $R^2$."),
+              ("r2", "It is a share of variance."),
+              ("cell-division-cycle-2", "The gene drives mitosis."))],
+          ["ML operations", "NFL theorem", "stochastic GD", "p-norm",
+           "R-squared", "R2", "cell division cycle 2"])
+    check("the answer text is the term alone without aliases, else the term "
+          "and every name in parentheses",
+          [flashcard_answer_text("ROC curve"),
+           flashcard_answer_text("Recall", recall[1], recall_prose)],
+          ["ROC curve", "Recall (true positive rate, TPR)"])
+
+    # item 19: spelling variants stay off card line 3
+    check("the spelling key drops diacritics, case, spacing, hyphens and "
+          "punctuation",
+          [_spelling_key(value) for value in (
+              "Scatter plot", "scatter-plot", "Lévy flight", "Naïve Bayes",
+              "R²", "C++", "", None)],
+          ["scatterplot", "scatterplot", "levyflight", "naivebayes", "r2",
+           "c", "", ""])
+    check("a spelling variant differs only in case, spacing, hyphens, "
+          "punctuation or diacritics, or by a plural or -ness ending",
+          [is_spelling_variant(name, other) for name, other in (
+              ("scatterplot", "Scatter plot"), ("lambda-rank", "LambdaRank"),
+              ("np-complete", "NP-completeness"), ("np-hard", "NP-hardness"),
+              ("svms", "SVM"), ("boxes", "Box"), ("levy-flight", "Lévy flight"),
+              ("Lévy flights", "levy-flight"), ("e-mail", "Email"))],
+          [True] * 9)
+    check("a name that only looks close is no spelling variant",
+          [is_spelling_variant(name, other) for name, other in (
+              ("cell-respiration", "Cellular respiration"),
+              ("randomized-search", "Random search"),
+              ("data-snooping", "Data snooping bias"),
+              ("archaeon", "Archaea"), ("lloyds-algorithm", "Lloyd algorithm"),
+              ("c-plus-plus", "C"), ("+", "+"), ("", ""))],
+          [False] * 8)
+    check("line 3 names each alias that is no spelling variant of the term, "
+          "its slug or an alias it already names, in order",
+          [line3_aliases(term, aliases) for term, aliases in (
+              ("Scatter plot", ("scatterplot",)),
+              ("LambdaRank", ("lambda-rank",)),
+              ("NP-hardness", ("np-hard", "nph")),
+              ("Feedforward neural network",
+               ("multilayer-perceptron", "multi-layer-perceptron", "mlp")),
+              ("Support vector machine", ("svm", "svms")),
+              ("Cellular respiration", ("cell-respiration",)),
+              ("Recall", ("true-positive-rate", "tpr")),
+              ("Lévy flight", ("levy-flights", "levy-walk")),
+              ("β-lactamase", ("betalactamase",)),
+              ("Ørsted", ("orsteds",)))],
+          [((), ("scatterplot",)), ((), ("lambda-rank",)),
+           (("nph",), ("np-hard",)),
+           (("multilayer-perceptron", "mlp"), ("multi-layer-perceptron",)),
+           (("svm",), ("svms",)), (("cell-respiration",), ()),
+           (("true-positive-rate", "tpr"), ()),
+           (("levy-walk",), ("levy-flights",)),
+           ((), ("betalactamase",)), ((), ("orsteds",))])
+    check("a line 3 that leaves out every spelling variant meets the "
+          "contract; a close name that is no variant stays on it",
+          [flashcard_line3_fault(line, title, aliases)
+           for line, title, aliases in (
+               ("Scatter plot", "Scatter plot", ["scatterplot"]),
+               ("LambdaRank", "LambdaRank", ["lambda-rank"]),
+               ("NP-completeness", "NP-completeness", ["np-complete"]),
+               ("NP-hardness (NPH)", "NP-hardness", ["np-hard", "nph"]),
+               ("Support vector machine (SVM)", "Support vector machine",
+                ["svm", "svms"]),
+               ("Feedforward neural network (multilayer perceptron, MLP)",
+                "Feedforward neural network",
+                ["multilayer-perceptron", "multi-layer-perceptron", "mlp"]),
+               ("Lévy flight", "Lévy flight", ["levy-flights"]),
+               ("Cellular respiration (cell respiration)",
+                "Cellular respiration", ["cell-respiration"]),
+               ("Random search (randomized search)", "Random search",
+                ["randomized-search"]),
+               ("Data snooping bias (data snooping)", "Data snooping bias",
+                ["data-snooping"]))],
+          [None] * 10)
+    alone = "; line 3 leaves out a spelling variant, so it is the term alone: "
+    except_variant = ("; line 3 names every alias except a spelling variant "
+                      "once, in `aliases:` order and without markup: ")
+    check("a variant of the term's slug, through a letter the slug "
+          "transliterates, stays off line 3 too",
+          [flashcard_line3_fault(line, "β-lactamase", ["betalactamase"])
+           for line in ("β-lactamase", "β-lactamase (betalactamase)")],
+          [None, 'the parenthetical names the spelling variant '
+           '"betalactamase"' + alone + '"β-lactamase"'])
+    check("a line 3 that names a spelling variant is a finding that suggests "
+          "the line without it",
+          [flashcard_line3_fault(line, title, aliases)
+           for line, title, aliases in (
+               ("Scatter plot (scatterplot)", "Scatter plot", ["scatterplot"]),
+               ("LambdaRank (Lambda Rank)", "LambdaRank", ["lambda-rank"]),
+               ("NP-hardness (NP-hard, NPH)", "NP-hardness",
+                ["np-hard", "nph"]),
+               ("Feedforward neural network (multilayer perceptron, "
+                "multi-layer perceptron, MLP)", "Feedforward neural network",
+                ["multilayer-perceptron", "multi-layer-perceptron", "mlp"]),
+               ("Lévy flight (Lévy flights)", "Lévy flight",
+                ["levy-flights"]),
+               ("Scatter plot (dot plot)", "Scatter plot", ["scatterplot"]),
+               ("Cellular respiration", "Cellular respiration",
+                ["cell-respiration"]))],
+          ['the parenthetical names the spelling variant "scatterplot"'
+           + alone + '"Scatter plot"',
+           'the parenthetical names the spelling variant "Lambda Rank"'
+           + alone + '"LambdaRank"',
+           'the parenthetical names the spelling variant "NP-hard"'
+           + except_variant + '"NP-hardness (NPH)"',
+           'the parenthetical names the spelling variant "multi-layer '
+           'perceptron"' + except_variant + '"Feedforward neural network '
+           '(multilayer perceptron, MLP)"',
+           'the parenthetical names the spelling variant "Lévy flights"'
+           + alone + '"Lévy flight"',
+           'the parenthetical names "dot plot", not an alias' + alone
+           + '"Scatter plot"',
+           "the aliases are missing; line 3 names every alias once, in "
+           '`aliases:` order and without markup: "Cellular respiration '
+           '(cell respiration)"'])
+    check("the answer text leaves out every spelling variant",
+          [flashcard_answer_text(term, aliases) for term, aliases in (
+              ("Scatter plot", ("scatterplot",)),
+              ("NP-hardness", ("np-hard", "nph")))],
+          ["Scatter plot", "NP-hardness (NPH)"])
+    check("a card whose term is a spelling-variant alias is still the near "
+          "miss",
+          kept_card_label([("card 1", "Why?", "fault"),
+                           ("card 2", "Scatterplot", "fault")],
+                          *flashcard_primary_answer("Scatter plot",
+                                                    ["scatterplot"])),
+          "card 2")
 
     failed = [case for case in cases if not case[1]]
     for label, ok, got, want in cases:

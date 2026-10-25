@@ -166,6 +166,10 @@ if _here != _shared:
     _sys.path.insert(1, _here)              # sibling modules before unrelated paths
 # --- end bootstrap ---
 
+from entry_checks import (  # noqa: E402
+    flashcard_answer_text,
+    flashcard_primary_answer,
+)
 from entry_structure import (  # noqa: E402
     mask_body_comments,
     mask_escaped_wikilinks,
@@ -1068,7 +1072,12 @@ def review(wiki, manifest, out, vault=None, images=None):
 # --------------------------------------------------------------------------
 
 def _st_entry(title, description, card, aliases=(), body="", related=""):
-    """A lint-clean Concept entry; ``body`` extends its opening sentence."""
+    """A lint-clean Concept entry; ``body`` extends its opening sentence.
+
+    Card line 3 is the shared primary answer: every alias but a spelling
+    variant, each read as words.
+    """
+    answer = flashcard_answer_text(*flashcard_primary_answer(title, aliases))
     lines = ['---', 'title: "%s"' % title, 'type: Concept']
     if aliases:
         lines += ['aliases:'] + ['  - "%s"' % alias for alias in aliases]
@@ -1080,7 +1089,7 @@ def _st_entry(title, description, card, aliases=(), body="", related=""):
         'tags:', '  - "#statistics"', 'parents: []', 'read: false',
         'issues: ""', '---',
         opener + "." + body, '', '**Related:**' + related, '', '---', '',
-        '## Flashcards', '', card, '??', title, '']
+        '## Flashcards', '', card, '??', answer, '']
     return "\n".join(lines)
 
 
@@ -1263,6 +1272,27 @@ def run_self_test():
         check("shrinking a three-way alias collision introduces nothing",
               (shrunk["on_staged"], shrunk["introduced"],
                shrunk["baseline_count"]), ([], [], 2))
+
+        # The fixture's card line 3 is the shared answer, which leaves out a
+        # spelling-variant alias; a draft that names it gets item 19.
+        variant_wiki = os.path.join(tmp, "variant-vault", "Wiki")
+        os.makedirs(variant_wiki)
+        scatter = _st_entry("Scatter plot", "Scatter plot is a test measure.",
+                            "A test measure.",
+                            aliases=["scatterplot", "scatter-diagram"])
+        scatter_drafts = {
+            "variant": scatter,
+            "variant-named": scatter.replace(
+                "??\nScatter plot (scatter diagram)\n",
+                "??\nScatter plot (scatterplot, scatter diagram)\n")}
+        check("a staged card leaves a spelling-variant alias off line 3; "
+              "naming it is an item-19 finding",
+              [sorted({r["item"] for r in review(variant_wiki, manifest(
+                  name + ".json", [("Wiki/scatter-plot.md", put(
+                      os.path.join(drafts, name + ".md"), text))]),
+                  os.path.join(tmp, name + "-review"))["on_staged"]})
+               for name, text in sorted(scatter_drafts.items())],
+              [[], ["19-flashcards"]])
 
         # An ownership-handoff trim leaves some of a neighbor's counted
         # faults untouched: fewer of the same occurrences stay inherited.

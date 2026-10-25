@@ -23,8 +23,8 @@ if _HERE not in sys.path:
     sys.path.insert(0, _HERE)
 
 # The opener's direct parenthetical after the bold title and the lexical
-# lead-ins inside it are the same slot and markers item 19 reads, so item-17
-# alias evidence uses entry_checks' one copy of each pattern.
+# lead-ins inside it are the slot and markers entry_checks defines, so item-17
+# alias evidence uses its one copy of each pattern.
 from entry_checks import (BOLD_OUTER_RE as _BOLD_OUTER_RE,
                           BOLD_PAREN_RE as _BOLD_PAREN_RE,
                           PAREN_LEADIN_RE as _PAREN_LEADIN_RE,
