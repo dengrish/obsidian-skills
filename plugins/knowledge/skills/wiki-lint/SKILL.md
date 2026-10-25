@@ -195,7 +195,10 @@ Task 1's boundaries:
   change. An entry keeps one definition card, whose line 1 lint may
   [improve](references/flashcards.md#improving-the-card), up to a complete
   rewrite, whenever the result is clearer, more precise, more concise or a
-  fairer definition, never for variety. Keep its separator, apart from the one
+  fairer definition, never for variety. Its line 3 names the title and every
+  alias except a spelling variant, in `aliases:` order
+  ([answer](../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer));
+  Task 1 rewrites a line 3 that does not. Keep its separator, apart from the one
   [`??` restoration](../wiki-build/references/flashcards-and-emphasis.md#line-2-the-separator),
   and every recognized scheduling or block-ID attachment byte-for-byte and in
   place. Restore a missing card with `??`, never add a second card, and

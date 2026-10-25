@@ -230,7 +230,6 @@ from entry_checks import (  # noqa: E402
     SHARED_MUTATIONS,
     SHARED_QUIET,
     SOURCE_REFERENCE_FORMS,
-    acronym_counterpart,
     acronym_expansion_missing,
     api_surface_findings,
     bare_common_noun_slug,
@@ -251,6 +250,10 @@ from entry_checks import (  # noqa: E402
     kept_card_label,
     label_drops_head,
     label_shares_surface,
+    line3_aliases,
+    line3_names,
+    line3_names_alias,
+    line3_parts,
     list_indent_findings,
     list_mismatch_findings,
     literal_dollar_count,
@@ -4142,8 +4145,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                 f'parenthetical directly after its bolded opener title — add '
                 f'the expansion there (wiki-build writing.md principle 5(f)) '
                 f'from the cited source or as a 5(h) clarification; then apply '
-                f"item 17's alias gates and, when the alias is added, item "
-                f"19's line-3 counterpart. A title whose letters stand for no "
+                f"item 17's alias gates; an alias they add joins card line 3 "
+                f"(item 19). A title whose letters stand for no "
                 f'established full form keeps its opener'))
         for line_no, cue_line in navigation_only_link_lines(e["prose"]):
             problems.append((
@@ -4614,8 +4617,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                         if len(cl) >= 3 and ci in _card_numbers)):
                 problems.append((sl, "item19", "## Flashcards holds " + _message))
             alias_forms = list(e["aliases"])
-            _expected_term, _expected_counterpart = flashcard_primary_answer(
-                title, e["aliases"], opener, e["type"])
+            _expected_term, _expected_aliases = flashcard_primary_answer(
+                title, e["aliases"])
             _line3_faults = []
             _definition_cues = []
             # With 2+ complete cards, the kept card is the primary card the
@@ -4625,12 +4628,12 @@ def scan(wiki, images=None, vault=None, settled=None):
             # removal is the only repair (lint_entry marks the same).
             _complete_rows = [
                 (f"card {ci}" if len(cards) > 1 else "flashcard", cl[2],
-                 flashcard_line3_fault(cl[2], title, e["aliases"], opener,
-                                       e["type"]))
+                 flashcard_line3_fault(cl[2], title, e["aliases"],
+                                       e["prose"]))
                 for ci, cl in enumerate(cards, 1)
                 if len(cl) >= 3 and ci in _card_numbers]
             _primary_tag = (kept_card_label(
-                _complete_rows, _expected_term, _expected_counterpart)
+                _complete_rows, _expected_term, _expected_aliases)
                 if len(_complete_rows) > 1 and title else None)
             for ci, cl in enumerate(cards, 1):
                 tag = (f"card {ci}" if len(cards) > 1 else "flashcard")
@@ -4730,16 +4733,15 @@ def scan(wiki, images=None, vault=None, settled=None):
                 for _line_no, _marker, _fault in sr_card_marker_faults(cl):
                     problems.append((
                         sl, "item19", f"{_lead}{tag} line {_line_no} {_fault}"))
-                # leak check: line 1 must not contain THIS card's answer — its own line-3 term (+ parenthetical
-                # expansion); add the entry's aliases only when this card's term is the entry title (the primary
-                # card). An extra card may name the primary entity, so don't test it against the title.
-                mt = re.match(r"^(.*?)(?:\s+\(([^)]*)\))?\s*$", line3.strip())
-                term_main = (mt.group(1) if mt else line3).strip()
-                paren = mt.group(2).strip() if (mt and mt.group(2)) else ""
-                # the parenthetical is a leak candidate only when it is a real acronym/expansion of the term; a
-                # discipline-disambiguation parenthetical ("Model (machine learning)") is just a domain tag, not part
-                # of the recall answer, so its appearance in line 1 ("a machine learning system") is context, not a leak.
-                cands = [term_main] + ([paren] if (paren and slug(paren) not in VALID_TAGS) else [])
+                # leak check: line 1 must not contain THIS card's answer — its own line-3 term and each name in
+                # its parenthetical; add the entry's aliases only when this card's term is the entry title (the
+                # primary card). An extra card may name the primary entity, so don't test it against the title.
+                term_main = line3_parts(line3)[0].strip()
+                # a discipline-disambiguation parenthetical ("Model (machine learning)") is just a domain tag, not
+                # part of the recall answer, so its appearance in line 1 ("a machine learning system") is context,
+                # not a leak (lint_entry makes the same exception).
+                cands = [term_main] + [name for name in line3_names(line3)
+                                       if name.strip() and slug(name) not in VALID_TAGS]
                 # The primary-card test compares against the title with a trailing
                 # discipline-disambiguation parenthetical stripped: the primary
                 # card's line 3 is the BASE term for a disambiguated title
@@ -4780,7 +4782,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                         "line 3 must be plain text (no markup, including "
                         "LaTeX)" + ("" if _extra else "; remove only the markup")))
                 _line3_fault = flashcard_line3_fault(
-                    line3, title, e["aliases"], opener, e["type"])
+                    line3, title, e["aliases"], e["prose"])
                 _line3_faults.append((tag, line3, _line3_fault))
                 _definition_cues.append((tag, line1.strip()))
                 _hints = flashcard_brevity_hints(line1)
@@ -4829,7 +4831,7 @@ def scan(wiki, images=None, vault=None, settled=None):
             # lint_entry makes the same choice.
             _report_line3, _no_primary = primary_line3_faults(
                 len(_line3_faults), _line3_faults, _expected_term,
-                _expected_counterpart)
+                _expected_aliases, e["prose"])
             # `card_rivals` input: the primary card's cue, else the first
             # complete card's.
             if _unique_owner and _definition_cues:
@@ -4839,7 +4841,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                 problems.append((sl, "item19", _no_primary))
             for tag, line3, line3_fault in _report_line3:
                 problems.append((sl, "item19",
-                                 f'{tag} line 3 is "{line3[:40]}" — '
+                                 f'{tag} line 3 is "{line3}" — '
                                  f'{line3_fault}'))
         # ---- item 11: exactly one terminal Related footer on entries ----
         # ``regions`` intentionally stops prose at the first rendered marker.
@@ -4945,12 +4947,18 @@ def scan(wiki, images=None, vault=None, settled=None):
         for _candidate, _where, _candidate_slug in (missing_introduced_aliases(
             strip_code(e["prose"]).split("\n"), title, e["aliases"], sl)
                 if alias_inventory_complete else ()):
+            # lint_entry's candidate names the same line-3 consequence.
             problems.append((
                 sl, "item17/alias-candidate",
                 f'the body introduces "{_candidate}" ({_where}) as a name for '
                 f'the subject, but aliases: does not contain '
                 f'"{_candidate_slug}" — review same-entity and cross-domain '
-                f'safety before adding it'
+                f'safety before adding it, and '
+                + ('name an added alias on card line 3 in the same edit '
+                   '(item 19)'
+                   if line3_names_alias(title, e["aliases"], _candidate_slug)
+                   else 'leave it off card line 3 as a spelling variant '
+                        '(item 19)')
                 + ("; " + BARE_WORD_ALIAS_HINT
                    if bare_word_alias_candidate(
                        _candidate_slug, title, _candidate)
@@ -6597,7 +6605,22 @@ def _st_entry(title, prose, tags=('"#statistics"',), type_="Concept",
     if related is not False and not has_related_marker:
         body += "\n\n**Related:**" + ((" " + related) if related else "")
     if card is not False:
-        term = card or title
+        term = card
+        if not term:
+            # Card line 3 names every alias but a spelling variant: by
+            # default each one read as words, a repeated slug once.
+            values, seen = [], set()
+            for item in aliases:
+                try:
+                    value = json.loads(item)
+                except ValueError:
+                    value = item.strip("'")
+                if isinstance(value, str) and value and slug(value) not in seen:
+                    seen.add(slug(value))
+                    values.append(value)
+            names = [value.replace("-", " ")
+                     for value in line3_aliases(title, values)[0]]
+            term = title + (" (%s)" % ", ".join(names) if names else "")
         body += ("\n\n---\n\n## Flashcards\n\n"
                  "The idea this entry is about, stated once.\n??\n%s\n" % term)
     return "---\n" + text + "---\n" + body + "\n"
@@ -9832,12 +9855,12 @@ def run_self_test():
             "Unbolded whitespace starts without emphasis.\n   \n"
             "Later, **Unbolded whitespace** is named in another paragraph.",
             card="Unbolded whitespace"))
-        _st_write(v, "counterpart-whitespace.md", _st_entry(
+        _st_write(v, "later-paragraph-alias.md", _st_entry(
             "Principal component analysis",
             "**Principal component analysis** reduces dimensionality.\n   \n"
             "Later, **Principal component analysis** (PCA) appears as an "
             "abbreviation example.",
-            aliases=('"pca"',), card="Principal component analysis"))
+            aliases=('"pca"',), card="Principal component analysis (PCA)"))
         _st_write(v, "wrapped-meeting.md", _st_entry(
             "Wrapped meeting", "The **Wrapped\nmeeting** (1975) was a worked example.",
             type_="Event"))
@@ -9861,8 +9884,8 @@ def run_self_test():
                   res, "unbolded-whitespace", "item16"), True)
         check("a bold title hard-wrapped inside the opener is found with its date",
               _st_keys(res, "wrapped-meeting"), [])
-        check("a later paragraph cannot establish the flashcard counterpart",
-              "item19" in _st_keys(res, "counterpart-whitespace"), False)
+        check("an alias a later paragraph introduces is named on line 3 too",
+              "item19" in _st_keys(res, "later-paragraph-alias"), False)
         check("a missing type: key is an item2 too",
               "missing type: key" in _st_msg(res, "no-type", "item2"), True)
         check("...and a missing sources: key",
@@ -11637,23 +11660,92 @@ def run_self_test():
             "Principal component analysis",
             "**Principal component analysis** (PCA) is a worked example.",
             aliases=('"pca"',), card="Principal component analysis (PCA)"))
-        _st_write(v, "missing-counterpart.md", _st_entry(
-            "Missing counterpart", "**Missing counterpart** (MC) is a worked example.",
-            aliases=('"mc"',), card="Missing counterpart"))
-        _st_write(v, "wrong-counterpart-case.md", _st_entry(
-            "Wrong counterpart case",
-            "**Wrong counterpart case** (WCC) is a worked example.",
-            aliases=('"wcc"',), card="Wrong counterpart case (wcc)"))
-        _st_write(v, "synonym-parenthetical.md", _st_entry(
-            "Synonym parenthetical", "**Synonym parenthetical** is a worked example.",
+        _st_write(v, "missing-alias.md", _st_entry(
+            "Missing alias", "**Missing alias** (MA) is a worked example.",
+            aliases=('"ma"',), card="Missing alias"))
+        _st_write(v, "alias-order.md", _st_entry(
+            "Alias order",
+            "**Alias order** (AO), also called the *order of aliases*, is a "
+            "worked example.",
+            aliases=('"order-of-aliases"', '"ao"'),
+            card="Alias order (AO, order of aliases)"))
+        _st_write(v, "long-alias-order.md", _st_entry(
+            "Long alias order",
+            "A **long alias order** (LAO), also called a *linear alias "
+            "order*, is a worked example.",
+            aliases=('"lao"', '"linear-alias-order"'),
+            card="Long alias order (linear alias order, LAO)"))
+        _st_write(v, "extra-name.md", _st_entry(
+            "Extra name", "**Extra name** is a worked example.",
             aliases=('"alternate-name"',),
-            card="Synonym parenthetical (alternate-name)"))
+            card="Extra name (alternate name, other name)"))
+        _st_write(v, "no-alias-name.md", _st_entry(
+            "No alias name", "**No alias name** is a worked example.",
+            card="No alias name (NAN)"))
+        _st_write(v, "threshold-logic-unit.md", _st_entry(
+            "Threshold logic unit",
+            "A **threshold logic unit** (TLU), also called a *linear "
+            "threshold unit* (LTU), is a worked example.",
+            aliases=('"tlu"', '"linear-threshold-unit"', '"ltu"'),
+            card="Threshold logic unit (TLU, linear threshold unit, LTU) "
+                 "<!--SR:!2026-10-01,3,250--> ^tlu-card"))
+        # Card line 3 leaves out a spelling variant of the term or of an
+        # alias it names; a name that only looks close stays on it.
+        _st_write(v, "scatter-plot.md", _st_entry(
+            "Scatter plot", "A **scatter plot** shows paired values as points.",
+            aliases=('"scatterplot"',), card="Scatter plot"))
+        _st_write(v, "scatter-plot-leak.md", _st_entry(
+            "Scatter plot leak",
+            "A **scatter plot leak** shows paired values as points.",
+            aliases=('"scatterplot-leak"',), card="Scatter plot leak").replace(
+            "The idea this entry is about, stated once.",
+            "The scatterplot leak idea, stated once."))
+        _st_write(v, "feedforward-neural-network.md", _st_entry(
+            "Feedforward neural network",
+            "A **feedforward neural network**, also called a *multilayer "
+            "perceptron* (MLP), is a worked example.",
+            aliases=('"multilayer-perceptron"', '"multi-layer-perceptron"',
+                     '"mlp"'),
+            card="Feedforward neural network (multilayer perceptron, MLP)"))
+        _st_write(v, "random-search.md", _st_entry(
+            "Random search",
+            "**Random search**, also called *randomized search*, is a worked "
+            "example.", aliases=('"randomized-search"',)))
+        _st_write(v, "data-snooping-bias.md", _st_entry(
+            "Data snooping bias", "**Data snooping bias** is a worked example.",
+            aliases=('"data-snooping"',), card="Data snooping bias"))
+        _st_write(v, "np-hardness.md", _st_entry(
+            "NP-hardness", "**NP-hardness** (NPH) is a worked example.",
+            aliases=('"np-hard"', '"nph"'), card="NP-hardness (NP-hard, NPH)"))
+        _st_write(v, "levy-walk.md", _st_entry(
+            "Lévy walk", "A **Lévy walk** is a worked example.",
+            aliases=('"levywalk"',), card="Lévy walk (Levywalk)"))
+        _st_write(v, "scheduled-missing-alias.md", _st_entry(
+            "Scheduled missing alias",
+            "**Scheduled missing alias** (SMA) is a worked example.",
+            aliases=('"sma"',),
+            card="Scheduled missing alias <!--SR:!2026-10-01,3,250-->"))
+        _st_write(v, "pearson-correlation-coefficient.md", _st_entry(
+            "Pearson correlation coefficient",
+            "The **Pearson correlation coefficient**, written *Pearson's r*, "
+            "is a worked example.", aliases=('"pearsons-r"',),
+            card="Pearson correlation coefficient (Pearson's r)"))
+        _st_write(v, "parenthetical-leak.md", _st_entry(
+            "Parenthetical leak", "**Parenthetical leak** is a worked example.")
+            + "\nThe DF idea, stated once.\n??\nGamma (delta function, DF)\n"
+            + "\nA machine learning idea, stated once.\n??\n"
+            + "Delta (machine learning)\n")
+        _st_write(v, "escherichia-coli.md", _st_entry(
+            "Escherichia coli",
+            "***Escherichia coli*** (*E. coli*) is a model bacterium.",
+            type_="Organism", aliases=('"e-coli"',),
+            card="Escherichia coli (E. coli)"))
         _st_write(v, "wrong-title-case.md", _st_entry(
             "Wrong title case", "**Wrong title case** is a worked example.",
             card="wrong title case"))
         _st_write(v, "archaea.md", _st_entry(
             "Archaea", "**Archaea** (singular, *archaeon*) is a domain of organisms.",
-            aliases=('"archaeon"',), card="Archaea"))
+            aliases=('"archaeon"',), card="Archaea (archaeon)"))
         _st_write(v, "singular-parenthetical.md", _st_entry(
             "Bacteria", "**Bacteria** (singular, *bacterium*) is a domain of organisms.",
             aliases=('"bacterium"',), card="Bacteria (bacterium)"))
@@ -11684,7 +11776,8 @@ def run_self_test():
         _st_write(v, "mus-musculus-biology.md", _st_entry(
             "Mus musculus (biology)",
             "***Mus musculus*** is a laboratory model species.",
-            type_="Organism", aliases=('"m-musculus"',), card="Mus musculus",
+            type_="Organism", aliases=('"m-musculus"',),
+            card="Mus musculus (M. musculus)",
             description="Mus musculus is a laboratory model species."))
         _st_write(v, "african-elephant.md", _st_entry(
             "African elephant", "**African elephant** is a large land mammal.",
@@ -11739,11 +11832,6 @@ def run_self_test():
         _st_write(v, "listed-imperative.md", _st_entry(
             "Listed imperative", "**Listed imperative** shows syntax.\n\n"
             "```markdown\nsee [[canonical-target]]\n```", type_="Software"))
-        _st_write(v, "algorithm-counterpart.md", _st_entry(
-            "Algorithm counterpart",
-            "The **Algorithm counterpart** algorithm (AC) predicts from nearby "
-            "observations.", aliases=('"ac"',),
-            card="Algorithm counterpart (AC)"))
         _st_write(v, "ilsvrc.md", _st_entry(
             "ILSVRC",
             "**ILSVRC** (2010–2017) (ImageNet Large Scale Visual Recognition "
@@ -11752,11 +11840,7 @@ def run_self_test():
             card="ILSVRC (ImageNet Large Scale Visual Recognition Challenge)"))
         _st_write(v, "mark-twain.md", _st_entry(
             "Mark Twain", "**Mark Twain** (Samuel Clemens) was an author.",
-            aliases=('"samuel-clemens"',), card="Mark Twain"))
-        _st_write(v, "counterpart-scope.md", _st_entry(
-            "Counterpart scope",
-            "**Counterpart scope** uses **Principal component analysis** (PCA).",
-            aliases=('"pca"',), card="Counterpart scope"))
+            aliases=('"samuel-clemens"',), card="Mark Twain (Samuel Clemens)"))
         _st_write(v, "a-star-search.md", _st_entry(
             "$A^{*}$ search",
             "**$\\boldsymbol{A}^{*}$ search** explores a graph.",
@@ -11874,7 +11958,7 @@ def run_self_test():
               in _st_msg(res, "non-slug-alias", "item18"), True)
         check("a scalar aliases field is rejected even when its value is a valid slug",
               "must be a list" in _st_msg(res, "scalar-alias", "item18"), True)
-        check("a malformed scalar alias cannot establish a card counterpart",
+        check("a malformed scalar alias field gives line 3 no alias to name",
               ("item18" in _st_keys(res, "scalar-bound-card"),
                "item19" in _st_keys(res, "scalar-bound-card")), (True, True))
         check("a bare aliases key is not an empty list",
@@ -11975,57 +12059,98 @@ def run_self_test():
               ["item19" in _st_keys(res, name) for name in
                ("feature-machine-learning", "k-nearest-neighbors",
                 "principal-component-analysis")], [False, False, False])
-        check("compound-derived and shared-tail acronyms remain valid counterparts",
-              [acronym_counterpart(short, long) for short, long in (
-                  ("ATP", "adenosine triphosphate"),
-                  ("DNA", "deoxyribonucleic acid"),
-                  ("RNA", "ribonucleic acid"),
-                  ("MLOps", "ML operations"),
-                  ("OOB evaluation", "out-of-bag evaluation"),
-              )], [True, True, True, True, True])
-        check("an opener-bound counterpart is mandatory and case-exact",
-              ["item19" in _st_keys(res, name) for name in
-               ("missing-counterpart", "wrong-counterpart-case")], [True, True])
-        check("a synonym alias cannot authorize a line-3 parenthetical",
-              "not an opener-established"
-              in _st_msg(res, "synonym-parenthetical", "item19"), True)
+        check("several aliases named in `aliases:` order meet the answer, a "
+              "same-line schedule and block ID after it included",
+              "item19" in _st_keys(res, "threshold-logic-unit"), False)
+        check("a missing alias and a wrong order each break the answer, "
+              "whose message names every alias as the body introduces it",
+              [_st_msg(res, name, "item19") for name in
+               ("missing-alias", "alias-order")],
+              ['flashcard line 3 is "Missing alias" — the aliases are '
+               "missing; line 3 names every alias once, in `aliases:` order "
+               'and without markup: "Missing alias (MA)"',
+               'flashcard line 3 is "Alias order (AO, order of aliases)" — '
+               "the parenthetical lists the aliases out of `aliases:` order; "
+               "line 3 names every alias once, in `aliases:` order and "
+               'without markup: "Alias order (order of aliases, AO)"'])
+        check("a line-3 finding quotes the whole line 3, however long",
+              _st_msg(res, "long-alias-order", "item19").startswith(
+                  'flashcard line 3 is "Long alias order (linear alias '
+                  'order, LAO)" — '), True)
+        check("a name that is no alias breaks the answer",
+              'the parenthetical names "other name", not an alias'
+              in _st_msg(res, "extra-name", "item19"), True)
         check("line 3 preserves the canonical title's casing",
               "same canonical casing"
               in _st_msg(res, "wrong-title-case", "item19"), True)
-        check("a singular synonym in an annotated opener parenthetical is not a card counterpart",
-              "item19" in _st_keys(res, "archaea"), False)
-        check("appending that singular synonym to line 3 is rejected",
-              "not an opener-established"
-              in _st_msg(res, "singular-parenthetical", "item19"), True)
-        check("a short-for expansion in the opener establishes its alias-bound "
-              "flashcard counterpart",
-              "item19" in _st_keys(res, "adaboost"), False)
-        check("an originally-called synonym remains excluded from the required "
-              "flashcard answer",
-              "item19" in _st_keys(res, "boosting"), False)
-        check("an originally-called synonym cannot be appended as an "
-              "opener-established counterpart",
-              "not an opener-established" in _st_msg(
-                  res, "boosting-with-synonym", "item19"), True)
-        check("a canonical triple-emphasis Organism opener establishes its "
-              "direct italic scientific-abbreviation counterpart",
-              "item19" in _st_keys(res, "saccharomyces-cerevisiae"), False)
-        check("the documented intervening algorithm noun preserves an opener "
-              "acronym binding",
-              "item19" in _st_keys(res, "algorithm-counterpart"), False)
-        check("a date before an acronym expansion keeps the card counterpart",
-              "item19" in _st_keys(res, "ilsvrc"), False)
-        check("pseudonyms and a later bold parenthetical are not acronym counterparts",
+        check("a singular-form alias is named on line 3 like any other",
               ["item19" in _st_keys(res, name)
-               for name in ("mark-twain", "counterpart-scope")], [False, False])
+               for name in ("archaea", "singular-parenthetical")],
+              [False, False])
+        check("an entry without aliases appends nothing to the term",
+              'the parenthetical "NAN" names no alias'
+              in _st_msg(res, "no-alias-name", "item19"), True)
+        check("a short-for expansion is named on line 3",
+              "item19" in _st_keys(res, "adaboost"), False)
+        check("an originally-called synonym is an alias, so a line 3 without "
+              "it breaks the answer",
+              "the aliases are missing" in _st_msg(res, "boosting", "item19"),
+              True)
+        check("...and naming it meets the answer",
+              "item19" in _st_keys(res, "boosting-with-synonym"), False)
+        check("a scientific abbreviation is named with its capital and period",
+              ["item19" in _st_keys(res, name) for name in
+               ("saccharomyces-cerevisiae", "escherichia-coli",
+                "mus-musculus-biology")], [False, False, False])
+        check("each name in a card's parenthetical is a leak needle; a "
+              "discipline disambiguator written there is not",
+              [msg for msg in _st_msg(
+                  res, "parenthetical-leak", "item19").split(" | ")
+               if "leaks the answer" in msg],
+              [EXTRA_CARD_PREFIX % 2 + 'card 2 line 1 leaks the answer '
+               '("DF")'])
+        check("a name keeps its casing and punctuation when it slugs to its "
+              "alias",
+              "item19" in _st_keys(res, "pearson-correlation-coefficient"),
+              False)
+        check("a long expansion after a date parenthetical is named like any "
+              "other alias",
+              "item19" in _st_keys(res, "ilsvrc"), False)
+        check("a pseudonym alias is named on line 3",
+              "item19" in _st_keys(res, "mark-twain"), False)
+        check("line 3 leaves out a spelling variant of the term or of an "
+              "alias it names, and keeps a name that only looks close",
+              ["item19" in _st_keys(res, name) for name in
+               ("scatter-plot", "feedforward-neural-network", "random-search")],
+              [False, False, False])
+        check("a close name that is no spelling variant must be on line 3",
+              "the aliases are missing"
+              in _st_msg(res, "data-snooping-bias", "item19"), True)
+        check("a line 3 that names a spelling variant is a finding that "
+              "suggests the line without it",
+              ['the parenthetical names the spelling variant "NP-hard"; line '
+               "3 names every alias except a spelling variant once, in "
+               '`aliases:` order and without markup: "NP-hardness (NPH)"'
+               in _st_msg(res, "np-hardness", "item19"),
+               'the parenthetical names the spelling variant "Levywalk"; line '
+               "3 leaves out a spelling variant, so it is the term alone: "
+               '"Lévy walk"' in _st_msg(res, "levy-walk", "item19")],
+              [True, True])
+        check("a spelling variant left off line 3 still leaks from line 1",
+              'line 1 leaks the answer ("scatterplot-leak")'
+              in _st_msg(res, "scatter-plot-leak", "item19"), True)
+        check("a same-line schedule after an answer missing its alias leaves "
+              "the fault",
+              "the aliases are missing"
+              in _st_msg(res, "scheduled-missing-alias", "item19"), True)
         check("an unrelated noun phrase and later parenthetical do not bind to "
               "the bolded title",
               bool(BOLD_PAREN_RE.search(
-                  "**Algorithm counterpart** predicts a class (AC) nearby.")),
+                  "**Algorithm noun** predicts a class (AN) nearby.")),
               False)
         import introduced_aliases as _alias_module
         check("item 17 reads the opener parenthetical and its lead-ins with "
-              "the shared item-19 patterns",
+              "entry_checks' shared patterns",
               [_alias_module._BOLD_PAREN_RE is BOLD_PAREN_RE,
                _alias_module._PAREN_LEADIN_RE is PAREN_LEADIN_RE],
               [True, True])
@@ -12470,6 +12595,9 @@ def run_self_test():
         _st_write(v, "introduced-alias.md", _st_entry(
             "Introduced alias", "**Introduced alias** — which many people "
             "call *alternate name* — is a worked example."))
+        _st_write(v, "box-plot.md", _st_entry(
+            "Box plot", "A **box plot**, also called a *boxplot*, is a worked "
+            "example."))
         _st_write(v, "feature-machine-learning.md", _st_entry(
             "Feature (machine learning)", "**Feature** — which many people "
             "call *covariate* — is a measurable input to a model."))
@@ -12578,6 +12706,14 @@ def run_self_test():
                '"alternate-name"' in _st_msg(
                    res, "introduced-alias", "item17/alias-candidate")),
               (True, True))
+        check("the item-17 candidate asks to name an added alias on card "
+              "line 3",
+              "and name an added alias on card line 3 in the same edit "
+              "(item 19)" in _st_msg(
+                  res, "introduced-alias", "item17/alias-candidate"), True)
+        check("the item-17 candidate leaves a spelling variant off line 3",
+              "leave it off card line 3 as a spelling variant (item 19)"
+              in _st_msg(res, "box-plot", "item17/alias-candidate"), True)
         check("a single-word synonym of a disambiguated subject defaults to staying out",
               ("stays out" in _st_msg(res, "feature-machine-learning",
                                       "item17/alias-candidate"),
@@ -13446,13 +13582,11 @@ def run_self_test():
         check("the scan leaves every card byte unchanged",
               {p: open(p, "rb").read() for p in iter_entry_files(v)}, before)
 
-        check("an a.k.a. lead-in is stripped from the opener counterpart, as "
-              "in lint_entry",
-              [flashcard_primary_answer(
-                  "PCA", ["principal-component-analysis"],
-                  "**PCA** (%s *principal component analysis*) projects data."
-                  % lead, "Concept")[1] for lead in ("a.k.a.", "a.k.a")],
-              ["principal component analysis"] * 2)
+        check("the primary answer is the shared one, as in lint_entry: the "
+              "base term, then every alias in order",
+              flashcard_primary_answer(
+                  "Recall (machine learning)", ["true-positive-rate", "tpr"]),
+              ("Recall", ("true-positive-rate", "tpr")))
         check("card_rivals pairs siblings under a hub parent and Related targets only",
               build_card_rivals(
                   {"a": "A cue.", "b": "B cue.", "c": "C cue.", "d": "D cue.",
