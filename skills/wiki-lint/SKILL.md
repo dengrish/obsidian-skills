@@ -51,7 +51,7 @@ This skill owns retrospective and vault-wide link decisions under its own closen
 
 ## Scope and order of a run
 
-Run Step 0 before any requested task. The default pass runs Task 1 → Task 1b → refresh the scan → Task 2 → Task 3. A request for only QC, only links, only MOCs, or some entries narrows the run; the scan grants no permission outside that scope. A request for one narrower task runs that task alone, with only the [user issues](#user-issues) it owns, and skips Task 1b; a request naming entries limits Task 1b to them and the neighbors a consolidation, split, merge or retitle must touch. **Task 3 cannot be narrowed to a subset:** it needs the connected closure defined in [hierarchy](references/hierarchy.md#scope-closure). Run it on each connected closure the request covers (a whole-wiki or all-MOCs request covers them all) or whose expansion the user or an [explicit request](#explicit-requests) authorizes; skip every other closure and report its [required expansion](references/hierarchy.md#scope-closure).
+Run Step 0 before any requested task. The default pass runs Task 1 → Task 1b → refresh the scan → Task 2 → Task 3. A request for only QC, only links, only MOCs, or some entries narrows the run; the scan grants no permission outside that scope. A request for one narrower task runs that task alone, with only the [user issues](#user-issues) it owns, and skips Task 1b; a request for some entries limits Task 1b to them and the neighbors a consolidation, split, merge or retitle must touch. **Task 3 cannot be narrowed to a subset:** it needs the connected closure defined in [hierarchy](references/hierarchy.md#scope-closure). Run it on each connected closure the request covers (a whole-wiki or all-MOCs request covers them all) or whose expansion the user or an [explicit request](#explicit-requests) authorizes; skip every other closure and report its [required expansion](references/hierarchy.md#scope-closure).
 
 After an interrupted Task 1, 1b or 2 run, rescan and rebuild the worklists from
 the current files. Completed atomic repairs stay and become no-ops; re-plan a
@@ -79,8 +79,9 @@ widening into the default pass unless its protocol needs a wider closure or
 the user asks. A standalone retitle, alias-removal, split, merge or deletion
 request finishes without Task 1b, with Tasks 1 and 2 on the entries it
 wrote. A request to fix the flagged issues (“fix the issues I flagged”)
-names the entries in `user_issues` and runs the default order on them and
-the neighbors their repairs must touch. Each of these requests authorizes
+runs the default order on the entries in `user_issues` and the entries their
+repairs create; a neighbor a repair must touch takes only that touch and the
+[final reread](#refresh-before-task-2). Each of these requests authorizes
 Task 3 on the connected closure of its
 [seeds](references/hierarchy.md#scope-closure).
 
@@ -91,32 +92,45 @@ An entry's `issues:` field is the user's issue inbox;
 owns its values, blanks and partial rewrites and when an issue is resolved or
 blocked.
 
-- **Authority.** Each issue is the user's own request for that entry, the
-  run's first worklist; beyond the entry it reaches only the neighbors a
-  consolidation, split, merge, retitle or link fix must touch, and a
-  [missing entry](references/refactors.md#create-a-missing-entry) it names.
-- **Repair.** Re-verify the problem against the note, its cited sources and
-  the rules, then repair it under Task 1b's
-  [evidence rule](#task-1b--content-repair), even with a change no builder
-  rule names, such as "add an example", if the builder rules allow it.
+- **Authority.** Each issue is the user's own request, within the reach §2d
+  gives it.
+- **Repair.** Repair an issue that survives §2d's re-verification under
+  Task 1b's [evidence rule](#task-1b--content-repair), even with a change no
+  builder rule names, such as "add an example", if the builder rules allow it.
 - **Routing.** Content, merge, split, title, alias or missing entry go to
   Task 1b. A card issue goes to Task 1's
   [card review](references/flashcards.md#improving-the-card), unless fixing
   it changes the claim the card tests; then Task 1b corrects that claim, and
   the card changes in the same edit. Links go to Task 2; tag or hierarchy to
   [item 8](references/qc-items.md#8-tags) and Task 3.
-- **Blocked.** An issue §2d blocks, such as one needing an uncited source
-  (an empty `sources:` is not one, nor is a root's
-  [form repair](references/hierarchy.md#establish-discipline-roots)
-  overview page), stays in the field and is reported as §2d says, and it
-  resets no `read:`.
+- **Blocked.** An issue §2d blocks stays in the field and is reported as §2d
+  says, and it resets no `read:`.
+- **General preference.** §2d settles an issue that states one ("not every...",
+  "always..."); the preference is
+  [logged to this skill's log](references/backlogs.md#proposal-scope), with no
+  skill edit in that run. It authorizes nothing beyond the entry.
 
 Once the owning tasks have run, rewrite the field under §2d in the last
 repair's [publication](#publishing) or a frontmatter-only one; a resolved
 issue sets `read: false` under the [user-issue override](#dates). A
-report-only run blanks and resets nothing. A narrowed run leaves the issues of
-its skipped tasks in the field. Report each issue under
+report-only run blanks and resets nothing. A narrowed run leaves in the field
+the issues of its skipped tasks and of entries outside its scope, resets nothing
+for them and reports each as out of scope. Report each issue under
 [User issues](references/backlogs.md#run-report).
+
+### Read entries
+
+A `read: true` entry is protected from additions:
+[CONVENTIONS §2c](../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
+owns what reaches it, and what it holds back is no defect. Task 1, Task 1b and
+the [final reread](#refresh-before-task-2) apply that rule before any repair, to
+every worklist; on an entry `read: true` in its first private copy the final
+reread repairs only the joins and regressions this run's own edits left, a
+correction §2c allows and what its own issue or a request naming it asks. Only a [user issue](#user-issues) or a request in chat
+can name an entry in §2c's sense; Task 1's handed-over findings and a
+note-content log item are subject to the rule, even when they name the entry. A
+request to fix the flagged issues opens a `read: true` entry only to what its
+issues ask; it names no entry in §2c's sense.
 
 ## Step 0 — Inventory the vault
 
@@ -188,14 +202,15 @@ Task 1's boundaries:
 - **Prose and metadata judgments:** use only the repair that numbered item
   authorizes. [Item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope)'s
   bounded editorial repairs fix phrasing, flow, and succinctness while
-  preserving claims, leaving clear prose alone. Task 1 never invents a
+  preserving claims, leaving clear prose alone, within
+  [Read entries](#read-entries). Task 1 never invents a
   discipline, rewrites a fact, selects source content, or redistributes
   material to close a finding.
 - **Cards:** read [flashcard maintenance](references/flashcards.md) before any
   change. An entry keeps one definition card, whose line 1 lint may
   [improve](references/flashcards.md#improving-the-card), up to a complete
-  rewrite, whenever the result is clearer, more precise, more concise or a
-  fairer definition, never for variety. Its line 3 names the title and every
+  rewrite, to repair a named failure of clarity, precision, concision or
+  fairness, never for variety. Its line 3 names the title and every
   alias except a spelling variant, in `aliases:` order
   ([answer](../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer));
   Task 1 rewrites a line 3 that does not. Keep its separator, apart from the one
@@ -210,8 +225,8 @@ Task 1's boundaries:
 Task 1b applies the source-dependent builder rules Task 1 cannot: to the
 [user issues](#user-issues) it owns, first, then to Task 1's handed-over
 findings and the note-content log's Open items, sweeping each item's class
-across the run's scope; a user issue's change that no builder rule names
-stays within its entry. Read the
+across the run's scope within [Read entries](#read-entries); a user issue's
+change that no builder rule names stays within its entry. Read the
 [source-backed correction protocol](references/source-backed-corrections.md)
 before the first repair, and the [refactor protocol](references/refactors.md)
 before a consolidation, merge, split, retitle, alias removal, new entry or
@@ -221,17 +236,11 @@ dangler gloss.
 cited document, a cited Markdown note, or a cited URL's page read online);
 beyond them it adds only the clarification
 [principle 5(h)](../wiki-build/references/writing.md#prose-principles)
-admits. To verify a clarification or settle a conflict, Task 1b may also read
-standard references online as data, never cited. The exceptions are an
-entry whose `sources:` is empty, which cites the page or document it was
-verified against under [item 4](references/qc-items.md#4-sources), and a
-discipline root's [form](references/hierarchy.md#establish-discipline-roots),
-which follows its own source rule. A direction derived
-directly from a stated formula also settles a conflict, and recollection
-alone never does. A gap only an uncited source teaches waits for a wiki-build request naming that
-whole source and is not logged. The
-[correction protocol](references/source-backed-corrections.md) owns these
-details; a new entry's source follows the
+admits. Recollection alone never settles a conflict. A gap only an uncited
+source teaches waits for a wiki-build request naming that whole source and is
+not logged. The
+[correction protocol](references/source-backed-corrections.md) owns the rest,
+including when standard references are read; a new entry's source follows the
 [missing-entry rule](references/refactors.md#create-a-missing-entry).
 
 Repair in this order:
@@ -265,7 +274,7 @@ Repair in this order:
    wording or scanner similarity alone never activate a merge; a long note,
    several headings or several sources alone never activate a split.
 4. **Retitles and semantic-invalid alias removals** through their protocols.
-5. **Missing entries, only from vault documents the using entries cite, and
+5. **Missing entries, only from a vault document a using entry cites, and
    dangler glosses** under the
    [missing-entry rule](references/refactors.md#create-a-missing-entry) and
    its [dangler hand-off](references/refactors.md#dangling-link-hand-off),
@@ -276,12 +285,14 @@ Only a deletion needs an explicit request; Task 1b proposes each deletion it
 finds to the note-content log. A merge or split whose identity or
 boundary is a genuinely close call, or whose evidence does not settle it, is
 not applied: it goes under *Notes for the user* with both options and is
-never logged. A conflict stays an open log item only when the references
+never logged. A user issue asking for that split or note decides the close call,
+the substance test's included; a subject its sources only use, mention or
+[defer](../wiki-build/SKILL.md#2-extract-entities) stays blocked under §2d. A conflict stays an open log item only when the references
 consulted disagree or none is reachable, and the item names them.
 
 ## Refresh before Task 2
 
-Once Task 1 and any Task 1b repairs are done, run the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against its first private copy, reviewing each `9-cut-join-candidate` that `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' --baseline '<copy>' '<entry>'` raises; a fix this final reread makes gets only its passage reread. Whenever Task 1 or Task 1b changed entries, refresh the scan so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from `wiki-scan-1.json` is this run's own copy, unless it pairs an entry with its own retitle destination; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, rereads that whole entry against its copy and refreshes the scan once more. Use the refreshed worklists, but keep Step 0's `run_timestamp` (or the coordinating run's) and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
+Once Task 1 and any Task 1b repairs are done, run the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against its first private copy, reviewing each `9-cut-join-candidate` that `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' --baseline '<copy>' '<entry>'` raises; a fix this final reread makes gets only its passage reread. When the [fresh reader](../wiki-build/references/review.md#fresh-reader) applies, it runs now, and Task 1b repairs what its triage keeps, rereading each repaired passage, and the whole of an entry the final reread did not cover, before the refresh. Whenever Task 1 or Task 1b changed entries, refresh the scan so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from `wiki-scan-1.json` is this run's own copy, unless it pairs an entry with its own retitle destination; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, rereads that whole entry against its copy and refreshes the scan once more. Use the refreshed worklists, but keep Step 0's `run_timestamp` (or the coordinating run's) and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
 
 ## Task 2 — Link hygiene
 
@@ -319,7 +330,7 @@ At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Re
 
 ### Churn-avoidance contract
 
-**Write only what actually changes.** Leave an unaffected entry byte-for-byte untouched, ordering and whitespace included. Make a targeted repair to a violation, never a discretionary rewrite of conforming prose; repairing a [named prose defect](../wiki-build/references/writing.md#editorial-reread) is such a repair, not rewording. Every Task 1b repair fixes a concrete defect a builder rule or a [user issue](#user-issues) names, and its owner and notation choices follow their stated tie-breaks, so they settle once.
+**Write only what actually changes.** Leave an unaffected entry byte-for-byte untouched, ordering and whitespace included. Make a targeted repair to a violation, never a discretionary rewrite of conforming prose; repairing a [named prose defect](../wiki-build/references/writing.md#editorial-reread) is such a repair, not rewording. Every Task 1b repair fixes a concrete defect a builder rule names or does what a [user issue](#user-issues) or a request naming the entry asks, and its owner and notation choices follow their stated tie-breaks, so they settle once.
 
 Conforming hand edits survive. A complete pass converges: a rerun on
 unchanged evidence finds nothing to change, never oscillates, reorders for
@@ -330,7 +341,11 @@ recurrence counters follow their own update rules.
 
 ### Publishing
 
-A scan does not reserve a pathname. Record each path that may change, a new
+A scan does not reserve a pathname. An entry read earlier (the scan, a semantic
+review, a flagged note) is recorded when the run decides to change it and then
+re-read in full; draft only from that re-read, as
+[wiki-build step 3](../wiki-build/SKILL.md#3-resolve-against-existing-entries)
+says. Record each path that may change, a new
 file's free destination included, before reading the bytes a decision uses,
 keep a private copy of each entry under `<scratch>` before its first edit,
 stage complete drafts under `<scratch>`, and publish them with the shared
@@ -375,7 +390,9 @@ a card edit or item-12 equation included, apart from an
 wiki-build's [body-change rule](../wiki-build/references/merge.md#the-read-reset):
 `updated:` becomes today when the entry's content changes, and `read:`
 becomes `false` only when explanatory content is added or rewritten; a close
-call keeps `read:` and is reported. A rewritten inbound link or `parents:`
+call keeps `read:` and is reported. On a `read: true` entry,
+[Read entries](#read-entries) first decides whether the repair applies, and §2c
+settles its `read:` and [report line](references/backlogs.md#run-report). A rewritten inbound link or `parents:`
 value alone changes neither. New entries get today's dates and `read: false`.
 A merge's survivor keeps its `created:` and gets today's `updated:` and
 `read: false` from any prior state.

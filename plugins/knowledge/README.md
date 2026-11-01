@@ -20,11 +20,21 @@ do not give and adding only clarification. It settles conflicting claims
 against standard references read online, consolidates duplicated explanations,
 merges duplicate entries, splits entries that define several subjects,
 retitles ambiguous titles and creates a missing entry only from a vault
-document the entries using its term already cite, reporting any other gap as
+document an entry using its term already cites, reporting any other gap as
 a candidate, then maintains links, parents and MOCs. New and merged entries
-are marked unread. It also resolves the issues you flag in entries and
+are marked unread. An entry you have marked `read` still takes corrections,
+which uncheck `read` and are named in the report, and trims and card,
+description, metadata or link repairs; new explanation reaches it only through its `issues` property or
+a request naming it. It also resolves the issues you flag in entries and
 works through the open items in `Reviews/wiki-notes-suggestions.md`. Deleting
 an entry needs an explicit request.
+
+A whole-wiki wiki-lint run that repairs content, a wiki-add run creating about
+10 entries or more, and a wiki-build of a whole chapter, several sources or
+about 10 entries or more, also hands the notes it changed to a fresh agent that
+sees neither the rules nor the sources. The run checks what that reader could not follow against
+the note and its sources, repairs what holds up and reports one count; a
+request can turn this on or off.
 
 ## Setup
 
@@ -90,8 +100,8 @@ to the plugin's *Folders to ignore*: otherwise a `::` or a line that is only
 `?` in an article becomes a card. wiki-lint reports unlisted tags, changed
 separators, active cloze conversion and an `Articles/` folder the plugin does
 not ignore, but never edits the plugin's settings. To pause a card, change its
-separator line to `!!`; restore `??` to resume it. wiki-lint may reword a
-card to make it clearer, keeping its review schedule, and wiki-lint and
+separator line to `!!`; restore `??` to resume it. wiki-lint rewords a
+card only to repair a named failure, keeping its review schedule, and wiki-lint and
 wiki-build remove any further card from an entry, along with its review
 schedule, quoting both in the run report.
 

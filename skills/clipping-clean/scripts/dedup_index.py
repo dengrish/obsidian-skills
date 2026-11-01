@@ -61,7 +61,7 @@ import re
 import stat
 import sys
 import unicodedata
-from urllib.parse import unquote_plus, urlsplit, urlunsplit
+from urllib.parse import unquote, unquote_plus, urlsplit, urlunsplit
 
 _OBSIDIAN_SHARED_MODULES = (
     'entry_structure', 'markdown_tables', 'slugify', 'yaml_scalars')
@@ -234,8 +234,9 @@ VARIANT_HOST_LABELS = {"m", "mobile", "amp"}
 
 
 def variant_key(url):
-    """A looser key that also folds the scheme, a mobile or AMP copy and an
-    arXiv version, so a copy saved under one of them can be found.
+    """A looser key that also folds the scheme, a mobile or AMP copy, an arXiv
+    version and a path's percent-escapes, so a copy saved under one of them can
+    be found.
 
     It never decides a verdict: `check()` only lists its matches in
     `variant_matches`, for a reader to compare. Query and routing fragment stay
@@ -254,7 +255,7 @@ def variant_key(url):
         labels = [label for i, label in enumerate(labels)
                   if i >= len(labels) - 2 or label not in VARIANT_HOST_LABELS]
     host = ".".join(labels)
-    path = re.sub(r"/amp$", "", parts.path)
+    path = re.sub(r"/amp$", "", unquote(parts.path))
     if host == "arxiv.org":
         path = re.sub(r"^(/(?:abs|pdf)/.+?)v[0-9]+(\.pdf)?$", r"\1\2", path)
     netloc = userinfo + separator + host + colon + port
@@ -785,6 +786,11 @@ def run_self_test():
              "https://arxiv.org/pdf/hep-th/9901001v2.pdf",
              "https://arxiv.org/pdf/hep-th/9901001.pdf"),
             ("a site named m keeps its host", "https://m.com/a", "https://m.com/a"),
+            ("a percent-encoded apostrophe equals the literal one",
+             "https://en.wikipedia.org/wiki/Bayes%27_theorem",
+             "https://en.wikipedia.org/wiki/Bayes'_theorem"),
+            ("a percent-encoded letter equals the literal one",
+             "https://example.com/G%C3%B6del", "https://example.com/G\u00f6del"),
             ("the query is kept", "https://m.example.com/a?id=1",
              "https://example.com/a?id=1")):
         case("variant_key: %s" % label, variant_key(url), want)
@@ -793,7 +799,8 @@ def run_self_test():
         ("https://arxiv.org/abs/2305.18290v3", "Versioned.md"),
         ("https://m.example.com/q?id=1", "Query.md"),
         ("https://m.com/a", "Site.md"),
-        ("https://example.com/same", "Same.md"))}
+        ("https://example.com/same", "Same.md"),
+        ("https://en.wikipedia.org/wiki/Bayes%27_theorem", "Bayes.md"))}
     variant_rows = check([
         {"id": "Inbox/raw.md", "source": "http://example.com/raw"},
         {"id": "wiki", "source": "https://en.wikipedia.org/wiki/X"},
@@ -802,12 +809,14 @@ def run_self_test():
         {"id": "query", "source": "https://example.com/q?id=2"},
         {"id": "com", "source": "https://com/a"},
         {"id": "same", "source": "https://example.com/same"},
+        {"id": "bayes", "source": "https://en.wikipedia.org/wiki/Bayes'_theorem"},
         {"id": "none", "source": None}], variant_index)
-    case("variant matches list mobile, scheme and arXiv copies; status stays exact",
+    case("variant matches list mobile, scheme, arXiv and percent-escape copies; "
+         "status stays exact",
          [(row["status"], row["variant_matches"]) for row in variant_rows],
          [("new", []), ("new", ["Mobile.md"]), ("new", ["Inbox/raw.md"]),
           ("new", ["Versioned.md"]), ("new", []), ("new", []),
-          ("duplicate", []), ("no-source", [])])
+          ("duplicate", []), ("new", ["Bayes.md"]), ("no-source", [])])
 
     # --- read_source, against the note shapes a real vault holds ------------
     tmp = tempfile.mkdtemp(prefix="dedup_selftest.")

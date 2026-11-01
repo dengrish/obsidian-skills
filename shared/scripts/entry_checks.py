@@ -191,7 +191,7 @@ def source_identity_pairs(values):
 #: from becoming an automatic backfill destination. No such word is proposed as
 #: an alias; a target that introduces one in italics accepts it as a label.
 COMMON_NOUNS = frozenset({
-    "activation", "agent", "attention", "attribute", "bias", "cell",
+    "activation", "affinity", "agent", "attention", "attribute", "bias", "cell",
     "classification", "clustering", "collinearity", "domain", "ensemble",
     "entropy", "feature", "field", "filter", "function", "gradient", "inertia",
     "kernel", "label", "model", "normalization", "policy", "predictor",

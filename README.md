@@ -108,14 +108,17 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
    entries into its owner, aligns notation, merges duplicate entries that name
    one entity, splits an entry that defines several subjects, retitles
    ambiguous bare titles and creates a missing entry only from a vault
-   document the entries using its term already cite, never from research.
+   document an entry using its term already cites, never from research.
    Each new or merged entry is marked unread.
 3. **Task 2** adds and prunes links, including links to the new entries.
 4. **Task 3** rebuilds `parents:` and the MOCs.
 
 The run also works through the open items in
-`Reviews/wiki-notes-suggestions.md`: it re-verifies each one, fixes it and
-moves it to Fixed, leaving open only what it cannot complete, with the reason.
+`Reviews/wiki-notes-suggestions.md`: it re-verifies each one, fixes it or finds that
+the current rules keep it, and moves it to Fixed, leaving open only what it
+cannot complete, with the reason. An entry marked `read` takes no added
+explanation unless its own issue or a request names it, as the
+[knowledge README](plugins/knowledge/README.md) describes.
 A request for a narrower task or a set of entries limits the run. A thin entry
 whose teaching lives only in a chapter not yet built waits for that chapter's
 wiki-build. A split or merge that is a close call is reported with both

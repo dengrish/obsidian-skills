@@ -26,7 +26,9 @@ may create a split note only for a subject already substantively present in the
 affected entry and supported by its cited sources.
 Task 1b's [missing-entry rule](#create-a-missing-entry) is the only other
 creation, limited to a concept the wiki relies on, taught by a vault document
-the entries using it cite.
+an entry using it cites. A user issue asking for a term's own note takes this
+split when the flagged entry holds the term's explanation and otherwise the
+missing-entry rule, each term routed on its own.
 
 ## Establish evidence and complete scope
 
@@ -76,16 +78,17 @@ the entries using it cite.
 ## Build the refactored entries
 
 - Apply wiki-build's current field, prose, equation, media, link, and
-  flashcard rules. Every result is a source-backed atomic entry; no temporary redirect is
+  flashcard rules, card line 3's
+  [answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)
+  included. Every result is a source-backed atomic entry; no temporary redirect is
   created.
 - A split moves each verified claim, equation, exhibit, and citation to its
   canonical owner. Leave enough concise relationship prose and wikilinks for
-  orientation, without duplicating the full explanation across the results.
+  orientation, without duplicating the full explanation across the results. Audit and review
+  each note a split creates as [missing-entry step 3](#create-a-missing-entry)
+  does, with a manifest naming the split's drafts.
   Every note a split creates gets today's `created:` and `updated:` dates and
-  `read: false`. Each result's card line 3 names the aliases that result
-  keeps, except a spelling variant
-  ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
-  A split keeps the original entry as the owner
+  `read: false`. A split keeps the original entry as the owner
   of one subject: the one its title names, or, when the title names several
   (`Precision and recall`) or none, the one with the fullest treatment, then
   the alphabetically first resulting slug. When the retained original's title
@@ -109,10 +112,7 @@ the entries using it cite.
   user-owned appearance fields, integrate nonduplicate claims, and union only valid source
   contributions, each document in one representation
   ([merge rule 1](../../wiki-build/references/merge.md#frontmatter-and-related-footer)),
-  and same-entity aliases, naming the survivor's aliases except a spelling
-  variant on its card's line 3
-  ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
-  The survivor gets today's
+  and same-entity aliases. The survivor gets today's
   `updated:` and `read: false`, whatever any merged entry's prior `read:`,
   in place of the builder's
   [body-change rule](../../wiki-build/references/merge.md#the-read-reset),
@@ -131,22 +131,22 @@ the entries using it cite.
 - A consolidation keeps the full treatment of an explanation, argument,
   worked example, property with its justification, or exhibit duplicated
   across entries or held outside its owner, in that owner: the most specific
-  entry whose subject it is about. A
-  property the sources state for a whole family belongs to the family's entry
-  (regularized models' scale sensitivity to Regularization, not Ridge
-  regression), and an argument about how a metric behaves belongs to that
-  metric (the rare-positive argument to False positive rate); plots built on
-  the metric keep the consequence, its one-clause reason and a link. Before choosing the owner,
+  entry whose subject it is about, under the builder's
+  [atomicity test](../../wiki-build/references/writing.md#body-structure). Before choosing the owner,
   search the whole Wiki for the passage's distinctive tokens (a figure with
   its unit, a gene or experiment name) and plan every hit in the same
   consolidation. Between equally specific entries, the owner is the one
   already holding the fullest version, then the alphabetically first slug.
-  If the owner already explains it, trim each other copy to its consequence
-  for that entry plus the one-clause reason or key value the
+  If the owner already covers all the explanation a copy gives, trim that copy
+  to its consequence for that entry plus any short clause or sentence of reason
+  or key value the
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
   allows, linked to the owner; the trim drops the rest of the owner's
   reasoning and keeps a source's own judgment, such as its recommendation, only in the owner, but never drops a fact that entry's core
-  facets need. Otherwise move the fullest version into the owner, verified
+  facets need. Otherwise move the fullest version into the owner, a
+  `read: true` owner only as
+  [§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
+  allows, verified
   against the cited sources of the entry that holds it or of the owner (new
   information they do not give is
   [trimmed](source-backed-corrections.md#correct-and-publish), never moved)
@@ -286,8 +286,7 @@ retitle also activates this protocol.
    admits it. A bare cross-domain old slug
    never stays, since the bare term is never an alias, and a proven wrong or
    misleading name is not retained merely to make old links resolve. Card
-   line 3 takes the new title and names the resulting aliases except a
-   spelling variant
+   line 3 follows the new title and aliases
    ([answer](../../wiki-build/references/flashcards-and-emphasis.md#line-3-the-answer)).
 3. Inventory the references to the old filename and its aliases under
    [step 3 above](#establish-evidence-and-complete-scope), whose write scope
@@ -367,18 +366,23 @@ it resolves a [user issue](../SKILL.md#user-issues).
 ## Create a missing entry
 
 Task 1b creates a missing entry only for a concept taught by a vault document
-that the entries using the term already cite, with a stable identity that
+an entry using the term already cites, with a stable identity that
 passes wiki-build's [substance and atomicity tests](../../wiki-build/SKILL.md#2-extract-entities),
 when a [user issue](../SKILL.md#user-issues) asks for its entry, when an
 open note-content item names it, or when it is a load-bearing term:
-one at least three entries use without a resolving link. A one-clause inline
-gloss still counts as a use, and so does a dangling body-prose link to the
+one at least three entries use without a resolving link, or two when both
+define the term beyond a brief gloss. A gloss, whether one inline clause or
+the one short sentence principle 9 gives an inserted definition, is no
+definition but still counts as a use, and so does a dangling body-prose link to the
 term. A use is a sentence that needs the term's meaning to make its point; a
 word inside a dataset column or variable name ("median house value"), a
 measurement ("135 million nucleotide pairs"), a list of examples or a
-Related-footer item, dangling or not, is not a use. Count the uses before
-adding any gloss, keep the count across the whole Task 1b sweep, and
-adjudicate every term that reaches three entries in the same run. A concept
+Related-footer item, dangling or not, is not a use. A passage that
+[defers](../../wiki-build/SKILL.md#2-extract-entities)
+a term does not teach it, and the later chapter it points to does not count,
+even in the same PDF, so a term only deferred gets a gloss, not an entry,
+whatever its count. Count the uses before adding any gloss, keep the count
+across the whole Task 1b sweep, and adjudicate every term that reaches that count in the same run. A concept
 failing those tests, including one no cited document teaches, gets no entry:
 it is a reported [missing-entry candidate](backlogs.md#run-report) for a
 later wiki-build of a source that teaches it or for wiki-add, and each using
@@ -394,8 +398,8 @@ It extracts no other topic from the evidence.
    links the term to it, or retargets its dangling links there; an occupied
    or ambiguous slug is reported.
 2. Cite that teaching document at the page that teaches the term: never
-   research the term on the web or in a vault document the using entries do
-   not cite. Cite a PDF once
+   research the term on the web or in a vault document no entry using the term
+   cites. Cite a PDF once
    [§1a's check](../../../shared/CONVENTIONS.md#1a-source-file-names-and-why-pdf-organize-runs-first)
    proves its basename unique.
    Citing an already cited document leaves wiki-build's coverage unchanged;
@@ -418,7 +422,7 @@ It extracts no other topic from the evidence.
    [consolidate](#build-the-refactored-entries) into the new entry every
    explanation, example and exhibit the using entries hold about its subject,
    under [Dates](../SKILL.md#dates). Task 1b hands
-   Task 2 the mentions it counted for the three-use test as the new entry's
+   Task 2 the mentions it counted for the load-bearing test as the new entry's
    link worklist; Task 2 judges each under the closeness bar and links the
    using entry's first eligible body-prose occurrence under the
    [backfill rules](link-hygiene.md#backfill-add-missing-links), and Task 3
@@ -471,7 +475,9 @@ as blocked by those entries.
    [genuine dangler](link-hygiene.md#dangling-links-target-missing). In an
    entry, each unlinked mention is glossed as the
    [dangler hand-off](#dangling-link-hand-off)'s step 3 glosses a dangling
-   one. An
+   one, unless
+   [§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
+   holds it back from a `read: true` entry. An
    `Investments/` reference or an ambiguous reference blocks the deletion. A
    link or embed to the entry's card block ID, or a transclusion of the entry
    or one of its sections (`![[old]]`, `![[old#Section]]`), which has no

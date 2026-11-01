@@ -17,6 +17,7 @@ caught.
     pluralize(word)                 plural_key(slug)
     singularize(word)               singular_key(slug)
     singular_forms(word) -> set     singular_keys(slug) -> set
+                                    collision_keys(slug) -> set
                                     wordorder_key_singular(slug)
                                     real_permutation(slug_a, slug_b)
                                     stem_key(slug), stem_tokens(slug)
@@ -52,7 +53,8 @@ import sys
 __all__ = [
     "IRREGULAR_PLURALS", "IRREGULAR_SINGULARS", "AMBIGUOUS_IRREGULAR_PLURALS",
     "VES_IRREGULARS", "pluralize", "singularize", "singular_forms",
-    "singular_key", "singular_keys", "plural_key", "wordorder_key_singular",
+    "singular_key", "singular_keys", "collision_keys", "plural_key",
+    "wordorder_key_singular",
     "real_permutation", "stem_key", "stem_tokens", "run_self_test",
 ]
 
@@ -196,6 +198,27 @@ def singular_keys(slug):
         return {slug}
     head = parts[-1]
     return {"-".join(parts[:-1] + [s]) for s in singular_forms(head)}
+
+
+def collision_keys(slug):
+    """Probe (c) key SET: `singular_keys` plus a name's possessive spellings.
+
+    Dropping the apostrophe gives `Bayes's` the slug `bayess` and `Bayes'` the
+    slug `bayes`, so a token ending in `ss` also files with one `s` dropped.
+    One token at a time, so `gausss-loss` still meets `gauss-loss`. Without a
+    dictionary `loss` also files under `los`, which matters only when both
+    exist, and then only as a duplicate candidate.
+
+    The alias checks stay on `singular_keys`: an alias holding a name's other
+    possessive spelling is a real surface, not a redundant inflection.
+    """
+    keys = singular_keys(slug)
+    for key in tuple(keys):
+        tokens = key.split("-")
+        for i, token in enumerate(tokens):
+            if token.endswith("ss"):
+                keys.add("-".join(tokens[:i] + [token[:-1]] + tokens[i + 1:]))
+    return keys
 
 
 def plural_key(slug):
@@ -355,6 +378,17 @@ SLUG_CASES = [
     ("oasis",              "oases",              True,  False),
 ]
 
+#: `(slug_a, slug_b, probe-c pair?)` for a name's two possessive spellings.
+COLLISION_CASES = [
+    ("bayess-theorem",  "bayes-theorem", True),
+    ("bayess-theorems", "bayes-theorem", True),
+    ("gausss-law",      "gauss-law",     True),
+    ("gausss-loss",     "gauss-loss",    True),
+    ("roc-curve",       "roc-curves",    True),
+    ("loss-function",   "log-function",  False),
+    ("cross-entropy",   "cross-validation", False),
+]
+
 # `(slug_a, slug_b, same stem key?)`. The positive pair is the documented gap
 # probe (f) exists to catch; the plural pair proves that callers still need to
 # prefer the earlier, more specific plural probe when both keys agree.
@@ -435,6 +469,20 @@ def run_self_test():
         if perm != is_permutation:
             failures.append("word-order-singular %r ~ %r -> %r, expected %r"
                             % (a, b, perm, is_permutation))
+
+    for a, b, is_pair in COLLISION_CASES:
+        total += 1
+        met = bool(collision_keys(a) & collision_keys(b))
+        if met != is_pair:
+            failures.append("collision_keys(%r) & collision_keys(%r) -> %r, "
+                            "expected %r" % (a, b, met, is_pair))
+
+    # The alias checks read `singular_keys`, so a possessive spelling must not
+    # reach it.
+    total += 1
+    if singular_keys("bayess-theorem") & singular_keys("bayes-theorem"):
+        failures.append("singular_keys must not relate a name's possessive "
+                        "spellings: an alias may hold the other one")
 
     for a, b, same_stem in STEM_CASES:
         total += 1
