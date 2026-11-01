@@ -10,7 +10,8 @@ permission to merge notes.
 PROBES:
   a  slug-equality        candidate slug compared as-is
   b  mu-variant           both U+00B5 / U+03BC spellings probed
-  c  singular-plural      plural and singular forms probed
+  c  singular-plural      plural and singular forms probed, and a name's s's
+                          possessive against its s' spelling
   d  hyphenation-collapse hyphens stripped from both sides
   e  word-order           slug tokenised on "-", tokens sorted, compared
   f  stem-morphology      light per-token suffix normalization
@@ -140,7 +141,7 @@ from entry_checks import bare_common_noun_slug  # noqa: E402
 # in shared/scripts/plurals.py; `python3 shared/scripts/plurals.py --test` is
 # the conformance suite.  Do NOT paste a copy back.
 from plurals import (  # noqa: E402
-    plural_key, pluralize, real_permutation, singular_forms,
+    collision_keys, plural_key, pluralize, real_permutation, singular_forms,
     singular_key, singular_keys, singularize, stem_key, stem_tokens,
     wordorder_key_singular,
 )
@@ -150,7 +151,8 @@ from lint_entry import TAG_ENUM  # noqa: E402
 __all__ = [
     "check_candidates", "check_candidate", "load_index", "build_targets",
     "pluralize", "singularize", "singular_forms", "singular_key",
-    "singular_keys", "hyphen_key", "wordorder_key", "stem_key", "stem_tokens",
+    "singular_keys", "collision_keys", "hyphen_key", "wordorder_key",
+    "stem_key", "stem_tokens",
     "PROBES",
 ]
 
@@ -425,7 +427,7 @@ def _candidate_slugs(title, use_stem=True, use_superset=True):
         "mu": mu_slugs,
         "plural_forms": {singular_key(slug), plural_key(slug)} - {slug},
         "singular": singular_key(slug),
-        "singular_set": singular_keys(slug),
+        "singular_set": collision_keys(slug),
         "hyphen": hyphen_key(slug),
         "wordorder": wordorder_key(slug),
         "wordorder_singular": wordorder_key_singular(slug),
@@ -477,7 +479,7 @@ def _probe_pair(keys, other_slug, use_stem=True, use_superset=True):
     # worked when the CANDIDATE was the plural and the guess happened to be the
     # right one -- "ROC curves" vs roc-curve.md fired nothing.
     if (other_slug in keys["plural_forms"]
-            or singular_keys(other_slug) & keys["singular_set"]):
+            or collision_keys(other_slug) & keys["singular_set"]):
         fired.append("c-singular-plural")
 
     if hyphen_key(other_slug) == keys["hyphen"]:
@@ -761,6 +763,7 @@ def run_self_test():
         # one portable identity for case variants on every filesystem.
         put("ROC-curve.md", _st_entry_text("ROC curve", aliases=["roc"]))
         put("mu-m.md", _st_entry_text("μm"))
+        put("bayes-theorem.md", _st_entry_text("Bayes theorem"))
         put("cross-validation.md", _st_entry_text("Cross-validation"))
         put("weight-tying.md", _st_entry_text("Weight tying"))
         put("masked-language-model.md", _st_entry_text("Masked language model"))
@@ -774,7 +777,7 @@ def run_self_test():
             _st_entry_text("Deep convolutional neural network"))
 
         index = _vault_index.build_index(wiki)
-        check("the fixture vault indexed", index["entry_count"], 10)
+        check("the fixture vault indexed", index["entry_count"], 11)
 
         # -- index shapes: all three must flatten to the same target set ----
         path = os.path.join(tmp, "index.json")
@@ -1001,6 +1004,27 @@ def run_self_test():
         check("...and implies merge", r["verdict"], "merge")
         check("...identity short-circuits the other probes",
               len([m for m in r["matches"] if m["matched_slug"] == "ROC-curve"]), 1)
+
+        for spelling in ("Bayes's theorem", "Bayes\u2019s theorem"):
+            r = probe(spelling)
+            check("(c) relates %s to the s' spelling's slug, adjudicate only"
+                  % spelling,
+                  (_st_fired(r, "bayes-theorem"), r["verdict"]),
+                  (["c-singular-plural"], "adjudicate"))
+
+        possessive_wiki = os.path.join(tmp, "possessive-wiki")
+        os.makedirs(possessive_wiki)
+        with open(os.path.join(possessive_wiki, "bayess-theorem.md"), "w",
+                  encoding="utf-8") as fh:
+            fh.write(_st_entry_text("Bayes's theorem"))
+        possessive_index = _vault_index.build_index(possessive_wiki)
+        for spelling in ("Bayes' theorem", "Bayes\u2019 theorem",
+                         "Bayes theorem"):
+            r = check_candidate(spelling, possessive_index)
+            check("(c) relates %s to an existing s's slug, adjudicate only"
+                  % spelling,
+                  (_st_fired(r, "bayess-theorem"), r["verdict"]),
+                  (["c-singular-plural"], "adjudicate"))
 
         r = probe("roc curve")
         check("(a) fires case-folded on a lowercase candidate too",

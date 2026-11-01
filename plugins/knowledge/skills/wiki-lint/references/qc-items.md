@@ -16,6 +16,8 @@ run from the entry's cited sources (plus the clarification
 and splits included. Whatever Task 1b cannot settle stays a nonblocking
 report, as the run report's [Not applied](backlogs.md#run-report) list and
 the [note-content closeout](backlogs.md#proposing-note-improvements) define.
+Every addition or clarity rewrite this file directs, in Task 1 or Task 1b, reaches a `read: true` entry only as
+[Read entries](../SKILL.md#read-entries) allows.
 
 Related procedures:
 
@@ -53,7 +55,7 @@ ownership.
 | `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise, when the passage needs the target, Task 1b states the relationship from the entry's or the linked entry's cited source, or as a 5(h) clarification, and integrates the link; when it does not, the cue goes, its link moving as the builder's [repeat check](../../wiki-build/references/writing.md#editorial-reread) says. |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or as a 5(h) clarification, under [item 14](#14-self-containment). A title whose letters stand for no established full form keeps its opener. |
-| `item9/list-indent` | Task 1 repair: indent the reported display block or continuation paragraph to its list item's text column (3 spaces after `1.`, 4 after `10.`), under [item 9](#9-body-structure-coherence-flow-and-scope). For a reported display, also indent the paragraph after it that explains it; for a nested list, shift all of its lines right by the same number of spaces, so its markers reach that column. Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
+| `item9/list-indent` | Task 1 repair: indent the reported block as the builder's [Markdown form](../../wiki-build/references/writing.md#body-structure) says, under [item 9](#9-body-structure-coherence-flow-and-scope). Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
 | `item9/list-mismatch-candidate` | Review the lead-in's count, the Repeat item's step or a short numbered list against the builder's [numbered-list tests](../../wiki-build/references/writing.md#body-structure). A count of something other than the list's items stays. A numbered list of fewer than three steps becomes prose as an item-9 local editorial repair. A real disagreement goes to Task 1b, which settles it from the cited source, correcting the count, restoring a missing step or pointing the Repeat item at the step that begins the repeated work, under [item 9](#9-body-structure-coherence-flow-and-scope). The candidate alone is never an order. |
 | `item9/register-candidate` | Review the praise word or imperative opener under the builder's neutral [register](../../wiki-build/references/writing.md#prose-principles): Task 1 drops praise that adds no claim and restates a definition written as instructions as a fact, keeping every claim; in the description or on card line 1 the review follows [item 7](#7-description) or [item 19](#19-flashcards). The candidate alone is never an order. |
 | `item10/case`, `item10/alias` | In Task 1, canonicalize the unambiguous existing target while preserving anchor and explicit display label. A real MOC filename outranks a Wiki alias, but only a recognized, readable canonical MOC (discipline or misc) with sole filename ownership gets an `item10/case` repair adding `MOCs/`. Unknown MOC owners are report-only. Keep required Wiki qualification when the target is an entry. Never create a variant file. A link to an entry this run's Task 1b retitles (a `rename_candidates` row with `target_exists: false`) waits for the retitle, which rewrites it once; if Task 1b keeps the name, it canonicalizes the link then. |
@@ -66,7 +68,7 @@ ownership.
 | `item10/dup`, `item10/late-link` | Use Task 2's [link protocol](link-hygiene.md), not an ordinary Task 1 repair. |
 | `item10/table`, `item10/redundant-pipe` | Task 1 repair: [item 10](#10-wikilinks). |
 | `item12/equation-typography` | In descriptions, replace raw ℓ-norm notation with plain `ell-one`/`ell-two` and retain Unicode `μm`. In prose and card prompts, replace raw `μm`/`µm` and a raw ℓ norm with canonical inline LaTeX; a raw ℓ that names no norm is renamed as for `item12/ell-non-norm`. |
-| `item12/equation-coverage-candidate` | Apply [item 12](#12-equations-images-and-tables)'s equation-coverage rules to the local prose or inline formula; clear prose may be the correct outcome. |
+| `item12/equation-coverage-candidate` | Apply [item 12](#12-equations-images-and-tables)'s equation-coverage rules to the local prose or inline formula; keeping prose is the expected outcome unless the [equations §1](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation) test passes. |
 | `item12/equation-format` | Preserve the existing equation and put each `$$` alone on its line with a blank line above and below. Wrap rows that use `&` or `\\` outside an environment in `\begin{aligned}...\end{aligned}`, or `gathered` when nothing aligns. Keep the math unchanged and do not add a duplicate display. |
 | `item12/equation-split-candidate` | When the flagged line really holds two equations, give each its own line under the [equation guide](../../wiki-build/references/equations.md#2-form--defining-equations-are-display-math): a separate display beside the prose that introduces it, or a row of an `aligned` or `gathered` display. Keep the math unchanged; this formatting repair changes no dates or review state. |
 | `item12/boilerplate-candidate` | Remove each listed condition the formula already presupposes, under item 12's well-definedness rule, and report the removal. Keep a range the definition needs. On card line 1, shorten the math, or replace math too long for the [line-1 rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage) with its verbal core, only when the tested claim is unchanged, preserving the cue, answer line, and attachments. |
@@ -80,13 +82,13 @@ ownership.
 | `item18/partial-label` | Task 1 repair; a cross-domain label, or one naming another entity, goes to Task 1b: [item 18](#18-alias-form-collisions-and-display-labels). |
 | `item18/cross-domain-alias` | The alias is a bare cross-domain term, which is never an alias. Task 1b removes it through the [alias-removal protocol](refactors.md#remove-a-semantic-invalid-alias). |
 | `item19` | Apply the format floor only after reading [flashcard maintenance](flashcards.md). Remove each extra card under the [card set](flashcards.md#card-set) rule; a finding on an extra card, its line-1 `item12` findings included, needs no repair beyond that removal. Content after a card's line 3 that is not a recognized attachment, and any other block in the section, is report-only unless it holds [card syntax](../../wiki-build/references/flashcards-and-emphasis.md#card-set), which makes it an extra card to remove. |
-| `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#improving-the-card) and shorten it when the shorter cue is clearer and still rules out its rivals; the candidate alone is never an order. |
+| `item19/brevity-candidate` | Review the cue (line 1) under [flashcard maintenance](flashcards.md#improving-the-card) and shorten it when the shorter cue is clearer, still rules out its rivals and keeps the defining property; the candidate alone is never an order. |
 | `item19/hedge-candidate` | Task 1b reviews the cue under [flashcard maintenance](flashcards.md#improving-the-card) against the cited source: it drops a hedge whose plain claim the note establishes for the ordinary case, keeping a word that states the definition itself or that principle 3 keeps; the candidate alone is never an order. |
 | `item19/card-equation-candidate` | Review the cue under [flashcard maintenance](flashcards.md#improving-the-card): add the expression inline in the compact form the [line-1 equation rule](../../wiki-build/references/flashcards-and-emphasis.md#line-1-equation-coverage) asks for, and keep the cue verbal when the display is no short definition or words state it as directly; the candidate alone is never an order. |
 | `item19/sr-marker` | Reword the line so it holds no `::` or `:::` outside a backtick span, and join a line that is only `?` or `??` to its neighbor, preserving its claim: write a math `::` as `\mathbin{:}\mathbin{:}`, and keep code in a backtick span or an unindented fence. For an HTML comment left open at the start of a line, indent its `<!--` by one space, keeping the comment unchanged; for a fence line no later column-0 line closes, indent that line by one space or start its closing fence at column 0. Never add or change a card for it. |
 | `card_rivals` | Use as the forward check's rival list: could a rival's term answer this cue? A yes is an ambiguity defect under [flashcard maintenance](flashcards.md#flashcard-definition-review-item-19). The list is a floor, not an exhaustive rival set. |
 | `neighbors` | Input to item 9's per-entry [coherence review](#9-body-structure-coherence-flow-and-scope) in a narrowed run or for an unplaced entry, and to a repair's one-hop [neighbor reread](source-backed-corrections.md#correct-and-publish); it authorizes no edit. |
-| `overlap_candidates` | A review-only reading list for item 9's family pass. Task 1b consolidates a real duplicate under item 9; a pair that keeps only the one clause the [atomicity test](../../wiki-build/references/writing.md#body-structure) allows stays as written, however often it returns. The list is never an order. |
+| `overlap_candidates` | A review-only reading list for item 9's family pass; its rows also show [shared word runs and short exact sentences](scanner.md#output-contract). Task 1b consolidates a real duplicate under item 9, one cluster at a time with a whole-note reread; a clause or short sentence the [atomicity test](../../wiki-build/references/writing.md#body-structure) allows, a stated difference between neighbors, and a term with no owner entry stay as written, however often they return. The list is never an order. |
 | `rename_candidates` | When `target_exists` is false and [item 5](#5-filename-collision-and-disambiguation) makes the canonical name determinate, Task 1b retitles the entry through the [entry-retitle protocol](refactors.md#retitle-an-entry) and reports the inbound links it rewrote. A `new_slug` that differs from the filename only in case or Unicode normalization names the entry's own file, which the protocol respells. An occupied destination is never retitled into: a same-entity occupant goes to Task 1b's [merge check](#5-filename-collision-and-disambiguation), and any other stays a disambiguation report with its collision warning. |
 | `collision_candidates` | Task 1b's [merge check](#5-filename-collision-and-disambiguation): merge the pair through the [refactor protocol](refactors.md) only when it is one entity under alternate names; a probe match alone never activates a merge. |
 | `hierarchy_diagnostic` (every field) | Use as report-only Task 3 inputs. Re-derive whole generated MOCs and complete parent unions from one authorized connected closure; unsafe paths, legacy vault-root MOCs, and unknown files remain protected. Actions are in [hierarchy](hierarchy.md#read-diagnostics-and-verify-completion). |
@@ -279,7 +281,8 @@ wrong fact from the entry's cited sources (plus the clarification 5(h)
 admits), leading with the prototype, and keeps the description, opener and
 card aligned in the same edit. A wrong sense includes any definition that
 fails [principle 1](../../wiki-build/references/writing.md#prose-principles)'s
-self-check, even when the source's sentence is phrased that way; the property
+self-check, even when the source's sentence is phrased that way (on a
+`read: true` entry, [§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) decides); the property
 it leads with moves to the body, and a rule stated as a prohibition leads with
 what it allows.
 
@@ -326,8 +329,9 @@ placed, with empty `parents:` and not a discipline root, is compared with its
 `neighbors`). It reads each family together, with
 the cross-family pairs that `item9/duplicate-sentence` rows and
 `overlap_candidates` name, and lists every explanation, example, exhibit,
-contrast, claim or name that the family states twice beyond the one clause
-the [atomicity test](../../wiki-build/references/writing.md#body-structure)
+contrast, claim or name that the family states twice beyond the one short
+clause or sentence the
+[atomicity test](../../wiki-build/references/writing.md#body-structure)
 allows, states differently, or holds outside the entry that test makes its
 owner. Each becomes a Task 1b coordinated repair. Content moves only when
 that test clearly names another owner (a more specific entry, or the
@@ -381,7 +385,11 @@ Task 1b splits it through the [refactor protocol](refactors.md) when each
 split-off subject passes the substance test with support in the entry's cited
 sources ([step 2](refactors.md#establish-evidence-and-complete-scope)). A
 long note, several headings or several sources alone never activate a split; inherent
-mechanisms, stages, conditions and limitations stay with their subject. A
+mechanisms, stages, conditions and limitations stay with their subject. A term
+an entry defines inside its own explanation stays there until a
+[user issue](../SKILL.md#user-issues) or request asks for its entry or the
+[missing-entry rule](refactors.md#create-a-missing-entry)'s load-bearing count
+reaches it; this review splits only an entry whose subjects are separate topics. A
 close call stays unapplied under
 [Task 1b's rule](../SKILL.md#task-1b--content-repair).
 
@@ -415,27 +423,33 @@ figure description or exhibit duplicated
 across entries or held outside its owner, and a neighbor's formula that this entry's own prediction, objective
 or defining relation is not built from
 ([atomicity test](../../wiki-build/references/writing.md#body-structure)).
-The one-clause reason or key value [item 14](#14-self-containment) keeps is
-no duplicate. Every such trim follows [Dates](../SKILL.md#dates).
+The short reason or key value [item 14](#14-self-containment) keeps is no
+duplicate. Every such trim follows [Dates](../SKILL.md#dates).
 
-A statement about this entry's own subject that the entry leaves
-unexplained, such as an equation without its meaning; a rule, recommendation,
-operation, number, result, complexity or derivation step without its reason; an example
-whose point is unstated; or a claim that something suits, is preferred for,
-helps, works better or matters, gets its reason in Task 1b, in one sentence,
-as the builder's
-[term audit](../../wiki-build/references/writing.md#editorial-reread) says; a linked
-entry's fact used here follows [item 14](#14-self-containment). Task 1b likewise replaces a derivation longer than
+Task 1b repairs a statement about this entry's own subject that the entry
+leaves unexplained, such as an equation without its meaning; a rule,
+recommendation, operation, number, result, complexity or derivation step
+without its reason; an example whose point is unstated; or a claim that
+something suits, is preferred for, helps, works better or matters. As the
+builder's [term audit](../../wiki-build/references/writing.md#editorial-reread)
+says, the reason comes from the cited sources, or in one short
+[5(h)](../../wiki-build/references/writing.md#prose-principles) sentence
+verified by direct derivation or a standard reference and checked against the
+note's own definitions and steps. With none of these the statement stays as
+written, while a complexity, iteration bound or derivation result follows the
+[equation guide](../../wiki-build/references/equations.md). The verification is
+required: a composed reason that merely sounds right, such as a claimed reason
+why a learning-rate turning point lies above the maximum rate, is an invented
+reason, a defect. A linked entry's fact used here follows
+[item 14](#14-self-containment). Task 1b likewise replaces a derivation longer than
 [equations §3](../../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide)
-allows, or a multi-step complexity analysis, with its one-sentence intuition,
-or, when none exists, with the takeaway alone, omitting the bound
+allows with its intuition in one or two short sentences, or a multi-step
+complexity analysis with its one-sentence intuition, or, when none exists, with the takeaway alone, omitting the bound
 ([equations §1](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)).
 A term with neither definition nor link follows
-[item 14](#14-self-containment). When no accurate reason exists because the
-stated result is itself wrong or imprecise, the defect is a conflict between
-the cited source and standard references, resolved as in the coherence review:
-Task 1b corrects the result, keeping the source's figure only within the scope
-that makes it true, and never invents a reason. Length, list shape or lexical
+[item 14](#14-self-containment). A result with no accurate reason because it is
+itself wrong or imprecise goes to Task 1b's
+[*Conflicts*](source-backed-corrections.md#correct-and-publish) rule. Length, list shape or lexical
 similarity alone proves nothing.
 
 **Caveat review.** Inspect qualifications, final paragraphs, captions and the
@@ -445,14 +459,9 @@ excludes, including a claim hedged below its source or stated above it; card lin
 follows
 [item 19](#19-flashcards). Never add caveats from memory; a main limitation
 the source teaches is explanation. Task 1 removes filler and repetition
-(the local repairs below) and well-definedness boilerplate (item 12). Task 1b removes every
-other hedge and caveat principle 3 excludes, its full "Leave out" list
-included (every kind it names, numerical details such as a library's default
-tolerance among them), under
-[*Hedges*](source-backed-corrections.md#correct-and-publish). It keeps a limit
-only when the plain claim is false for the ordinary case, naming the condition
-instead of a hedge word, and keeps evidence-bearing uncertainty in research
-findings; a source-supported detail can still be unnecessary.
+(the local repairs below) and well-definedness boilerplate (item 12). Task 1b handles every
+other hedge and caveat under
+[*Hedges*](source-backed-corrections.md#correct-and-publish).
 
 **Depth review.** Apply the builder's
 [core-facet check](../../wiki-build/references/writing.md#prose-principles) to
@@ -470,7 +479,12 @@ only an uncited or unbuilt source would fill waits for that source's whole
 build under those rules and is reported, never logged.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
-establishes an unambiguous meaning:
+establishes an unambiguous meaning. On a `read: true` entry only this list's
+deletions, grammar and fragment repairs and list or heading forms apply; a split
+or merged sentence, reworded phrase, moved sentence or paragraph, or written
+link between facts is a clarity rewrite
+[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) holds
+back.
 
 - Repair grammar, fragments, awkward phrasing, or an unclear pointer word
   with a known referent. Split an overloaded sentence
@@ -660,9 +674,7 @@ follow [equations §3](../../wiki-build/references/equations.md#3-notation--one-
 tie-break; report a choice only when it decides nothing.
 
 Per [Dates](../SKILL.md#dates), Task 1's equation fixes write neither `created:`,
-`updated:`, nor `read:`. An insertion into an entry whose `read:` is `true` is
-named under *Notes for the user* with the slug and equation, so the user may
-decide whether to clear their checkbox. In Task 1b an inserted equation
+`updated:`, nor `read:`. In Task 1b an inserted equation
 follows wiki-build's [body-change rule](../../wiki-build/references/merge.md#the-read-reset)
 instead, and a notation rename advances `updated:` and keeps `read:`. Group
 every insertion, promotion, removal, and notation change under item 12 in the
@@ -700,10 +712,10 @@ cited source or as a 5(h) clarification:
   districts") follows 5(d): the example is introduced briefly inline, or it
   goes.
 - A consequence carried from a linked entry gets its reason or key value
-  only when it would otherwise leave an open question, as the
+  only when the
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
-  defines it: Task 1b opens the owner and adds the one clause the atomicity
-  test allows; consolidation keeps that clause and trims anything beyond it.
+  allows it: Task 1b adds that one short clause or sentence; consolidation
+  keeps it and trims anything beyond it.
 - The subject shows its acronym ↔ full-form counterpart on first mention under
   5(e)–(f): `the **standard deviation** (SD)`,
   `**MNIST** (Modified National Institute of Standards and Technology)`.

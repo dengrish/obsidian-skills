@@ -15,7 +15,8 @@ outline.
 
 ## Scope closure
 
-Seed the requested entries and named disciplines. An entry in scope only for
+Seed the requested entries and named disciplines. A request to correct, simplify
+or deepen, or to remove a class of defects, seeds only an entry a retitle, split or merge changes. An entry in scope only for
 its [user issues](../SKILL.md#user-issues) is a seed only when one of its
 issues routes to item 8 or Task 3, or a retitle, split or merge resolves one.
 Every entry the run creates, by Task 1b or a refactor request, such as a
@@ -97,7 +98,9 @@ publication; never fall back to an MOC parent.
 ## Derive the hierarchy
 
 **Review every included MOC and every parent assignment semantically on every
-Task 3 run.** Read the entries and compare siblings and candidate parents;
+Task 3 run.** Judge every entry from its title, description, opener and
+parents, compare siblings and candidate parents, and read the whole body of the
+run's seeds, their siblings and any placement those leave unsettled;
 scanner silence and an unchanged membership list are not evidence that the
 organization makes sense. The prior MOC is context, not the default answer.
 Fix existing conceptual defects even when no entries were added. Keep an

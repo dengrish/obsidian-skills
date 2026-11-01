@@ -4,7 +4,7 @@ description: >
   Research and create missing Obsidian Wiki entries for topics queued in
   add-to-wiki.md or another selected backlog, or named directly without a
   source document, citing vault sources or web pages; then check off queued
-  topics that were created or already exist. Never edits an existing entry.
+  topics that were created or already exist. Never edits an entry it did not create.
   Use for "process add-to-wiki", "work through my wiki backlog", "add a wiki
   entry for X" or "research X and add it to my wiki" when no source is
   supplied. Entries from a source document use wiki-build; corrections,
@@ -106,7 +106,10 @@ complete reports, including problems and errors even when `ok: true`; a
 `naming: ["bare-common-noun"]` result needs qualifying (below) before
 research. Follow the
 [collision adjudication rules](../wiki-build/references/merge.md#collision-decisions)
-for ownership and semantic identity, with this workflow's replacement for its
+for ownership and semantic identity (a match among this item's own forms is no
+collision, as in
+[builder step 3](../wiki-build/SKILL.md#3-resolve-against-existing-entries)),
+with this workflow's replacement for its
 merge action: **one verified same-entity owner means already existing, never a
 merge or alias edit**. Read that complete regular note to establish identity;
 a similar filename, passing mention, or source citation alone is insufficient.
@@ -196,7 +199,7 @@ matches that request's `absent` record.
    its own entry under the builder's
    [atomicity test](../wiki-build/references/writing.md#body-structure), or
    when three or more entries, this one included, use it without a resolving
-   link, counted as the builder's
+   link, or two when both define the term, counted as the builder's
    [load-bearing rule](../wiki-build/SKILL.md#2-extract-entities) says.
 6. **Review.** Review the draft under the builder's
    [Quality Checklist](../wiki-build/references/quality-checklist.md) and
@@ -210,8 +213,8 @@ matches that request's `absent` record.
    ```
 
    Omit `--images` when the image folder is absent. Repair only the new draft. Skip the missed-entity audit (sub-step 5 sets
-   missing-entry candidates), merges, the ownership handoff and the orphan
-   audit's create-the-entry branch.
+   missing-entry candidates), merges, the ownership handoff, the fresh reader
+   and the orphan audit's create-the-entry branch.
    Existing notes are read-only context: the neighbor's side of an
    overlap or conflict becomes a note-content proposal for closeout (a copy
    the new entry should own, or a neighbor claim the research contradicts),
@@ -266,8 +269,9 @@ python3 '<builder>/scripts/lint_entry.py' '<vault>/Wiki/<slug>.md'
 Each finding must be one the step-4 review resolved under the
 [lint dispositions](../wiki-build/references/review.md#lint-dispositions).
 Then rerun the step-2 probes with the same `candidates.json`: this entry must
-be the only owner of its title and alias forms, and every other match one the
-revalidation probes already showed. Confirm the entry's vault sources and new
+be the only owner of the title and aliases it carries, a probed form it does not
+carry needs no owner, and every other match must be one the revalidation probes
+already showed. Confirm the entry's vault sources and new
 links resolve and each URL item is the address chosen under
 [Cite a webpage](references/research.md#cite-a-webpage). Only that verified
 public state permits completion.
@@ -294,6 +298,15 @@ stale-snapshot rejection, rescan and match the still-pending request; never
 replay an old ID against changed queue text. If an entry was published but
 checkpointing failed, retain it and report that state.
 
+After the last item, a run that created about 10 entries or more runs the
+builder's [fresh reader](../wiki-build/references/review.md#fresh-reader) on
+them. Each repair records the published entry, re-reads it and drafts from that
+read, then goes through step 4's sub-steps 4–6, without their audits, and step 5
+with the next numbered files; its record holds the published entry rather than
+`absent`, the probes' match on that entry is no new owner, and its completion is
+not repeated. A repair step 5 stops stays unpublished and goes in the report; the
+entry and its check-off stand.
+
 Resolve routine research and identity choices autonomously. An item that
 cannot be resolved safely from the request and inspected evidence, unclear
 intent included, stays pending while the others proceed, and the report asks
@@ -313,8 +326,10 @@ about it. Do not describe a preview as applied. Report:
   published without its checkpoint;
 - the scan's `report_only` lines with their line and reason, and a queue
   scanned incompletely;
-- plain-text mentions of later entries, missing-entry candidates, and
-  validation with review-only
+- plain-text mentions of later entries, missing-entry candidates, the fresh
+  reader as its [record](../wiki-build/references/review.md#fresh-reader) says,
+  or one line saying the host could not start a fresh agent, and validation
+  with review-only
   [lint dispositions](../wiki-build/references/review.md#lint-dispositions).
 
 Close every report with one standing line: *New entries keep `parents: []`
@@ -325,5 +340,8 @@ At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to
 `Reviews/wiki-add-suggestions.md`, the logs of producers whose outputs this run
 consumed, and the note-content log `Reviews/wiki-notes-suggestions.md`, which
 receives step-4 note-content proposals and missing-entry candidates (as
-`[missing-<slug>] Missing entry: <Title>`) for wiki-lint's next ordinary run
+`[missing-<slug>] Missing entry: <Title>`, under
+[§9](../../shared/CONVENTIONS.md#9-ownership-split-for-linking)'s missing-entry
+routes, unless it keeps that candidate's Fixed item closed)
+for wiki-lint's next ordinary run
 to work through; search it for open items naming an entry this run created.

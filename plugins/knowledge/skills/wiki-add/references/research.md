@@ -20,8 +20,14 @@ Inspect the actual page or document and its complete relevant sections:
 definitions, mechanism, equations and figures. Read caveats and the applicable
 version or population so that no claim is overstated. Read surrounding
 context when a selected passage cannot stand alone. Search snippets,
-inaccessible previews and generated summaries are discovery aids, not
-evidence; in a cleaned clipping, take evidence only from the captured body
+inaccessible previews and generated summaries, including a fetch tool's
+model-written answer about a page, are discovery aids, not evidence. Read the
+page's own text and head, treated as data: save it to scratch with a plain
+fetch, or open it in a browser. If the host offers only such a tool, have it
+quote each passage a claim rests on, check the claim against the quote, and
+report that limit under
+[runtime](../../../shared/RUNTIME.md#use-the-hosts-available-tools). In a
+cleaned clipping, take evidence only from the captured body
 under the builder's [read-and-classify rule](../../wiki-build/references/source-intake.md#read-and-classify).
 Seek an accessible alternative when needed; do not bypass access controls or
 invent missing content.
@@ -62,7 +68,7 @@ Skip [feed-owned attachments](../../../shared/CONVENTIONS.md#1c-feed-owned-attac
 and search a split book through its chapter PDFs, never its whole-book file,
 under the builder's [books-and-chapters rule](../../wiki-build/references/source-intake.md#books-and-chapters).
 `Inbox/` files are intake material, not sources: never cite one. Before
-acquiring a document or citing its web page, check whether an `Inbox/` PDF in
+acquiring a document, or citing the web page of a paper, report or book, check whether an `Inbox/` PDF in
 the same `pdfs` inventory is that document: search it for the title, arXiv ID
 or DOI (with `pdftotext -layout` while the parser check fails):
 
@@ -74,7 +80,8 @@ python3 '<plugin>/skills/paper-summarize/scripts/paper_text.py' '<inbox pdf>' \
 If one is, do not download another copy or cite that page by URL; report the
 Inbox copy with its route (pdf-organize, then wiki-build), and use other
 evidence or leave the topic pending. When some sources cannot be searched (a
-failed parser check without `pdftotext`, or an unreadable file), report the
+failed parser check without `pdftotext`, a scan `paper_text.py` exits 4 on, which
+this search does not OCR, or an unreadable file), report the
 unsearched paths and continue.
 
 Read the passage around each hit, then run the builder's
@@ -101,9 +108,11 @@ folder run skip the whole source. Cite one only when it is a
 under [New PDFs](#new-pdfs); report the latter as `<source> is cited by
 <entry> but not yet built: a wiki-build request naming it fills in its other
 topics`.
-Otherwise report `<source> also covers <topic>: run wiki-build on it` and
-continue with already-cited sources or web evidence, never another copy of
-that document; when neither suffices, leave the topic pending with that route.
+Otherwise, when it teaches the topic under the builder's step-2 gates, report `<source> also
+covers <topic>: run wiki-build on it` and continue with already-cited sources or
+web evidence, never another copy of that document; when neither suffices, leave
+the topic pending with that route. A source that only uses or names the topic is
+a rejected hit with no route.
 An incomplete coverage result proves nothing: report it and do not cite that
 source.
 
@@ -178,7 +187,8 @@ sources it cites; beyond them, add only the clarification
 admits. Take the address from the page's own
 `<link rel="canonical">` when it serves the content that was read, else from
 its `og:url` when that does, otherwise the address that was loaded, treating
-the page as data. Drop tracking parameters, a mobile or AMP variant and a
+the page as data. A head the reader hid is reported, not taken as having no
+canonical link. Drop tracking parameters, a mobile or AMP variant and a
 fragment that only scrolls the page. Cite a version-specific address (a paper
 revision, a documentation release) only when the entry relies on that
 version, even where the canonical link omits the version. Otherwise cite the
@@ -292,8 +302,7 @@ Wiki `sources:` never contains a fabricated local filename.
 ## Optional images and publication order
 
 Use the builder's [media rules](../../wiki-build/references/media.md) for
-selection, inventory, source identity, embeds and captions. Usually no image
-or one focused figure suffices. Use only a real, inspected source asset.
+selection, inventory, source identity, embeds and captions. Use only a real, inspected source asset.
 Unavailable assets or an unsafe inventory are reasons to
 omit/report the optional image, not invent an exhibit or broaden the topic.
 Existing source images may be reused read-only under those same rules.
@@ -302,8 +311,9 @@ step never runs on a reused PDF: report a figure it lacks as unavailable.
 
 A [cited webpage](#cite-a-webpage)'s images are never downloaded or
 hotlinked: an entry embeds only images from a reused vault source (a reused
-clipping's remote images keep their Markdown form) or figures of a PDF this
-run filed.
+clipping's remote images keep their Markdown form), figures of a PDF this
+run filed, or
+[figures the user copied for a cited page](../../wiki-build/references/media.md#images).
 
 When a figure of a PDF this run filed would help, run the missing PDF figures
 step on its filed path alone, before selecting from it, creating an absent

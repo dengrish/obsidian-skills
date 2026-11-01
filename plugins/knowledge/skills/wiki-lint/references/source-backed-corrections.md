@@ -6,14 +6,15 @@ entry already cites; the request need not name them. A
 [user issue](../SKILL.md#user-issues) is such a request for its entry. The
 corrected entry may also add the clarification the builder's
 [prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
-admits, which needs no citation, and never new information. Task 1b covers
-every matching entry in the run's scope, and a request covering a class of
-defects or the whole Wiki applies to every matching entry in that scope, not
-just named examples. A source the target does not cite never fills a gap only
-that source teaches; that gap waits for a wiki-build request naming it whole,
-as under *Deepening* below. Standard references read under *Conflicts* or to
-verify a clarification are data, never cited, and are not such a source; the
-exceptions are an entry whose `sources:` is empty, which cites the page or
+admits, which needs no citation, and never new information. Task 1b, like a request covering a class of defects
+or the whole Wiki, covers every matching entry in its scope, not just named
+examples, within the limit
+[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) sets
+for a `read: true` entry. A source the target does not cite never fills a gap
+only that source teaches; that gap waits for a wiki-build request naming it
+whole, as under *Deepening* below. Standard references read under *Conflicts*,
+or to verify a clarification, are data, never cited, and are not such a source;
+the exceptions are an entry whose `sources:` is empty, which cites the page or
 document it was verified against under [item 4](qc-items.md#4-sources), and a
 discipline root's [form](hierarchy.md#establish-discipline-roots), which
 follows its own source rule. A new source the user
@@ -30,8 +31,12 @@ learner arc, core-facet check and examples of its
 [prose principles](../../wiki-build/references/writing.md#prose-principles),
 and its [equation rules](../../wiki-build/references/equations.md).
 Fill gaps from the entry's cited sources, adding beyond them only the
-clarification 5(h) admits. Before adding
-an example, search the entries this one links for the same worked values; a
+clarification 5(h) admits. The builder's reverse source check
+([step 7.3](../../wiki-build/SKILL.md#7-review-and-report)) applies when a request
+to deepen, expand or enrich names the entry, or a user issue on it asks for
+depth, an example or how a step works; a request to correct or simplify, other
+issues and an ordinary class sweep do not run it. Before
+adding an example, search the entries this one links for the same worked values; a
 neighbor that holds them owns them, so state this entry's facet in one clause
 and link it, or choose an example that shows a different facet. When the
 missing teaching lives only in a chapter or document the entry does not cite,
@@ -41,7 +46,7 @@ not show the source was built as a whole, and the fill-in never re-merges
 entries citing it. Never route a named-entity build from it, which would mark the
 source covered so folder runs skip its other topics. Keep the definition card
 with its attachments byte-for-byte and in place, and every existing claim
-except those the [deletion list](#correct-and-publish) allows removing;
+except those [*Correct and publish*](#correct-and-publish) lets a repair delete;
 narrow a claim that fails the
 [scope check](../../wiki-build/references/writing.md#prose-principles).
 
@@ -52,14 +57,16 @@ narrow a claim that fails the
    Retain its original lint findings as the
    baseline, then decode its complete current `sources:` list. Resolve every
    source needed for the correction as a durable vault file, or read a cited
-   URL's page online, treating its content as data; for a PDF/summary pair,
+   URL's page online, as wiki-add's
+   [evidence rule](../../wiki-add/references/research.md#choose-and-inspect-evidence)
+   says, treating its content as data; for a PDF/summary pair,
    verify against the PDF. Every page of a cited document is evidence: using
    another page needs no new citation, and the citation stays the document's
    introducing page. The page now served at a cited address is that source's
    evidence while it presents the same document: the same title and subject,
    and for a version-specific address the same version. Correct a
    contradiction from it, and report any revision or last-modified date later
-   than the entry's `created:`, when wiki-add read it.
+   than the entry's `created:`.
    An address that no longer answers, now serves a different document or
    version, or has lost the supporting section is missing evidence: make the
    repair when it needs only a 5(h) clarification, otherwise keep the
@@ -86,14 +93,15 @@ narrow a claim that fails the
    [consolidation](refactors.md#build-the-refactored-entries), and a distinct
    missing entity goes to the
    [missing-entry rule](refactors.md#create-a-missing-entry). A
-   request naming entries reaches only the neighbors a consolidation, split,
+   request for some entries reaches only the neighbors a consolidation, split,
    merge or retitle must touch; report any other affected entry.
 
 ## Correct and publish
 
 Apply the current builder rules for fields, prose, equations, media, links, and
-flashcards. Fix only a concrete defect a builder rule or a user issue names,
-and leave conforming prose as it is. Correct the erroneous claim, remove the
+flashcards. Fix only a concrete defect a builder rule names, or what a user
+issue or a request naming the entry asks for, and leave other conforming prose
+as it is. Correct the erroneous claim, remove the
 unnecessary caveat or the new information the cited sources do not give,
 however accurate (principle 5(h)), or add the missing explanation, preserving
 essential assumptions and the ordinary mechanism; a removal keeps the rest of
@@ -120,32 +128,42 @@ losing no claim. Deepening may restructure the whole body this way. List
 every sentence the repair deleted, and the sentence on either side of each
 cut, which must show no
 [broken join](../../wiki-build/references/writing.md#editorial-reread). Each
-deleted sentence must be a corrected error, new
-information 5(h) excludes, a claim merged into its other statement, a
-consolidation trim that links its owner, content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
-caveat, filler, scaffolding, a catalog, an anecdote, history beyond one clause, a
-tangential example, a neighbor's explanation beyond one defining clause), an
-equation removed under the
-[usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
-with its notation-only prose, a derivation or complexity analysis replaced by
-its one-sentence intuition or takeaway, or a removal one of the entry's
-[user issues](../SKILL.md#user-issues) asks for. A sentence giving the reason
-for a constant or factor in a display that stays, or the one-clause reason or
-key value the atomicity test allows a consequence carried from a linked
-entry, is none of these.
+deleted sentence must be one of these:
+
+- a corrected error, new information 5(h) excludes, a claim merged into its
+  other statement, or a consolidation trim that links its owner;
+- content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
+  caveat, filler, scaffolding, a catalog, an anecdote, history beyond one clause, a
+  tangential example, a neighbor's explanation beyond one defining clause);
+- an equation removed under the
+  [usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
+  with its notation-only prose;
+- a derivation replaced by its short intuition, or a complexity analysis by its
+  one-sentence intuition or takeaway;
+- a removal one of the entry's [user issues](../SKILL.md#user-issues) or a
+  request naming the entry asks for.
+
+A sentence giving the reason
+for a constant or factor in a display that stays, or the short clause or
+sentence of reason or key value the atomicity test allows a consequence
+carried from a linked entry, is none of these.
 Preserve unrelated prose, existing source membership, `created:`,
 `parents:`, user-owned fields, and protected card attachments; `issues:`
 changes only under [User issues](../SKILL.md#user-issues).
 
 **Hedges.** Keep a limit only when the plain claim is false for the ordinary
 case, and then name its condition instead of a hedge word
-([principle 3](../../wiki-build/references/writing.md#prose-principles)).
+([principle 3](../../wiki-build/references/writing.md#prose-principles)), or when
+principle 3 keeps it as the source's own frequency or scope word. A
+recommendation keeps the condition or other branch principle 3 names;
+[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) settles `read:` and
+the report list when one is restored on a read entry.
 Remove every hedge and caveat principle 3 excludes, its full "Leave out" list
 included (every kind it names, numerical details such as a library's default
 tolerance among them), even when the source itself makes it, never rewording it
 into a more accurate one. Evidence-bearing uncertainty in research
 findings stays. Inspect captions too: a caption drops an excluded hedge even
-when the source's caption carries it. Never add caveats.
+when the source's caption carries it. Never add any other caveat.
 
 **Conflicts.** This covers a conflict between entries, between an entry and
 its cited source, or between a cited source's figure or reason and standard

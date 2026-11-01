@@ -1124,8 +1124,8 @@ def _check_description(fm, findings, title=None):
         findings.append(_f(
             "7-hedge-candidate", "warning",
             "description hedges its claim with a frequency word; state the "
-            "ordinary case plainly when the note establishes it, unless the "
-            "cited source uses that word",
+            "ordinary case plainly when the note establishes it, unless "
+            "principle 3 keeps that word",
             {"words": hedge_words, "description": desc,
              "agent_review": True}))
     praise_words = register_hints(desc, title=title)
@@ -2623,7 +2623,7 @@ def _check_flashcards_present(fm, sections, findings, filename,
                 {"matches": [row], "agent_review": True}, row["card"], extras))
     hedge_message = ("card line 1 hedges its definition with a frequency word; "
                      "state the ordinary case plainly when the note "
-                     "establishes it, unless the cited source uses that word")
+                     "establishes it, unless principle 3 keeps that word")
     primary_hedges = [row for row in hedges if row["card"] not in extras]
     if primary_hedges:
         findings.append(_f(

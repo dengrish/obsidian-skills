@@ -42,6 +42,7 @@ import argparse
 import bisect
 import datetime
 import hashlib
+import itertools
 import json
 import math
 import os
@@ -161,7 +162,7 @@ def fold_name(s):
 # conformance suite.  Do NOT paste a copy back.
 # ===========================================================================
 from plurals import (  # noqa: E402
-    real_permutation, singular_forms, singular_keys,
+    collision_keys, real_permutation, singular_forms, singular_keys,
     stem_key, wordorder_key_singular,
 )
 from organism_names import (  # noqa: E402
@@ -1059,6 +1060,19 @@ def _plain_item_allowed(key, value):
     return key == "aliases" or (
         key == "sources" and isinstance(value, str)
         and re.match(r"https?://", value) is not None)
+
+
+def tag_rewrite_target(entry_slug, tag_slug):
+    """The enum slug item 8 rewrites a lowercase tag slug to, or None.
+
+    CONVENTIONS §3: the field Artificial intelligence itself takes
+    #computer-science, though `ai` elsewhere means #machine-learning.
+    """
+    target = tag_slug if tag_slug in VALID_TAGS else TAG_ALIASES.get(tag_slug)
+    if (entry_slug == "artificial-intelligence" and tag_slug not in VALID_TAGS
+            and target == "machine-learning"):
+        return "computer-science"
+    return target
 
 
 def tag_canonical(tag_slug):
@@ -2417,6 +2431,15 @@ why will with within without would yet you your
 #: copied facts ("Some viruses carry genomes made of RNA rather than DNA").
 OVERLAP_MIN_SIMILARITY = 0.5
 OVERLAP_MIN_WORDS = 6
+#: The literal route beside that fuzzy comparison: the fewest consecutive
+#: words outside math in a shared run, and the fewest in an exact sentence
+#: under the `item9/duplicate-sentence` floor.  On the 374-entry vault of
+#: 2026-10-31 these add 59 entry pairs to the 221 fuzzy ones and 83 runs,
+#: 62 of them on the new pairs, for about 3 percent more scan time.  They mix
+#: copied explanations with parallel definition frames ("is the failure mode
+#: in which a model").
+OVERLAP_RUN_WORDS = 8
+OVERLAP_SHORT_WORDS = 5
 
 
 def overlap_content_words(normalized, vocabulary=frozenset()):
@@ -2438,8 +2461,107 @@ def overlap_content_words(normalized, vocabulary=frozenset()):
     return frozenset(words)
 
 
+def overlap_word_stretches(surface):
+    """A sentence's normalized words as one list per stretch outside math,
+    so that no run crosses a formula and a formula counts as no word. A dollar
+    sign inside a code span opens no math."""
+    masked = _INLINE_CODE.sub(lambda match: match.group(0).replace("$", " "),
+                              surface)
+    masked = re.sub(r"\$\$.+?\$\$", "\0", masked)
+    return [re.findall(r"\w+", unicodedata.normalize("NFKC", part).casefold())
+            for part in _DUPLICATE_INLINE_MATH_RE.sub("\0", masked).split("\0")]
+
+
+def overlap_title_phrases(names):
+    """Each whole title or alias, and the word sequences of at least
+    `OVERLAP_SHORT_WORDS` words inside one: a run or short sentence that is one
+    of them merely repeats a name."""
+    phrases = set()
+    for name in names:
+        words = re.findall(r"\w+", unicodedata.normalize(
+            "NFKC", name or "").casefold())
+        if words:
+            phrases.add(" ".join(words))
+        for start in range(len(words)):
+            for stop in range(start + OVERLAP_SHORT_WORDS, len(words) + 1):
+                phrases.add(" ".join(words[start:stop]))
+    return frozenset(phrases)
+
+
+def overlap_only_names(text, ordered_names):
+    """Whether a run is nothing but titles or aliases, longest first in
+    ``ordered_names``, joined by an article, "and", "or" or "of"."""
+    rest = " %s " % text
+    for name in ordered_names:
+        while " %s " % name in rest:
+            rest = rest.replace(" %s " % name, " ")
+    return set(rest.split()) <= {"a", "an", "the", "and", "or", "of"}
+
+
+def overlap_literal_matches(sentences, exact_keys, listed, name_phrases):
+    """The literal route of ``build_overlap_candidates``: for each entry pair,
+    its shared word runs and its exact short sentences.
+
+    A run has at least `OVERLAP_RUN_WORDS` consecutive words outside math, is
+    found through an index of word 8-grams, and is maximal: it is extended
+    both ways. An exact sentence needs `OVERLAP_SHORT_WORDS` words outside
+    math. ``exact_keys`` and the sentence pairs in ``listed`` are already
+    reported, and an exact sentence yields no run of itself.
+    """
+    records, index, owners = [], defaultdict(list), defaultdict(dict)
+    for slug_value in sorted(sentences):
+        seen = set()
+        for normalized, surface in sentences[slug_value]:
+            if normalized in seen:
+                continue
+            seen.add(normalized)
+            stretches = overlap_word_stretches(surface)
+            record = len(records)
+            records.append((slug_value, normalized, surface, stretches))
+            for number, words in enumerate(stretches):
+                for start in range(len(words) - OVERLAP_RUN_WORDS + 1):
+                    index[tuple(words[start:start + OVERLAP_RUN_WORDS])].append(
+                        (record, number, start))
+            if (normalized not in exact_keys
+                    and sum(map(len, stretches)) >= OVERLAP_SHORT_WORDS
+                    and normalized not in name_phrases):
+                owners[normalized][slug_value] = surface
+
+    runs, shorts = defaultdict(dict), defaultdict(list)
+    # Name wins a length tie, so the removal order, and the row it decides,
+    # never depends on the hash seed.
+    ordered_names = sorted(name_phrases, key=lambda name: (-len(name), name))
+    for postings in index.values():
+        for (i, i_number, i_start), (j, j_number, j_start) in (
+                itertools.combinations(postings, 2)):
+            first, second = records[i], records[j]
+            if first[0] == second[0] or first[1] == second[1]:
+                continue
+            if (first[0], second[0], first[1], second[1]) in listed:
+                continue
+            i_words, j_words = first[3][i_number], second[3][j_number]
+            if (i_start and j_start
+                    and i_words[i_start - 1] == j_words[j_start - 1]):
+                continue
+            length = OVERLAP_RUN_WORDS
+            while (i_start + length < len(i_words)
+                   and j_start + length < len(j_words)
+                   and i_words[i_start + length] == j_words[j_start + length]):
+                length += 1
+            text = " ".join(i_words[i_start:i_start + length])
+            if not overlap_only_names(text, ordered_names):
+                runs[(first[0], second[0])].setdefault(
+                    text, (length, first[2], second[2]))
+    for normalized, holders in owners.items():
+        for first, second in itertools.combinations(sorted(holders), 2):
+            if (first, second, normalized, normalized) not in listed:
+                shorts[(first, second)].append(holders[first])
+    return runs, shorts
+
+
 def build_overlap_candidates(sentences, exact_keys=frozenset(),
-                             min_similarity=None, min_words=None):
+                             min_similarity=None, min_words=None,
+                             name_phrases=frozenset()):
     """Review-only fuzzy duplicates: sentence pairs from two entries whose
     content-word sets reach ``min_similarity`` Jaccard similarity.
 
@@ -2450,6 +2572,12 @@ def build_overlap_candidates(sentences, exact_keys=frozenset(),
     not repeated. Candidates are found with a prefix filter over words
     ordered rarest first, so all entry pairs are compared without the
     quadratic cost. Rows group by entry pair, most similar first.
+
+    A row also carries what ``overlap_literal_matches`` finds for its pair
+    outside the sentence pairs it lists, as ``shared_runs`` and
+    ``short_sentences``; a pair with only those has ``similarity`` null and
+    follows every similar pair, longest run first. ``name_phrases`` holds the
+    `overlap_title_phrases` of the run's titles and aliases.
     """
     min_similarity = (OVERLAP_MIN_SIMILARITY if min_similarity is None
                       else min_similarity)
@@ -2469,6 +2597,7 @@ def build_overlap_candidates(sentences, exact_keys=frozenset(),
     frequency = Counter(word for record in records for word in record[3])
     index = defaultdict(list)
     matches = defaultdict(list)
+    listed = set()
     for i, (slug_value, normalized, surface, words) in enumerate(records):
         # Two sets with Jaccard similarity >= t share a word among the
         # first |x| - ceil(t|x|) + 1 words of each, in one global order.
@@ -2492,19 +2621,55 @@ def build_overlap_candidates(sentences, exact_keys=frozenset(),
                                     (other_slug, other_surface)))
             matches[(first[0], second[0])].append(
                 (round(similarity, 2), first[1], second[1]))
+            listed.add((slug_value, other_slug, normalized, other_normalized))
+            listed.add((other_slug, slug_value, other_normalized, normalized))
+    runs, shorts = overlap_literal_matches(sentences, exact_keys, listed,
+                                           name_phrases)
 
     def _snippet(text):
         return text if len(text) <= 180 else text[:177].rstrip() + "..."
 
+    def _run_snippet(text, run):
+        """The sentence's snippet, moved along when the cut would hide the
+        run."""
+        hit = re.search(r"\W+".join(map(re.escape, run.split())), text, re.I)
+        if len(text) <= 180 or not hit or hit.end() <= 177:
+            return _snippet(text)
+        tail = text[max(0, hit.start() - 40):]
+        return "..." + (tail if len(tail) <= 177
+                        else tail[:174].rstrip() + "...")
+
+    def _kept_runs(found):
+        """Longest first, without a run another run of the pair contains."""
+        kept = []
+        for text, (length, a_text, b_text) in sorted(
+                found.items(), key=lambda item: (-item[1][0], item[0])):
+            if not any(" %s " % text in " %s " % row["run"] for row in kept):
+                kept.append({"words": length, "run": text,
+                             "a": _run_snippet(a_text, text),
+                             "b": _run_snippet(b_text, text)})
+        return kept
+
     rows = []
-    for (first, second), found in matches.items():
-        found.sort(key=lambda row: (-row[0], row[1], row[2]))
-        rows.append({
-            "a": first, "b": second, "similarity": found[0][0],
+    for first, second in set(matches) | set(runs) | set(shorts):
+        found = sorted(matches.get((first, second), ()),
+                       key=lambda row: (-row[0], row[1], row[2]))
+        row = {
+            "a": first, "b": second,
+            "similarity": found[0][0] if found else None,
             "sentences": [{"similarity": score, "a": _snippet(a_text),
                            "b": _snippet(b_text)}
-                          for score, a_text, b_text in found]})
-    rows.sort(key=lambda row: (-row["similarity"], row["a"], row["b"]))
+                          for score, a_text, b_text in found]}
+        if (first, second) in runs:
+            row["shared_runs"] = _kept_runs(runs[(first, second)])
+        if (first, second) in shorts:
+            row["short_sentences"] = sorted(
+                _snippet(text) for text in shorts[(first, second)])
+        rows.append(row)
+    rows.sort(key=lambda row: (
+        row["similarity"] is None, -(row["similarity"] or 0),
+        -max((run["words"] for run in row.get("shared_runs", ())), default=0),
+        row["a"], row["b"]))
     return rows
 
 
@@ -4044,7 +4209,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                     "description hedges with "
                     + ", ".join(f'"{word}"' for word in _desc_hedges)
                     + " — state the ordinary case plainly when the note "
-                    "establishes it, unless the cited source uses that word; "
+                    "establishes it, unless principle 3 keeps that word; "
                     "a candidate is never an order"))
             # Praise is a register candidate wherever it appears (lint_entry's
             # 9-register-candidate).
@@ -4082,7 +4247,7 @@ def scan(wiki, images=None, vault=None, settled=None):
             is_wikilink = inner.startswith("[[") or inner.endswith("]]")
             slugpart = inner.lstrip("#").strip().strip("[]").strip()     # core slug: drop #, [[ ]]
             low = slugpart.lower()
-            target = low if low in VALID_TAGS else TAG_ALIASES.get(low)  # the corrected enum slug, if one exists
+            target = tag_rewrite_target(sl, low)  # the corrected enum slug, if one exists
             faults = []
             if is_wikilink:
                 faults.append("written as a wikilink (tags are #-prefixed slugs, not links)")
@@ -4106,7 +4271,8 @@ def scan(wiki, images=None, vault=None, settled=None):
         # discipline written twice, and the raw check reported no duplicate
         # while item 8's own mandated fix above ("rewrite as
         # #machine-learning") went on to create one. Same for `#Machine-Learning`.
-        _canon_by_tag = [(t, tag_canonical(s)) for t, s in zip(e_tags_raw, e_tag_slugs)]
+        _canon_by_tag = [(t, tag_rewrite_target(sl, s.lower()) or tag_canonical(s))
+                         for t, s in zip(e_tags_raw, e_tag_slugs)]
         _dup_counts = [c for _t, c in _canon_by_tag]
         for d in sorted({c for c in _dup_counts if _dup_counts.count(c) > 1}):
             spellings = ", ".join(f'"{t}"' for t, c in _canon_by_tag if c == d)
@@ -4798,8 +4964,8 @@ def scan(wiki, images=None, vault=None, settled=None):
                         f'{_lead}{tag} line 1 hedges with '
                         + ", ".join(f'"{word}"' for word in _hedges)
                         + " — state the ordinary case plainly when the note "
-                        "establishes it, unless the cited source uses that "
-                        "word; a candidate is never an order"))
+                        "establishes it, unless principle 3 keeps that word; "
+                        "a candidate is never an order"))
                 # Shared with lint_entry (equation_coverage); the kept card
                 # only, since an extra card is removed.
                 _card_equation = None if _extra else \
@@ -5538,10 +5704,11 @@ def scan(wiki, images=None, vault=None, settled=None):
                                 and (pair_ok is None or pair_ok(ms[i][1], ms[j][1]))
                                 and (skip_pairs is None or pair not in skip_pairs)):
                             collisions.append((ms[i][0], ms[j][0], name, f"{ms[i][1]}~{ms[j][1]}"))
-    # `singular_keys` is shared/scripts/plurals.py's probe-(c) key SET — every plausible
-    # singular of the identifier's head token, the identifier itself included — so an
-    # ambiguous `-es` ("bases" = base + basis) files under both readings in one pass.
-    group_probe(singular_keys, "plural")
+    # `collision_keys` is shared/scripts/plurals.py's probe-(c) key SET — every plausible
+    # singular of the identifier's head token, the identifier itself included, and a
+    # name's possessive spellings — so an ambiguous `-es` ("bases" = base + basis) files
+    # under both readings in one pass.
+    group_probe(collision_keys, "plural")
     group_probe(lambda s: s.replace("-",""), "hyphenation")
     group_probe(lambda s: "-".join(sorted(s.split("-"))), "word-order")
     # The sort above is a PURE token sort, so it cannot see `weight-tying` ~ `tying-weights`:
@@ -5727,8 +5894,8 @@ def scan(wiki, images=None, vault=None, settled=None):
     # Exact normalized sentence overlap is a cross-entry ownership candidate,
     # not proof that either copy is wrong: each entry is clean in isolation,
     # while only one is the explanation's owner. Task 1b keeps the owner's
-    # copy and trims the others to their consequence plus the one-clause
-    # reason or key value the atomicity test allows, linked to it;
+    # copy and trims the others to their consequence plus any short clause or
+    # sentence of reason or key value the atomicity test allows, linked to it;
     # refactors.md, not this message, chooses the owner (a family-wide
     # property goes to the family's entry, not to the most specific one).
     # A basename several files share names its scanned file by path.
@@ -5762,8 +5929,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "a long prose sentence has the same normalized word sequence "
                 "in %s: %r — Task 1b consolidates it in its owner under the "
                 "refactors.md consolidation rule and trims every other copy "
-                "to its consequence plus the one-clause reason or key value "
-                "the atomicity test allows, linked to the owner; normalized "
+                "to its consequence plus any short clause or sentence of "
+                "reason or key value the atomicity test allows, linked to the "
+                "owner; normalized "
                 "similarity alone never chooses the owner"
                 % (", ".join(_peers), _snippet)))
     # The fuzzy variant over all entry pairs is a review-only reading list
@@ -5775,7 +5943,10 @@ def scan(wiki, images=None, vault=None, settled=None):
             min_chars=0, min_words=0) if not _row[1].endswith(":")]
          for _slug, _entry in entries.items()},
         {_normalized for _normalized, _owners in sentence_owners.items()
-         if len(_owners) > 1})
+         if len(_owners) > 1},
+        name_phrases=overlap_title_phrases(
+            _name for _entry in entries.values()
+            for _name in [_entry.get("title")] + list(_entry.get("aliases", ()))))
 
     # One image file embedded in several entries is a review-only
     # ownership candidate: a family-level exhibit may belong to the family.
@@ -7629,6 +7800,22 @@ def run_self_test():
               'rewrite as "#machine-learning"' in _st_msg(res, "abbrev", "item8"), True)
         check("...and on its own it is NOT a duplicate",
               "tagged more than once" in _st_msg(res, "abbrev", "item8"), False)
+        _ai_vault = os.path.join(tmp, "v3-ai-field")
+        _st_write(_ai_vault, "artificial-intelligence.md", _st_entry(
+            "Artificial intelligence", "**Artificial intelligence** is a worked example.",
+            tags=('"#ai"',)))
+        check("#ai on the field Artificial intelligence itself names #computer-science",
+              'rewrite as "#computer-science"'
+              in _st_msg(scan(_ai_vault), "artificial-intelligence", "item8"), True)
+        for _ai_other, _ai_dup in (("#computer-science", True), ("#machine-learning", False)):
+            _ai_pair = os.path.join(tmp, "v3-ai-" + _ai_other[1:])
+            _st_write(_ai_pair, "artificial-intelligence.md", _st_entry(
+                "Artificial intelligence", "**Artificial intelligence** is a worked example.",
+                tags=('"#ai"', f'"{_ai_other}"')))
+            check(f"#ai beside {_ai_other} on Artificial intelligence: "
+                  f"duplicate is {_ai_dup}, counted on the tag item 8 rewrites to",
+                  "tagged more than once"
+                  in _st_msg(scan(_ai_pair), "artificial-intelligence", "item8"), _ai_dup)
         check("#ml beside #machine-learning IS a duplicate (item 8's own fix "
               "creates it otherwise)",
               "tagged more than once" in _st_msg(res, "aliased", "item8"), True)
@@ -7884,6 +8071,17 @@ def run_self_test():
               [(c["a"], c["b"], c["probe"]) for c in res4b["collision_candidates"]],
               [("roc-curve", "roc-curves", "plural")])
 
+        v = os.path.join(tmp, "v4b-possessive")
+        for name, title in (("bayess-theorem", "Bayes's theorem"),
+                            ("bayes-theorem", "Bayes' theorem")):
+            _st_write(v, name + ".md", _st_entry(
+                title, "**%s** is a worked example." % title, card=title))
+        check("a name's two possessive spellings in the vault are a plural "
+              "collision candidate",
+              [(c["a"], c["b"], c["probe"])
+               for c in scan(v)["collision_candidates"]],
+              [("bayes-theorem", "bayess-theorem", "plural")])
+
         # Probe (f) uses the exact same shared stem key as wiki-build, and it
         # runs only after the more specific probes have had first claim.
         v = os.path.join(tmp, "v4c")
@@ -8131,7 +8329,6 @@ def run_self_test():
                    {"similarity": 1.0, "a": "A1", "b": "C1"}]},
                {"a": "b", "b": "c", "similarity": 1.0, "sentences": [
                    {"similarity": 1.0, "a": "B1", "b": "C1"}]}])
-        import itertools
         import random
         _rng = random.Random(7)
         _vocab = ["word%s" % chr(ord("a") + i) for i in range(18)]
@@ -8152,6 +8349,199 @@ def run_self_test():
               sorted((row["a"], row["b"]) for row in build_overlap_candidates(
                   _sentences, min_similarity=0.5, min_words=4)),
               sorted(_brute))
+
+        # overlap_candidates' literal route: shared word runs and exact
+        # short sentences, in optional row fields.
+        def _literal(**texts):
+            return {slug_value: [row for text in rows for row in
+                                 duplicate_sentence_surfaces(
+                                     text, min_chars=0, min_words=0)]
+                    for slug_value, rows in texts.items()}
+        _eight = "alpha bravo charlie delta echo foxtrot golf hotel"
+        check("eight consecutive shared words are a run-only row with a null "
+              "similarity; seven are none",
+              [build_overlap_candidates(_literal(
+                  a=["Yak %s zulu." % words], b=["Kilo %s lima." % words]),
+                  min_words=99)
+               for words in (_eight, _eight.rsplit(" ", 1)[0])],
+              [[{"a": "a", "b": "b", "similarity": None, "sentences": [],
+                 "shared_runs": [{
+                     "words": 8, "run": _eight, "a": "Yak %s zulu." % _eight,
+                     "b": "Kilo %s lima." % _eight}]}], []])
+        check("a run is extended to its full length, once, and a run the "
+              "pair's longer run contains is dropped",
+              [(run["words"], run["run"]) for row in build_overlap_candidates(
+                  _literal(a=["Yak %s india zulu." % _eight,
+                              "Mike %s oscar." % _eight],
+                           b=["Kilo %s india lima." % _eight,
+                              "Papa %s quebec." % _eight]), min_words=99)
+               for run in row["shared_runs"]],
+              [(9, _eight + " india")])
+        check("no run crosses inline math or counts it as a word; a run "
+              "beside it still counts",
+              [[row["shared_runs"][0]["run"] for row in
+                build_overlap_candidates(_literal(a=[a_text], b=[b_text]),
+                                         min_words=99)]
+               for a_text, b_text in (
+                   ("Yak alpha bravo charlie delta $x$ echo foxtrot golf "
+                    "hotel zulu.",
+                    "Kilo alpha bravo charlie delta $x$ echo foxtrot golf "
+                    "hotel lima."),
+                   ("Yak $x$ %s zulu." % _eight, "Kilo $y$ %s lima." % _eight),
+                   ("Yak alpha bravo $$x + y = z + w + v + u + t + s$$ charlie "
+                    "zulu.",
+                    "Kilo alpha bravo $$x + y = z + w + v + u + t + s$$ charlie "
+                    "lima."),
+                   ("Yak sets `$HOME` then %s with $x$ zulu." % _eight,
+                    "Kilo sets `$HOME` then %s with $x$ lima." % _eight))],
+              [[], [_eight], [], ["sets home then " + _eight + " with"]])
+        _long_tail = " ".join(["ribosome"] * 30)
+        check("a long sentence's snippet keeps its run in view",
+              [(_eight in run["a"], len(run["a"]) <= 180,
+                run["a"].startswith("..."), run["a"].endswith("..."))
+               for row in build_overlap_candidates(_literal(
+                   a=["%s then %s then zulu." % (_long_tail, _eight)],
+                   b=["Kilo %s lima." % _eight]), min_words=99)
+               for run in row["shared_runs"]],
+              [(True, True, True, False)])
+        check("an exact sentence of five words under the floor is listed; "
+              "four words, a reported exact key and other math are not",
+              [[row.get("short_sentences") for row in
+                build_overlap_candidates(_literal(a=[a_text], b=[b_text]),
+                                         keys, min_words=99)]
+               for a_text, b_text, keys in (
+                   ("Ribosomes build proteins from RNA.",
+                    "Ribosomes build proteins from RNA.", frozenset()),
+                   ("Ribosomes build proteins fast.",
+                    "Ribosomes build proteins fast.", frozenset()),
+                   ("Ribosomes build proteins from RNA.",
+                    "Ribosomes build proteins from RNA.",
+                    frozenset({"ribosomes build proteins from rna"})),
+                   ("The score here is $x$ now.",
+                    "The score here is $y$ now.", frozenset()),
+                   ("The $x$ equals $y$ now.",
+                    "The $x$ equals $y$ now.", frozenset()),
+                   ("$$a + b + c + d + e + f$$", "$$a + b + c + d + e + f$$",
+                    frozenset()))],
+              [[["Ribosomes build proteins from RNA."]], [], [], [], [], []])
+        check("a run or short sentence inside a title or alias merely "
+              "repeats a name",
+              build_overlap_candidates(
+                  _literal(a=["Yak %s zulu." % _eight, "Bravo charlie delta "
+                              "echo foxtrot."],
+                           b=["Kilo %s lima." % _eight, "Bravo charlie delta "
+                              "echo foxtrot."]),
+                  min_words=99, name_phrases=overlap_title_phrases(
+                      ["Oscar " + _eight, None])),
+              [])
+        check("overlapping names of one length are removed in name order, "
+              "so a run that is only names lists no row on any hash seed",
+              build_overlap_candidates(
+                  _literal(a=["Yak aaaa bb cc dd ee ff gg hh iiii zulu."],
+                           b=["Kilo aaaa bb cc dd ee ff gg hh iiii lima."]),
+                  min_words=99, name_phrases=overlap_title_phrases(
+                      ["aaaa bb cc dd ee", "ee ff gg hh iiii",
+                       "ff gg hh iiii"])),
+              [])
+        check("a run of whole names joined by an article or 'and' repeats "
+              "names; one with another word does not",
+              [[run["run"] for row in build_overlap_candidates(
+                  _literal(a=["Yak %s zulu." % words],
+                           b=["Kilo %s lima." % words]),
+                  min_words=99, name_phrases=overlap_title_phrases(
+                      ["Alpha bravo charlie", "Delta echo foxtrot", "Golf"]))
+                for run in row["shared_runs"]]
+               for words in ("the alpha bravo charlie and delta echo foxtrot "
+                             "and golf",
+                             "the alpha bravo charlie then delta echo foxtrot "
+                             "and golf")],
+              [[], ["the alpha bravo charlie then delta echo foxtrot and golf"]])
+        _second = "mike november oscar papa quebec romeo sierra tango uniform"
+        check("a sentence pair the row lists yields no run",
+              [(row["similarity"], len(row["sentences"]), "shared_runs" in row)
+               for row in build_overlap_candidates(_literal(
+                   a=["%s india juliet." % _eight],
+                   b=["%s india kilo." % _eight]))],
+              [(0.82, 1, False)])
+        check("a run in a row's other sentence pair sits beside its similar "
+              "pair",
+              [(row["similarity"], len(row["sentences"]),
+                [run["run"] for run in row["shared_runs"]])
+               for row in build_overlap_candidates(_literal(
+                   a=["%s india juliet." % _eight, "Yak %s." % _second],
+                   b=["%s india juliet kilo." % _eight,
+                      "Zulu lima %s tango victor whiskey xray." % _second]),
+                   min_similarity=0.8)],
+              [(0.91, 1, [_second])])
+        check("similar pairs come first, then run-only pairs, longest run "
+              "first",
+              [(row["a"], row["b"], row["similarity"])
+               + (("short_sentences",) if "short_sentences" in row else ())
+               for row in
+               build_overlap_candidates(_literal(
+                   c=["Yak %s zulu." % _eight], d=["Kilo %s lima." % _eight],
+                   e=["%s ribosome genome plasmid nucleus vacuole." % _second],
+                   f=["%s lysosome membrane protein enzyme carbon." % _second],
+                   g=["Cyclin kinase histone telomere centromere spindle."],
+                   h=["Cyclin kinase histone telomere centromere spindle."]),
+                   min_similarity=0.9)],
+              [("g", "h", 1.0), ("e", "f", None), ("c", "d", None)])
+        _body_run = ("sheds its outer membrane when the surrounding medium "
+                     "turns acidic")
+        _elsewhere = "Bacteria " + _body_run
+        v = os.path.join(tmp, "v4-overlap-literal")
+        _st_write(v, "body-one.md", _st_entry(
+            "Body one", "**Body one** is a worked example. Under stress the "
+            "clade quickly %s, which protects ribosomes, plasmids and enzymes "
+            "from lasting damage." % _body_run))
+        _st_write(v, "body-two.md", _st_entry(
+            "Body two", "**Body two** is another worked example. In a flask "
+            "it %s, although the cytosol keeps pumping protons outward "
+            "through channels." % _body_run))
+        _st_write(v, "caption-y.md", _st_entry(
+            "Caption Y", "**Caption Y** is a third worked example.\n\n"
+            "![[Doe_X_2025_fig_2.png]]\n*%s.*" % _elsewhere))
+        _st_write(v, "table-y.md", _st_entry(
+            "Table Y", "**Table Y** is a fourth worked example.\n\n"
+            "Claim | Note\n--- | ---\nfirst | %s\n*Claims in the fixture.*"
+            % _elsewhere))
+        _st_write(v, "listing-y.md", _st_entry(
+            "Listing Y", "**Listing Y** is a fifth worked example.\n\n"
+            "```\n%s\n```" % _elsewhere, tags=('"#software"',)))
+        _st_write(v, "footer-y.md", _st_entry(
+            "Footer Y", "**Footer Y** is a sixth worked example.",
+            related="[[body-one|%s]]" % _elsewhere))
+        _st_write(v, "card-y.md", _st_entry(
+            "Card Y", "**Card Y** is a seventh worked example."
+            ).replace("The idea this entry is about, stated once.",
+                      _elsewhere + ".", 1))
+        _literal_res = scan(v)
+        check("a scan lists a shared body run as review-only; captions, "
+              "tables, listings, Related footers and cards take no part, and "
+              "it is no item-9 finding",
+              ([(row["a"], row["b"], row["similarity"],
+                 [run["words"] for run in row["shared_runs"]])
+                for row in _literal_res["overlap_candidates"]],
+               [row["slug"] for row in _literal_res["problems"]
+                if row["item"].startswith("item9")]),
+              ([("body-one", "body-two", None, [10])], []))
+        v = os.path.join(tmp, "v4-overlap-names")
+        _long_alias = "mike november oscar papa quebec romeo sierra tango"
+        _st_write(v, "long-name.md", _st_entry(
+            "%s" % _eight.capitalize(), "**%s** is a worked example."
+            % _eight.capitalize(), aliases=(_long_alias.replace(" ", "-"),)))
+        _st_write(v, "uses-one.md", _st_entry(
+            "Uses one", "**Uses one** is a worked example. Yak calls it %s "
+            "beside ribosomes, plasmids and enzymes. Yak calls it %s beside "
+            "ribosomes, plasmids and enzymes." % (_eight, _long_alias)))
+        _st_write(v, "uses-two.md", _st_entry(
+            "Uses two", "**Uses two** is a worked example. Zulu names %s near "
+            "lipids, proteins and vesicles. Zulu names %s near lipids, "
+            "proteins and vesicles." % (_eight, _long_alias)))
+        check("a scan drops a run that merely repeats a title or alias",
+              [row.get("shared_runs") for row in scan(v)["overlap_candidates"]
+               if row["similarity"] is None or "shared_runs" in row],
+              [])
 
         # The neighbors map and the per-page source key.
         check("source_page_key folds the file name and keeps its page anchor; "
