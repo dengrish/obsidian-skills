@@ -2223,13 +2223,45 @@ _INLINE_CODE = re.compile(r"(`+)[^\n]*?\1(?!`)")
 #: blank line where duplicate_sentence_surfaces ends a sentence.
 _DUPLICATE_LIST_ITEM_RE = re.compile(r"^[ \t]*(?:[-*+]|\d{1,9}[.)])[ \t]+")
 _DUPLICATE_BREAK = "dupblockbreak"
+#: A one-line ``- Label: value`` bullet: a label of at most four words that
+#: holds no clause punctuation, emphasized or linked or not, then its value.
+_DUPLICATE_LABEL_VALUE_RE = re.compile(
+    r"^[ \t]*[-*+][ \t]+([^:\n]{1,60}?):[*_]*[ \t]+(\S.*)$")
+_DUPLICATE_LABEL_LINK_RE = re.compile(r"\[\[(?:[^\]|\n]*\|)?([^\]\n]*)\]\]")
+#: A label that opens a sentence rather than naming a fact (``- Note: ...``,
+#: ``- In other words: ...``): its value can be a real copied sentence.
+_DUPLICATE_DISCOURSE_LABEL_RE = re.compile(
+    r"\W*(?:note|warning|caution|remark|hint|tip|example|intuition|idea|key|"
+    r"why|how|what|in|it|this|that|these|those|so|thus|hence|then|when|if|"
+    r"because|for)\b", re.I)
+
+
+def _label_value_bullet(line):
+    """Whether ``line`` is a ``- Label: value`` bullet of one sentence.
+
+    Sibling notes each state such a fact of their own (``- Range: all real
+    numbers.``), so identical wording is no explanation with an owner.
+    """
+    match = _DUPLICATE_LABEL_VALUE_RE.match(line)
+    if not match:
+        return False
+    label = _DUPLICATE_LABEL_LINK_RE.sub(r"\1", match.group(1))
+    if _DUPLICATE_DISCOURSE_LABEL_RE.match(label):
+        return False
+    return (len(label.split()) <= 4 and not re.search(r"[.,;!?]", label)
+            and not label.count("$") % 2 and not label.count("`") % 2
+            and len(split_sentences(match.group(2))) == 1)
+
+
 def duplicate_sentence_surfaces(prose, table_spans=(), min_chars=80,
-                                min_words=12):
+                                min_words=12, label_values=False):
     """Return long normalized prose sentences eligible for ownership review.
 
     Exact copied prose is a useful cross-entry signal only after presentation
-    syntax is removed. Listings, displays, tables, images, and captions are not
-    assertions to deduplicate, so they are blanked. Wikilinks normalize to
+    syntax is removed. Listings, displays, tables, images, captions and
+    ``Label: value`` bullets are not assertions to deduplicate, so they are
+    blanked; ``label_values`` keeps those bullets for `overlap_candidates`,
+    which only asks a reviewer to read them. Wikilinks normalize to
     their rendered label, making a linked and an unlinked copy comparable.
     Every blank or blanked line ends a sentence, and each list item starts
     one without its marker, so a lead-in never joins the sentence after its
@@ -2250,7 +2282,8 @@ def duplicate_sentence_surfaces(prose, table_spans=(), min_chars=80,
         if (not stripped or stripped.startswith("#")
                 or re.match(r"^!\[\[.*\]\]$", stripped)
                 or re.match(r"^!\[[^\]]*\]\([^)]*\)$", stripped)
-                or re.match(r"^\*(?!\*)\S(?:.*\S)?\*$", stripped)):
+                or re.match(r"^\*(?!\*)\S(?:.*\S)?\*$", stripped)
+                or (not label_values and _label_value_bullet(line))):
             kept_lines.append(" %s " % _DUPLICATE_BREAK)
         else:
             kept_lines.append(_DUPLICATE_LIST_ITEM_RE.sub(
@@ -5660,7 +5693,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                         sl, "item18/partial-label",
                         f'wikilink [[{tgt}|{disp}]] — "{disp}" keeps only '
                         f'modifiers of the target title "{target_title}" and '
-                        f'omits its head word "{_head}"; reword so the label '
+                        f'omits its head word "{_head}"; relabel so it '
                         "names the target (its title, an alias, an inflection, "
                         "a derived form or a word it introduces in italics), "
                         "or review whether the label names "
@@ -5940,7 +5973,8 @@ def scan(wiki, images=None, vault=None, settled=None):
     overlap_candidates = build_overlap_candidates(
         {_slug: [_row for _row in duplicate_sentence_surfaces(
             _entry.get("prose", ""), _entry.get("table_spans", ()),
-            min_chars=0, min_words=0) if not _row[1].endswith(":")]
+            min_chars=0, min_words=0, label_values=True)
+            if not _row[1].endswith(":")]
          for _slug, _entry in entries.items()},
         {_normalized for _normalized, _owners in sentence_owners.items()
          if len(_owners) > 1},
@@ -8196,6 +8230,52 @@ def run_self_test():
                   + step_sentence)],
               [surface for _normalized, surface in duplicate_sentence_surfaces(
                   "Compute it.\n\n$$\ne = 1\n$$\n\n" + step_sentence)])
+        _fact = ("none, because the branches run to $\\infty$ and $-\\infty$ "
+                 "on every interval of the whole domain.")
+        check("a one-sentence Label: value bullet is no duplicate surface, "
+              "emphasized or linked or not",
+              [duplicate_sentence_surfaces(_line) for _line in (
+                  "- Global extrema: " + _fact,
+                  "* **Global extrema:** " + _fact,
+                  "- **Global extrema**: " + _fact,
+                  "- [[global-extrema|Global extrema]]: " + _fact)],
+              [[], [], [], []])
+        check("a numbered item, a second sentence, a long label, a colon "
+              "inside math and plain prose stay duplicate surfaces",
+              [len(duplicate_sentence_surfaces(_line)) for _line in (
+                  "1. Global extrema: " + _fact,
+                  "- Global extrema: " + _fact + " The same holds for each "
+                  "branch of the curve across its whole domain without "
+                  "exception.",
+                  "- The extreme values of this function: " + _fact,
+                  "- The map $f: X \\to Y$ sends every input vector to one "
+                  "output vector under the rule that defines the map.",
+                  "Global extrema: " + _fact)],
+              [1, 2, 1, 1, 1])
+        check("a discourse label, a clause before the colon or a colon inside "
+              "code stays a duplicate surface; a link counts by its label",
+              [len(duplicate_sentence_surfaces(_line)) for _line in (
+                  "- Note: " + _fact,
+                  "- In other words: " + _fact,
+                  "- Range, in brief: " + _fact,
+                  "- The `a: b` key maps " + _fact,
+                  "- [[a b c d e f|Range]]: " + _fact)],
+              [1, 1, 1, 1, 0])
+        check("overlap_candidates still reads a Label: value bullet",
+              len(duplicate_sentence_surfaces(
+                  "- Global extrema: " + _fact, label_values=True)),
+              1)
+        v = os.path.join(tmp, "v4-label-value")
+        for _name in ("Cosecant function", "Secant function"):
+            _st_write(v, slug(_name) + ".md", _st_entry(
+                _name, "**%s** is a worked example.\n\n- Global extrema: %s"
+                % (_name, _fact), card=_name))
+        _res_facts = scan(v)
+        check("sibling notes sharing a Label: value bullet raise no "
+              "duplicate-sentence row",
+              ["item9/duplicate-sentence" in _st_keys(_res_facts, _slug)
+               for _slug in ("cosecant-function", "secant-function")],
+              [False, False])
 
         # overlap_candidates: the fuzzy, review-only variant over all pairs.
         check("an exact item9/duplicate-sentence pair is not repeated as an "

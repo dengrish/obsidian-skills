@@ -7951,9 +7951,13 @@ def check_moc_placement(rep, conv):
 
 #: SHA-1 of link-hygiene.md's **Late first links.** paragraph and
 #: closeness-bar section (whitespace collapsed), per scan_vault.py
-#: CLOSENESS_BAR revision; see check_link_rules.
+#: CLOSENESS_BAR revision; see check_link_rules. 2026-11-01: dropping the
+#: needs-the-target's-meaning trigger and rejecting a word used plainly, as a
+#: bar item and as a late first mention, only tightens the bar: a settled rejection stays rejected, and a kept hub item
+#: or a late link left in place never rested on that trigger, so revision 2
+#: stands and no ledger is re-judged.
 CLOSENESS_BAR_TEXT = {
-    2: "68b722e0f975bf3b29f19ec58c810d4786e2c656",
+    2: "4633ab77d8192b0facc487c08b3a078a75e6814f",
 }
 
 
@@ -9885,8 +9889,8 @@ WRITING_RULE_PINS = (
         "only when this entry's own source passage gives it for this entry's "
         "claim",
         "That reason or key value takes the shortest form",
-        "The owner keeps its derivation, conditions, full rule and supporting "
-        "argument",
+        "The owner keeps its derivation, worked example, conditions, full "
+        "rule and supporting argument",
         "any one-clause reciprocal contrast",
         "when the sibling's own nearest contrast is this entry, the sibling "
         "returns it in one clause with a link",
@@ -9934,8 +9938,7 @@ WRITING_RULE_PINS = (
         # in place, matching item 10's first eligible occurrence.
         "one that clears the bar links in place when a [label "
         "carve-out](#display-label-casing) allows its form, and otherwise "
-        "links its first later claimed form or is reworded under the label "
-        "rules",
+        "links its first later claimed form or stays plain",
         "never by quoting another implementation's cost",
         "the property or benefit the description and card define the subject "
         "by appears in the opening paragraph",
@@ -10837,8 +10840,9 @@ WRITING_RULE_PINS = (
         "[step 7.1](../../wiki-build/SKILL.md#7-review-and-report), with a "
         "[manifest](../SKILL.md#publishing) naming only the draft",
         # A sentence kept as the user's own edit moves with its issue.
-        "a 5(h) clarification, or a sentence [kept as the user's own "
-        "edit](source-backed-corrections.md#correct-and-publish), moves",
+        "a 5(h) clarification, a sentence [kept as the user's own "
+        "edit](source-backed-corrections.md#correct-and-publish), or what a "
+        "facet merge keeps, moves",
     )),
     (("wiki-lint", "references", "hierarchy.md"), (
         "review it as a [missing entry's](refactors.md#create-a-missing-entry) "
@@ -10852,7 +10856,7 @@ WRITING_RULE_PINS = (
     )),
     (("wiki-lint", "references", "qc-items.md"), (
         "goes on Task 2's link worklist when its entry exists",
-        "where a sentence that needs its meaning [clears the closeness "
+        "judged under the [closeness "
         "bar](link-hygiene.md#the-closeness-bar)",
         "or for the misc root a dictionary page, cited by its URL",
         "removing a repeated target's later items, is determinate",
@@ -10868,8 +10872,7 @@ WRITING_RULE_PINS = (
     (("wiki-lint", "references", "link-hygiene.md"), (
         "When the last scan's `settled.error` is set, it leaves the ledger "
         "unwritten and reports the error",
-        "So does a mention whose sentence needs the target's meaning, which "
-        "the entry does not define.",
+        "bare name-drops, or a word the sentence uses plainly",
         "and [item 14](qc-items.md#14-self-containment) each unlinked term "
         "whose entry exists",
     )),
@@ -10953,8 +10956,8 @@ WRITING_RULE_PINS = (
         "Every other copy, a list step excepted, is cut to what it adds, or "
         "goes",
         "Outside the opening paragraph, a sentence that only previews claims",
-        "a link only deleted text had moves to the next mention of its target, "
-        "or else to the Related footer",
+        "a link only deleted text had goes, to the Related footer only when "
+        "[its priority](#the-related-footer) selects the target",
         # 2026-10-31 (knowledge 1.38.0): the sentence-pair labeling is
         # retired; this read stays.
         "Then read each paragraph's first sentence and list lead-in in order, "
@@ -10982,8 +10985,8 @@ WRITING_RULE_PINS = (
         "*one*, *an alternative*, *the variants*, *the reverse*",
         # 2026-10-31 (knowledge 1.38.0): the reason comes from this entry's own
         # source passage for this entry's claim, not from the owner's source.
-        "a plot built on the metric keeps the consequence, any reason its own "
-        "source passage gives and a link",
+        "and only when this entry's own source passage gives it for this "
+        "entry's claim",
         # A linked entry's argument is explained by its link plus any reason
         # the atomicity test adds, as the user's link-don't-re-explain rule
         # asks.
@@ -11124,7 +11127,7 @@ WRITING_RULE_PINS = (
         "it",
         "Delete principle 6's filler and every copy of a repeated claim the "
         "repeat check does not keep",
-        "When removing repetition or filler, keep every qualifier, and move a "
+        "When removing repetition or filler, keep every qualifier, and settle a "
         "link only the deleted text had as the [repeat check](../../"
         "wiki-build/references/writing.md#editorial-reread) says",
         "puts it under the same heading; split or merge adjacent paragraphs",
@@ -11157,7 +11160,7 @@ WRITING_RULE_PINS = (
         # Equations §1 alone sets which calculations an equation writes.
         "A verified standard equation absent from that prose is Task 1b's to "
         "add",
-        "when it does not, the cue goes, its link moving as the builder's "
+        "when it does not, the cue goes, its link following the builder's "
         "[repeat check]",
         "gets a brief definition at its first use, inserted as principle 9 "
         "says",
@@ -11535,7 +11538,7 @@ WRITING_RULE_PINS = (
         "the repair may cut or reword rather than add",
         "An item needing new information, an unbuilt chapter or an edge-case "
         "caveat is dropped",
-        "In wiki-lint, a repair to a read entry follows [§2c]",
+        "a repair to a read entry follows [§2c]",
         "One summary count in the run report (items read, repaired, dropped), "
         "not a per-item ledger",
         # The run report's line.
@@ -11570,8 +11573,9 @@ WRITING_RULE_PINS = (
         "A closed count or either/or (in two ways, there are two designs, "
         "either A or B) appears only when the source gives it and the note "
         "lists every item",
-        "a sentence announcing that something depends, differs or varies "
-        "without saying how",
+        "a sentence or clause announcing that something depends, differs, "
+        "varies, decides or acts in some way without saying how or linking "
+        "the note that does",
         "When a cut sentence was the source declining to rank two results, "
         "the wording left behind must not rank them",
         # Confusable terms.
@@ -11603,7 +11607,7 @@ WRITING_RULE_PINS = (
         "negative for the concrete statement",
         # One rule for a reason's size.
         "A reason lives in the note whose claim needs it",
-        "a reason beyond the sources is one short sentence (5(h))",
+        "or else in the one short sentence [5(h)](#prose-principles) admits",
         "a reason the sources give takes one or two short sentences, never one "
         "compressed sentence",
         # A borrowed example names its unit.
@@ -11625,6 +11629,82 @@ WRITING_RULE_PINS = (
     (("wiki-build", "references", "special-titles.md"), (
         "Add no sentence whose only purpose is to say the entry differs from "
         "its namesake unless its sources warn of the confusion",
+    )),
+    # 2026-11-01: the whole-wiki review's rules. A marked rule governs only
+    # what a run writes; a label never bends its sentence; a deletion keeps
+    # the fact somewhere; a promised result is delivered; a page fact is not
+    # coverage; a facet merge opens only on an issue or a naming request.
+    (("wiki-build", "references", "writing.md"), (
+        "A rule marked *new text only* governs text a run writes. Existing "
+        "text is not a defect under it, and an ordinary class sweep does not "
+        "run it; named notes take it.",
+        "or a title whose tail is generic (of a function, of an angle): the "
+        "title's head word",
+        "A label never decides the sentence: when no allowed label reads "
+        "naturally, the word stays plain (*new text only*)",
+        "links its first later claimed form or stays plain",
+        "A sentence promising a rule or result delivers it from the source in "
+        "one clause or links the note that does; otherwise it goes",
+        "unless a linked entry owns the argument, a reason the sources give "
+        "takes one or two short sentences",
+        "An explanation, argument, worked example or justified property "
+        "belongs to the entry",
+        "A different problem type is a different facet only when it needs a "
+        "new step; one that needs none is cut or moved to the note that owns "
+        "it (*new text only*)",
+    )),
+    (("wiki-build", "references", "equations.md"), (
+        "a logarithm-base remark nothing in the note depends on",
+        "A concrete matrix an example computes with or a caption refers to is "
+        "set in matrix form, inline where short ([new text "
+        "only](writing.md#prose-principles))",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "and reads card line 1 as a definition",
+        "or a promised rule or result never given",
+        "a cut under the leave-out check needs no page reread",
+        "so triage expects same-run sibling gaps, filling nothing from memory",
+    )),
+    (("wiki-lint", "references", "source-backed-corrections.md"), (
+        "a neighbor's explanation, whose owner holds the fact, beyond one "
+        "defining clause",
+        "one-sentence intuition or takeaway, which stands alone",
+        "A page fact stays out when it is a problem the concept helps solve, "
+        "the concept crossed with a family of functions or transformations, "
+        "or a fact whose subject is a linked entry's and which that entry "
+        "holds, leaving one pointer clause at most ([new text only]",
+        "Covering every page is not a goal.",
+    )),
+    (("wiki-build", "references", "flashcards-and-emphasis.md"), (
+        "a polynomial, not a sum of multiples of powers of the unknown",
+    )),
+    (("wiki-lint", "references", "scanner.md"), (
+        "lead-ins ending in a colon, `Label: value` bullets, tables",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "when none reads naturally, only a named note takes the word plain",
+        "'s facet route",
+    )),
+    (("wiki-lint", "references", "link-hygiene.md"), (
+        "a sentence the link step rewords gets the [editorial "
+        "reread](../../wiki-build/references/writing.md#editorial-reread)",
+        "uses the word in another sense or plainly, it is not eligible",
+    )),
+    (("wiki-lint", "references", "refactors.md"), (
+        "When a user issue or naming request says a rule, operation or fact "
+        "note should not stand, the note also merges into the concept it is "
+        "a facet of; the home keeps the note's rule and one example, and the "
+        "rest goes.",
+        "integrate nonduplicate claims (of a facet note, what step 2 keeps)",
+        "and so is the rest a facet merge lets go",
+    )),
+    (("wiki-lint", "SKILL.md"), (
+        "runs only on its issue or naming request",
+    )),
+    (("wiki-add", "SKILL.md"), (
+        "procedure or rule of another concept, even another candidate",
+        "Listed topics stay pending; none is created or folded unasked. The "
+        "report says how many.",
     )),
     # A cue's kind noun, and no sweep of rewordings.
     (("wiki-build", "references", "flashcards-and-emphasis.md"), (

@@ -1585,15 +1585,35 @@ _SPELLING_FORM = "NFKD"
 #: The endings by which a spelling variant may also differ: a plural (-s,
 #: -es) or a -ness noun.
 _VARIANT_ENDINGS = ("s", "es", "ness")
+_PLURAL_ENDINGS = ("s", "es")
+
+
+def _spelling_text(value):
+    """``value`` decomposed, its combining marks dropped and case-folded."""
+    text = unicodedata.normalize(_SPELLING_FORM, value or "")
+    return "".join(char for char in text
+                   if not unicodedata.combining(char)).casefold()
 
 
 def _spelling_key(value):
     """``value`` decomposed, its combining marks dropped, case-folded and
     reduced to its letters and digits: ``Scatter plot``, ``scatterplot`` and
     ``scatter-plot`` give ``scatterplot``, and ``Lévy`` gives ``levy``."""
-    text = unicodedata.normalize(_SPELLING_FORM, value or "")
-    text = "".join(char for char in text if not unicodedata.combining(char))
-    return "".join(char for char in text.casefold() if char.isalnum())
+    return "".join(char for char in _spelling_text(value) if char.isalnum())
+
+
+def _interior_plural(key_text, short):
+    """Whether dropping -s or -es from one word after the first of
+    ``key_text`` gives the spelling key ``short``: ``partial-fractions
+    decomposition`` gives ``partialfractiondecomposition``. A first word
+    stays out, since ``lloyds-algorithm`` is a possessive, not a plural. A
+    later word's possessive slug (``modified-newtons-method``) still matches:
+    nothing tells it from a plural."""
+    words = re.findall(r"[^\W_]+", _spelling_text(key_text))
+    return any(
+        "".join(words[:i] + [word[:-len(ending)]] + words[i + 1:]) == short
+        for i, word in enumerate(words) for ending in _PLURAL_ENDINGS
+        if i and len(word) > len(ending) and word.endswith(ending))
 
 
 def is_spelling_variant(name, other):
@@ -1603,7 +1623,9 @@ def is_spelling_variant(name, other):
     differ only in case, spacing, hyphens, punctuation or diacritics, or when
     one key is the other plus ``s``, ``es`` or ``ness``: ``scatterplot`` and
     ``Scatter plot``, ``Lambda Rank`` and ``LambdaRank``, ``NP-complete`` and
-    ``NP-completeness``. ``cell respiration`` and ``Cellular respiration``
+    ``NP-completeness``. One word's plural inside the name counts too:
+    ``rational-roots-theorem`` and ``Rational root theorem``.
+    ``cell respiration`` and ``Cellular respiration``
     are not, nor are ``randomized search`` and ``Random search``. A name
     without a letter or digit is no one's variant. lint_entry, the scanner
     and review_tree reach this one test through the line-3 helpers below.
@@ -1612,8 +1634,10 @@ def is_spelling_variant(name, other):
     if not key or not other_key:
         return False
     short, long_ = sorted((key, other_key), key=len)
-    return long_ == short or any(long_ == short + ending
-                                 for ending in _VARIANT_ENDINGS)
+    if long_ == short or any(long_ == short + ending
+                             for ending in _VARIANT_ENDINGS):
+        return True
+    return _interior_plural(name if key == long_ else other, short)
 
 
 def line3_aliases(term, aliases=()):
@@ -3813,6 +3837,29 @@ def run_self_test(verbose=False):
               ("svms", "SVM"), ("boxes", "Box"), ("levy-flight", "Lévy flight"),
               ("Lévy flights", "levy-flight"), ("e-mail", "Email"))],
           [True] * 9)
+    check("one word's plural inside a name is a spelling variant, either way "
+          "round",
+          [is_spelling_variant(name, other) for name, other in (
+              ("partial-fractions-decomposition",
+               "Partial fraction decomposition"),
+              ("Integration by partial fraction",
+               "integration-by-partial-fractions"),
+              ("rational-roots-theorem", "Rational root theorem"),
+              ("Support vector machine", "support-vectors-machine"),
+              ("scatter-plots matrix", "Scatterplot matrix"),
+              ("support-boxes-plot", "Support box plot"),
+              ("modified-newtons-method", "Modified Newton method"))],
+          [True] * 7)
+    check("an interior difference that is no plural is no spelling variant",
+          [is_spelling_variant(name, other) for name, other in (
+              ("partial-fractions-method", "Partial fraction decomposition"),
+              ("rational-roots", "Rational root theorem"),
+              ("rational-rootness-theorem", "Rational root theorem"),
+              ("partial-fractions-decompositions-method",
+               "Partial fraction decomposition method"),
+              ("boxes-plot", "Box plot"),
+              ("Modified Newton's method", "Modified Newton method"))],
+          [False] * 6)
     check("a name that only looks close is no spelling variant",
           [is_spelling_variant(name, other) for name, other in (
               ("cell-respiration", "Cellular respiration"),

@@ -78,7 +78,12 @@ entry published earlier in this run counts as existing for later items. When
 the builder's atomicity test splits a request into distinct topics, such as
 `Precision and recall`, each part is a request; `Bias–variance trade-off`
 stays one. A topic whose request names a vault source document belongs to
-wiki-build: report that route and do not build it.
+wiki-build: report that route and do not build it. On a run asked to cover a
+course's or list's pages, the page topics are candidates. Before drafting, list
+by concept each candidate titled as an operation, calculation, formula, fact,
+picture, table, procedure or rule of another concept, even another candidate,
+with the page's first sentence, and ask the user to rule. Listed topics stay pending; none is
+created or folded unasked. The report says how many.
 
 ## 2. Resolve identity without edits
 

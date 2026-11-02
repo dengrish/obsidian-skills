@@ -37,17 +37,19 @@ missing-entry rule, each term routed on its own.
    files, and cited URLs read online. For a PDF/summary pair, verify claims
    against the original PDF. A missing, unreadable, unreachable or ambiguous
    source blocks every movement that depends on it: only content a readable
-   cited source supports, a 5(h) clarification, or a sentence
+   cited source supports, a 5(h) clarification, a sentence
    [kept as the user's own edit](source-backed-corrections.md#correct-and-publish),
-   moves. Never
+   or what a facet merge keeps, moves. Never
    fill a gap with uncertain recollection.
 2. Prove the proposed boundary against the entries' definitions and cited
    sources. A split needs two or more independently
    definable subjects, each with source-supported substance that passes the
    builder's [substance test](../../wiki-build/SKILL.md#2-extract-entities).
    A merge needs one entity under alternate names, not merely related
-   concepts. Inherent mechanisms, stages, conditions, and limitations remain
-   with their subject.
+   concepts. When a user issue or naming request says a rule, operation or
+   fact note should not stand, the note also merges into the concept it is a
+   facet of; the home keeps the note's rule and one example, and the rest goes. Inherent
+   mechanisms, stages, conditions, and limitations remain with their subject.
 3. Inventory every live reference to a slug or alias that may disappear across
    all vault Markdown and Obsidian Canvas boards, including body/Related links,
    `parents:`, MOCs, note transclusions, relative Markdown links, and a
@@ -109,7 +111,8 @@ missing-entry rule, each term routed on its own.
   the run's scope, titled by the builder's
   [title rule](../../wiki-build/references/writing.md#title), its
   acronym-or-full-form choice included. Preserve that entry's `created:` and
-  user-owned appearance fields, integrate nonduplicate claims, and union only valid source
+  user-owned appearance fields, integrate nonduplicate claims (of a facet
+  note, what step 2 keeps), and union only valid source
   contributions, each document in one representation
   ([merge rule 1](../../wiki-build/references/merge.md#frontmatter-and-related-footer)),
   and same-entity aliases. The survivor gets today's
@@ -164,7 +167,7 @@ missing-entry rule, each term routed on its own.
 - Preserve the retained primary flashcard's recognized scheduling attachments
   and block ID byte-for-byte. Of the merged entries' primary cards, a merge
   keeps only the survivor's: a retired entry's primary card tests the same
-  entity, so the merge removes it. Remove every other card
+  entity or a facet of it, so the merge removes it. Remove every other card
   under the [card set](flashcards.md#card-set) rule, naming any distinct
   entity it tested as a missing-entry candidate. Each link or embed to a
   removed card's block ID, primary or extra, becomes a plain link to the
@@ -212,9 +215,7 @@ filesystem transaction, so order prevents a disappearing target:
    to delete. A merged-away entry's `read:` and `issues:` are accounted for
    by the survivor's `read: false` and carried issue text under the
    [merge rule](#build-the-refactored-entries) above. A merged-away primary
-   card counts as accounted for once it is quoted in the report, because the
-   survivor's primary card tests the same
-   entity; so does an extra card removed under the
+   card counts as accounted for once it is quoted in the report; so does an extra card removed under the
    [card set](flashcards.md#card-set) rule. A block-ID reference step 2 could
    not rewrite, such as one in an `Investments/` note, is an unresolved
    inbound reference that retains the old entry.
@@ -223,7 +224,7 @@ filesystem transaction, so order prevents a disappearing target:
    information, a claim its cited sources, every one read, do not give and
    5(h) does not admit, is accounted for once
    [trimmed](source-backed-corrections.md#correct-and-publish) and listed in
-   the report. If a later edit or an
+   the report, and so is the rest a facet merge lets go. If a later edit or an
    unresolved inbound reference appears, retain the file and report the mixed
    state; never force cleanup to make the refactor look done. A rollback
    restores only files whose published bytes are still unchanged.
