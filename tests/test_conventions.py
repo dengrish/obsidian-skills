@@ -6481,7 +6481,9 @@ SELFTEST_MIN_CASES = {
     # spelling keeps the owned note.
     # 2026-10-11 (knowledge 1.32.0): check and rename keep the note under
     # another vault spelling, and a --vault spelled with .. holds its source.
-    "skills/pdf-organize/scripts/organize.py": 527,
+    # 2026-11-02 (knowledge 1.39.1): a replaced source and new bytes on the
+    # planned inode are separate cases, neither left to inode reuse.
+    "skills/pdf-organize/scripts/organize.py": 528,
     # 2026-10-06 (knowledge 1.22.0): stray-text and nested-task reports;
     # completion keeps the backlog's listed spelling and Wiki containment
     # compares folder identity.
