@@ -6524,15 +6524,19 @@ def _selftest():
         check("...and leaves the late occupant untouched",
               open(_src, "rb").read(), b"late bytes")
 
+    # The replacement's inode is allocated while the planned one is still
+    # linked, so the two always differ. Unlinking first would leave this to the
+    # allocator: ext4 can hand the freed number straight back, which is the
+    # next case and not this one.
     with _tf.TemporaryDirectory(prefix="org-late-source-identity-") as _v:
         _src = _put(_v, "download.pdf", b"planned source")
+        _late = _put(_v, "late.pdf", b"late source")
         _dst = os.path.join(_v, "Doe_Study_2025.pdf")
         _real_move = move_noreplace
 
         def _replace_planned_source(src, dst, expected=None, **kwargs):
-            os.unlink(src)
-            with open(src, "wb") as _fh:
-                _fh.write(b"late source")
+            if src == _src:
+                os.replace(_late, src)
             return _real_move(src, dst, expected=expected, **kwargs)
 
         with patch.dict(globals(), move_noreplace=_replace_planned_source):
@@ -6543,8 +6547,39 @@ def _selftest():
                 _identity_failure = _exc
         check("a source replaced after planning is retained rather than renamed",
               (open(_src, "rb").read(), os.path.lexists(_dst),
-               bool(_identity_failure and _identity_failure.rolled_back)),
-              (b"late source", False, True))
+               bool(_identity_failure and _identity_failure.rolled_back),
+               isinstance(getattr(_identity_failure, "__cause__", None),
+                          _atomic_move.SourceChanged)),
+              (b"late source", False, True, True))
+
+    # New bytes on the planned inode (a rewrite in place, or a freed number the
+    # filesystem reused) pass the identity guard, so the file does move. The
+    # readback then refuses it and the rollback returns that inode to its old
+    # name. Only the forward move is injected; a helper that also fired on the
+    # rollback would replace the very file being restored.
+    with _tf.TemporaryDirectory(prefix="org-late-source-same-inode-") as _v:
+        _src = _put(_v, "download.pdf", b"planned source")
+        _dst = os.path.join(_v, "Doe_Study_2025.pdf")
+        _real_move = move_noreplace
+
+        def _rewrite_planned_source(src, dst, expected=None, **kwargs):
+            if src == _src:
+                with open(src, "wb") as _fh:
+                    _fh.write(b"late source")
+            return _real_move(src, dst, expected=expected, **kwargs)
+
+        with patch.dict(globals(), move_noreplace=_rewrite_planned_source):
+            try:
+                rename_all(None, _src, "Doe_Study_2025.pdf", apply=True)
+                _same_inode_failure = None
+            except RenameFailed as _exc:
+                _same_inode_failure = _exc
+        check("new bytes on the planned inode are moved back rather than renamed",
+              (open(_src, "rb").read(), os.path.lexists(_dst),
+               bool(_same_inode_failure and _same_inode_failure.rolled_back),
+               isinstance(getattr(_same_inode_failure, "__cause__", None),
+                          StaleRenamePlan)),
+              (b"late source", False, True, True))
 
     # Rewriting a regular file in place preserves its inode, so the exclusive
     # move helper's identity guard alone cannot see it. A manifest-owned figure
