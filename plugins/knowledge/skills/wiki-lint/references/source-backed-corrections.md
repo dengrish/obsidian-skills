@@ -31,7 +31,12 @@ learner arc, core-facet check and examples of its
 [prose principles](../../wiki-build/references/writing.md#prose-principles),
 and its [equation rules](../../wiki-build/references/equations.md).
 Fill gaps from the entry's cited sources, adding beyond them only the
-clarification 5(h) admits. The builder's reverse source check
+clarification 5(h) admits. A page fact stays out when it is a problem the
+concept helps solve, the concept crossed with a family of functions or
+transformations, or a fact whose subject is a linked entry's and which that
+entry holds, leaving one pointer clause at most
+([new text only](../../wiki-build/references/writing.md#prose-principles)).
+Covering every page is not a goal. The builder's reverse source check
 ([step 7.3](../../wiki-build/SKILL.md#7-review-and-report)) applies when a request
 to deepen, expand or enrich names the entry, or a user issue on it asks for
 depth, an example or how a step works; a request to correct or simplify, other
@@ -134,12 +139,13 @@ deleted sentence must be one of these:
   other statement, or a consolidation trim that links its owner;
 - content that principle 3, 6 or 7 or the atomicity test leaves out (a hedge or
   caveat, filler, scaffolding, a catalog, an anecdote, history beyond one clause, a
-  tangential example, a neighbor's explanation beyond one defining clause);
+  tangential example, a neighbor's explanation, whose owner holds the fact,
+  beyond one defining clause);
 - an equation removed under the
   [usefulness test](../../wiki-build/references/equations.md#1-coverage--explanatory-value-before-notation)
   with its notation-only prose;
 - a derivation replaced by its short intuition, or a complexity analysis by its
-  one-sentence intuition or takeaway;
+  one-sentence intuition or takeaway, which stands alone;
 - a removal one of the entry's [user issues](../SKILL.md#user-issues) or a
   request naming the entry asks for.
 

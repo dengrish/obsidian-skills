@@ -127,9 +127,12 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               sentence after it opens with (this, these,
                               such, it, hence, thus, therefore, however,
                               the reverse) or uses anywhere (also, either),
-                              and each prose paragraph a cut left one
-                              sentence long, the opener excepted; agent
-                              reviews. Without a baseline nothing is raised
+                              each prose paragraph a cut left one
+                              sentence long, the opener excepted, and each
+                              numbered list of three or more items that is
+                              gone (no draft list of three or more keeps
+                              half its words); agent reviews. Without a
+                              baseline nothing is raised
       9-register-candidate    advisory: praise (famous, one of the most
                               important; classic, except before example or
                               case in the body) in the
@@ -2817,18 +2820,24 @@ _CUT_OPENER_RE = re.compile(
     r"(%s|%s|(?:hence|the reverse|this|these|such|however|thus|therefore|"
     r"it)\b)" % (_CUT_ALSO, _CUT_EITHER), re.I)
 _CUT_INNER_RE = re.compile(r"\b(%s|%s)" % (_CUT_ALSO, _CUT_EITHER), re.I)
+#: A numbered list this long is a procedure the reader may follow, so its
+#: disappearance is worth a look even when every word survives as prose.
+_CUT_LIST_MIN_ITEMS = 3
 
 
 def _cut_join_units(text):
     """The explanatory body as paragraphs of sentences, or ``None``.
 
     ``None`` when no frontmatter closes. Each paragraph is ``{"kind",
-    "sentences"}``, ``kind`` one of prose, list (an item or a paragraph
-    indented under one), caption, quote or display (a whole display is one
-    sentence). Each sentence is ``{"text", "plain", "words", "spans",
-    "para", "line"}``: ``plain`` reads a link as its label, ``words`` are its
-    casefolded words with their ``spans`` in ``plain``, and ``line`` is the
-    file line it starts on. Headings, rules, images and tables are skipped.
+    "sentences"}``, ``kind`` one of prose, step (a numbered item indented at
+    most three spaces), list (any other item or a paragraph indented under
+    one), caption, quote, display (a whole display is one sentence) or break
+    (no sentences: the heading, rule, image, table or top-level bullet that
+    ends a numbered list). Each sentence is ``{"text", "plain", "words",
+    "spans", "para", "line"}``: ``plain`` reads a link as its label, ``words``
+    are its casefolded words with their ``spans`` in ``plain``, and ``line``
+    is the file line it starts on. Headings, rules, images and tables add no
+    sentence.
     """
     text = text.replace("\r\n", "\n").replace("\r", "\n")
     try:
@@ -2859,8 +2868,15 @@ def _cut_join_units(text):
                 or _CUT_HEADING_RE.match(line) or _CUT_RULE_RE.fullmatch(line)
                 or _CUT_IMAGE_RE.match(line)):
             current = None
+            if line.strip() and blocks:
+                blocks.append(("break", []))
         elif _CUT_MARKER_RE.match(line):
-            current = ("list", [(index, line[_CUT_MARKER_RE.match(line).end():])])
+            step = (line.lstrip(" ")[:1].isdigit()
+                    and len(line) - len(line.lstrip(" ")) <= 3)
+            if not step and blocks and not line[:1].isspace():
+                blocks.append(("break", []))
+            current = ("step" if step else "list",
+                       [(index, line[_CUT_MARKER_RE.match(line).end():])])
             blocks.append(current)
         elif current is not None:
             current[1].append((index, line.strip().lstrip("> ")))
@@ -2904,6 +2920,32 @@ def _cut_join_units(text):
     return paragraphs, sentences
 
 
+def _numbered_lists(paragraphs, sentences):
+    """Each numbered list of ``_CUT_LIST_MIN_ITEMS`` or more items in
+    ``_cut_join_units`` output, as ``(items, words, first)``: its item count,
+    a ``Counter`` of its items' words longer than three letters, so that shared
+    function words never keep a list, and its first sentence. A block indented
+    under an item, or a display a list resumes after, does not end the list."""
+    lists, run = [], []
+
+    def close():
+        if len(run) >= _CUT_LIST_MIN_ITEMS:
+            first = next((sentences[i]["text"] for para in run
+                          for i in para["sentences"]), None)
+            lists.append((len(run), collections.Counter(
+                word for para in run for i in para["sentences"]
+                for word in sentences[i]["words"] if len(word) > 3), first))
+        del run[:]
+
+    for para in paragraphs:
+        if para["kind"] == "step":
+            run.append(para)
+        elif para["kind"] not in ("list", "display"):
+            close()
+    close()
+    return lists
+
+
 def _check_cut_joins(baseline_text, draft_text, findings):
     """Item 9: ``9-cut-join-candidate`` rows for each cut since the baseline.
 
@@ -2916,8 +2958,10 @@ def _check_cut_joins(baseline_text, draft_text, findings):
     Each cut names the surviving sentence on either side (the same
     sentence twice for a cut inside it) and a connective the sentence after
     it leans on; each prose paragraph a cut left one sentence long, the
-    opener excepted, is a row too. Returns ``False`` when the baseline has
-    no frontmatter to compare, else ``True``.
+    opener excepted, is a row too, and so is each numbered list of three or
+    more items that no such draft list keeps half of, even when its words
+    survive as prose: where does the reader now get the steps? Returns
+    ``False`` when the baseline has no frontmatter to compare, else ``True``.
     """
     base = _cut_join_units(baseline_text)
     draft = _cut_join_units(draft_text)
@@ -3040,6 +3084,17 @@ def _check_cut_joins(baseline_text, draft_text, findings):
             {"check": "one-sentence-paragraph",
              "line": d_sen[sentences[0]]["line"],
              "paragraph": d_sen[sentences[0]]["text"], "agent_review": True}))
+    kept_lists = _numbered_lists(d_par, d_sen)
+    for items, words, first in _numbered_lists(b_par, b_sen):
+        if any(2 * sum((words & other).values()) >= sum(words.values())
+               for _items, other, _first in kept_lists):
+            continue
+        findings.append(_f(
+            "9-cut-join-candidate", "warning",
+            "a numbered list of %d items is gone; reread where the reader "
+            "now gets each step; a candidate is never an order" % items,
+            {"check": "numbered-list", "line": None, "items": items,
+             "first_item": first, "agent_review": True}))
     return True
 
 
@@ -6749,6 +6804,83 @@ def run_self_test():
           (cut_rows(cut_base, "Each point is one threshold."),
            cut_rows("Each point is one threshold.")),
           ((False, []), (True, [])))
+    steps = ("The curve is drawn in three steps:\n\n1. Sort the instances by "
+             "their score.\n2. Sweep the threshold down the sorted list.\n"
+             "3. Plot each pair of rates.")
+    with_steps = cut("moves.\n\nEach point", "moves.\n\n%s\n\nEach point"
+                     % steps)
+
+    def list_rows(draft, base=with_steps):
+        found = []
+        _check_cut_joins(base, draft, found)
+        return [f["evidence"]["items"] for f in found
+                if f["evidence"]["check"] == "numbered-list"]
+
+    check("a numbered list of three items that is gone is a candidate, "
+          "whether cut or turned into prose",
+          [list_rows(cut_base),
+           list_rows(cut(steps, "The curve sorts the instances by their "
+                         "score, sweeps the threshold down the sorted list "
+                         "and plots each pair of rates.", with_steps)),
+           list_rows(cut("\n3. Plot each pair of rates.", "", with_steps))],
+          [[3], [3], [3]])
+    check("a kept, reworded or moved list is no list candidate, nor is a "
+          "bullet list or a list of two",
+          [list_rows(with_steps),
+           list_rows(cut("Sort the instances by", "Order the instances by",
+                         with_steps)),
+           list_rows(cut("\n\n" + steps, "", cut(
+               " useful model beats.", " useful model beats.\n\n" + steps,
+               with_steps))),
+           list_rows(cut_base, cut("\n1. ", "\n- ", cut(
+               "\n2. ", "\n- ", cut("\n3. ", "\n- ", with_steps)))),
+           list_rows(cut_base, cut("\n3. Plot each pair of rates.", "",
+                                   with_steps))],
+          [[], [], [], [], []])
+    other = ("1. Square each deviation.\n2. Average those squares.\n"
+             "3. Extract their root.")
+
+    def split_rows(sep):
+        gap = "\n\n" + sep + "\n\n"
+        base = cut("\n\n" + steps, "\n\n" + steps + gap + other, with_steps)
+        return list_rows(cut(gap + other, gap + "Prose.", base), base)
+
+    check("a heading, image, table, rule or bullet between two lists keeps "
+          "them apart",
+          [split_rows(sep) for sep in (
+              "## Two", "![[a.png]]", "| a |\n|---|\n| b |", "---",
+              "- A bullet.")],
+          [[3]] * 5)
+    check("prose ends a list, a list with other words is gone, two spaces of "
+          "indent stay a list and four under a bullet do not",
+          [list_rows(cut_base, cut("\n2. Sweep", "\n\nA bridge follows.\n\n"
+                                   "2. Sweep", with_steps)),
+           list_rows(cut(steps, "1. Sort each deviation.\n2. Average those "
+                         "squares.\n3. Plot its root.", with_steps)),
+           list_rows(cut_base, cut("\n1. ", "\n  1. ", cut(
+               "\n2. ", "\n  2. ", cut("\n3. ", "\n  3. ", with_steps)))),
+           list_rows(cut_base, cut("\n1. ", "\n- Parent\n    1. ", cut(
+               "\n2. ", "\n    2. ", cut("\n3. ", "\n    3. ", with_steps))))],
+          [[], [3], [3], []])
+    check("a surviving list that shares only function words keeps nothing",
+          list_rows(cut(steps, "1. The rate of the curve is in the plot."
+                        "\n2. The peak of the curve is in the plot.\n3. "
+                        "The base of the curve is in the plot.", with_steps),
+                    cut(steps, "1. The value of the sum is in the list.\n2. "
+                        "The width of the sum is in the list.\n3. The depth "
+                        "of the sum is in the list.", with_steps)),
+          [3])
+    found_list = []
+    _check_cut_joins(with_steps, cut_base, found_list)
+    check("the numbered-list row quotes the list's first item",
+          [f["evidence"]["first_item"] for f in found_list
+           if f["evidence"]["check"] == "numbered-list"],
+          ["Sort the instances by their score."])
+    check("a display or an indented paragraph inside a list does not end it",
+          list_rows(cut_base, cut(
+              "\n3. Plot", "\n\n   $$\n   t = 1\n   $$\n\n   The threshold "
+              "starts high.\n3. Plot", with_steps)),
+          [3])
 
     tmp = tempfile.mkdtemp(prefix="lint_entry-selftest-")
     try:

@@ -52,7 +52,7 @@ ownership.
 | `item3`, `item3/report-only` | Report only: [item 3](#3-dates). |
 | `item4/source-identity` | Task 1 repair only once [item 4](#4-sources)'s provenance test proves one source (a chapter beside its whole book is proven by its name); otherwise report. |
 | `item7/hedge-candidate` | Task 1b reviews the description under [item 7](#7-description) and item 9's [caveat review](#9-body-structure-coherence-flow-and-scope) against the cited source: it drops a hedge whose plain claim the note establishes for the ordinary case unless principle 3 keeps it, and otherwise names the condition or keeps evidence-bearing uncertainty. Keep the description, opener and card aligned; the candidate alone is never an order. |
-| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise, when the passage needs the target, Task 1b states the relationship from the entry's or the linked entry's cited source, or as a 5(h) clarification, and integrates the link; when it does not, the cue goes, its link moving as the builder's [repeat check](../../wiki-build/references/writing.md#editorial-reread) says. |
+| `item9/imperative-link` | Integrate the link when adjacent prose already states the relationship and the edit adds no claim. Otherwise, when the passage needs the target, Task 1b states the relationship from the entry's or the linked entry's cited source, or as a 5(h) clarification, and integrates the link; when it does not, the cue goes, its link following the builder's [repeat check](../../wiki-build/references/writing.md#editorial-reread). |
 | `item9/duplicate-sentence` | A cross-entry ownership candidate. Task 1b consolidates it into its owner under [item 9](#9-body-structure-coherence-flow-and-scope). Normalized similarity alone proves neither copy wrong and never chooses the owner. |
 | `item9/acronym-expansion` | Task 1b adds the full form in a parenthetical directly after the bolded title, from the cited source or as a 5(h) clarification, under [item 14](#14-self-containment). A title whose letters stand for no established full form keeps its opener. |
 | `item9/list-indent` | Task 1 repair: indent the reported block as the builder's [Markdown form](../../wiki-build/references/writing.md#body-structure) says, under [item 9](#9-body-structure-coherence-flow-and-scope). Keep its math and wording unchanged; this formatting repair changes no dates or review state. |
@@ -223,8 +223,8 @@ duplicates that shape probes cannot find.
 **Merge check.** Collision-probe matches and synonym duplicates are Task 1b's
 merge candidates. Task 1b merges two or more entries through the
 [refactor protocol](refactors.md) only when their definitions and cited
-sources verify one entity under alternate names
-([step 2](refactors.md#establish-evidence-and-complete-scope)). Related
+sources verify one entity under alternate names, or by
+[step 2](refactors.md#establish-evidence-and-complete-scope)'s facet route. Related
 concepts, overlapping wording or a probe match alone never activate a merge.
 A close call stays unapplied under
 [Task 1b's rule](../SKILL.md#task-1b--content-repair). An entry beside its
@@ -538,7 +538,7 @@ Nor may an edit add a caveat, exception, or clarification the explanation
 does not need. Keep existing link tokens, citations, math spans and numerical values,
 image/table-plus-caption units, the complete flashcard section, and frontmatter
 verbatim during a Task 1 item 9 edit. When removing repetition or filler,
-keep every qualifier, and move a link only the deleted text had as the
+keep every qualifier, and settle a link only the deleted text had as the
 [repeat check](../../wiki-build/references/writing.md#editorial-reread) says.
 Descriptions follow item 7;
 links, equations, exhibits, and cards may change only under their own
@@ -701,8 +701,8 @@ cited source or as a 5(h) clarification:
 
 - A term the entry uses with neither definition nor resolving link,
   including terms in added clarifications or corrections, goes on Task 2's
-  link worklist when its entry exists, where a sentence that needs its
-  meaning [clears the closeness bar](link-hygiene.md#the-closeness-bar),
+  link worklist when its entry exists, judged under the
+  [closeness bar](link-hygiene.md#the-closeness-bar),
   and otherwise gets a brief definition at its first use, inserted as
   principle 9 says; a dangling link's
   term follows the [dangler hand-off](refactors.md#dangling-link-hand-off). A
@@ -803,12 +803,12 @@ recurring finding on a cross-domain word outside the corpus is a
 
 Any other `item18/partial-label` is a label of the target title's modifiers
 alone (`[[greedy-algorithm|greedy]]`). When the sentence already refers to the
-target, reword it so the label is the title, an alias, an inflection, or a
-derived form, preserving the claim (`CART's greedy choices` → `CART is a
-greedy algorithm: its choices`). When the label names a different entity
+target, relabel it with the title, an alias, an inflection or a derived form;
+when none reads naturally, only a named note takes the word plain. When the label names a
+different entity
 (`[[feature-engineering|features]]` for input features), Task 1 leaves the
 link, and Task 1b settles from the sentence and the cited source which entity
-it means. It rewords the sentence so the label names the target when the
+it means. It repairs the label this way when the
 target is meant, retargets the link to the meant entity's existing entry with
 the label kept, or unlinks the label to plain text when that entity has no
 entry. A surface match alone never retargets a link.

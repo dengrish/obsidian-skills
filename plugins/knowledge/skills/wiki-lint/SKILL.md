@@ -271,7 +271,9 @@ Repair in this order:
    each split-off subject passes its
    [substance test](../wiki-build/SKILL.md#2-extract-entities) with support in
    the cited sources. Related concepts, overlapping
-   wording or scanner similarity alone never activate a merge; a long note,
+   wording or scanner similarity alone never activate a merge, and a
+   [facet merge](references/refactors.md#establish-evidence-and-complete-scope)
+   runs only on its issue or naming request; a long note,
    several headings or several sources alone never activate a split.
 4. **Retitles and semantic-invalid alias removals** through their protocols.
 5. **Missing entries, only from a vault document a using entry cites, and
