@@ -116,9 +116,10 @@ A default wiki-lint run, such as "lint my wiki", works in this order:
 The run also works through the open items in
 `Reviews/wiki-notes-suggestions.md`: it re-verifies each one, fixes it or finds that
 the current rules keep it, and moves it to Fixed, leaving open only what it
-cannot complete, with the reason. An entry marked `read` takes no added
-explanation unless its own issue or a request names it, as the
-[knowledge README](plugins/knowledge/README.md) describes.
+cannot complete, with the reason. An entry marked `read` takes the same
+repairs as any other; a correction that changes what a claim says, or added or
+rewritten explanation, unchecks `read`, and the report lists each entry it
+unchecked.
 A request for a narrower task or a set of entries limits the run. A thin entry
 whose teaching lives only in a chapter not yet built waits for that chapter's
 wiki-build. A split or merge that is a close call is reported with both

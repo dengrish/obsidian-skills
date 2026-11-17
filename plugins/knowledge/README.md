@@ -22,12 +22,13 @@ merges duplicate entries, splits entries that define several subjects,
 retitles ambiguous titles and creates a missing entry only from a vault
 document an entry using its term already cites, reporting any other gap as
 a candidate, then maintains links, parents and MOCs. New and merged entries
-are marked unread. An entry you have marked `read` still takes corrections,
-which uncheck `read` and are named in the report, and trims and card,
-description, metadata or link repairs; new explanation reaches it only through its `issues` property or
-a request naming it. It also resolves the issues you flag in entries and
-works through the open items in `Reviews/wiki-notes-suggestions.md`. Deleting
-an entry needs an explicit request.
+are marked unread. An entry you have marked `read` takes the same repairs as
+any other entry; a correction that changes what a claim says, or added or
+rewritten explanation, unchecks `read`, and the report lists each entry it
+unchecked. It also resolves the
+issues you flag in entries and works through the open items in
+`Reviews/wiki-notes-suggestions.md`. Deleting an entry needs an explicit
+request.
 
 A whole-wiki wiki-lint run that repairs content, a wiki-add run creating about
 10 entries or more, and a wiki-build of a whole chapter, several sources or

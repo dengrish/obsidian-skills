@@ -7682,11 +7682,11 @@ def check_equation_policy(rep, conv):
          "equations.md` as the equation policy's home -- the pointer that "
          "makes the policy findable from the canonical layer"),
         (CONVENTIONS, conv,
-         r"reports a date inserted into a `read: true` entry under\s+"
-         r"\*Notes for the user\*",
-         "CONVENTIONS.md §2c no longer records that a linter-inserted date on "
-         "a read entry is reported under *Notes for the user* (the linter "
-         "writes neither `read:` nor `updated:`)"),
+         r"insertion into an entry whose\s+`read:` is `true` is named\s+"
+         r"under \*Notes for the user\*",
+         "CONVENTIONS.md §2c no longer records that a linter-inserted date or "
+         "equation in a `read: true` entry is reported under *Notes for the "
+         "user* (the linter writes neither `read:` nor `updated:`)"),
         (CONVENTIONS, conv, r"resets `read: false`",
          "CONVENTIONS.md §2c no longer records the builder half of the "
          "split: a merge that adds an equation resets `read: false`"),
@@ -7698,6 +7698,15 @@ def check_equation_policy(rep, conv):
          "equations.md no longer states the linter half of the split: a "
          "retroactive item-12 insertion writes neither `read:` nor "
          "`updated:`"),
+        (eq_path, eq, r"\*Notes for the user\*",
+         "equations.md no longer routes the linter's insertion notice to "
+         "*Notes for the user*"),
+        (qc_path, qc,
+         r"insertion into an entry whose `read:` is `true`[^.]{0,220}"
+         r"\*Notes for the user\*",
+         "qc-items.md item 12 no longer states that an insertion into a "
+         "`read: true` entry is named under *Notes for the user* -- the "
+         "silent-unread-math gap the 2026-08-20 review closed"),
         (qc_path, qc, r"owned by `wiki-build/references/equations\.md`",
          "qc-items.md item 12 no longer credits equations.md as the owner "
          "of the equation clauses -- the restatement has detached from its "
@@ -11305,72 +11314,34 @@ WRITING_RULE_PINS = (
         "`item10/late-link`.",
     )),
     # 2026-10-31 (knowledge 1.38.0): the whole-wiki review's rules.
-    # `read: true` protects an entry from wiki-lint's additions.
-    # CONVENTIONS §2c owns the rule and every other surface links it.
+    # 2026-11-17 (knowledge 1.40.0): a `read: true` entry takes every repair
+    # an unread one takes; only the review checkbox's own rules stay. Only the
+    # user sets `true`, a correction that changes a claim or added or
+    # rewritten explanation resets it, and so does a resolved user issue.
     (("..", "shared", "CONVENTIONS.md"), (
-        "**A read entry is protected from additions.**",
-        "**Corrections of wrong claims.** A correction that changes what a "
-        "claim says sets `read: false` and is named in the run report under "
-        "its own heading",
-        "A wrong claim that is simply removed is a trim: it keeps `read:` and "
-        "is named in the same list",
-        "**Trims, card and description repairs, metadata, links and format "
-        "fixes.** They keep `read:`",
-        "(a new definition, reason, step, example, equation, Person or Event "
-        "date, contrast sentence, a clarity rewrite, or an explanation moved "
-        "in from another entry)",
-        "A merge or split whose refactor proof holds is not an addition under "
-        "this rule",
-        "any other rewording or moved prose, the opener's predicate included, "
-        "is a clarity rewrite",
-        "self-check yet states nothing false is one as well",
-        "states the prototype sense from the cited sources, and its mismatch "
-        "with the held-back opener is no defect",
-        "through its own `issues:` field or a request naming that entry",
-        "An issue on another entry reaches it only for the move or merge that "
-        "issue's repair must make",
-        "A request that selects entries by a class of defect, a tag, a source "
-        "or the whole wiki does not name an entry, and neither does a log item",
-        "A repair held back under this rule **is not a defect**: it is not "
-        "logged, not proposed and not re-reported, so a rerun converges",
-        "an overlap trim of a copy still happens when the owner already has "
-        "the explanation; when the owner is read and lacks it, both notes "
-        "stay as they are",
-        "Entries whose `read:` is false, missing, null or unknown when the run "
-        "first reads them",
-        "lifts the protection only for later runs",
-        "on an entry whose `read:` is not `true`, typeset a calculation",
+        "| the user | `true`, whenever they have read it |",
+        "only when a pass adds or rewrites unread explanatory body content or "
+        "a correction changes what a claim says",
+        "A wrong claim that is simply removed is a trim and keeps `read:`",
+        "so do a correction confined to the description or card and a "
+        "recommendation's condition or other branch restored from its source",
+        "When the call is genuinely close, **do not reset**",
+        "**A resolved user issue resets `read:` as well.**",
+        "`false` for a content repair that changes what a claim says or adds "
+        "or rewrites explanatory body content; `false` after resolving a user "
+        "issue",
         "A sentence or list item holding several asks counts as one issue per "
         "ask",
-        "wiki-build is outside this rule: a merge from a new source follows "
-        "the body-change rule, and a named-entity or named-merge build is a "
-        "request naming the entry",
-        "which reaches a `read: true` entry only as the protection below "
-        "allows",
-        "within §2c's protection of read entries",
     )),
     (("wiki-build", "references", "merge.md"), (
-        "wiki-lint holds back an addition to a `read: true` entry under "
-        "[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-"
-        "checkbox), and this reset still happens when a named or issue-driven "
-        "repair adds explanation",
+        "A correction that changes what a claim says also resets it, apart "
+        "from the cases [§2c](../../../shared/CONVENTIONS.md#2c-read--the-"
+        "users-review-checkbox) keeps",
     )),
     (("wiki-lint", "SKILL.md"), (
-        "### Read entries",
-        "A `read: true` entry is protected from additions",
-        "Task 1, Task 1b and the [final reread](#refresh-before-task-2) apply "
-        "that rule before any repair, to every worklist",
-        "reread repairs only the joins and regressions this run's own edits left",
-        "A request to fix the flagged issues opens a `read: true` entry only "
-        "to what its issues ask",
-        "Only a [user issue](#user-issues) or a request in chat can name an "
-        "entry in §2c's sense",
-        "Task 1's handed-over findings and a note-content log item are "
-        "subject to the rule, even when they name the entry",
-        "sweeping each item's class across the run's scope within [Read "
-        "entries](#read-entries)",
-        "On a `read: true` entry, [Read entries](#read-entries) first decides "
-        "whether the repair applies",
+        "becomes `false` only when explanatory content is added or rewritten "
+        "or a correction changes what a claim says",
+        "lists each entry whose `read:` went from `true` to `false`",
         # The fresh reader runs after the final reread, before the refreshed
         # scan.
         "When the [fresh reader](../wiki-build/references/review.md#fresh-"
@@ -11387,8 +11358,8 @@ WRITING_RULE_PINS = (
         "fairness, never for variety",
     )),
     (("wiki-lint", "references", "source-backed-corrections.md"), (
-        "within the limit [§2c](../../../shared/CONVENTIONS.md#2c-read--the-"
-        "users-review-checkbox) sets for a `read: true` entry",
+        "covers every matching entry in its scope, not just named examples.",
+        "settles `read:` when one is restored",
         # A sentence of mechanism is verified, never cited.
         "or to verify a clarification, are data, never cited",
         # wiki-lint's reverse check is limited to a named entry.
@@ -11402,14 +11373,9 @@ WRITING_RULE_PINS = (
         "Never add any other caveat",
     )),
     (("wiki-lint", "references", "backlogs.md"), (
-        "**Claims corrected in read entries** — each `read: true` entry a "
-        "correction reached, with the old and new claim",
-        "nothing §2c holds back from a `read: true` entry appears in this "
-        "report",
-        "holds back from a `read: true` entry, which its Verified line names "
-        "as the rule that keeps the entry",
-        "holds back from a `read: true` entry is not a defect, so it is neither "
-        "repaired nor logged",
+        "**Entries to reread** — each entry whose `read:` went from `true` to "
+        "`false` this run, in one short line with the reason",
+        "dates or equations inserted into `read: true` entries",
         # The fresh reader's report line.
         "**Fresh reader** — as its [Record](../../wiki-build/references/"
         "review.md#fresh-reader) says",
@@ -11422,11 +11388,8 @@ WRITING_RULE_PINS = (
         "log](#proposal-scope)",
     )),
     (("wiki-lint", "references", "qc-items.md"), (
-        "Every addition or clarity rewrite this file directs, in Task 1 or "
-        "Task 1b, reaches a `read: true` entry only as [Read "
-        "entries](../SKILL.md#read-entries) allows",
-        "On a `read: true` entry only this list's deletions, grammar and "
-        "fragment repairs and list or heading forms apply",
+        "**Local editorial repairs.** Apply these autonomously when the "
+        "existing entry establishes an unambiguous meaning:",
         # The reason is verified, or the statement stays.
         "from the cited sources, or in one short "
         "[5(h)](../../wiki-build/references/writing.md#prose-principles) "
@@ -11455,8 +11418,8 @@ WRITING_RULE_PINS = (
         "stay as written",
     )),
     (("wiki-lint", "references", "refactors.md"), (
-        "a `read: true` owner only as [§2c](../../../shared/CONVENTIONS.md#2c-"
-        "read--the-users-review-checkbox) allows",
+        "Otherwise move the fullest version into the owner, verified against "
+        "the cited sources",
         "If the owner already covers all the explanation a copy gives",
         "A gloss, whether one inline clause or the one short sentence "
         "principle 9 gives an inserted definition, is no definition",
@@ -11540,7 +11503,7 @@ WRITING_RULE_PINS = (
         "the repair may cut or reword rather than add",
         "An item needing new information, an unbuilt chapter or an edge-case "
         "caveat is dropped",
-        "a repair to a read entry follows [§2c]",
+        "triage expects same-run sibling gaps, filling nothing from memory.",
         "One summary count in the run report (items read, repaired, dropped), "
         "not a per-item ledger",
         # The run report's line.
@@ -11754,11 +11717,13 @@ WRITING_RULE_PINS = (
         "never a finding or an order, and the settled ledger holds no record "
         "of it",
     )),
-    # The README's summary of read protection and the fresh reader.
+    # The README's summary of the review checkbox and the fresh reader.
     (("..", "plugins", "knowledge", "README.md"), (
-        "An entry you have marked `read` still takes corrections",
-        "new explanation reaches it only through its `issues` property or a "
-        "request naming it",
+        "An entry you have marked `read` takes the same repairs as any other "
+        "entry",
+        "a correction that changes what a claim says, or added or rewritten "
+        "explanation, unchecks `read`, and the report lists each entry it "
+        "unchecked",
         "hands the notes it changed to a fresh agent that sees neither the "
         "rules nor the sources",
     )),
@@ -12111,6 +12076,29 @@ WRITING_RULE_RETIRED = (
     "whenever the result is clearer, more precise",
     "every term that reaches three entries",
     "the three-use test",
+    # 2026-11-17 (knowledge 1.40.0): a `read: true` entry gets no special
+    # treatment. wiki-lint repairs, merges and splits it like any other entry,
+    # and a held-back repair no longer exists.
+    "protected from additions",
+    "### Read entries",
+    "(#read-entries)",
+    "(../SKILL.md#read-entries)",
+    "protection of read entries",
+    "lifts the protection",
+    "in §2c's sense",
+    "holds back from a `read: true` entry",
+    "holds it back from a `read: true` entry",
+    "holds back an addition to a `read: true` entry",
+    "A repair held back under this rule",
+    "a repair to a read entry follows",
+    "a `read: true` owner only as",
+    "Claims corrected in read entries",
+    "on an entry whose `read:` is not `true`",
+    "reaches a `read: true` entry only",
+    "wiki-build is outside this rule",
+    "new explanation reaches it only through",
+    "takes no added explanation unless",
+    "on a `read: true` entry",
 )
 
 
