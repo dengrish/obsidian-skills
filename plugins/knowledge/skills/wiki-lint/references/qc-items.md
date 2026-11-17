@@ -16,8 +16,6 @@ run from the entry's cited sources (plus the clarification
 and splits included. Whatever Task 1b cannot settle stays a nonblocking
 report, as the run report's [Not applied](backlogs.md#run-report) list and
 the [note-content closeout](backlogs.md#proposing-note-improvements) define.
-Every addition or clarity rewrite this file directs, in Task 1 or Task 1b, reaches a `read: true` entry only as
-[Read entries](../SKILL.md#read-entries) allows.
 
 Related procedures:
 
@@ -281,8 +279,7 @@ wrong fact from the entry's cited sources (plus the clarification 5(h)
 admits), leading with the prototype, and keeps the description, opener and
 card aligned in the same edit. A wrong sense includes any definition that
 fails [principle 1](../../wiki-build/references/writing.md#prose-principles)'s
-self-check, even when the source's sentence is phrased that way (on a
-`read: true` entry, [§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) decides); the property
+self-check, even when the source's sentence is phrased that way; the property
 it leads with moves to the body, and a rule stated as a prohibition leads with
 what it allows.
 
@@ -479,12 +476,7 @@ only an uncited or unbuilt source would fill waits for that source's whole
 build under those rules and is reported, never logged.
 
 **Local editorial repairs.** Apply these autonomously when the existing entry
-establishes an unambiguous meaning. On a `read: true` entry only this list's
-deletions, grammar and fragment repairs and list or heading forms apply; a split
-or merged sentence, reworded phrase, moved sentence or paragraph, or written
-link between facts is a clarity rewrite
-[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) holds
-back.
+establishes an unambiguous meaning:
 
 - Repair grammar, fragments, awkward phrasing, or an unclear pointer word
   with a known referent. Split an overloaded sentence
@@ -674,7 +666,9 @@ follow [equations §3](../../wiki-build/references/equations.md#3-notation--one-
 tie-break; report a choice only when it decides nothing.
 
 Per [Dates](../SKILL.md#dates), Task 1's equation fixes write neither `created:`,
-`updated:`, nor `read:`. In Task 1b an inserted equation
+`updated:`, nor `read:`. An insertion into an entry whose `read:` is `true` is
+named under *Notes for the user* with the slug and equation, so the user may
+decide whether to clear their checkbox. In Task 1b an inserted equation
 follows wiki-build's [body-change rule](../../wiki-build/references/merge.md#the-read-reset)
 instead, and a notation rename advances `updated:` and keeps `read:`. Group
 every insertion, promotion, removal, and notation change under item 12 in the

@@ -8,9 +8,7 @@ corrected entry may also add the clarification the builder's
 [prose principle 5(h)](../../wiki-build/references/writing.md#prose-principles)
 admits, which needs no citation, and never new information. Task 1b, like a request covering a class of defects
 or the whole Wiki, covers every matching entry in its scope, not just named
-examples, within the limit
-[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) sets
-for a `read: true` entry. A source the target does not cite never fills a gap
+examples. A source the target does not cite never fills a gap
 only that source teaches; that gap waits for a wiki-build request naming it
 whole, as under *Deepening* below. Standard references read under *Conflicts*,
 or to verify a clarification, are data, never cited, and are not such a source;
@@ -161,9 +159,9 @@ changes only under [User issues](../SKILL.md#user-issues).
 case, and then name its condition instead of a hedge word
 ([principle 3](../../wiki-build/references/writing.md#prose-principles)), or when
 principle 3 keeps it as the source's own frequency or scope word. A
-recommendation keeps the condition or other branch principle 3 names;
-[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox) settles `read:` and
-the report list when one is restored on a read entry.
+recommendation keeps the condition or other branch principle 3 names, and
+[§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
+settles `read:` when one is restored.
 Remove every hedge and caveat principle 3 excludes, its full "Leave out" list
 included (every kind it names, numerical details such as a library's default
 tolerance among them), even when the source itself makes it, never rewording it

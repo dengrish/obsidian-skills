@@ -146,10 +146,7 @@ missing-entry rule, each term routed on its own.
   [atomicity test](../../wiki-build/references/writing.md#body-structure)
   allows, linked to the owner; the trim drops the rest of the owner's
   reasoning and keeps a source's own judgment, such as its recommendation, only in the owner, but never drops a fact that entry's core
-  facets need. Otherwise move the fullest version into the owner, a
-  `read: true` owner only as
-  [§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
-  allows, verified
+  facets need. Otherwise move the fullest version into the owner, verified
   against the cited sources of the entry that holds it or of the owner (new
   information they do not give is
   [trimmed](source-backed-corrections.md#correct-and-publish), never moved)
@@ -476,9 +473,7 @@ as blocked by those entries.
    [genuine dangler](link-hygiene.md#dangling-links-target-missing). In an
    entry, each unlinked mention is glossed as the
    [dangler hand-off](#dangling-link-hand-off)'s step 3 glosses a dangling
-   one, unless
-   [§2c](../../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
-   holds it back from a `read: true` entry. An
+   one. An
    `Investments/` reference or an ambiguous reference blocks the deletion. A
    link or embed to the entry's card block ID, or a transclusion of the entry
    or one of its sections (`![[old]]`, `![[old#Section]]`), which has no

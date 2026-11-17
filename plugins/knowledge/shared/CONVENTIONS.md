@@ -658,7 +658,7 @@ pins it as `checkbox`, so the value is a bare YAML boolean.
 | paper-summarize | `false` on creation; an authorized rewrite preserves the existing value, including an absent or unknown state (regeneration is not new reading) | a new summary note in `Articles/` |
 | wiki-build | `false`, on creation; `false` again on a **body-content revision** | the [body-change rule](../skills/wiki-build/references/merge.md#the-read-reset) |
 | wiki-add | `false`, on creation only | a new requested entry; pre-existing notes are never edited |
-| wiki-lint | meaning-preserving spelling repair in Task 1; `false` for a new entry or a merge's surviving entry; `false` for a content repair that changes what a claim says or adds or rewrites explanatory body content, which reaches a `read: true` entry only as the protection below allows; `false` after resolving a user issue | existing entries keep their review state in Tasks 1, 2 and 3, except an entry with at least one user issue resolved (§2d); Task 3's missing discipline roots, Task 1b's content repairs, splits, merges and new entries, and requested refactors follow the creation/body-change rules below |
+| wiki-lint | meaning-preserving spelling repair in Task 1; `false` for a new entry or a merge's surviving entry; `false` for a content repair that changes what a claim says or adds or rewrites explanatory body content; `false` after resolving a user issue | existing entries keep their review state in Tasks 1, 2 and 3, except an entry with at least one user issue resolved (§2d); Task 3's missing discipline roots, Task 1b's content repairs, splits, merges and new entries, and requested refactors follow the creation/body-change rules below |
 | the user | `true`, whenever they have read it | this is the point of the field |
 
 **The linter preserves the meaning of `read:`.** It may normalize recognizable
@@ -681,8 +681,12 @@ user issue and a merge's surviving entry are the exceptions (below).
 **The reset rule — body content only.** wiki-build's
 [`read:` reset](../skills/wiki-build/references/merge.md#the-read-reset) is the
 single body-change rule: an existing entry's known `read:` becomes `false`
-only when a pass adds or rewrites unread explanatory body content (a
-wiki-lint correction that changes a claim also resets it, below). This
+only when a pass adds or rewrites unread explanatory body content or a
+correction changes what a claim says. A wrong claim that is simply removed is
+a trim and keeps `read:`, and so do a correction confined to the description
+or card and a recommendation's condition or other branch restored from its
+source
+([*Hedges*](../skills/wiki-lint/references/source-backed-corrections.md#correct-and-publish)). This
 body-change reset is **narrower than the `updated:` bump**: every body-change
 reset implies an `updated:` bump, but not every bump implies a reset.
 `read:` records whether the user still needs to look at the note, and a new
@@ -700,58 +704,15 @@ those report-only cases lack. This reset alone does not advance `updated:`;
 the task that resolves the issue dates the entry (§2a). A blocked issue
 resets nothing, and a report-only run writes neither field.
 
-**A read entry is protected from additions.** In wiki-lint, a `read: true`
-entry takes these in any run:
-
-- **Corrections of wrong claims.** A correction that changes what a claim says
-  sets `read: false` and is named in the run report under its own heading. A
-  wrong claim that is simply removed is a trim: it keeps `read:` and is named
-  in the same list. So do a correction confined to the description or card and
-  a recommendation's condition or other branch restored from its source
-  ([*Hedges*](../skills/wiki-lint/references/source-backed-corrections.md#correct-and-publish)).
-- **Trims, card and description repairs, metadata, links and format fixes.**
-  They keep `read:`, as the body-change rule already says, and so does every
-  other change it lists as no reset, such as an added acronym or full-form
-  parenthetical or a contrast named and linked in an existing sentence.
-
-Added or rewritten explanation that corrects no wrong claim (a new definition, reason,
-step, example, equation, Person or Event date, contrast sentence, a clarity
-rewrite, or an explanation moved in from another entry) reaches a `read: true` entry **only**
-through its own `issues:` field or a request naming that entry. An issue on
-another entry reaches it only for the move or merge that issue's repair must
-make, and the move resets its `read:`. A
-request that selects entries by a class of defect, a tag, a source or the whole
-wiki does not name an entry, and neither does a log item. A merge or split whose refactor proof holds is not an addition
-under this rule: it runs in any run and follows its own `read:` rule. A repair
-held back under this rule **is not a defect**: it is not
-logged, not proposed and not re-reported, so a rerun converges. It does not
-block a neighbor's repair: an overlap trim of a copy still happens when the
-owner already has the explanation; when the owner is read and lacks it, both
-notes stay as they are unless an issue or request above allows the move. Entries whose `read:` is false, missing, null or
-unknown when the run first reads them (the first private copy holds that
-value) take every repair, and so does a merge's survivor; a reset this run
-writes for a correction, a move or a resolved issue lifts the protection only
-for later runs. wiki-build is outside this rule: a merge from a new
-source follows the body-change rule, and a named-entity or named-merge build is
-a request naming the entry. The localized Task 1 edits below follow their own
-paragraph. In Task 1, item 9's deletions, grammar and fragment repairs and list
-or heading forms count as trims and format fixes; any other rewording or moved
-prose, the opener's predicate included, is a clarity rewrite, held back there
-too. In Task 1b, an opener that fails
-[principle 1](../skills/wiki-build/references/writing.md#prose-principles)'s
-self-check yet states nothing false is one as well: that wrong sense is no wrong
-claim here. A description or card repair this rule allows states the prototype
-sense from the cited sources, and its mismatch with the held-back opener is no
-defect.
-
 **Localized Task 1 edits: the rule for them lives here.**
 wiki-lint may copy a missing Person/Event date into the required opener only
-when that exact date is already stated elsewhere in the entry, or, on an entry
-whose `read:` is not `true`, typeset a calculation the note's own prose already
-states under item 12 (the equation policy's home is
+when that exact date is already stated elsewhere in the entry, or typeset a
+calculation the note's own prose already states under item 12 (the equation policy's home is
 `wiki-build/references/equations.md`). Even then the linter writes neither
-`read:` nor `updated:`. It reports a date inserted into a `read: true` entry under
-*Notes for the user*, and the checkbox stays the user's to clear. A Task 1 card edit under
+`read:` nor `updated:`. For either case, an insertion into an entry whose
+`read:` is `true` is named under *Notes for the user*, since that `read: true`
+now predates the added date or equation, and the checkbox stays the user's to
+clear. A Task 1 card edit under
 wiki-lint's
 [card maintenance](../skills/wiki-lint/references/flashcards.md#improving-the-card),
 a complete rewrite of line 1 included, likewise writes neither field; an
@@ -1704,8 +1665,8 @@ that respelling creates and drops (§2a):
   the things wiki-build structurally cannot do, because it sees one source at
   a time and cannot know about entries that do not exist yet.
 - **Content repair across entries** (Task 1b) — correct, simplify and deepen
-  existing entries from their cited sources, within §2c's protection of read
-  entries, removing new information they do not give,
+  existing entries from their cited sources, removing new information they
+  do not give,
   consolidate an explanation duplicated across entries into its owner,
   resolve conflicting claims, align notation across siblings, merge synonym
   duplicates, split an entry that defines several durable subjects, retitle

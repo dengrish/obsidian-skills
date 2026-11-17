@@ -118,20 +118,6 @@ the issues of its skipped tasks and of entries outside its scope, resets nothing
 for them and reports each as out of scope. Report each issue under
 [User issues](references/backlogs.md#run-report).
 
-### Read entries
-
-A `read: true` entry is protected from additions:
-[CONVENTIONS §2c](../../shared/CONVENTIONS.md#2c-read--the-users-review-checkbox)
-owns what reaches it, and what it holds back is no defect. Task 1, Task 1b and
-the [final reread](#refresh-before-task-2) apply that rule before any repair, to
-every worklist; on an entry `read: true` in its first private copy the final
-reread repairs only the joins and regressions this run's own edits left, a
-correction §2c allows and what its own issue or a request naming it asks. Only a [user issue](#user-issues) or a request in chat
-can name an entry in §2c's sense; Task 1's handed-over findings and a
-note-content log item are subject to the rule, even when they name the entry. A
-request to fix the flagged issues opens a `read: true` entry only to what its
-issues ask; it names no entry in §2c's sense.
-
 ## Step 0 — Inventory the vault
 
 Verify the selected vault and image path first. An apply-capable run
@@ -202,8 +188,7 @@ Task 1's boundaries:
 - **Prose and metadata judgments:** use only the repair that numbered item
   authorizes. [Item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope)'s
   bounded editorial repairs fix phrasing, flow, and succinctness while
-  preserving claims, leaving clear prose alone, within
-  [Read entries](#read-entries). Task 1 never invents a
+  preserving claims, leaving clear prose alone. Task 1 never invents a
   discipline, rewrites a fact, selects source content, or redistributes
   material to close a finding.
 - **Cards:** read [flashcard maintenance](references/flashcards.md) before any
@@ -225,8 +210,8 @@ Task 1's boundaries:
 Task 1b applies the source-dependent builder rules Task 1 cannot: to the
 [user issues](#user-issues) it owns, first, then to Task 1's handed-over
 findings and the note-content log's Open items, sweeping each item's class
-across the run's scope within [Read entries](#read-entries); a user issue's
-change that no builder rule names stays within its entry. Read the
+across the run's scope; a user issue's change that no builder rule names
+stays within its entry. Read the
 [source-backed correction protocol](references/source-backed-corrections.md)
 before the first repair, and the [refactor protocol](references/refactors.md)
 before a consolidation, merge, split, retitle, alias removal, new entry or
@@ -391,10 +376,10 @@ a card edit or item-12 equation included, apart from an
 `updated:` and keeps `read:`. Task 1b and requested refactors follow
 wiki-build's [body-change rule](../wiki-build/references/merge.md#the-read-reset):
 `updated:` becomes today when the entry's content changes, and `read:`
-becomes `false` only when explanatory content is added or rewritten; a close
-call keeps `read:` and is reported. On a `read: true` entry,
-[Read entries](#read-entries) first decides whether the repair applies, and §2c
-settles its `read:` and [report line](references/backlogs.md#run-report). A rewritten inbound link or `parents:`
+becomes `false` only when explanatory content is added or rewritten or a
+correction changes what a claim says; a close call keeps `read:` and is
+reported. The [run report](references/backlogs.md#run-report) lists each
+entry whose `read:` went from `true` to `false`. A rewritten inbound link or `parents:`
 value alone changes neither. New entries get today's dates and `read: false`.
 A merge's survivor keeps its `created:` and gets today's `updated:` and
 `read: false` from any prior state.
