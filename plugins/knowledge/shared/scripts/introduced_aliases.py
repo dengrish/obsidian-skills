@@ -88,6 +88,16 @@ _PAREN_NAME_LIST_RE = re.compile(
     r"\*[^*\n]+\*)*",
     re.IGNORECASE)
 
+# Any other parenthetical lists names at ", or", at each comma of a list that
+# ends in ", or", and at ";", never at a bare "or", which a full form can
+# contain ("exclusive or gate"). As in an italic list, a ";" followed by an
+# indefinite article pairs a name with a description.
+_PLAIN_OR_SEP_RE = re.compile(r",\s*or\s+", re.IGNORECASE)
+
+# "IO for input/output" glosses an abbreviation in the title, not the subject.
+_WORD_GLOSS_RE = re.compile(r"(?P<word>[^\W_]+)\s+for\s+(?P<gloss>.+)",
+                            re.IGNORECASE)
+
 _DIRECT_SYNONYM_RE = re.compile(
     r"^\s*(?:(?:the|an?)\s+)?\*([^*\n]{2,60})\*", re.IGNORECASE)
 
@@ -102,11 +112,32 @@ def _fold_name(value):
     return portable_identity(value or "")
 
 
-def _parenthetical_names(raw):
+def _plain_names(plain):
+    """Split a parenthetical that is not an italic name list into names."""
+    segments = re.split(r";\s*", plain)
+    if any(re.match(r"an?\s", seg, re.IGNORECASE) for seg in segments[1:]):
+        return [plain]
+    parts = []
+    for segment in segments:
+        pieces = _PLAIN_OR_SEP_RE.split(segment)
+        if len(pieces) > 1:
+            pieces = [item for piece in pieces[:-1]
+                      for item in re.split(r",\s+", piece)] + pieces[-1:]
+        parts.extend(pieces)
+    return parts[:1] + [
+        re.sub(r"^(?:the|an?)\s+", "", _PAREN_LEADIN_RE.sub("", part),
+               flags=re.IGNORECASE) for part in parts[1:]]
+
+
+def _parenthetical_names(raw, subject=""):
     """Return the names a parenthetical gives, lead-ins and emphasis stripped.
 
     An article is part of the lead-in only after a synonym marker: "(also
-    called the *A*)" names *A*, while "(a *B*)" stays a description.
+    called the *A*)" names *A*, while "(a *B*)" stays a description. A
+    parenthetical that opens with a non-name marker names nothing. A part
+    "X for Y" whose X is an all-capitals word of ``subject``, the bolded
+    title, glosses that word: it names nothing, or names Y when X is the
+    whole title.
     """
     value = " ".join((raw or "").split())
     names = _PAREN_LEADIN_RE.sub("", value)
@@ -114,8 +145,25 @@ def _parenthetical_names(raw):
     if names != value:
         listed = re.sub(r"^(?:the|an?)\s+", "", names, flags=re.IGNORECASE)
     if _PAREN_NAME_LIST_RE.fullmatch(listed):
-        return [name.strip() for name in _PAREN_ITALIC_RE.findall(listed)]
-    return [names.replace("*", "").replace("_", "").strip()]
+        parts = [name.strip() for name in _PAREN_ITALIC_RE.findall(listed)]
+    else:
+        plain = listed.replace("*", "").replace("_", "").strip()
+        if (_NON_NAME_PAREN_RE.match(plain)
+                or _person_initials(plain, [subject])):
+            return []
+        parts = _plain_names(plain)
+    words = {word.casefold() for word in re.findall(r"[^\W_]+", subject)}
+    out = []
+    for part in parts:
+        part = part.strip()
+        gloss = _WORD_GLOSS_RE.fullmatch(part)
+        word = gloss.group("word") if gloss else ""
+        if word.isupper() and word.casefold() in words:
+            if word.casefold() == subject.strip().casefold():
+                out.append(gloss.group("gloss").strip())
+            continue
+        out.append(part)
+    return out
 
 
 def _opening_block(prose_lines):
@@ -226,7 +274,7 @@ def introduced_alias_candidates(prose_lines, subject_forms=None):
             wanted = set().union(*(_surface_keys(form) for form in subject_forms))
             if not (_surface_keys(visible) & wanted):
                 continue
-        for name in _parenthetical_names(match.group("paren")):
+        for name in _parenthetical_names(match.group("paren"), visible):
             add(name, "opener parenthetical")
     for match in _SYN_CUE_RE.finditer(prose):
         direct = _DIRECT_SYNONYM_RE.match(prose[match.end():])
@@ -422,6 +470,62 @@ def run_self_test(verbose=False):
          ["tumor necrosis factor; a cytokine"],
          ["tumor necrosis factor", "cachexin"],
          ["tumor necrosis factor", "cachexin"]])
+    add("a plain parenthetical splits into names at ', or' and ';' only",
+        [[name for name, _how in introduced_alias_candidates([value], [title])]
+         for title, value in (
+             ("Dueling DQN", "**Dueling DQN** (dueling deep Q-network, or "
+              "DDQN) is a variant."),
+             ("Dueling DQN", "**Dueling DQN** (dueling deep Q-network; "
+              "DDQN) is a variant."),
+             ("XOR gate", "An **XOR gate** (exclusive or gate) outputs "
+              "1."),
+             ("TNF", "**TNF** (tumor necrosis factor; a cytokine) "
+              "signals."))],
+        [["dueling deep Q-network", "DDQN"],
+         ["dueling deep Q-network", "DDQN"],
+         ["exclusive or gate"],
+         ["tumor necrosis factor; a cytokine"]])
+    add("a list ending in ', or' splits at each comma, and each listed name "
+        "loses its lead-in",
+        [[name for name, _how in introduced_alias_candidates([value], [title])]
+         for title, value in (
+             ("Dueling DQN", "**Dueling DQN** (dueling deep Q-network, "
+              "dueling network, or DDQN) is a variant."),
+             ("Dueling DQN", "**Dueling DQN** (also called the dueling deep "
+              "Q-network, or DDQN) is a variant."),
+             ("TNF", "**TNF** (tumor necrosis factor; also called "
+              "cachexin) signals."))],
+        [["dueling deep Q-network", "dueling network", "DDQN"],
+         ["dueling deep Q-network", "DDQN"],
+         ["tumor necrosis factor", "cachexin"]])
+    add("a parenthetical that opens with a non-name marker names no later "
+        "part either",
+        [introduced_alias_candidates([value], [title])
+         for title, value in (
+             ("Max Planck", "**Max Planck** (born 1858; German physicist) "
+              "was a physicist."),
+             ("Leonardo", "**Leonardo** (c. 1500; Italian painter) "
+              "painted."),
+             ("activation function", "An **activation function** (e.g., "
+              "ReLU, or sigmoid) maps inputs."),
+             ("Abduction", "**Abduction** (C. S. Peirce, 1903; American "
+              "philosopher) infers."))],
+        [[], [], [], []])
+    add("'X for Y' glosses an all-capitals title word and names nothing, or "
+        "names Y when X is the whole title",
+        [[name for name, _how in introduced_alias_candidates([value], [title])]
+         for title, value in (
+             ("Perceiver IO", "**Perceiver IO** (IO for input/output) "
+              "extends the Perceiver."),
+             ("Perceiver IO", "**Perceiver IO** (*IO for input/output*) "
+              "extends the Perceiver."),
+             ("IO", "**IO** (IO for input/output) moves data."),
+             ("SETI", "**SETI** (search for extraterrestrial intelligence) "
+              "listens."),
+             ("Pearson's chi-squared test", "**Pearson's chi-squared test** "
+              "(test for goodness of fit) compares counts."))],
+        [[], [], ["input/output"], ["search for extraterrestrial intelligence"],
+         ["test for goodness of fit"]])
     add("scientific abbreviation is retained",
         introduced_alias_candidates(
             ["***Escherichia coli*** (*E. coli*) is a bacterium."],
@@ -506,6 +610,27 @@ def run_self_test(verbose=False):
             ["A **ROC curve** (receiver plot) shows rates."],
             "ROC curve", [], "roc-curve"),
         [("receiver plot", "opener parenthetical", "receiver-plot")])
+    add("each name a plain parenthetical lists is checked against the "
+        "aliases; a title-word gloss gives none, and a full form stays a "
+        "candidate",
+        [missing_introduced_aliases([prose], title, aliases, slug)
+         for prose, title, aliases, slug in (
+             ("**Dueling DQN** (dueling deep Q-network, or DDQN) is a "
+              "variant.", "Dueling DQN", ["dueling-deep-q-network", "ddqn"],
+              "dueling-dqn"),
+             ("**Dueling DQN** (dueling deep Q-network; DDQN) is a variant.",
+              "Dueling DQN", ["dueling-deep-q-network", "ddqn"],
+              "dueling-dqn"),
+             ("**Dueling DQN** (dueling deep Q-network, or DDQN) is a "
+              "variant.", "Dueling DQN", ["dueling-deep-q-network"],
+              "dueling-dqn"),
+             ("**Perceiver IO** (IO for input/output) extends the "
+              "Perceiver.", "Perceiver IO", [], "perceiver-io"),
+             ("**MAD** (mean absolute deviation) measures spread.", "MAD",
+              [], "mad"))],
+        [[], [], [("DDQN", "opener parenthetical", "ddqn")], [],
+         [("mean absolute deviation", "opener parenthetical",
+           "mean-absolute-deviation")]])
     add("an opener expansion over 60 characters is a missing alias",
         missing_introduced_aliases(
             ["**HDBSCAN** (Hierarchical Density-Based Spatial Clustering of "

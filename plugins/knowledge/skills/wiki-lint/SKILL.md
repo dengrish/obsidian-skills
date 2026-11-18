@@ -32,7 +32,7 @@ Read each reference when its trigger fires, and not before.
 | [references/flashcards.md](references/flashcards.md) | before Task 1's card review, and before a card is added, changed or removed |
 | [references/source-backed-corrections.md](references/source-backed-corrections.md) | before Task 1b's first repair, or on a request to correct, simplify or deepen entries |
 | [references/refactors.md](references/refactors.md) | before a consolidation, merge, split, retitle, alias removal, missing entry, dangler hand-off or requested deletion |
-| [references/link-hygiene.md](references/link-hygiene.md) | before Task 2 adds, keeps or removes a link, resolves a dangler or rewrites the settled ledger |
+| [references/link-hygiene.md](references/link-hygiene.md) | before Task 2 adds, keeps or removes a link or resolves a dangler, and before the closeout rewrites the settled ledger |
 | [references/hierarchy.md](references/hierarchy.md) | before Task 3 derives a tree or writes `parents:` or MOCs |
 | [references/backlogs.md](references/backlogs.md) | closing the run, and before any log edit |
 
@@ -60,6 +60,24 @@ output and drafts rather than replaying them. A retitle whose destination
 already exists beside its old entry is
 [finished, not merged](references/refactors.md#finish-an-interrupted-retitle).
 Task 3 has its stricter connected-closure recovery rule.
+
+### Arrivals during a run
+
+Another session can publish entries while a run works. The run's inventory is
+Step 0's `inventory.slugs`, plus every slug the run created (a retitle's new
+slug included) or an earlier Task 3 comparison found, less those it merged
+away, retitled or deleted; an arrival is a slug outside it in a fresh scan's
+`inventory.slugs`, and stays one once found. Compare a fresh scan with the
+run's inventory once Task 3 has derived its plan, before it publishes
+anything, and at closeout, on the run's last scan, made after its last edit.
+An arrival found by Task 3's comparison goes through Tasks 1 and 1b, the
+[refresh](#refresh-before-task-2) and Task 2 in a default pass, with the
+neighbors its repairs touch, and skips them in a narrowed run; either way,
+Task 3 then re-derives, from a fresh scan, each authorized closure holding
+the arrival or an entry changed for it. One found at closeout is not
+covered and waits for the next run. The
+[run report](references/backlogs.md#run-report) names every arrival and the
+tasks that covered it.
 
 ### Explicit requests
 
@@ -131,7 +149,7 @@ missing or invalid explicit override is reported and blocks the checks and
 writes that depend on it.
 
 On an apply-capable run, record `Reviews/.wiki-lint-settled.json` with
-`snapshot` ([publishing](#publishing)) before the scan reads it; Task 2's
+`snapshot` ([publishing](#publishing)) before the scan reads it; the
 closeout rewrites it under
 [settled decisions](references/link-hygiene.md#settled-decisions).
 
@@ -145,7 +163,7 @@ python3 '<skill>/scripts/scan_vault.py' '<vault>/Wiki' \
 Each refresh writes the next numbered file (`wiki-scan-2.json`,
 `wiki-scan-3.json`, …); keep every file for later slices.
 
-**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run supplied one, and read the JSON in slices. Its keys feed the tasks ([output contract](references/scanner.md#output-contract)): `inventory`, `discipline_tags` and `untagged_entries` set scope; `user_issues` comes first; `problems` drives QC and links; `rename_candidates`, `collision_candidates` and `item5` feed retitles and merges; `backfill_candidates`, `hub_footer`, `late_links` and `settled` feed Task 2; `card_rivals` feeds item 19; `neighbors` and `overlap_candidates` feed item 9's coherence review; `hierarchy_diagnostic` feeds Task 3; `image_folder_findings` and `spaced_repetition` are report-only.
+**The scanner reads and reports; it never fixes the vault.** Save its initial `run_timestamp` for backlog updates unless a coordinating run supplied one, and read the JSON in slices. Its keys feed the tasks ([output contract](references/scanner.md#output-contract)): `inventory`, `discipline_tags` and `untagged_entries` set scope; `user_issues` comes first; `problems` drives QC and links; `rename_candidates`, `collision_candidates` and `item5` feed retitles and merges; `backfill_candidates`, `hub_footer`, `late_links` and `settled` feed Task 2; `card_rivals` feeds item 19; `neighbors`, `overlap_candidates` and `duplicate_sentences` feed item 9's coherence review; `hierarchy_diagnostic` feeds Task 3; `image_folder_findings` and `spaced_repetition` are report-only.
 
 No key's name means “fix in place”: unreadable files, ambiguous identity, user state and valid user configuration may appear in `problems` without authorizing an edit, and `hierarchy_diagnostic` authorizes no write (a fresh builder note normally has a placement gap until Task 3 runs). A missing, failed, malformed or incomplete scan is not a clean inventory: record the failure and stop every dependent task or write, unless a referenced procedure defines an equivalent complete scan.
 
@@ -279,7 +297,7 @@ consulted disagree or none is reachable, and the item names them.
 
 ## Refresh before Task 2
 
-Once Task 1 and any Task 1b repairs are done, run the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against its first private copy, reviewing each `9-cut-join-candidate` that `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' --baseline '<copy>' '<entry>'` raises; a fix this final reread makes gets only its passage reread. When the [fresh reader](../wiki-build/references/review.md#fresh-reader) applies, it runs now, and Task 1b repairs what its triage keeps, rereading each repaired passage, and the whole of an entry the final reread did not cover, before the refresh. Whenever Task 1 or Task 1b changed entries, refresh the scan so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row absent from `wiki-scan-1.json` is this run's own copy, unless it pairs an entry with its own retitle destination; Task 1b consolidates it under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that changes an entry, rereads that whole entry against its copy and refreshes the scan once more. Use the refreshed worklists, but keep Step 0's `run_timestamp` (or the coordinating run's) and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
+Once Task 1 and any Task 1b repairs are done, run the builder's [editorial reread](../wiki-build/references/writing.md#editorial-reread) once on the whole of every entry the run changed, against its first private copy, reviewing each `9-cut-join-candidate` that `python3 '<plugin>/skills/wiki-build/scripts/lint_entry.py' --baseline '<copy>' '<entry>'` raises; a fix this final reread makes gets only its passage reread. When the [fresh reader](../wiki-build/references/review.md#fresh-reader) applies, it runs now, and Task 1b repairs what its triage keeps, rereading each repaired passage, and the whole of an entry the final reread did not cover, before the refresh. Whenever Task 1 or Task 1b changed entries, refresh the scan so Task 2 links new entries and Task 3 places them. An `item9/duplicate-sentence` row that names only slugs in the run's [inventory](#arrivals-during-a-run) is this run's own copy when `wiki-scan-1.json` lacks it or, for a row naming an arrival, the comparison scan that found the arrival lacks it; a row pairing an entry with its own retitle destination is not. Nor is a pair one of those scans listed, or the ledger settled, under a retitled entry's old slug: Task 1b judges it again. Task 1b consolidates an own copy under [item 9](references/qc-items.md#9-body-structure-coherence-flow-and-scope) and, when that or a re-judgment changes an entry, rereads that whole entry against its copy and refreshes the scan once more. Use the refreshed worklists, but keep Step 0's `run_timestamp` (or the coordinating run's) and every retagged entry's prior-group evidence, a retag from or to misc included, which Task 3's closure needs.
 
 ## Task 2 — Link hygiene
 
@@ -301,9 +319,9 @@ Discipline roots have empty parents; every other entry points to its nearest
 linked Wiki ancestor, never a MOC. Create missing roots only through the narrow
 [root prerequisite](references/hierarchy.md#establish-discipline-roots).
 An `unreadable` MOC state or unsafe/ambiguous path ownership blocks its
-connected closure. [Publish](#publishing) every file under the safe-write
-guard and re-scan the final bytes against the guide's
-[completion checks](references/hierarchy.md#read-diagnostics-and-verify-completion).
+connected closure. After the [arrival check](#arrivals-during-a-run),
+[publish](#publishing) every file under the safe-write guard and re-scan the
+final bytes against the guide's [completion checks](references/hierarchy.md#read-diagnostics-and-verify-completion).
 An interrupted Task 3 requires rereading and rederiving the same connected
 closure before retrying; per-file guards do not make the group transactional.
 
@@ -311,7 +329,7 @@ closure before retrying; per-file guards do not make the group transactional.
 
 Read [reports and backlogs](references/backlogs.md) when closing the run and **before any log edit**. End with one consolidated report in the conversation, never a dated review note, with the sections its [run report](references/backlogs.md#run-report) lists; keep “proposed,” “applied,” and “not validated” distinct.
 
-At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Reviews/wiki-lint-suggestions.md`, the note-content log `Reviews/wiki-notes-suggestions.md`, and the logs of producers whose outputs this run consumed. A link Task 2 left for a missing root the run did not create is dropped now, under the [dangler protocol](references/link-hygiene.md#dangling-links-target-missing). An apply-capable run that performed Task 2 also rewrites `Reviews/.wiki-lint-settled.json` under [settled decisions](references/link-hygiene.md#settled-decisions). Note-content items move from Open to Fixed, or stay open with a concrete blocker, only under the [note-content closeout](references/backlogs.md#proposing-note-improvements).
+At closeout, apply the [closeout gate](../../shared/RUNTIME.md#close-out) to `Reviews/wiki-lint-suggestions.md`, the note-content log `Reviews/wiki-notes-suggestions.md`, and the logs of producers whose outputs this run consumed. A link Task 2 left for a missing root the run did not create is dropped now, under the [dangler protocol](references/link-hygiene.md#dangling-links-target-missing). An apply-capable run that performed Task 1b or Task 2 also rewrites `Reviews/.wiki-lint-settled.json` under [settled decisions](references/link-hygiene.md#settled-decisions). Note-content items move from Open to Fixed, or stay open with a concrete blocker, only under the [note-content closeout](references/backlogs.md#proposing-note-improvements).
 
 ## Rules every task applies
 
@@ -393,6 +411,6 @@ Tasks 1, 2 and 3 advance it only for an extra-card removal, never for blanking
 ### Files
 
 - Scan `<vault>/Wiki`, **not the vault root**, with `--images` on every apply-capable run ([scanner CLI](references/scanner.md#cli)). Apply user folder overrides per run without editing installed skills. Image-folder findings never authorize moving, renaming, or deleting anything.
-- wiki-lint owns `<vault>/Reviews/.wiki-lint-settled.json`, private run state recording Task 2's settled backfill rejections, kept hub items and late links left in place, not a suggestion log ([settled decisions](references/link-hygiene.md#settled-decisions)).
+- wiki-lint owns `<vault>/Reviews/.wiki-lint-settled.json`, private run state recording Task 2's settled backfill rejections, kept hub items and late links left in place, and the duplicate-sentence pairs Task 1b judged conforming, not a suggestion log ([settled decisions](references/link-hygiene.md#settled-decisions)).
 - Task 3 owns the generated MOCs `<vault>/MOCs/<discipline-slug>-moc.md` and `MOCs/misc-moc.md`, outside `Wiki/`; unknown `MOCs/` files, legacy vault-root MOCs, and suggestion logs stay outside that ownership.
 - Task 1b reads cited sources, the note-content log and standard references under its [evidence rule](#task-1b--content-repair). It writes entries in `Wiki/`, inbound links in `MOCs/` and, for a refactor, the inbound links its [protocol](references/refactors.md#establish-evidence-and-complete-scope) allows in other vault notes.

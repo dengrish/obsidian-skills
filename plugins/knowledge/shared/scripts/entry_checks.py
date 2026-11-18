@@ -19,6 +19,7 @@ frontmatter. Stdlib only (plus sibling shared helpers), Python 3.10+.
 """
 
 import argparse
+import itertools
 import os
 import re
 import sys
@@ -1616,6 +1617,37 @@ def _interior_plural(key_text, short):
         if i and len(word) > len(ending) and word.endswith(ending))
 
 
+#: An ``&`` and the small and fullwidth ampersands, which NFKD maps to it.
+_AMPERSAND_RE = re.compile("[&\ufe60\uff06]")
+#: The most ``&`` whose readings mix; a name with more reads every ``&`` the
+#: same way, so its readings stay few.
+_MAX_MIXED_AMPERSANDS = 4
+
+
+def _ampersand_readings(value):
+    """``value`` with each ``&`` either kept, which its spelling key and slug
+    drop, or read as ``and``, in every combination."""
+    value = value or ""
+    signs = _AMPERSAND_RE.findall(value)
+    texts = _AMPERSAND_RE.split(value)
+    choices = (itertools.product(*[(sign, " and ") for sign in signs])
+               if len(signs) <= _MAX_MIXED_AMPERSANDS
+               else (signs, [" and "] * len(signs)))
+    return tuple(texts[0] + "".join(join + text
+                                    for join, text in zip(joins, texts[1:]))
+                 for joins in choices)
+
+
+def _variant_reading(name, other):
+    """``is_spelling_variant`` for one reading of each name."""
+    key, other_key = _spelling_key(name), _spelling_key(other)
+    short, long_ = sorted((key, other_key), key=len)
+    if long_ == short or any(long_ == short + ending
+                             for ending in _VARIANT_ENDINGS):
+        return True
+    return _interior_plural(name if key == long_ else other, short)
+
+
 def is_spelling_variant(name, other):
     """Item 19: whether ``name`` and ``other`` are spelling variants.
 
@@ -1624,20 +1656,21 @@ def is_spelling_variant(name, other):
     one key is the other plus ``s``, ``es`` or ``ness``: ``scatterplot`` and
     ``Scatter plot``, ``Lambda Rank`` and ``LambdaRank``, ``NP-complete`` and
     ``NP-completeness``. One word's plural inside the name counts too:
-    ``rational-roots-theorem`` and ``Rational root theorem``.
-    ``cell respiration`` and ``Cellular respiration``
-    are not, nor are ``randomized search`` and ``Random search``. A name
-    without a letter or digit is no one's variant. lint_entry, the scanner
-    and review_tree reach this one test through the line-3 helpers below.
+    ``rational-roots-theorem`` and ``Rational root theorem``. Each ``&``
+    also reads as ``and``: ``wide-and-deep-neural-network``, like the slug
+    ``wide-deep-neural-network``, is a variant of ``Wide & Deep neural
+    network``. Only an ``&`` makes ``and`` optional, so
+    ``research-development`` and ``Research and development`` are not
+    variants, nor are ``cell respiration`` and ``Cellular respiration``, or
+    ``randomized search`` and ``Random search``. A name without a letter or
+    digit is no one's variant. lint_entry, the scanner and review_tree reach
+    this one test through the line-3 helpers below.
     """
-    key, other_key = _spelling_key(name), _spelling_key(other)
-    if not key or not other_key:
+    if not _spelling_key(name) or not _spelling_key(other):
         return False
-    short, long_ = sorted((key, other_key), key=len)
-    if long_ == short or any(long_ == short + ending
-                             for ending in _VARIANT_ENDINGS):
-        return True
-    return _interior_plural(name if key == long_ else other, short)
+    return any(_variant_reading(text, other_text)
+               for text in _ampersand_readings(name)
+               for other_text in _ampersand_readings(other))
 
 
 def line3_aliases(term, aliases=()):
@@ -1649,18 +1682,22 @@ def line3_aliases(term, aliases=()):
     named (``is_spelling_variant``); every other alias is named. The slug
     form matters for a letter the slug transliterates rather than
     decomposes: ``betalactamase`` is a variant of ``β-lactamase`` through
-    its slug ``beta-lactamase``. ``aliases`` are distinct aliases, as
-    ``flashcard_primary_answer`` returns them. A variant stays a valid alias
-    and part of the answer line 1 must not leak; only line 3 omits it.
+    its slug ``beta-lactamase``. The slug of each ``&`` reading counts too,
+    so ``beta-and-gamma-decay`` is a variant of ``β & γ decay``.
+    ``aliases`` are distinct aliases, as ``flashcard_primary_answer``
+    returns them. A variant stays a valid alias and part of the answer line
+    1 must not leak; only line 3 omits it.
     """
-    try:
-        term_slug = slug_stem(term or "")
-    except SlugError:
-        term_slug = ""
+    term_slugs = []
+    for reading in _ampersand_readings(term):
+        try:
+            term_slugs.append(slug_stem(reading))
+        except SlugError:
+            pass
     named, variants = [], []
     for alias in aliases or ():
         if any(is_spelling_variant(alias, other)
-               for other in [term or "", term_slug] + named):
+               for other in [term or ""] + term_slugs + named):
             variants.append(alias)
         else:
             named.append(alias)
@@ -3868,6 +3905,27 @@ def run_self_test(verbose=False):
               ("archaeon", "Archaea"), ("lloyds-algorithm", "Lloyd algorithm"),
               ("c-plus-plus", "C"), ("+", "+"), ("", ""))],
           [False] * 8)
+    check("an & reads as and or drops as the slug drops it; only an & makes "
+          "and optional",
+          [is_spelling_variant(name, other) for name, other in (
+              ("wide-and-deep-neural-network", "Wide & Deep neural network"),
+              ("wide-deep-neural-network", "Wide & Deep neural network"),
+              ("Wide & Deep neural networks", "wide-and-deep-neural-network"),
+              ("r-and-d", "R&D"), ("Q & A", "q&a"),
+              ("A & B & C", "a-and-b-c"), ("A & B & C", "a-b-and-c"),
+              ("Wide \uff06 Deep", "wide-and-deep"),
+              ("Wide \ufe60 Deep", "wide-and-deep"),
+              ("research-development", "Research and development"),
+              ("Research development", "Research and development"),
+              ("wide-and-deep-network", "Wide & Deep neural network"),
+              ("deep-and-wide-neural-network", "Wide & Deep neural network"),
+              ("A & B & C", "a-or-b-and-c"), ("&", "and"))],
+          [True] * 9 + [False] * 6)
+    letters = "abcdefghijklmnopqrstuvwxyz"
+    check("past four &, a name reads every & the same way",
+          [is_spelling_variant("&".join(letters), other) for other in (
+              letters, "and".join(letters), "aand" + letters[1:])],
+          [True, True, False])
     check("line 3 names each alias that is no spelling variant of the term, "
           "its slug or an alias it already names, in order",
           [line3_aliases(term, aliases) for term, aliases in (
@@ -3881,14 +3939,20 @@ def run_self_test(verbose=False):
               ("Recall", ("true-positive-rate", "tpr")),
               ("Lévy flight", ("levy-flights", "levy-walk")),
               ("β-lactamase", ("betalactamase",)),
-              ("Ørsted", ("orsteds",)))],
+              ("Ørsted", ("orsteds",)),
+              ("Wide & Deep neural network",
+               ("wide-and-deep-neural-network", "wide-deep-network")),
+              ("β & γ decay", ("beta-and-gamma-decay",)),
+              ("Ørsted & Co", ("orsted-and-co",)))],
           [((), ("scatterplot",)), ((), ("lambda-rank",)),
            (("nph",), ("np-hard",)),
            (("multilayer-perceptron", "mlp"), ("multi-layer-perceptron",)),
            (("svm",), ("svms",)), (("cell-respiration",), ()),
            (("true-positive-rate", "tpr"), ()),
            (("levy-walk",), ("levy-flights",)),
-           ((), ("betalactamase",)), ((), ("orsteds",))])
+           ((), ("betalactamase",)), ((), ("orsteds",)),
+           (("wide-deep-network",), ("wide-and-deep-neural-network",)),
+           ((), ("beta-and-gamma-decay",)), ((), ("orsted-and-co",))])
     check("a line 3 that leaves out every spelling variant meets the "
           "contract; a close name that is no variant stays on it",
           [flashcard_line3_fault(line, title, aliases)
@@ -3908,8 +3972,10 @@ def run_self_test(verbose=False):
                ("Random search (randomized search)", "Random search",
                 ["randomized-search"]),
                ("Data snooping bias (data snooping)", "Data snooping bias",
-                ["data-snooping"]))],
-          [None] * 10)
+                ["data-snooping"]),
+               ("Wide & Deep neural network", "Wide & Deep neural network",
+                ["wide-and-deep-neural-network"]))],
+          [None] * 11)
     alone = "; line 3 leaves out a spelling variant, so it is the term alone: "
     except_variant = ("; line 3 names every alias except a spelling variant "
                       "once, in `aliases:` order and without markup: ")
@@ -3934,7 +4000,10 @@ def run_self_test(verbose=False):
                 ["levy-flights"]),
                ("Scatter plot (dot plot)", "Scatter plot", ["scatterplot"]),
                ("Cellular respiration", "Cellular respiration",
-                ["cell-respiration"]))],
+                ["cell-respiration"]),
+               ("Wide & Deep neural network (wide and deep neural network)",
+                "Wide & Deep neural network",
+                ["wide-and-deep-neural-network"]))],
           ['the parenthetical names the spelling variant "scatterplot"'
            + alone + '"Scatter plot"',
            'the parenthetical names the spelling variant "Lambda Rank"'
@@ -3950,7 +4019,9 @@ def run_self_test(verbose=False):
            + '"Scatter plot"',
            "the aliases are missing; line 3 names every alias once, in "
            '`aliases:` order and without markup: "Cellular respiration '
-           '(cell respiration)"'])
+           '(cell respiration)"',
+           'the parenthetical names the spelling variant "wide and deep '
+           'neural network"' + alone + '"Wide & Deep neural network"'])
     check("the answer text leaves out every spelling variant",
           [flashcard_answer_text(term, aliases) for term, aliases in (
               ("Scatter plot", ("scatterplot",)),

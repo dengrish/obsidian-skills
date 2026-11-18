@@ -210,14 +210,20 @@ Implemented checks (Quality Checklist item -> finding ``item`` slug):
                               code span (a pure-math title's opener excepted)
   17  17-alias-completeness   an alternative name the body introduces for the
                               entry's own subject -- an italicized also-called
-                              synonym, or the opener's acronym/expansion
-                              parenthetical -- whose slug is missing from
-                              aliases: (warning, review-only: the same-entity
-                              test and the alias rule's carve-outs stay with
-                              the executing agent, and a recorded decision
-                              that the name stays out resolves it; a
-                              single-word candidate of a qualified or
-                              common-noun subject carries the scanner's hint)
+                              synonym, or a name the opener's acronym/expansion
+                              parenthetical lists (one that is not an italic
+                              list splits at ", or", the commas of a list
+                              ending in ", or", and ";", none when a ";" is
+                              followed by "a" or "an"; a gloss of an
+                              all-capitals word of a longer title, "IO for
+                              input/output", names nothing) -- whose
+                              slug is missing from aliases: (warning,
+                              review-only: the same-entity test and the alias
+                              rule's carve-outs stay with the executing agent,
+                              and a recorded decision that the name stays out
+                              resolves it; a single-word candidate of a
+                              qualified or common-noun subject carries the
+                              scanner's hint)
   19  19-flashcards          `## Flashcards` present on every entry except a
                               discipline root (`<discipline>.md` whose sole
                               tag names it), preceded by a `---` separator,
@@ -5241,6 +5247,19 @@ def run_self_test():
                "??\nCellular respiration (cell respiration)\n",
                "??\nCellular respiration\n"), "cellular-respiration.md")],
           [[], [], ["19-flashcards"]])
+    wide_card = retitled(
+        "Wide & Deep neural network", "wide-and-deep-neural-network",
+        "A Wide & Deep neural network sends its inputs to the output layer "
+        "two ways.",
+        "A **Wide & Deep neural network** sends its inputs to the output "
+        "layer two ways.", "Wide & Deep neural network")
+    check("an alias that spells an & as and stays off line 3",
+          [items(text, "wide-deep-neural-network.md") for text in (
+              wide_card, wide_card.replace(
+                  "??\nWide & Deep neural network\n",
+                  "??\nWide & Deep neural network (wide and deep neural "
+                  "network)\n"))],
+          [[], ["19-flashcards"]])
     check("a same-line schedule and block ID after the answer are no part "
           "of it",
           [items(mutate("??\nROC curve (AUROC)\n",

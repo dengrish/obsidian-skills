@@ -72,7 +72,8 @@ incompletely scanned, never as empty or fully processed. A missing, crashing or 
 dependent writes; never replace the parser or guarded completion with a
 text-search checkbox edit.
 
-**Order.** Take pending items one at a time, in file or request order, through
+**Order.** Take pending items one at a time, in file or request order, each
+group's owners first ([step 4](#4-draft-and-review-the-new-entry)), through
 steps 2–5 and their step-6 completion; report and close out at the end. An
 entry published earlier in this run counts as existing for later items. When
 the builder's atomicity test splits a request into distinct topics, such as
@@ -166,13 +167,20 @@ matches that request's `absent` record.
    apply. A requested discipline (`Wiki/<discipline>.md`) takes the builder's
    [root form](../wiki-build/references/writing.md#tags).
 2. **Read the neighbors.** Before drafting, read the entries that link to or
-   mention the topic, and its nearest siblings: the draft links an
-   explanation, argument or example one of them owns instead of repeating it.
+   mention the topic, and its nearest siblings, this run's own entries
+   included (in a preview, its drafts): the draft links an explanation, argument or
+   example one of them owns instead of repeating it.
    It uses the symbols of the builder's
    [notation table](../wiki-build/references/equations.md#3-notation--one-symbol-per-role-vault-wide),
    and outside the table the symbols they state; a sibling that departs from
    the table is never a model to copy and becomes a note-content proposal for
-   closeout.
+   closeout. When several requests (a group) share an explanation, argument,
+   worked example or property, name each shared one's owner under the
+   builder's
+   [owner rule](../wiki-build/references/review.md#overlapownership-audit-this-runs-entries-and-their-relevant-neighbors)
+   before taking the first of them; the other members keep only what that
+   rule leaves a related note and link the owner. When an apply run leaves an
+   owner unpublished, the next member of its group owns what it owned.
 3. **Draft privately.** Draft complete bytes privately under the canonical
    title's reported slug, with today's creation/update dates, `read: false`
    and then `issues: ""`.
@@ -198,8 +206,9 @@ matches that request's `absent` record.
    and the builder's
    [wikilink rules](../wiki-build/references/writing.md#3-wikilinks-and-naming):
    only to existing entries, including ones this run already published; a
-   requested entry published later stays plain text. Never backfill existing notes or create
-   prerequisite topics: a prerequisite with no entry is glossed in one clause
+   requested entry published later stays plain text, apart from the owner
+   link a [trim](#6-complete-and-report) adds. Never backfill existing notes
+   or create prerequisite topics: a prerequisite with no entry is glossed in one clause
    on first use. It is a missing-entry candidate for closeout when it deserves
    its own entry under the builder's
    [atomicity test](../wiki-build/references/writing.md#body-structure), or
@@ -224,8 +233,13 @@ matches that request's `absent` record.
    overlap or conflict becomes a note-content proposal for closeout (a copy
    the new entry should own, or a neighbor claim the research contradicts),
    and step 7's report-only findings on existing entries in the overlay block
-   neither publication nor completion. Resolve ownership uncertainty and every
-   other finding affecting the new entry before publishing.
+   neither publication nor completion. The overlap audit's current-run
+   entries are every entry this run published or is drafting (in a preview,
+   its drafts), and it reads each other member of the draft's group in full;
+   an entry this run published that copies what this draft owns is trimmed
+   [after the last item](#6-complete-and-report) instead of proposed. Resolve
+   ownership uncertainty and every other finding affecting the new entry
+   before publishing.
 
 ## 5. Revalidate, publish and verify
 
@@ -298,16 +312,21 @@ changes only the completion marker; it does **not** adjudicate identity or
 entry quality, so decide those first. Check off a multi-topic line only when
 every part was created or exists (pass one as `--entry` and name the others
 in the report). After each successful completion, rescan to the next numbered
-snapshot and take from it the next pending item not yet attempted. After a
-stale-snapshot rejection, rescan and match the still-pending request; never
+snapshot and take from it the next pending item not yet attempted, in the
+[order](#1-read-the-requests) step 1 sets. After a stale-snapshot rejection,
+rescan and match the still-pending request; never
 replay an old ID against changed queue text. If an entry was published but
 checkpointing failed, retain it and report that state.
 
-After the last item, a run that created about 10 entries or more runs the
-builder's [fresh reader](../wiki-build/references/review.md#fresh-reader) on
-them. Each repair records the published entry, re-reads it and drafts from that
-read, then goes through step 4's sub-steps 4–6, without their audits, and step 5
-with the next numbered files; its record holds the published entry rather than
+After the last item, trim each copy that step 4's review sends here to what
+the owner rule leaves a related note, linked to the owner, once the owner is
+published; a copy holding anything the owner lacks or contradicts becomes a
+note-content proposal instead. Then a run that created about 10 entries or
+more runs the builder's
+[fresh reader](../wiki-build/references/review.md#fresh-reader) on them. Each
+repair, a trim included, records the published entry, re-reads it and drafts
+from that read, then goes through step 4's sub-steps 4–6, without their
+audits, and step 5 with the next numbered files; its record holds the published entry rather than
 `absent`, the probes' match on that entry is no new owner, and its completion is
 not repeated. A repair step 5 stops stays unpublished and goes in the report; the
 entry and its check-off stand.
@@ -331,8 +350,9 @@ about it. Do not describe a preview as applied. Report:
   published without its checkpoint;
 - the scan's `report_only` lines with their line and reason, and a queue
   scanned incompletely;
-- plain-text mentions of later entries, missing-entry candidates, the fresh
-  reader as its [record](../wiki-build/references/review.md#fresh-reader) says,
+- plain-text mentions of later entries, each trim with the owner it links,
+  missing-entry candidates, the fresh reader as its
+  [record](../wiki-build/references/review.md#fresh-reader) says,
   or one line saying the host could not start a fresh agent, and validation
   with review-only
   [lint dispositions](../wiki-build/references/review.md#lint-dispositions).

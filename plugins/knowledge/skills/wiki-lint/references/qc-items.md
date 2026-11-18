@@ -421,7 +421,9 @@ across entries or held outside its owner, and a neighbor's formula that this ent
 or defining relation is not built from
 ([atomicity test](../../wiki-build/references/writing.md#body-structure)).
 The short reason or key value [item 14](#14-self-containment) keeps is no
-duplicate. Every such trim follows [Dates](../SKILL.md#dates).
+duplicate. Every such trim follows [Dates](../SKILL.md#dates). An
+`item9/duplicate-sentence` pair Task 1b judges conforming is
+[settled](link-hygiene.md#settled-decisions).
 
 Task 1b repairs a statement about this entry's own subject that the entry
 leaves unexplained, such as an equation without its meaning; a rule,

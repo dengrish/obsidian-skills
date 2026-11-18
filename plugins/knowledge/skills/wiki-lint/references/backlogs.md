@@ -15,7 +15,7 @@ End every run with a single consolidated response in the conversation, not a dat
   record, grouped by kind (nested item, staging residue, unreadable/unusable
   path, or portable-name collision). These observations never authorize moving,
   renaming, or deleting media.
-- **Autonomous agent-review coverage** — `agent-reviewed/readable in-scope entries`, plus every skipped or unreadable file by name and reason. Scanner execution is counted separately from the agent's semantic pass.
+- **Autonomous agent-review coverage** — `agent-reviewed/readable in-scope entries`, plus every skipped or unreadable file by name and reason, and every [arrival](../SKILL.md#arrivals-during-a-run) with the tasks that covered it, or as not covered. Scanner execution is counted separately from the agent's semantic pass.
 - **User issues** — for each entry in `user_issues` and each of its issues ([User issues](../SKILL.md#user-issues)): the change made, or the evidence that the reported problem does not hold, or the blocker that keeps it in the field, or that it is out of scope; then the entry's `issues:` result (blanked, or the unresolved text kept) and its `read:` result. A report-only run gives what it would do.
 - **Task 1 — tags fixed / unresolved:** tag *format* fixes applied (added `#`/quotes, de-duplicated, abbreviation expanded to an enum slug, wikilink-form converted to a `#`-tag). Include genuine blank/empty tags assigned a specific home or `#misc`, and misc/specific conflicts resolved. Also list each re-homed entry, and each unresolved home with its competing candidates.
 - **Task 1 — QC fixes**, grouped by checklist item: per fixed entry, the item and a one-line description of the fix, including every claim-preserving local prose repair and its kind. Under item 19, give each card edit's old and new line 1 and each line-3 change's old and new line 3, and quote each [removed card](flashcards.md#card-set) verbatim, attachments included, with each link to its block ID that the removal rewrote. Duplicate spellings inside one alias list remain ordinary format fixes. Also report **`Software` reclassifications** (item 6, corrected artifact type plus the selective API-scope result) and any **ambiguous code-content/type calls left unchanged and reported with the missing evidence**. An `item17/alias-candidate` row its gates reject is given as a count, itemized only on an entry this run changed.
@@ -28,6 +28,11 @@ End every run with a single consolidated response in the conversation, not a dat
     its page, or the URL read with its date and section, or that it is a 5(h) clarification; any standard
     reference read or derivation that settled a conflict; and the date and
     `read:` decision.
+  - **Duplicate sentences kept:** each `item9/duplicate-sentence` pair
+    judged conforming, which the closeout
+    [settles](link-hygiene.md#settled-decisions), itemized only when this
+    run changed one of its entries, and otherwise counted, plus the count the
+    ledger suppressed.
   - **Merges and splits applied**, as `old-a + old-b → survivor` or
     `old → retained + new`, with:
     - the paths, and the evidence for the identity or boundary (definitions

@@ -338,4 +338,8 @@ full-vault pass they hold for all active disciplines, misc, and requested entrie
 inactive discipline MOCs, legacy MOCs, and skipped closures remain explicitly
 reported and preserved, not described as repaired.
 Any remaining active in-closure finding requires re-deriving that same closure
-before declaring completion.
+before declaring completion. An
+[arrival](../SKILL.md#arrivals-during-a-run) found only after Task 3's
+pre-publish comparison, and the findings it causes, such as its placement gap
+and its MOC's `missing-entry` finding, are exempt from these conditions and
+that re-derivation.
