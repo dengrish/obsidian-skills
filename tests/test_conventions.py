@@ -6145,7 +6145,12 @@ SELFTEST_MIN_CASES = {
     # 2026-10-11 (knowledge 1.32.0): annual, ongoing and a year exclude only
     # in a date shape, and a repeated subject keeps an en dash or a
     # non-ASCII letter.
-    "shared/scripts/introduced_aliases.py": 46,
+    # 2026-11-18 (knowledge 1.41.0): an opener parenthetical that is no
+    # italic list splits at ", or", an Oxford list's commas and ";", its
+    # parts lose their lead-ins, a non-name marker or person's initials drop
+    # it whole, and an all-capitals title word's "X for Y" gloss names
+    # nothing.
+    "shared/scripts/introduced_aliases.py": 51,
     # 2026-10-07 (knowledge 1.23.0): a table indented inside a list item
     # ends at a block that starts at the item's text column.
     "shared/scripts/markdown_tables.py": 44,
@@ -6699,7 +6704,11 @@ SELFTEST_MIN_CASES = {
     # caption, table, footer and card exclusions.
     # 2026-10-31 (knowledge 1.38.0): a name's two possessive spellings in the
     # vault are a plural collision candidate.
-    "skills/wiki-lint/scripts/scan_vault.py": 838,
+    # 2026-11-18 (knowledge 1.41.0): a settled duplicate-sentence pair is
+    # suppressed until its sentence changes, and a third entry sharing it
+    # is listed as the only new peer; stale, outdated, malformed and
+    # shared-basename records.
+    "skills/wiki-lint/scripts/scan_vault.py": 859,
 }
 
 
@@ -7967,8 +7976,11 @@ def check_moc_placement(rep, conv):
 #: bar item and as a late first mention, only tightens the bar: a settled rejection stays rejected, and a kept hub item
 #: or a late link left in place never rested on that trigger, so revision 2
 #: stands and no ledger is re-judged.
+#: 2026-11-18 (knowledge 1.41.0): the digest also takes in qc-items.md's
+#: **Editorial and ownership review.** paragraph, which judges a settled
+#: duplicate-sentence pair; no rule changed, so revision 2 stands.
 CLOSENESS_BAR_TEXT = {
-    2: "4633ab77d8192b0facc487c08b3a078a75e6814f",
+    2: "e0b4451cc805c63b73b785087c351d8eedf58028",
 }
 
 
@@ -8054,34 +8066,44 @@ def check_link_rules(rep, conv):
     # left 82 rejections settled under the old one).
     # 2026-10-14 (knowledge 1.35.1): a late link left in place is settled
     # under the same bar, so the digest covers Late first links too.
+    # 2026-11-18 (knowledge 1.41.0): a conforming duplicate-sentence pair is
+    # settled under item 9's ownership review, so the digest covers that
+    # paragraph too.
     lh = os.path.join(SKILLS_DIR, "wiki-lint", "references", "link-hygiene.md")
+    qc = os.path.join(SKILLS_DIR, "wiki-lint", "references", "qc-items.md")
     bar_text = re.search(r"^#### The closeness bar\n(.*?)(?=^#{1,4} )",
                          read(lh), re.M | re.S)
     late_text = re.search(r"^\*\*Late first links\.\*\*.*?(?=\n[ \t]*\n|\Z)",
                           read(lh), re.M | re.S)
+    own_text = re.search(
+        r"^\*\*Editorial and ownership review\.\*\*.*?(?=\n[ \t]*\n|\Z)",
+        read(qc), re.M | re.S)
     bar_rev = re.search(r"^CLOSENESS_BAR = (\d+)$", read(SCAN_VAULT), re.M)
-    if not bar_text or not late_text or not bar_rev:
+    if not bar_text or not late_text or not own_text or not bar_rev:
         rep.fail(check, "cannot find link-hygiene.md's closeness-bar section "
-                 "or Late first links, or scan_vault.py's CLOSENESS_BAR",
-                 rel(lh))
+                 "or Late first links, qc-items.md's Editorial and ownership "
+                 "review, or scan_vault.py's CLOSENESS_BAR", rel(lh))
     else:
         digest = hashlib.sha1(" ".join(
-            (late_text.group(0) + "\n" + bar_text.group(1)).split()
+            (late_text.group(0) + "\n" + bar_text.group(1) + "\n"
+             + own_text.group(0)).split()
         ).encode("utf-8")).hexdigest()
         rev = int(bar_rev.group(1))
         if CLOSENESS_BAR_TEXT.get(rev) != digest:
             rep.fail(check, "link-hygiene.md's closeness bar or Late first "
-                     "links changed (text SHA-1 %s) under CLOSENESS_BAR = "
-                     "%d. If the change can flip a settled backfill "
-                     "rejection, kept hub item or late link left in place, "
-                     "raise CLOSENESS_BAR in scan_vault.py, so every ledger "
-                     "judged under the old bar is re-judged once, and record "
-                     "this digest under the new revision in "
-                     "CLOSENESS_BAR_TEXT; otherwise record it under the "
-                     "current revision." % (digest, rev), rel(lh))
+                     "links, or qc-items.md's Editorial and ownership review, "
+                     "changed (text SHA-1 %s) under CLOSENESS_BAR = %d. If "
+                     "the change can flip a settled backfill rejection, kept "
+                     "hub item, late link left in place or conforming "
+                     "duplicate-sentence pair, raise CLOSENESS_BAR in "
+                     "scan_vault.py, so every ledger judged under the old bar "
+                     "is re-judged once, and record this digest under the new "
+                     "revision in CLOSENESS_BAR_TEXT; otherwise record it "
+                     "under the current revision." % (digest, rev), rel(lh))
         else:
-            rep.ok(check, "the closeness bar and Late first links match "
-                   "revision %d of the settled ledger" % rev, rel(lh))
+            rep.ok(check, "the closeness bar, Late first links and item 9's "
+                   "ownership review match revision %d of the settled ledger"
+                   % rev, rel(lh))
     n_files = 0
     for skill, path, text in walk_skill_files():
         n_files += 1
@@ -9855,6 +9877,9 @@ WRITING_RULE_PINS = (
         "already on the line only in case, spacing, hyphens, punctuation or "
         "diacritics, or by a plural ending (-s, -es) or a -ness ending",
         "When every alias is a spelling variant, line 3 is the title alone",
+        # 2026-11-18 (knowledge 1.41.0): an `&` also reads as `and`.
+        "or a -ness ending, and an `&` in the title also reads as `and`",
+        "with an `&` also read as `and`",
         "A spelling variant stays in `aliases:`, where it resolves links, "
         "and line 1 still must not leak it",
         "Each alias is written as a name, not a slug",
@@ -10445,16 +10470,22 @@ WRITING_RULE_PINS = (
         "once on the whole of every entry the run changed, against its "
         "first private copy",
         "a fix this final reread makes gets only its passage reread",
-        "row absent from `wiki-scan-1.json` is this run's own copy",
+        "row that names only slugs in the run's "
+        "[inventory](#arrivals-during-a-run) is this run's own copy when "
+        "`wiki-scan-1.json` lacks it or, for a row naming an arrival, the "
+        "comparison scan that found the arrival lacks it",
         # 2026-10-11 (knowledge 1.34.0): a run that skips Task 1b still gets
         # the final reread and its cut-join candidates.
         "Once Task 1 and any Task 1b repairs are done, run the builder's",
         # 2026-10-10 (knowledge 1.30.0): an entry the post-refresh
         # consolidation changes is reread whole; a row pairing an entry with
         # its own retitle destination is no own copy.
-        "when that changes an entry, rereads that whole entry against its "
-        "copy and refreshes the scan once more",
-        "unless it pairs an entry with its own retitle destination",
+        # 2026-11-18 (knowledge 1.41.0): nor is a pair re-judged under a
+        # retitled entry's new slug, and an own copy names only slugs in the
+        # run's inventory.
+        "when that or a re-judgment changes an entry, rereads that whole "
+        "entry against its copy and refreshes the scan once more",
+        "a row pairing an entry with its own retitle destination is not",
         "property with its justification, or exhibit into its owner",
     )),
     # 2026-10-10 (knowledge 1.30.0): Task 1 adds only an alias 5(h) admits
@@ -11184,8 +11215,10 @@ WRITING_RULE_PINS = (
     # closeness-bar revision it was judged under, and an outdated ledger
     # settles nothing, so a bar change re-judges every settled row once.
     (("wiki-lint", "references", "link-hygiene.md"), (
-        "`bar` is the revision of the closeness bar its decisions were "
-        "judged under",
+        "`bar` is the revision of the closeness bar, the late-first-links "
+        "rule and "
+        "[item 9](qc-items.md#9-body-structure-coherence-flow-and-scope)'s "
+        "editorial and ownership review that its decisions were judged under",
         "is outdated (`settled.outdated`): it settles nothing, so the run "
         "judges every row under the current bar",
         "Write `\"version\": 2` and the last scan's `settled.bar` as `bar`.",
@@ -11265,6 +11298,10 @@ WRITING_RULE_PINS = (
     # eligible one and leaves it only when none is, and the closeout then
     # settles every listed mention. The ledger suppresses no other `problems`
     # finding, and a new sentence holding a listed occurrence reopens a row.
+    # 2026-11-18 (knowledge 1.41.0): a duplicate-sentence pair Task 1b judged
+    # conforming is settled too, keyed to the normalized sentence, so its
+    # finding lists only unsettled peers; a shared basename stays reported, and
+    # a run that performed Task 1b rewrites the ledger as well.
     (("wiki-lint", "references", "link-hygiene.md"), (
         "its `late_links` row lists each such mention not yet settled",
         "Judge every listed mention, and move the link to the first eligible "
@@ -11276,13 +11313,24 @@ WRITING_RULE_PINS = (
         "only when every such occurrence is settled",
         "and so does a new sentence holding an occurrence that row would list",
         "Of the `problems` findings, the ledger suppresses only "
-        "`item10/late-link`.",
+        "`item10/late-link` and `item9/duplicate-sentence`.",
+        "a late first link left in place and an `item9/duplicate-sentence` "
+        "pair Task 1b judged conforming are settled on unchanged evidence",
+        "lists only the peers no record settles and is omitted when none is "
+        "left",
+        "A duplicate-sentence pair stays settled while both copies keep the "
+        "normalized sentence",
+        "an apply-capable run that performed Task 1b or Task 2 rewrites the "
+        "ledger",
         # 2026-10-14 (knowledge 1.36.0): the closeout settles only the hub
         # items and late links the run judged, never an out-of-scope row.
         "each candidate this run rejected, the `settle_key` of every "
-        "`hub_footer` item it judged and kept, and every `settle_keys` "
-        "record of each `late_links` row it judged and left in place",
-        "`backfill`, `hub_footer`, `late_link` and each record's fields",
+        "`hub_footer` item it judged and kept, every `settle_keys` "
+        "record of each `late_links` row it judged and left in place, and "
+        "the `settle_keys` record of each `duplicate_sentences` peer whose "
+        "pair Task 1b judged conforming",
+        "`backfill`, `hub_footer`, `late_link`, `duplicate_sentence` and each "
+        "record's fields",
         # 2026-10-14 (knowledge 1.36.0): a ledger missing one of its lists
         # reads it as empty, as the scanner does.
         "a missing list is empty, and any other shape is malformed",
@@ -11311,7 +11359,20 @@ WRITING_RULE_PINS = (
         "ones, in text order, all of which the closeout stores when Task 2 "
         "leaves the link in place",
         "Of the `problems` findings, the ledger suppresses only a settled "
-        "`item10/late-link`.",
+        "`item10/late-link` and the settled peers of an "
+        "`item9/duplicate-sentence`.",
+        "and a `duplicate_sentences` row, with its `item9/duplicate-sentence` "
+        "finding, lists only the peers no record settles",
+    )),
+    (("wiki-lint", "references", "qc-items.md"), (
+        "`item9/duplicate-sentence` pair Task 1b judges conforming is "
+        "[settled](link-hygiene.md#settled-decisions)",
+    )),
+    (("wiki-lint", "SKILL.md"), (
+        "Nor is a pair one of those scans listed, or the ledger settled, "
+        "under a retitled entry's old slug: Task 1b judges it again.",
+        "An apply-capable run that performed Task 1b or Task 2 also rewrites "
+        "`Reviews/.wiki-lint-settled.json`",
     )),
     # 2026-10-31 (knowledge 1.38.0): the whole-wiki review's rules.
     # 2026-11-17 (knowledge 1.40.0): a `read: true` entry takes every repair
@@ -11437,6 +11498,44 @@ WRITING_RULE_PINS = (
         "create-the-entry branch",
         "a run that created about 10 entries or more runs the",
         "the probes' match on that entry is no new owner",
+    )),
+    # 2026-11-18 (knowledge 1.41.0): a group of requests drafted in one run
+    # gets one owner for each shared explanation, taken first, and an owner an
+    # apply run leaves unpublished passes it to the next member; the run's own
+    # entries are neighbors and current-run entries; a copy in an entry the
+    # run published is trimmed after the last item, with its owner link, and
+    # reported; a sentence two current-run entries share word for word is an
+    # overlap finding unless each entry needs it for itself.
+    (("wiki-add", "SKILL.md"), (
+        "in file or request order, each group's owners first",
+        "this run's own entries included (in a preview, its drafts)",
+        "When several requests (a group) share an explanation, argument, "
+        "worked example or property, name each shared one's owner",
+        "before taking the first of them; the other members keep only what "
+        "that rule leaves a related note and link the owner",
+        "When an apply run leaves an owner unpublished, the next member of its "
+        "group owns what it owned",
+        "The overlap audit's current-run entries are every entry this run "
+        "published or is drafting (in a preview, its drafts), and it reads "
+        "each other member of the draft's group in full",
+        "an entry this run published that copies what this draft owns is "
+        "trimmed [after the last item](#6-complete-and-report) instead of "
+        "proposed",
+        "trim each copy that step 4's review sends here to what the owner "
+        "rule leaves a related note, linked to the owner, once the owner is "
+        "published; a copy holding anything the owner lacks or contradicts "
+        "becomes a note-content proposal instead",
+        "a requested entry published later stays plain text, apart from the "
+        "owner link a [trim](#6-complete-and-report) adds",
+        "the next pending item not yet attempted, in the "
+        "[order](#1-read-the-requests) step 1 sets",
+        "Each repair, a trim included, records the published entry",
+        "each trim with the owner it links",
+    )),
+    (("wiki-build", "references", "review.md"), (
+        "Yet a sentence this run wrote that another current-run entry also "
+        "holds word for word is a finding unless each entry needs it for "
+        "itself, as a gloss, symbol binding or procedure step can.",
     )),
     (("wiki-build", "SKILL.md"), (
         # The load-bearing rule; a deferred term gets a gloss.
@@ -11726,6 +11825,31 @@ WRITING_RULE_PINS = (
         "unchecked",
         "hands the notes it changed to a fresh agent that sees neither the "
         "rules nor the sources",
+    )),
+    # 2026-11-18 (knowledge 1.41.0): entries another session publishes during a
+    # lint run are compared against the run's inventory (Step 0's slugs plus
+    # those it created) once Task 3 has its plan and at closeout's last scan,
+    # and the run report names each one.
+    (("wiki-lint", "SKILL.md"), (
+        "### Arrivals during a run",
+        "an arrival is a slug outside it in a fresh scan's `inventory.slugs`",
+        "plus every slug the run created (a retitle's new slug included) or "
+        "an earlier Task 3 comparison found",
+        "once Task 3 has derived its plan, before it publishes anything, and "
+        "at closeout, on the run's last scan, made after its last edit",
+        "each authorized closure holding the arrival or an entry changed for "
+        "it",
+        "One found at closeout is not covered and waits for the next run.",
+        "After the [arrival check](#arrivals-during-a-run),",
+    )),
+    (("wiki-lint", "references", "backlogs.md"), (
+        "every [arrival](../SKILL.md#arrivals-during-a-run) with the tasks "
+        "that covered it, or as not covered",
+    )),
+    (("wiki-lint", "references", "hierarchy.md"), (
+        "found only after Task 3's pre-publish comparison, and the findings it "
+        "causes",
+        "are exempt from these conditions and that re-derivation",
     )),
 )
 

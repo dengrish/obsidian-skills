@@ -7,8 +7,8 @@ deterministic QC violations ("problems"), and the worklists the executing agent 
 judge — the user's flagged issues (`user_issues`, the run's first worklist),
 collision candidates (item-5 probes), rename candidates, backfill
 candidates and hub footer items (Task 2), card rivals (item 19), and
-neighbors and overlap candidates (item 9) — plus the Task 3 hierarchy
-diagnostic. Outside `Wiki/` it reads the MOCs, for the
+neighbors, overlap candidates and duplicate sentences (item 9) — plus the
+Task 3 hierarchy diagnostic. Outside `Wiki/` it reads the MOCs, for the
 advisory `spaced_repetition` report the Spaced Repetition plugin's settings
 file, and with `--settled` wiki-lint's settled-decisions ledger; it never
 writes any of them.
@@ -2925,14 +2925,16 @@ def _entry_physical_key(wiki, path):
 #: (link-hygiene.md, Settled decisions).
 SETTLED_FIELDS = {"backfill": ("entry", "target", "surface", "context"),
                   "hub_footer": ("entry", "target", "context"),
-                  "late_link": ("entry", "target", "surface", "context")}
+                  "late_link": ("entry", "target", "surface", "context"),
+                  "duplicate_sentence": ("entry", "peer", "context")}
 
 #: The revision of link-hygiene.md's closeness bar that this scanner applies.
-#: Raise it when the bar or the late-first-links rule changes in a way that
-#: can flip a settled backfill rejection, kept hub item or late link left in
-#: place: a ledger written under an older revision then settles nothing, so
-#: the next run judges every row under the new bar (tests/test_conventions.py
-#: ties it to the text of both).
+#: Raise it when the bar, the late-first-links rule or qc-items.md item 9's
+#: ownership review changes in a way that can flip a settled backfill
+#: rejection, kept hub item, late link left in place or conforming
+#: duplicate-sentence pair: a ledger written under an older revision then
+#: settles nothing, so the next run judges every row under the new bar
+#: (tests/test_conventions.py ties it to the text of all three).
 CLOSENESS_BAR = 2
 
 
@@ -2983,20 +2985,20 @@ def read_settled(path):
     return records, bar, None
 
 
-def settled_late_links(path):
-    """The ``late_link`` records of a current ledger at ``path``, else none.
+def settled_records(path, kind):
+    """The ``kind`` records of a current ledger at ``path``, else none.
 
-    A missing, malformed or outdated ledger settles no late link, as
+    A missing, malformed or outdated ledger settles nothing, as
     :func:`apply_settled` reports.
     """
     if path is None:
         return set()
     records, bar, _error = read_settled(path)
-    return records["late_link"] if bar >= CLOSENESS_BAR else set()
+    return records[kind] if bar >= CLOSENESS_BAR else set()
 
 
 def apply_settled(backfill_rows, hub_footer, path, complete=True,
-                  late_links=()):
+                  late_links=(), duplicate_sentences=()):
     """Omit the rows a settled ledger records; return them and ``settled``.
 
     A ``backfill_candidates`` row or a ``hub_footer`` item is omitted when
@@ -3006,17 +3008,21 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True,
     target is kept, with ``settle_keys``: its own key and those of the
     target's later unsettled sentences, which a rejection records together.
     ``stale`` lists the records that matched no current row, in the
-    ledger's own shape; it stays empty when ``complete`` is false, since the
-    rows themselves were then not computed. A ledger judged under an older
+    ledger's own shape; it stays empty when ``complete`` is false, since
+    some rows (backfill and late links, or an unreadable entry's duplicate
+    pairs) were then not computed. A ledger judged under an older
     closeness bar is ``outdated``: it settles nothing, and ``stale`` lists
     all its records. ``bar`` is the revision the closeout writes.
     ``late_links`` holds the ``settle_key`` of each earlier-mention sentence
     of every late link found; a matching ``late_link`` record settles that
-    mention of a link left in place, and :func:`settled_late_links` applies
-    the same test to ``problems``.
+    mention of a link left in place. ``duplicate_sentences`` holds the
+    record of each entry and peer sharing a duplicate sentence; a matching
+    ``duplicate_sentence`` record settles that pair. :func:`settled_records`
+    applies the same test to ``problems``.
     """
     settled = {"path": path, "backfill_suppressed": 0,
                "hub_footer_suppressed": 0, "late_link_suppressed": 0,
+               "duplicate_sentence_suppressed": 0,
                "stale": {kind: [] for kind in SETTLED_FIELDS},
                "bar": CLOSENESS_BAR, "outdated": False, "error": None}
     if path is None:
@@ -3053,6 +3059,9 @@ def apply_settled(backfill_rows, hub_footer, path, complete=True,
                 row["settle_key"] for row in open_rows]))
     for key in late_links:
         settled["late_link_suppressed"] += _is_settled("late_link", key)
+    for key in duplicate_sentences:
+        settled["duplicate_sentence_suppressed"] += _is_settled(
+            "duplicate_sentence", key)
     hubs = []
     for row in hub_footer:
         items = [(entry, key)
@@ -5893,7 +5902,7 @@ def scan(wiki, images=None, vault=None, settled=None):
     # them is unsettled, so a settled sentence never hides a new one.
     # `late_links` names the first unsettled mention and the records a
     # closeout stores.
-    _late_settled = settled_late_links(settled)
+    _late_settled = settled_records(settled, "late_link")
     _late_keys, late_link_rows, _late_mentions = [], [], {}
     for _sl, _target, _matched, _surface, _line, _context in _late_links:
         _settle_key = {"entry": _sl, "target": _entry_link_target(entries[_target]),
@@ -5946,13 +5955,37 @@ def scan(wiki, images=None, vault=None, settled=None):
             if not _surface.endswith(":"):
                 sentence_owners.setdefault(_normalized, {}) \
                     .setdefault(_slug, _surface)
+    # A pair Task 1b judged conforming is settled by its ledger record, keyed
+    # to the normalized sentence, while both copies keep that sentence. A
+    # basename several files share takes no part, so its pairs stay reported.
+    # `duplicate_sentences` lists each finding's unsettled peers and the
+    # records a closeout stores.
+    _dup_settled = settled_records(settled, "duplicate_sentence")
+    _dup_keys, duplicate_sentence_rows = [], []
     for _normalized, _owners in sorted(sentence_owners.items()):
         if len(_owners) < 2:
             continue
+        _context = hashlib.sha1(_normalized.encode("utf-8")).hexdigest()
         _all_slugs = sorted(_owners)
         for _slug in _all_slugs:
-            _peers = [_twin_path(peer) or peer
-                      for peer in _all_slugs if peer != _slug]
+            _peers, _keys = [], []
+            for _peer in _all_slugs:
+                if _peer == _slug:
+                    continue
+                if _twin_path(_slug) or _twin_path(_peer):
+                    _peers.append(_twin_path(_peer) or _peer)
+                    continue
+                _key = {"entry": _slug, "peer": _peer, "context": _context}
+                _dup_keys.append(_key)
+                if (_slug, _peer, _context) not in _dup_settled:
+                    _peers.append(_peer)
+                    _keys.append(_key)
+            if not _peers:
+                continue
+            duplicate_sentence_rows.append(dict(
+                {"slug": _slug, "peers": _peers, "sentence": _owners[_slug],
+                 "settle_keys": _keys},
+                **({"path": _twin_path(_slug)} if _twin_path(_slug) else {})))
             _snippet = _owners[_slug]
             if len(_snippet) > 180:
                 _snippet = _snippet[:177].rstrip() + "..."
@@ -5967,6 +6000,9 @@ def scan(wiki, images=None, vault=None, settled=None):
                 "owner; normalized "
                 "similarity alone never chooses the owner"
                 % (", ".join(_peers), _snippet)))
+    problems.current_path = ""
+    duplicate_sentence_rows.sort(key=lambda row: (
+        row["slug"], row.get("path", ""), row["sentence"]))
     # The fuzzy variant over all entry pairs is a review-only reading list
     # (`overlap_candidates`), never a `problems` row: a one-clause contrast
     # kept on purpose would otherwise return every run.
@@ -6663,7 +6699,7 @@ def scan(wiki, images=None, vault=None, settled=None):
                            "context": context}})
     _backfill_rows, hub_footer, _settled = apply_settled(
         _backfill_rows, hub_footer, settled, alias_inventory_complete,
-        late_links=_late_keys)
+        late_links=_late_keys, duplicate_sentences=_dup_keys)
     def _public_problem(row):
         slug_value, item, message, path = row
         result = {"slug": slug_value, "item": item, "message": message}
@@ -6717,8 +6753,13 @@ def scan(wiki, images=None, vault=None, settled=None):
         # earlier mention, with the ledger records of every unsettled one a
         # closeout stores when Task 2 leaves that link in place.
         "late_links": late_link_rows,
+        # Each item9/duplicate-sentence finding: the entry's shared sentence,
+        # its unsettled peers and the ledger records a closeout stores when
+        # Task 1b judges a pair conforming.
+        "duplicate_sentences": duplicate_sentence_rows,
         # The --settled ledger's effect, and the closeness-bar revision the
-        # closeout writes; of `problems`, it suppresses only late links.
+        # closeout writes; of `problems`, it suppresses only late links and
+        # duplicate sentences.
         "settled": _settled,
         # Item 19's forward-check input: a floor, not an exhaustive rival set.
         "card_rivals": card_rivals,
@@ -14469,7 +14510,9 @@ def run_self_test():
               (res0["settled"], _bf_key, _hub_key),
               ({"path": _ledger, "backfill_suppressed": 0,
                 "hub_footer_suppressed": 0, "late_link_suppressed": 0,
-                "stale": {"backfill": [], "hub_footer": [], "late_link": []},
+                "duplicate_sentence_suppressed": 0,
+                "stale": {"backfill": [], "hub_footer": [], "late_link": [],
+                          "duplicate_sentence": []},
                 "bar": CLOSENESS_BAR, "outdated": False, "error": None},
                {"entry": "settle-reader", "target": "hub-term",
                 "surface": "hub term",
@@ -14520,7 +14563,8 @@ def run_self_test():
             json.dump({"version": 2, "backfill": [_bf_key]}, fh)
         check("an outdated ledger is all stale even when rows are unknown",
               apply_settled([], [], _ledger, complete=False)[2]["stale"],
-              {"backfill": [_bf_key], "hub_footer": [], "late_link": []})
+              {"backfill": [_bf_key], "hub_footer": [], "late_link": [],
+               "duplicate_sentence": []})
         with open(_ledger, "w", encoding="utf-8") as fh:
             json.dump({"version": 2, "bar": CLOSENESS_BAR,
                        "backfill": [_bf_key, _gone],
@@ -14696,7 +14740,7 @@ def run_self_test():
         check("an alias-inventory gap still drops an outdated ledger's records",
               scan(_gap_hub, settled=_later_ledger)["settled"]["stale"],
               {"backfill": [_three["settle_key"]], "hub_footer": [],
-               "late_link": []})
+               "late_link": [], "duplicate_sentence": []})
         # A late link Task 2 left in place is settled by its record until the
         # earlier mention's sentence changes.
         _late_wiki = os.path.join(tmp, "v-late-settled")
@@ -14836,6 +14880,136 @@ def run_self_test():
               sorted(row["target"] for row in scan(_mentions)["late_links"]
                      if row["slug"] == "late-display"),
               ["test-set", "training-set"])
+        # A duplicate-sentence pair Task 1b judged conforming is settled by
+        # its record while both copies keep the normalized sentence.
+        _dup_wiki = os.path.join(tmp, "v-dup-settled")
+        _dup_sentence = ("Each update first sets the velocity vector to zero "
+                         "before the optimizer reads any gradient of the "
+                         "loss.")
+        _dup_edited = _dup_sentence.replace("to zero", "to all zeros")
+
+        def _dup_write(slug_, sentence):
+            _title = slug_.replace("-", " ").capitalize()
+            _st_write(_dup_wiki, slug_ + ".md", _st_entry(
+                _title, "**%s** is a worked example. %s" % (_title, sentence)))
+        for _dup_slug in ("dup-a", "dup-b"):
+            _dup_write(_dup_slug, _dup_sentence)
+        _dup_ledger = os.path.join(tmp, "dup-settled.json")
+
+        def _dup_rec(entry, peer, sentence=_dup_sentence):
+            return {"entry": entry, "peer": peer, "context": hashlib.sha1(
+                duplicate_sentence_surfaces(sentence)[0][0]
+                .encode("utf-8")).hexdigest()}
+
+        def _dup_scan(ledger=None, **extra):
+            if ledger is not None:
+                with open(_dup_ledger, "w", encoding="utf-8") as fh:
+                    json.dump(dict(ledger, **extra), fh)
+            res = scan(_dup_wiki, settled=_dup_ledger)
+            return (res, {row["slug"]: (row["peers"], row["settle_keys"],
+                                        "item9/duplicate-sentence" in _st_keys(
+                                            res, row["slug"]))
+                          for row in res["duplicate_sentences"]})
+
+        def _dup_ledger_of(*records):
+            return {"version": 2, "bar": CLOSENESS_BAR,
+                    "duplicate_sentence": list(records)}
+        _ab, _ba = _dup_rec("dup-a", "dup-b"), _dup_rec("dup-b", "dup-a")
+        _d0, _rows0 = _dup_scan()
+        check("an unsettled duplicate sentence lists each peer with its "
+              "ledger record",
+              (_rows0, [row["sentence"] for row in _d0["duplicate_sentences"]]),
+              ({"dup-a": (["dup-b"], [_ab], True),
+                "dup-b": (["dup-a"], [_ba], True)}, [_dup_sentence] * 2))
+        _d1, _rows1 = _dup_scan(_dup_ledger_of(_ab, _ba))
+        check("a settled duplicate-sentence pair is no finding and not stale",
+              (_rows1, ["item9/duplicate-sentence" in _st_keys(_d1, s_)
+                        for s_ in ("dup-a", "dup-b")],
+               _d1["settled"]["duplicate_sentence_suppressed"],
+               _d1["settled"]["stale"]["duplicate_sentence"]),
+              ({}, [False, False], 2, []))
+        _d2, _rows2 = _dup_scan(_dup_ledger_of(_ab))
+        check("a pair settled one way is still reported the other way",
+              _rows2, {"dup-b": (["dup-a"], [_ba], True)})
+        _dup_write("dup-b", _dup_sentence.replace(
+            "velocity vector", "[[velocity-vector|*velocity* vector]]"))
+        check("a link or emphasis keeps a duplicate-sentence pair settled",
+              (sorted(_dup_scan(_dup_ledger_of())[1]),
+               _dup_scan(_dup_ledger_of(_ab, _ba))[1]),
+              (["dup-a", "dup-b"], {}))
+        for _dup_slug in ("dup-a", "dup-b"):
+            _dup_write(_dup_slug, _dup_edited)
+        _d3, _rows3 = _dup_scan(_dup_ledger_of(_ab, _ba))
+        check("a changed shared sentence brings the pair back and leaves "
+              "its old records stale",
+              (_rows3, _d3["settled"]["stale"]["duplicate_sentence"]),
+              ({"dup-a": (["dup-b"], [_dup_rec("dup-a", "dup-b", _dup_edited)],
+                          True),
+                "dup-b": (["dup-a"], [_dup_rec("dup-b", "dup-a", _dup_edited)],
+                          True)}, [_ab, _ba]))
+        _dup_write("dup-a", _dup_sentence)
+        _d4, _rows4 = _dup_scan(_dup_ledger_of(_ab, _ba))
+        check("a copy changed alone ends the pair, and its records are stale",
+              (_rows4, "item9/duplicate-sentence" in _st_keys(_d4, "dup-a"),
+               _d4["settled"]["stale"]["duplicate_sentence"]),
+              ({}, False, [_ab, _ba]))
+        _dup_write("dup-b", _dup_sentence)
+        _dup_write("dup-c", _dup_sentence)
+        _d5, _rows5 = _dup_scan(_dup_ledger_of(_ab, _ba))
+        check("a third entry sharing a settled sentence is the only peer "
+              "reported for the settled pair",
+              (_rows5, _st_msg(_d5, "dup-a", "item9/duplicate-sentence")
+               .startswith("a long prose sentence has the same normalized "
+                           "word sequence in dup-c: "),
+               _d5["settled"]["duplicate_sentence_suppressed"]),
+              ({"dup-a": (["dup-c"], [_dup_rec("dup-a", "dup-c")], True),
+                "dup-b": (["dup-c"], [_dup_rec("dup-b", "dup-c")], True),
+                "dup-c": (["dup-a", "dup-b"], [_dup_rec("dup-c", "dup-a"),
+                                               _dup_rec("dup-c", "dup-b")],
+                          True)}, True, 2))
+        _dup_gone = _dup_rec("dup-gone", "dup-a")
+        for _old in ({"version": 2}, {"version": 2, "bar": CLOSENESS_BAR - 1}):
+            _d6, _rows6 = _dup_scan(_old, duplicate_sentence=[_ab, _dup_gone])
+            check("an outdated ledger settles no duplicate sentence and is "
+                  "all stale: " + json.dumps(_old),
+                  (sorted(_rows6), _d6["settled"]["outdated"],
+                   _d6["settled"]["duplicate_sentence_suppressed"],
+                   _d6["settled"]["stale"]["duplicate_sentence"]),
+                  (["dup-a", "dup-b", "dup-c"], True, 0, [_ab, _dup_gone]))
+        _d7 = _dup_scan(_dup_ledger_of(_ab, _dup_gone))[0]
+        check("a duplicate-sentence record matching no pair is stale",
+              _d7["settled"]["stale"]["duplicate_sentence"], [_dup_gone])
+        for _bad in ([{"entry": "dup-a", "peer": "dup-b"}],
+                     [dict(_ab, target="dup-b")],
+                     [dict(_ab, context="0" * 39)], [dict(_ab, peer="")],
+                     {"entry": "dup-a"}):
+            _d8, _rows8 = _dup_scan({"version": 2, "bar": CLOSENESS_BAR},
+                                    duplicate_sentence=_bad)
+            check("a malformed duplicate-sentence record makes the ledger "
+                  "malformed: " + json.dumps(_bad),
+                  (sorted(_rows8), bool(_d8["settled"]["error"]),
+                   _d8["settled"]["duplicate_sentence_suppressed"]),
+                  (["dup-a", "dup-b", "dup-c"], True, 0))
+        # A basename several files share takes no part in settling.
+        _dup_twin = os.path.join(tmp, "v-dup-twin")
+        for _rel, _name in (("a/twin.md", "Twin"), ("b/twin.md", "Twin"),
+                            ("other.md", "Other")):
+            _st_write(_dup_twin, _rel, _st_entry(
+                _name, "**%s** is a worked example. %s"
+                % (_name, _dup_sentence)))
+        with open(_dup_ledger, "w", encoding="utf-8") as fh:
+            json.dump(_dup_ledger_of(_dup_rec("other", "twin"),
+                                     _dup_rec("twin", "other")), fh)
+        _d9 = scan(_dup_twin, settled=_dup_ledger)
+        check("a shared basename's duplicate-sentence pairs carry no record "
+              "and stay reported",
+              ([(row["slug"], row.get("path"), row["peers"],
+                 row["settle_keys"]) for row in _d9["duplicate_sentences"]],
+               [_st_keys(_d9, s_).count("item9/duplicate-sentence")
+                for s_ in ("other", "twin")],
+               len(_d9["settled"]["stale"]["duplicate_sentence"])),
+              ([("other", None, ["a/twin.md"], []),
+                ("twin", "a/twin.md", ["other"], [])], [1, 1], 2))
     finally:
         shutil.rmtree(tmp, ignore_errors=True)
 
@@ -14954,8 +15128,9 @@ def main(argv=None):
     ap.add_argument("--settled", metavar="FILE",
                     help="the settled-decisions ledger "
                          "(<vault>/Reviews/.wiki-lint-settled.json): omit the "
-                         "backfill_candidates and late_links occurrences and "
-                         "hub_footer items it records (a settled occurrence "
+                         "backfill_candidates and late_links occurrences, "
+                         "hub_footer items and duplicate-sentence pairs it "
+                         "records (a settled occurrence "
                          "yields to the target's next sentence); a missing "
                          "file is an "
                          "empty ledger, one judged under an older closeness "

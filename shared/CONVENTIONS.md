@@ -58,7 +58,7 @@ staging follows [SAFE_WRITES.md](SAFE_WRITES.md).
 | `Investments/` | dated stock analyses at the top level, plus maintained stock notes, research evidence and source collections in dedicated subfolders; each investments skill governs its own format | stock-research (immutable dated records/evidence and maintained Stocks/ notes), feed-collect (maintained source collections); the user maintains `x-accounts.md`; clipping-clean respells only a link or embed to a clipping it renames, never in a dated record (see below) | the investments skills within their own scope |
 | `add-to-wiki.md` at the *vault root* | requested-topic queue | the user; wiki-add checks off successful or already-existing items only | wiki-add |
 | `MOCs/` | **flat**; fully generated `<discipline>-moc.md` nested outlines plus `misc-moc.md` for Wiki entries tagged `#misc`; no marker comments, H1, or frontmatter | wiki-lint; clipping-clean respells a link to a clipping it renames (§7) | wiki-lint (navigation/hierarchy diagnostics only; reads each before an in-place update) |
-| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones; and `.wiki-lint-settled.json`, wiki-lint's private ledger of settled link decisions (run state, not a log) | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); during their own renames and refactors, clipping-clean (a changed-slug reprocess) and wiki-lint (under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope)) retarget or unlink every link in a log that resolves to the retired note, links inside issue text included, and pdf-organize (a PDF rename) and figure-extract (an Extended Data switch) rewrite the old file name in links and in the plain-text mentions [rename repair](../skills/pdf-organize/references/rename-repair.md#establish-the-owned-family) defines; none changes any other issue text; wiki-lint writes its settled ledger | skills consuming the relevant outputs or verifying a fix; wiki-lint reads the note-content log's open items as a worklist it re-verifies; wiki-lint's scanner reads the settled ledger (`--settled`) |
+| `Reviews/` | `<current-skill>-suggestions.md` for installed skills, plus `Reviews/wiki-notes-suggestions.md` for Wiki note-content improvements; open issues, then fixed ones; and `.wiki-lint-settled.json`, wiki-lint's private ledger of settled link and duplicate-sentence decisions (run state, not a log) | skills under the attribution and setup rules in [SUGGESTIONS.md](SUGGESTIONS.md); during their own renames and refactors, clipping-clean (a changed-slug reprocess) and wiki-lint (under its [refactor rewrite scope](../skills/wiki-lint/references/refactors.md#establish-evidence-and-complete-scope)) retarget or unlink every link in a log that resolves to the retired note, links inside issue text included, and pdf-organize (a PDF rename) and figure-extract (an Extended Data switch) rewrite the old file name in links and in the plain-text mentions [rename repair](../skills/pdf-organize/references/rename-repair.md#establish-the-owned-family) defines; none changes any other issue text; wiki-lint writes its settled ledger | skills consuming the relevant outputs or verifying a fix; wiki-lint reads the note-content log's open items as a worklist it re-verifies; wiki-lint's scanner reads the settled ledger (`--settled`) |
 
 Suggestion logs use current skill names under `Reviews/`. The shared
 [SUGGESTIONS.md](SUGGESTIONS.md) owns attribution, the log format, moving
@@ -1598,10 +1598,11 @@ wiki-add applies builder's entry-writing and linking rules to the missing
 topics the user requested, whether queued or named directly. New entries have
 `parents: []` and `read: false`. Their links may target existing entries,
 including requested entries published earlier in the same run; a mention of
-one published later stays plain text for wiki-lint's backfill. An existing
-identity is skipped without auditing, merging, normalizing or otherwise
-editing it. No inbound-link backfill, parent population or MOC work belongs to
-this route.
+one published later stays plain text for wiki-lint's backfill, apart from
+the owner link a [trim](../skills/wiki-add/SKILL.md#6-complete-and-report)
+adds. An existing identity is skipped without auditing, merging, normalizing
+or otherwise editing it. No inbound-link backfill, parent population or MOC
+work belongs to this route.
 
 The requested-topic boundary also applies to builder's missed-entity and
 orphan-link audits: wiki-add never creates an unrequested entry to satisfy

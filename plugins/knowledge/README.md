@@ -62,8 +62,9 @@ apart from clipping-clean respelling a link or embed to a clipping or
 image it renames; dated research records are never edited. Open and fixed
 suggestions are kept in `Reviews/<skill>-suggestions.md` under the
 [shared protocol](shared/SUGGESTIONS.md).
-wiki-lint also keeps its settled link decisions, private run state rather
-than a suggestion log, in `Reviews/.wiki-lint-settled.json`.
+wiki-lint also keeps its settled link and duplicate-sentence decisions,
+private run state rather than a suggestion log, in
+`Reviews/.wiki-lint-settled.json`.
 
 ## Flagging issues in a note
 

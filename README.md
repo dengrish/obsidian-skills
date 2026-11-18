@@ -320,7 +320,7 @@ it and any per-run path overrides through [RUNTIME.md](shared/RUNTIME.md).
 └── Reviews/                  suggestion logs: open issues, then fixed ones
     ├── <current-skill>-suggestions.md  one per skill
     ├── wiki-notes-suggestions.md      note-content backlog
-    └── .wiki-lint-settled.json        wiki-lint's private ledger of settled link decisions
+    └── .wiki-lint-settled.json        wiki-lint's private ledger of settled link and duplicate-sentence decisions
 ```
 
 PDFs move out of `Inbox/`; raw clippings stay as the record of what was
